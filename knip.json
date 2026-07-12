@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreDependencies": ["@swc/helpers", "nx"],
+  "ignoreBinaries": ["skills"],
+  "workspaces": {
+    "packages/*": {
+      "entry": ["src/index.ts", "test/**/*.{test,spec}.ts"],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
+    }
+  }
+}
