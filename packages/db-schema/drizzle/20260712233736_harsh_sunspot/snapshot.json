@@ -1,0 +1,131 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "a1442403-19e5-45e7-b49b-f9a7a594beee",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "ddl": [
+    {
+      "name": "repository",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "github_owner",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "github_repo",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "local_path",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "is_bare",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "paused",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "repository_pk",
+      "table": "repository",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "lower(\"github_owner\")",
+          "isExpression": true
+        },
+        {
+          "value": "lower(\"github_repo\")",
+          "isExpression": true
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "repository_github_owner_repo_lower_uidx",
+      "entityType": "indexes",
+      "table": "repository"
+    },
+    {
+      "columns": [
+        "local_path"
+      ],
+      "nameExplicit": false,
+      "name": "repository_local_path_unique",
+      "entityType": "uniques",
+      "table": "repository"
+    }
+  ],
+  "renames": []
+}

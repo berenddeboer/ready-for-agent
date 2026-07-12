@@ -1,0 +1,33 @@
+{
+  "name": "@ready-for-agent/db-schema",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@ready-for-agent/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "drizzle-kit generate",
+    "typecheck": "tsc --noEmit -p tsconfig.lib.json"
+  },
+  "nx": {
+    "name": "db-schema"
+  },
+  "dependencies": {
+    "drizzle-orm": "^1.0.0-rc.4",
+    "tslib": "^2.3.0",
+    "ulidx": "^2.4.1"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^1.0.0-rc.4"
+  }
+}

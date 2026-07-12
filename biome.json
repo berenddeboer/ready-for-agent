@@ -14,7 +14,8 @@
       "!!**/out-tsc",
       "!!**/.nx",
       "!!**/generated",
-      "!!**/routeTree.gen.ts"
+      "!!**/routeTree.gen.ts",
+      "!!**/drizzle"
     ]
   },
   "formatter": {
