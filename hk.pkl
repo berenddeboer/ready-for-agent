@@ -1,0 +1,50 @@
+amends "package://github.com/jdx/hk/releases/download/v1.50.0/hk@1.50.0#/Config.pkl"
+
+hooks {
+  ["pre-commit"] {
+    stash = "git"
+    steps {
+      ["descriptive-branch"] {
+        check = #"""
+branch_name=$(git branch --show-current)
+
+case "$branch_name" in
+  worktree*[!0-9]* | worktree | "") ;;
+  worktree*)
+    echo "Refusing to commit on temporary worktree branch '$branch_name'."
+    echo "Create or switch to a descriptive branch name first."
+    exit 1
+    ;;
+esac
+"""#
+      }
+      ["bun-lockfile"] {
+        depends = "descriptive-branch"
+        check = "bun install --frozen-lockfile --lockfile-only --silent --minimum-release-age 0"
+      }
+      ["biome-json"] {
+        depends = "bun-lockfile"
+        glob = List("*.json", "**/*.json")
+        exclude = "**/generated/**"
+        fix = "bun run biome check --write {{files}}"
+      }
+      ["nx-lint-fix"] {
+        depends = "bun-lockfile"
+        glob = List("*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.json")
+        exclude = "**/generated/**"
+        fix = "unset $(git rev-parse --local-env-vars); bunx nx affected -t lint --fix --batch --excludeTaskDependencies"
+      }
+      ["nx-affected"] {
+        depends = List("biome-json", "nx-lint-fix")
+        check = "unset $(git rev-parse --local-env-vars); bunx nx affected -t lint,typecheck,test --batch"
+      }
+    }
+  }
+  ["commit-msg"] {
+    steps {
+      ["commitlint"] {
+        check = "bun run commitlint -- --edit \"{{commit_msg_file}}\""
+      }
+    }
+  }
+}
