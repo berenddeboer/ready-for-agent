@@ -35,6 +35,15 @@
           "SQLITE_DATABASE_PATH": "/tmp/knip-dummy.db"
         }
       }
+    },
+    {
+      "plugin": "@nx/vite/plugin",
+      "options": {
+        "buildTargetName": "build",
+        "serveTargetName": "serve",
+        "previewTargetName": "preview",
+        "typecheckTargetName": "typecheck"
+      }
     }
   ],
   "targetDefaults": {

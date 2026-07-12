@@ -13,7 +13,8 @@
       "!!**/dist",
       "!!**/out-tsc",
       "!!**/.nx",
-      "!!**/generated"
+      "!!**/generated",
+      "!!**/routeTree.gen.ts"
     ]
   },
   "formatter": {
