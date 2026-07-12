@@ -2,12 +2,19 @@
   "name": "@ready-for-agent/source",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "knip": "knip --no-config-hints",
+    "lint": "biome check ."
+  },
   "private": true,
   "dependencies": {},
   "devDependencies": {
+    "@berenddeboer/nx-biome": "^1.0.3",
+    "@berenddeboer/nx-knip": "^1.1.0",
+    "@biomejs/biome": "^2.5.0",
     "@nx/js": "23.0.1",
     "@swc/helpers": "~0.5.18",
+    "knip": "^6.21.0",
     "nx": "23.0.1",
     "tslib": "^2.3.0",
     "typescript": "~5.9.2"
