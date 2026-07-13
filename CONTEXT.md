@@ -11,3 +11,10 @@ _Avoid_: Repo (in formal docs), target, project, checkout
 **Paused**:
 A Repository state in which the harness does not process the repo (no issue polling, worktrees, or jobs) while keeping the configuration. New Repositories start paused until deliberately unpaused.
 _Avoid_: Disabled, inactive, enabled=false
+
+**Issue**:
+A GitHub issue belonging to a Repository, identified within that Repository by a positive integer GitHub issue number and represented locally with its non-empty title and valid GitHub creation time. The harness may retain a local representation for later use, but GitHub remains authoritative.
+_Avoid_: Ticket, task (unless referring to a broader concept)
+
+**Issue store**:
+The harness capability that retains Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues.

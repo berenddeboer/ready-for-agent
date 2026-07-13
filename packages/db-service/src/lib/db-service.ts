@@ -1,16 +1,23 @@
 import type { SqlError } from "@effect/sql/SqlError"
-import { and, eq, sql } from "drizzle-orm"
+import { and, asc, eq, sql } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
 import { ulid } from "ulidx"
 import { TypedSqliteDrizzle, runDrizzle } from "@ready-for-agent/db"
 import * as schema from "@ready-for-agent/db-schema"
 import {
   DatabaseError,
+  InvalidIssueInputError,
   InvalidRepositoryInputError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
+  RepositoryNotFoundError,
 } from "./errors.js"
-import type { AddRepositoryInput, RepositoryRecord } from "./types.js"
+import type {
+  AddRepositoryInput,
+  IssueRecord,
+  RepositoryRecord,
+  StoreIssueInput,
+} from "./types.js"
 
 const formatSqlError = (error: SqlError): string => {
   const parts: string[] = [error.message]
@@ -78,6 +85,20 @@ const toRecord = (row: {
   paused: row.paused,
 })
 
+const toIssueRecord = (row: {
+  id: string
+  repositoryId: string
+  githubIssueNumber: number
+  title: string
+  githubCreatedAt: number
+}): IssueRecord => ({
+  id: row.id,
+  repositoryId: row.repositoryId,
+  githubIssueNumber: row.githubIssueNumber,
+  title: row.title,
+  githubCreatedAt: new Date(row.githubCreatedAt),
+})
+
 const toDatabaseError = (error: SqlError) =>
   new DatabaseError({
     message: `Database error: ${formatSqlError(error)}`,
@@ -93,6 +114,18 @@ export interface DbServiceShape {
     | RepositoryAlreadyExistsError
     | LocalPathInUseError
     | DatabaseError
+  >
+  readonly storeIssue: (
+    input: StoreIssueInput,
+  ) => Effect.Effect<
+    IssueRecord,
+    InvalidIssueInputError | RepositoryNotFoundError | DatabaseError
+  >
+  readonly listIssues: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    readonly IssueRecord[],
+    RepositoryNotFoundError | DatabaseError
   >
 }
 
@@ -206,6 +239,123 @@ export const DbServiceLive = Layer.effect(
         return toRecord(row)
       })
 
-    return DbService.of({ addRepository })
+    const ensureRepositoryExists = (
+      repositoryId: string,
+    ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
+      Effect.gen(function* () {
+        const repository = yield* runDrizzle(
+          db
+            .select({ id: schema.repository.id })
+            .from(schema.repository)
+            .where(eq(schema.repository.id, repositoryId))
+            .limit(1),
+        ).pipe(Effect.mapError(toDatabaseError))
+
+        if (!repository[0]) {
+          return yield* new RepositoryNotFoundError({ repositoryId })
+        }
+      })
+
+    const storeIssue = (
+      input: StoreIssueInput,
+    ): Effect.Effect<
+      IssueRecord,
+      InvalidIssueInputError | RepositoryNotFoundError | DatabaseError
+    > =>
+      Effect.gen(function* () {
+        if (
+          !Number.isSafeInteger(input.githubIssueNumber) ||
+          input.githubIssueNumber <= 0
+        ) {
+          return yield* new InvalidIssueInputError({
+            field: "githubIssueNumber",
+            message: "githubIssueNumber must be a positive integer",
+          })
+        }
+        if (input.title.trim().length === 0) {
+          return yield* new InvalidIssueInputError({
+            field: "title",
+            message: "title cannot be empty",
+          })
+        }
+        if (Number.isNaN(input.githubCreatedAt.getTime())) {
+          return yield* new InvalidIssueInputError({
+            field: "githubCreatedAt",
+            message: "githubCreatedAt must be a valid date",
+          })
+        }
+
+        yield* ensureRepositoryExists(input.repositoryId)
+
+        const now = Date.now()
+        const result = yield* runDrizzle(
+          db
+            .insert(schema.issue)
+            .values({
+              id: `issue-${ulid()}`,
+              repositoryId: input.repositoryId,
+              githubIssueNumber: input.githubIssueNumber,
+              title: input.title,
+              githubCreatedAt: input.githubCreatedAt.getTime(),
+              createdAt: now,
+              updatedAt: now,
+            })
+            .onConflictDoUpdate({
+              target: [
+                schema.issue.repositoryId,
+                schema.issue.githubIssueNumber,
+              ],
+              set: {
+                title: input.title,
+                githubCreatedAt: input.githubCreatedAt.getTime(),
+                updatedAt: now,
+              },
+            })
+            .returning({
+              id: schema.issue.id,
+              repositoryId: schema.issue.repositoryId,
+              githubIssueNumber: schema.issue.githubIssueNumber,
+              title: schema.issue.title,
+              githubCreatedAt: schema.issue.githubCreatedAt,
+            }),
+        ).pipe(Effect.mapError(toDatabaseError))
+
+        const row = result[0]
+        if (!row) {
+          return yield* new DatabaseError({
+            message: "No issue returned from upsert",
+          })
+        }
+
+        return toIssueRecord(row)
+      })
+
+    const listIssues = (
+      repositoryId: string,
+    ): Effect.Effect<
+      readonly IssueRecord[],
+      RepositoryNotFoundError | DatabaseError
+    > =>
+      Effect.gen(function* () {
+        yield* ensureRepositoryExists(repositoryId)
+
+        const issues = yield* runDrizzle(
+          db
+            .select({
+              id: schema.issue.id,
+              repositoryId: schema.issue.repositoryId,
+              githubIssueNumber: schema.issue.githubIssueNumber,
+              title: schema.issue.title,
+              githubCreatedAt: schema.issue.githubCreatedAt,
+            })
+            .from(schema.issue)
+            .where(eq(schema.issue.repositoryId, repositoryId))
+            .orderBy(asc(schema.issue.githubIssueNumber)),
+        ).pipe(Effect.mapError(toDatabaseError))
+
+        return issues.map(toIssueRecord)
+      })
+
+    return DbService.of({ addRepository, storeIssue, listIssues })
   }),
 )
