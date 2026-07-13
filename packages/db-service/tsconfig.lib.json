@@ -12,9 +12,6 @@
   "references": [
     {
       "path": "../db/tsconfig.lib.json"
-    },
-    {
-      "path": "../db-schema/tsconfig.lib.json"
     }
   ]
 }

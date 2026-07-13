@@ -11,13 +11,10 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../db/tsconfig.lib.json"
-    },
-    {
-      "path": "../db-schema/tsconfig.lib.json"
-    },
-    {
       "path": "../queue-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../db/tsconfig.lib.json"
     }
   ]
 }

@@ -16,15 +16,12 @@
     }
   },
   "dependencies": {
-    "@effect/sql": "^0.51.1",
-    "@ready-for-agent/db": "workspace:*",
-    "@ready-for-agent/db-schema": "workspace:*",
-    "drizzle-orm": "1.0.0-rc.4-5d5b77c",
-    "effect": "^3.21.4",
+    "effect": "^4.0.0-beta.97",
     "tslib": "^2.3.0",
     "ulidx": "^2.4.1"
   },
   "devDependencies": {
+    "@ready-for-agent/db": "workspace:*",
     "@types/bun": "^1.3.0"
   }
 }

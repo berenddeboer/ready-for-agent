@@ -55,10 +55,10 @@ const makeSidecarService = (
   const retryDelayMs = options.retryDelayMs ?? 100
   const startupTimeoutMs = options.startupTimeoutMs ?? 5_000
 
-  const request = <A, I>(
+  const request = <S extends Schema.ConstraintDecoder<unknown>>(
     operation: string,
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: S,
     responseKeys: readonly string[],
     body?: unknown,
   ) =>
@@ -84,7 +84,7 @@ const makeSidecarService = (
           ? Effect.fail(
               safeError(operation, "Keymaxxer sidecar request failed"),
             )
-          : Schema.decodeUnknown(schema)(json).pipe(
+          : Schema.decodeUnknownEffect(schema)(json).pipe(
               Effect.mapError(() =>
                 safeError(operation, "Keymaxxer sidecar request failed"),
               ),
@@ -108,12 +108,14 @@ const makeSidecarService = (
         catch: () =>
           safeError("initialize", "Keymaxxer sidecar request failed"),
       }).pipe(
-        Effect.catchAll((error) =>
-          Date.now() - startedAt >= startupTimeoutMs
-            ? Effect.fail(error)
-            : Effect.sleep(`${retryDelayMs} millis`).pipe(
-                Effect.flatMap(connect),
-              ),
+        Effect.catchIf(
+          () => true,
+          (error) =>
+            Date.now() - startedAt >= startupTimeoutMs
+              ? Effect.fail(error)
+              : Effect.sleep(`${retryDelayMs} millis`).pipe(
+                  Effect.flatMap(connect),
+                ),
         ),
       )
 
@@ -133,7 +135,7 @@ const makeSidecarService = (
           ? Effect.fail(
               safeError("initialize", "Keymaxxer sidecar request failed"),
             )
-          : Schema.decodeUnknown(HealthResponse)(json).pipe(
+          : Schema.decodeUnknownEffect(HealthResponse)(json).pipe(
               Effect.mapError(() =>
                 safeError("initialize", "Keymaxxer sidecar request failed"),
               ),
@@ -144,19 +146,18 @@ const makeSidecarService = (
   }
 
   return {
-    initialize: () =>
-      waitForHealth().pipe(
-        Effect.flatMap(() =>
-          request(
-            "initialize",
-            "/initialize",
-            InitializeResponse,
-            ["initialized"],
-            {},
-          ),
+    initialize: waitForHealth().pipe(
+      Effect.flatMap(() =>
+        request(
+          "initialize",
+          "/initialize",
+          InitializeResponse,
+          ["initialized"],
+          {},
         ),
-        Effect.asVoid,
       ),
+      Effect.asVoid,
+    ),
     hasSecret: (name) =>
       validateSecretName(name)
         ? request(

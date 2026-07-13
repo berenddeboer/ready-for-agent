@@ -1,9 +1,7 @@
-import type { SqlError } from "@effect/sql/SqlError"
-import { and, asc, eq, sql } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
-import { TypedSqliteDrizzle, runDrizzle } from "@ready-for-agent/db"
-import * as schema from "@ready-for-agent/db-schema"
 import {
   DatabaseError,
   InvalidIssueInputError,
@@ -74,15 +72,15 @@ const toRecord = (row: {
   githubOwner: string
   githubRepo: string
   localPath: string
-  isBare: boolean
-  paused: boolean
+  isBare: boolean | number
+  paused: boolean | number
 }): RepositoryRecord => ({
   id: row.id,
   githubOwner: row.githubOwner,
   githubRepo: row.githubRepo,
   localPath: row.localPath,
-  isBare: row.isBare,
-  paused: row.paused,
+  isBare: Boolean(row.isBare),
+  paused: Boolean(row.paused),
 })
 
 const toIssueRecord = (row: {
@@ -129,14 +127,14 @@ export interface DbServiceShape {
   >
 }
 
-export class DbService extends Context.Tag(
+export class DbService extends Context.Service<DbService, DbServiceShape>()(
   "@ready-for-agent/db-service/DbService",
-)<DbService, DbServiceShape>() {}
+) {}
 
 export const DbServiceLive = Layer.effect(
   DbService,
   Effect.gen(function* () {
-    const db = yield* TypedSqliteDrizzle
+    const sql = yield* SqlClient.SqlClient
 
     const addRepository = (
       input: AddRepositoryInput,
@@ -157,18 +155,14 @@ export const DbServiceLive = Layer.effect(
         const now = Date.now()
         const id = `repo-${ulid()}`
 
-        const existingByGithub = yield* runDrizzle(
-          db
-            .select({ id: schema.repository.id })
-            .from(schema.repository)
-            .where(
-              and(
-                sql`lower(${schema.repository.githubOwner}) = ${githubOwner.toLowerCase()}`,
-                sql`lower(${schema.repository.githubRepo}) = ${githubRepo.toLowerCase()}`,
-              ),
-            )
-            .limit(1),
-        ).pipe(Effect.mapError(toDatabaseError))
+        const existingByGithub = yield* sql
+          .unsafe(
+            `SELECT id FROM repository
+             WHERE lower(github_owner) = ? AND lower(github_repo) = ?
+             LIMIT 1`,
+            [githubOwner.toLowerCase(), githubRepo.toLowerCase()],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
 
         if (existingByGithub[0]) {
           return yield* new RepositoryAlreadyExistsError({
@@ -177,79 +171,87 @@ export const DbServiceLive = Layer.effect(
           })
         }
 
-        const existingByPath = yield* runDrizzle(
-          db
-            .select({ id: schema.repository.id })
-            .from(schema.repository)
-            .where(eq(schema.repository.localPath, localPath))
-            .limit(1),
-        ).pipe(Effect.mapError(toDatabaseError))
+        const existingByPath = yield* sql
+          .unsafe("SELECT id FROM repository WHERE local_path = ? LIMIT 1", [
+            localPath,
+          ])
+          .pipe(Effect.mapError(toDatabaseError))
 
         if (existingByPath[0]) {
           return yield* new LocalPathInUseError({ localPath })
         }
 
-        const result = yield* runDrizzle(
-          db
-            .insert(schema.repository)
-            .values({
+        const result = yield* sql
+          .unsafe(
+            `INSERT INTO repository (
+               id, github_owner, github_repo, local_path, is_bare, paused, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             RETURNING id, github_owner, github_repo, local_path, is_bare, paused`,
+            [
               id,
               githubOwner,
               githubRepo,
               localPath,
-              isBare: input.isBare,
-              paused: true,
-              createdAt: now,
-              updatedAt: now,
-            })
-            .returning({
-              id: schema.repository.id,
-              githubOwner: schema.repository.githubOwner,
-              githubRepo: schema.repository.githubRepo,
-              localPath: schema.repository.localPath,
-              isBare: schema.repository.isBare,
-              paused: schema.repository.paused,
-            }),
-        ).pipe(
-          Effect.mapError((error: SqlError) => {
-            if (isUniqueConstraint(error)) {
-              const message = formatSqlError(error).toLowerCase()
-              if (
-                message.includes("local_path") ||
-                message.includes("localpath")
-              ) {
-                return new LocalPathInUseError({ localPath })
+              input.isBare,
+              true,
+              now,
+              now,
+            ],
+          )
+          .pipe(
+            Effect.mapError((error: SqlError) => {
+              if (isUniqueConstraint(error)) {
+                const message = formatSqlError(error).toLowerCase()
+                if (
+                  message.includes("local_path") ||
+                  message.includes("localpath")
+                ) {
+                  return new LocalPathInUseError({ localPath })
+                }
+                return new RepositoryAlreadyExistsError({
+                  githubOwner,
+                  githubRepo,
+                })
               }
-              return new RepositoryAlreadyExistsError({
-                githubOwner,
-                githubRepo,
-              })
-            }
-            return toDatabaseError(error)
-          }),
-        )
+              return toDatabaseError(error)
+            }),
+          )
 
-        const row = result[0]
+        const row = result[0] as
+          | {
+              id: string
+              github_owner: string
+              github_repo: string
+              local_path: string
+              is_bare: boolean | number
+              paused: boolean | number
+            }
+          | undefined
         if (!row) {
           return yield* new DatabaseError({
             message: "No repository returned from insert",
           })
         }
 
-        return toRecord(row)
+        return toRecord({
+          id: row.id,
+          githubOwner: row.github_owner,
+          githubRepo: row.github_repo,
+          localPath: row.local_path,
+          isBare: row.is_bare,
+          paused: row.paused,
+        })
       })
 
     const ensureRepositoryExists = (
       repositoryId: string,
     ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
       Effect.gen(function* () {
-        const repository = yield* runDrizzle(
-          db
-            .select({ id: schema.repository.id })
-            .from(schema.repository)
-            .where(eq(schema.repository.id, repositoryId))
-            .limit(1),
-        ).pipe(Effect.mapError(toDatabaseError))
+        const repository = yield* sql
+          .unsafe("SELECT id FROM repository WHERE id = ? LIMIT 1", [
+            repositoryId,
+          ])
+          .pipe(Effect.mapError(toDatabaseError))
 
         if (!repository[0]) {
           return yield* new RepositoryNotFoundError({ repositoryId })
@@ -288,46 +290,50 @@ export const DbServiceLive = Layer.effect(
         yield* ensureRepositoryExists(input.repositoryId)
 
         const now = Date.now()
-        const result = yield* runDrizzle(
-          db
-            .insert(schema.issue)
-            .values({
-              id: `issue-${ulid()}`,
-              repositoryId: input.repositoryId,
-              githubIssueNumber: input.githubIssueNumber,
-              title: input.title,
-              githubCreatedAt: input.githubCreatedAt.getTime(),
-              createdAt: now,
-              updatedAt: now,
-            })
-            .onConflictDoUpdate({
-              target: [
-                schema.issue.repositoryId,
-                schema.issue.githubIssueNumber,
-              ],
-              set: {
-                title: input.title,
-                githubCreatedAt: input.githubCreatedAt.getTime(),
-                updatedAt: now,
-              },
-            })
-            .returning({
-              id: schema.issue.id,
-              repositoryId: schema.issue.repositoryId,
-              githubIssueNumber: schema.issue.githubIssueNumber,
-              title: schema.issue.title,
-              githubCreatedAt: schema.issue.githubCreatedAt,
-            }),
-        ).pipe(Effect.mapError(toDatabaseError))
+        const result = yield* sql
+          .unsafe(
+            `INSERT INTO issue (
+               id, repository_id, github_issue_number, title, github_created_at, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (repository_id, github_issue_number) DO UPDATE SET
+               title = excluded.title,
+               github_created_at = excluded.github_created_at,
+               updated_at = excluded.updated_at
+             RETURNING id, repository_id, github_issue_number, title, github_created_at`,
+            [
+              `issue-${ulid()}`,
+              input.repositoryId,
+              input.githubIssueNumber,
+              input.title,
+              input.githubCreatedAt.getTime(),
+              now,
+              now,
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
 
-        const row = result[0]
+        const row = result[0] as
+          | {
+              id: string
+              repository_id: string
+              github_issue_number: number
+              title: string
+              github_created_at: number
+            }
+          | undefined
         if (!row) {
           return yield* new DatabaseError({
             message: "No issue returned from upsert",
           })
         }
 
-        return toIssueRecord(row)
+        return toIssueRecord({
+          id: row.id,
+          repositoryId: row.repository_id,
+          githubIssueNumber: row.github_issue_number,
+          title: row.title,
+          githubCreatedAt: row.github_created_at,
+        })
       })
 
     const listIssues = (
@@ -339,21 +345,31 @@ export const DbServiceLive = Layer.effect(
       Effect.gen(function* () {
         yield* ensureRepositoryExists(repositoryId)
 
-        const issues = yield* runDrizzle(
-          db
-            .select({
-              id: schema.issue.id,
-              repositoryId: schema.issue.repositoryId,
-              githubIssueNumber: schema.issue.githubIssueNumber,
-              title: schema.issue.title,
-              githubCreatedAt: schema.issue.githubCreatedAt,
-            })
-            .from(schema.issue)
-            .where(eq(schema.issue.repositoryId, repositoryId))
-            .orderBy(asc(schema.issue.githubIssueNumber)),
-        ).pipe(Effect.mapError(toDatabaseError))
+        const issues = yield* sql
+          .unsafe(
+            `SELECT id, repository_id, github_issue_number, title, github_created_at
+             FROM issue WHERE repository_id = ? ORDER BY github_issue_number ASC`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
 
-        return issues.map(toIssueRecord)
+        return (
+          issues as ReadonlyArray<{
+            id: string
+            repository_id: string
+            github_issue_number: number
+            title: string
+            github_created_at: number
+          }>
+        ).map((issue) =>
+          toIssueRecord({
+            id: issue.id,
+            repositoryId: issue.repository_id,
+            githubIssueNumber: issue.github_issue_number,
+            title: issue.title,
+            githubCreatedAt: issue.github_created_at,
+          }),
+        )
       })
 
     return DbService.of({ addRepository, storeIssue, listIssues })

@@ -1,4 +1,4 @@
-import { Effect, Either, Layer, ManagedRuntime } from "effect"
+import { Effect, Layer, ManagedRuntime } from "effect"
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
 import { DatabaseLive } from "@ready-for-agent/db"
@@ -25,7 +25,7 @@ const runtime = ManagedRuntime.make(AppLayer)
 await runtime.runPromise(
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
-    yield* keymaxxer.initialize()
+    yield* keymaxxer.initialize
   }),
 )
 
@@ -84,18 +84,16 @@ const yoga = createYoga({
       },
       Mutation: {
         addRepository: async (_parent: unknown, args: AddRepositoryArgs) => {
-          const result = await runtime.runPromise(
-            Effect.either(
+          try {
+            return await runtime.runPromise(
               Effect.gen(function* () {
                 const db = yield* DbService
                 return yield* db.addRepository(args.input)
               }),
-            ),
-          )
-          if (Either.isLeft(result)) {
-            throw toGraphQLError(result.left)
+            )
+          } catch (error) {
+            throw toGraphQLError(error)
           }
-          return result.right
         },
       },
     },

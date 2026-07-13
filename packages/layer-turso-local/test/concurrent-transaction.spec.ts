@@ -1,6 +1,6 @@
 import { unlink } from "node:fs/promises"
-import * as SqlClient from "@effect/sql/SqlClient"
-import { ConfigProvider, Effect, Layer } from "effect"
+import { Effect } from "effect"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { makeTursoLive } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -8,6 +8,11 @@ const tempDbPath = () =>
   `/tmp/test-turso-${Date.now()}-${Math.random().toString(36).slice(2)}.db`
 
 const sqlQuery = (sql: string) => Object.assign([sql], { raw: [sql] })
+
+const makeTestLayer = (dbPath: string) => {
+  process.env.SQLITE_DATABASE_PATH = dbPath
+  return makeTursoLive()
+}
 
 const cleanupDb = async (dbPath: string) => {
   await unlink(dbPath).catch(() => {})
@@ -18,10 +23,7 @@ const cleanupDb = async (dbPath: string) => {
 describe("makeTursoLive", () => {
   it("uses BEGIN IMMEDIATE (write lock) transactions", async () => {
     const dbPath = tempDbPath()
-    const ConfigLayer = Layer.setConfigProvider(
-      ConfigProvider.fromMap(new Map([["SQLITE_DATABASE_PATH", dbPath]])),
-    )
-    const TestLayer = makeTursoLive().pipe(Layer.provide(ConfigLayer))
+    const TestLayer = makeTestLayer(dbPath)
 
     try {
       const rows = await Effect.runPromise(
@@ -49,11 +51,8 @@ describe("makeTursoLive", () => {
 
   it("makes writes visible across long-lived clients", async () => {
     const dbPath = tempDbPath()
-    const ConfigLayer = Layer.setConfigProvider(
-      ConfigProvider.fromMap(new Map([["SQLITE_DATABASE_PATH", dbPath]])),
-    )
-    const WriterLayer = makeTursoLive().pipe(Layer.provide(ConfigLayer))
-    const ReaderLayer = makeTursoLive().pipe(Layer.provide(ConfigLayer))
+    const WriterLayer = makeTestLayer(dbPath)
+    const ReaderLayer = makeTestLayer(dbPath)
 
     try {
       await Effect.runPromise(
@@ -95,10 +94,7 @@ describe("makeTursoLive", () => {
 
   it("supports partial unique-index upserts", async () => {
     const dbPath = tempDbPath()
-    const ConfigLayer = Layer.setConfigProvider(
-      ConfigProvider.fromMap(new Map([["SQLITE_DATABASE_PATH", dbPath]])),
-    )
-    const TestLayer = makeTursoLive().pipe(Layer.provide(ConfigLayer))
+    const TestLayer = makeTestLayer(dbPath)
 
     try {
       const rows = await Effect.runPromise(
@@ -136,10 +132,7 @@ describe("makeTursoLive", () => {
 
   it("preserves duplicate selected columns in values mode", async () => {
     const dbPath = tempDbPath()
-    const ConfigLayer = Layer.setConfigProvider(
-      ConfigProvider.fromMap(new Map([["SQLITE_DATABASE_PATH", dbPath]])),
-    )
-    const TestLayer = makeTursoLive().pipe(Layer.provide(ConfigLayer))
+    const TestLayer = makeTestLayer(dbPath)
 
     try {
       const rows = await Effect.runPromise(

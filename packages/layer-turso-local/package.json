@@ -36,10 +36,8 @@
     }
   },
   "dependencies": {
-    "@effect/experimental": "^0.60.0",
-    "@effect/sql": "^0.51.1",
     "@tursodatabase/database": "0.7.0-pre.13",
-    "effect": "^3.21.4",
+    "effect": "^4.0.0-beta.97",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
