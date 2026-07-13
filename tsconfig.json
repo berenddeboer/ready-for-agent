@@ -38,6 +38,9 @@
     },
     {
       "path": "./packages/keymaxxer-service"
+    },
+    {
+      "path": "./packages/opencode"
     }
   ]
 }
