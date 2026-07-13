@@ -24,6 +24,7 @@ const issue = (
   url: `https://github.com/acme/widgets/issues/${number}`,
   createdAt: new Date(`2026-07-${String(number).padStart(2, "0")}T12:00:00Z`),
   state,
+  parent: null,
   blockedBy: [],
 })
 
@@ -42,6 +43,10 @@ describe("GitHubService live implementation", () => {
                 url: "https://github.com/acme/widgets/issues/9",
                 createdAt: "2026-07-09T12:00:00Z",
                 state: "OPEN",
+                parent: {
+                  number: 1,
+                  url: "https://github.com/acme/widgets/issues/1",
+                },
                 blockedBy: {
                   nodes: [
                     {
@@ -69,6 +74,7 @@ describe("GitHubService live implementation", () => {
                 url: "https://github.com/acme/widgets/issues/2",
                 createdAt: "2026-07-02T12:00:00Z",
                 state: "CLOSED",
+                parent: null,
                 blockedBy: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },
@@ -99,7 +105,12 @@ describe("GitHubService live implementation", () => {
       url: "https://github.com/acme/widgets/issues/2",
       createdAt: new Date("2026-07-02T12:00:00Z"),
       state: "CLOSED",
+      parent: null,
       blockedBy: [],
+    })
+    expect(result[1]?.parent).toEqual({
+      number: 1,
+      url: "https://github.com/acme/widgets/issues/1",
     })
     expect(result[1]?.blockedBy).toEqual([
       {
@@ -131,6 +142,7 @@ describe("GitHubService live implementation", () => {
       url: true,
       createdAt: true,
       state: true,
+      parent: { number: true, url: true },
       blockedBy: {
         __args: { first: 100 },
         nodes: { number: true, url: true },
@@ -156,6 +168,7 @@ describe("GitHubService live implementation", () => {
                 url: "https://github.com/acme/widgets/issues/7",
                 createdAt: "2026-07-07T12:00:00Z",
                 state: "OPEN",
+                parent: null,
                 blockedBy: {
                   nodes: [
                     {
@@ -265,6 +278,7 @@ describe("GitHubService live implementation", () => {
                 url: "not-a-url",
                 createdAt: "2026-07-01T12:00:00Z",
                 state: "OPEN",
+                parent: null,
                 blockedBy: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },

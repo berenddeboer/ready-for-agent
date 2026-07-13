@@ -17,5 +17,6 @@ export interface ReadyLabeledIssue {
   readonly url: string
   readonly createdAt: Date
   readonly state: GitHubIssueState
+  readonly parent: GitHubIssueReference | null
   readonly blockedBy: readonly GitHubIssueReference[]
 }

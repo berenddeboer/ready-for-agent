@@ -41,6 +41,7 @@ const remoteIssue = (
     `2026-07-${String(number).padStart(2, "0")}T00:00:00.000Z`,
   ),
   state: "OPEN",
+  parent: null,
   blockedBy: [],
   ...overrides,
 })
@@ -59,6 +60,13 @@ const localIssue = (
     url: remote.url,
     githubCreatedAt: remote.createdAt,
     state: remote.state,
+    parent:
+      remote.parent === null
+        ? null
+        : {
+            githubIssueNumber: remote.parent.number,
+            githubIssueUrl: remote.parent.url,
+          },
     blockedBy: remote.blockedBy.map((dependency) => ({
       githubIssueNumber: dependency.number,
       githubIssueUrl: dependency.url,
@@ -288,6 +296,36 @@ describe("IssueReconciler", () => {
           "store:1",
           "mark",
         ])
+      }),
+      db.layer,
+      github,
+    )
+  })
+
+  it("updates an otherwise unchanged issue when its parent changes", () => {
+    const db = makeDbFixture({ issues: [localIssue(1)] })
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1, {
+          parent: {
+            number: 9,
+            url: "https://github.com/acme/widgets/issues/9",
+          },
+        }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary.updated).toBe(1)
+        expect(db.stored[0]?.parent).toEqual({
+          githubIssueNumber: 9,
+          githubIssueUrl: "https://github.com/acme/widgets/issues/9",
+        })
       }),
       db.layer,
       github,

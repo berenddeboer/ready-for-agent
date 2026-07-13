@@ -34,6 +34,7 @@ describe("DbService", () => {
     body: "Issue body",
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
+    parent: null,
     blockedBy: [],
   }
 
@@ -248,6 +249,7 @@ describe("DbService", () => {
           expect(issue.url).toBe("https://github.com/acme/widgets/issues/42")
           expect(issue.state).toBe("OPEN")
           expect(issue.githubCreatedAt).toEqual(githubCreatedAt)
+          expect(issue.parent).toBeNull()
         }),
       ))
 
@@ -329,6 +331,43 @@ describe("DbService", () => {
           expect((yield* db.listIssues(repository.id))[0]?.blockedBy).toEqual(
             stored.blockedBy,
           )
+        }),
+      ))
+
+    it("stores, replaces, and clears an issue's parent", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* addTestRepository(db)
+          const baseInput = {
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Child issue",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          }
+
+          const withParent = yield* db.storeIssue({
+            ...baseInput,
+            parent: {
+              githubIssueNumber: 7,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/7",
+            },
+          })
+          expect(withParent.parent).toEqual({
+            githubIssueNumber: 7,
+            githubIssueUrl: "https://github.com/acme/widgets/issues/7",
+          })
+          expect((yield* db.listIssues(repository.id))[0]?.parent).toEqual(
+            withParent.parent,
+          )
+
+          const withoutParent = yield* db.storeIssue({
+            ...baseInput,
+            parent: null,
+          })
+          expect(withoutParent.parent).toBeNull()
+          expect((yield* db.listIssues(repository.id))[0]?.parent).toBeNull()
         }),
       ))
 

@@ -99,6 +99,8 @@ const toIssueRecord = (row: {
   url: string
   state: "OPEN" | "CLOSED"
   githubCreatedAt: number
+  parentGithubIssueNumber: number | null
+  parentGithubIssueUrl: string | null
   blockedBy: readonly IssueDependency[]
 }): IssueRecord => ({
   id: row.id,
@@ -109,6 +111,13 @@ const toIssueRecord = (row: {
   url: row.url,
   state: row.state,
   githubCreatedAt: new Date(row.githubCreatedAt),
+  parent:
+    row.parentGithubIssueNumber === null || row.parentGithubIssueUrl === null
+      ? null
+      : {
+          githubIssueNumber: row.parentGithubIssueNumber,
+          githubIssueUrl: row.parentGithubIssueUrl,
+        },
   blockedBy: row.blockedBy,
 })
 
@@ -448,6 +457,18 @@ export const DbServiceLive = Layer.effect(
           })
         }
 
+        if (
+          input.parent !== null &&
+          (!Number.isSafeInteger(input.parent.githubIssueNumber) ||
+            input.parent.githubIssueNumber <= 0 ||
+            !URL.canParse(input.parent.githubIssueUrl))
+        ) {
+          return yield* new InvalidIssueInputError({
+            field: "parent",
+            message: "parent must have a positive issue number and valid URL",
+          })
+        }
+
         for (const dependency of input.blockedBy) {
           if (
             !Number.isSafeInteger(dependency.githubIssueNumber) ||
@@ -476,17 +497,21 @@ export const DbServiceLive = Layer.effect(
                 .unsafe(
                   `INSERT INTO issue (
                id, repository_id, github_issue_number, title, body, url, state,
-               github_created_at, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                github_created_at, parent_github_issue_number,
+                parent_github_issue_url, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (repository_id, github_issue_number) DO UPDATE SET
                title = excluded.title,
                body = excluded.body,
                url = excluded.url,
-               state = excluded.state,
-               github_created_at = excluded.github_created_at,
-               updated_at = excluded.updated_at
-             RETURNING id, repository_id, github_issue_number, title, body, url, state,
-               github_created_at`,
+                state = excluded.state,
+                github_created_at = excluded.github_created_at,
+                parent_github_issue_number = excluded.parent_github_issue_number,
+                parent_github_issue_url = excluded.parent_github_issue_url,
+                updated_at = excluded.updated_at
+              RETURNING id, repository_id, github_issue_number, title, body, url, state,
+                github_created_at, parent_github_issue_number,
+                parent_github_issue_url`,
                   [
                     `issue-${ulid()}`,
                     input.repositoryId,
@@ -496,6 +521,8 @@ export const DbServiceLive = Layer.effect(
                     input.url,
                     input.state,
                     input.githubCreatedAt.getTime(),
+                    input.parent?.githubIssueNumber ?? null,
+                    input.parent?.githubIssueUrl ?? null,
                     now,
                     now,
                   ],
@@ -512,6 +539,8 @@ export const DbServiceLive = Layer.effect(
                     url: string
                     state: "OPEN" | "CLOSED"
                     github_created_at: number
+                    parent_github_issue_number: number | null
+                    parent_github_issue_url: string | null
                   }
                 | undefined
               if (!row) {
@@ -564,6 +593,8 @@ export const DbServiceLive = Layer.effect(
                 url: row.url,
                 state: row.state,
                 githubCreatedAt: row.github_created_at,
+                parentGithubIssueNumber: row.parent_github_issue_number,
+                parentGithubIssueUrl: row.parent_github_issue_url,
                 blockedBy: dependencies,
               })
             }),
@@ -587,7 +618,8 @@ export const DbServiceLive = Layer.effect(
         const issues = yield* sql
           .unsafe(
             `SELECT id, repository_id, github_issue_number, title, body, url, state,
-               github_created_at
+                github_created_at, parent_github_issue_number,
+                parent_github_issue_url
              FROM issue WHERE repository_id = ? ORDER BY github_issue_number ASC`,
             [repositoryId],
           )
@@ -629,6 +661,8 @@ export const DbServiceLive = Layer.effect(
             url: string
             state: "OPEN" | "CLOSED"
             github_created_at: number
+            parent_github_issue_number: number | null
+            parent_github_issue_url: string | null
           }>
         ).map((issue) =>
           toIssueRecord({
@@ -640,6 +674,8 @@ export const DbServiceLive = Layer.effect(
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.github_created_at,
+            parentGithubIssueNumber: issue.parent_github_issue_number,
+            parentGithubIssueUrl: issue.parent_github_issue_url,
             blockedBy: dependenciesByIssue.get(issue.id) ?? [],
           }),
         )

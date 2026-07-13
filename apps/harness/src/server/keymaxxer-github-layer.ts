@@ -17,6 +17,12 @@ const SerializedIssue = Schema.Struct({
   url: Schema.String,
   createdAt: Schema.String,
   state: Schema.Literals(["OPEN", "CLOSED"]),
+  parent: Schema.NullOr(
+    Schema.Struct({
+      number: Schema.Finite,
+      url: Schema.String,
+    }),
+  ),
   blockedBy: Schema.Array(
     Schema.Struct({
       number: Schema.Finite,
@@ -63,6 +69,15 @@ const parseIssues = (
               throw new Error("Invalid Issue creation time")
             }
             new URL(issue.url)
+            if (issue.parent !== null) {
+              if (
+                !Number.isSafeInteger(issue.parent.number) ||
+                issue.parent.number <= 0
+              ) {
+                throw new Error("Invalid parent Issue number")
+              }
+              new URL(issue.parent.url)
+            }
             for (const dependency of issue.blockedBy) {
               if (
                 !Number.isSafeInteger(dependency.number) ||

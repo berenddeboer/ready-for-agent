@@ -31,6 +31,7 @@ type Issue {
   url: URI!
   createdAt: DateTime!
   state: IssueState!
+  parent: Issue
   blockedBy(first: Int, after: String): IssueConnection!
 }
 
