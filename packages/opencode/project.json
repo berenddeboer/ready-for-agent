@@ -1,0 +1,15 @@
+{
+  "name": "opencode",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true
+    }
+  }
+}
