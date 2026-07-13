@@ -4,13 +4,15 @@ CLI for the ready-for-agent harness.
 
 ## Usage
 
-Start the GraphQL API and harness from the repo root:
+Start the harness from the repo root:
 
 ```bash
-bun run --cwd apps/api dev
-# In another terminal:
-bun run --cwd apps/harness dev
+bun nx run harness:dev
 ```
+
+This starts both Vite and the GraphQL API. By default, API development data is
+stored in `tmp/ready-for-agent.db`. Set `SQLITE_DATABASE_PATH` to use another
+SQLite/Turso database.
 
 Then add a local repository:
 
@@ -18,7 +20,7 @@ Then add a local repository:
 bun run harness-cli add /path/to/local/repo
 ```
 
-The CLI inspects the local git repository, calls the harness GraphQL endpoint at `http://127.0.0.1:4200/graphql`, and prints the returned Repository fields. The API currently returns a stub response; persistence is not wired yet. The path must be a git repository with a GitHub remote, and new Repositories are reported as paused.
+The CLI inspects the local git repository, calls the harness GraphQL endpoint at `http://127.0.0.1:4200/graphql`, and prints the persisted Repository fields. The path must be a git repository with a GitHub remote, and new Repositories are reported as paused.
 
 Override the endpoint when the harness is available elsewhere:
 
@@ -32,7 +34,7 @@ Example:
 ```bash
 bun run harness-cli add ~/src/pf/monorepo/
 # Added repository processfocus/monorepo
-#   id: stub-repository-id
+#   id: repo-01...
 #   local path: /home/berend/src/pf/monorepo
 #   bare: true
 #   paused: true

@@ -1,0 +1,13 @@
+{
+  "name": "db",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "migrate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "mkdir -p ../../tmp && SQLITE_DATABASE_PATH=${SQLITE_DATABASE_PATH:-../../tmp/ready-for-agent.db} bun --conditions @ready-for-agent/source src/bin/migrate.ts"
+      }
+    }
+  }
+}

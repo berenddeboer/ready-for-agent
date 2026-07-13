@@ -13,7 +13,7 @@ export const repository = snakeCase.table(
   {
     id: text()
       .primaryKey()
-      .$defaultFn(() => ulid()),
+      .$defaultFn(() => `repo-${ulid()}`),
     githubOwner: text().notNull(),
     githubRepo: text().notNull(),
     localPath: text().notNull().unique(),

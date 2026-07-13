@@ -8,7 +8,13 @@
       "options": {
         "command": "vite",
         "cwd": "apps/harness"
-      }
+      },
+      "dependsOn": [
+        {
+          "projects": ["api"],
+          "target": "serve"
+        }
+      ]
     }
   }
 }
