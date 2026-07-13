@@ -10,6 +10,7 @@ type Query {
 }
 
 type Repository {
+  nameWithOwner: String!
   issues(first: Int, after: String, labels: [String!]): IssueConnection!
   issue(number: Int!): Issue
 }
@@ -31,8 +32,15 @@ type Issue {
   url: URI!
   createdAt: DateTime!
   state: IssueState!
+  repository: Repository!
   parent: Issue
+  subIssues(first: Int, after: String): IssueConnection!
+  subIssuesSummary: SubIssuesSummary!
   blockedBy(first: Int, after: String): IssueConnection!
+}
+
+type SubIssuesSummary {
+  total: Int!
 }
 
 enum IssueState {

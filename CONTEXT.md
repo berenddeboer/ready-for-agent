@@ -17,10 +17,10 @@ A GitHub issue belonging to a Repository, identified within that Repository by a
 _Avoid_: Ticket, task (unless referring to a broader concept)
 
 **Issue store**:
-The harness capability that retains Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues.
+The harness capability that retains the Repository's current working set of Relevant Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues.
 
 **Issue Reconciler**:
-The sole harness capability that changes the Issue store, making one Repository's stored Issues reflect GitHub's authoritative set of Ready-labeled Issues. Issues absent from that set, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
+The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from GitHub's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
 _Avoid_: GitHub Reconciler (too broad), Issue Synchronizer (suggests bidirectional updates)
 
 **Keymaxxer Service**:
@@ -38,3 +38,11 @@ _Avoid_: chat, thread, conversation (in formal docs)
 **Ready-labeled Issue**:
 An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, and GitHub state so consumers can decide whether it is actionable.
 _Avoid_: Ready Issue (can imply that the Issue is open and actionable)
+
+**Supported Issue Hierarchy**:
+A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety.
+_Avoid_: Issue tree (implies arbitrary depth), nested Issues
+
+**Relevant Issue**:
+A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness: either an open root Issue, or a direct child whose parent is open and Ready-labeled. A closed root Issue, or a child with a closed or non-Ready-labeled parent, is not relevant.
+_Avoid_: Active Issue (a Relevant Issue may be closed), Actionable Issue (actionability also depends on workflow constraints), Visible Issue (presentation-specific)

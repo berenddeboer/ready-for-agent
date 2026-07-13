@@ -20,10 +20,13 @@ const SerializedIssue = Schema.Struct({
   url: Schema.String,
   createdAt: Schema.String,
   state: Schema.Literals(["OPEN", "CLOSED"]),
+  hierarchySupported: Schema.Boolean,
   parent: Schema.NullOr(
     Schema.Struct({
       number: Schema.Finite,
       url: Schema.String,
+      state: Schema.Literals(["OPEN", "CLOSED"]),
+      isReadyLabeled: Schema.Boolean,
     }),
   ),
   blockedBy: Schema.Array(

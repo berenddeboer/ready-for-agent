@@ -42,6 +42,7 @@ const remoteIssue = (
   ),
   state: "OPEN",
   parent: null,
+  hierarchySupported: true,
   blockedBy: [],
   ...overrides,
 })
@@ -184,6 +185,12 @@ describe("IssueReconciler", () => {
         remoteIssue(3),
         remoteIssue(2, {
           state: "CLOSED",
+          parent: {
+            number: 1,
+            url: "https://github.com/acme/widgets/issues/1",
+            state: "OPEN",
+            isReadyLabeled: true,
+          },
           blockedBy: [
             {
               number: 1,
@@ -310,6 +317,8 @@ describe("IssueReconciler", () => {
           parent: {
             number: 9,
             url: "https://github.com/acme/widgets/issues/9",
+            state: "OPEN",
+            isReadyLabeled: true,
           },
         }),
       ],
@@ -326,6 +335,58 @@ describe("IssueReconciler", () => {
           githubIssueNumber: 9,
           githubIssueUrl: "https://github.com/acme/widgets/issues/9",
         })
+      }),
+      db.layer,
+      github,
+    )
+  })
+
+  it("stores only Relevant Issues", () => {
+    const db = makeDbFixture({
+      issues: [localIssue(3), localIssue(4), localIssue(5), localIssue(6)],
+    })
+    const parent = {
+      number: 1,
+      url: "https://github.com/acme/widgets/issues/1",
+      state: "OPEN" as const,
+      isReadyLabeled: true,
+    }
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1),
+        remoteIssue(2, { state: "CLOSED", parent }),
+        remoteIssue(3, { state: "CLOSED" }),
+        remoteIssue(4, {
+          parent: { ...parent, state: "CLOSED" },
+        }),
+        remoteIssue(5, {
+          parent: { ...parent, isReadyLabeled: false },
+        }),
+        remoteIssue(6, { hierarchySupported: false }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary).toEqual({
+          fetched: 6,
+          inserted: 2,
+          updated: 0,
+          deleted: 4,
+          unchanged: 0,
+        })
+        expect(
+          db.stored
+            .map((issue) => issue.githubIssueNumber)
+            .sort((left, right) => left - right),
+        ).toEqual([1, 2])
+        expect(
+          db.stored.find((issue) => issue.githubIssueNumber === 2)?.state,
+        ).toBe("CLOSED")
       }),
       db.layer,
       github,

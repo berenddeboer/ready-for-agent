@@ -10,6 +10,11 @@ export interface GitHubIssueReference {
   readonly url: string
 }
 
+export interface GitHubIssueParent extends GitHubIssueReference {
+  readonly state: GitHubIssueState
+  readonly isReadyLabeled: boolean
+}
+
 export interface ReadyLabeledIssue {
   readonly number: number
   readonly title: string
@@ -17,6 +22,7 @@ export interface ReadyLabeledIssue {
   readonly url: string
   readonly createdAt: Date
   readonly state: GitHubIssueState
-  readonly parent: GitHubIssueReference | null
+  readonly parent: GitHubIssueParent | null
+  readonly hierarchySupported: boolean
   readonly blockedBy: readonly GitHubIssueReference[]
 }

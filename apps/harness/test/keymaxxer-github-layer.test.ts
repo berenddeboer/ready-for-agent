@@ -121,9 +121,12 @@ describe("Keymaxxer-backed GitHub layer", () => {
               url: "https://github.com/acme/widgets/issues/7",
               createdAt: "2026-07-07T12:00:00.000Z",
               state: "OPEN",
+              hierarchySupported: true,
               parent: {
                 number: 1,
                 url: "https://github.com/acme/widgets/issues/1",
+                state: "OPEN",
+                isReadyLabeled: true,
               },
               blockedBy: [
                 {
@@ -166,6 +169,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(results[0]?.[0]?.parent).toEqual({
       number: 1,
       url: "https://github.com/acme/widgets/issues/1",
+      state: "OPEN",
+      isReadyLabeled: true,
     })
     expect(runs).toHaveLength(2)
     expect(tokenChecks).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
