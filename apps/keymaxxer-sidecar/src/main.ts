@@ -55,10 +55,12 @@ if (import.meta.main) {
   process.once("SIGINT", () => abortController.abort())
   process.once("SIGTERM", () => abortController.abort())
 
-  Effect.runPromise(program, { signal: abortController.signal }).catch(() => {
-    if (!abortController.signal.aborted) {
-      console.error("Keymaxxer Sidecar startup failed")
-      process.exitCode = 1
-    }
-  })
+  Effect.runPromise(program, { signal: abortController.signal }).catch(
+    (error) => {
+      if (!abortController.signal.aborted) {
+        console.error("Keymaxxer Sidecar startup failed", error)
+        process.exitCode = 1
+      }
+    },
+  )
 }
