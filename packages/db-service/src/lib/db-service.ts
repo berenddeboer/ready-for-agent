@@ -14,6 +14,7 @@ import {
 import type {
   AddRepositoryInput,
   ConfigRecord,
+  IssueDependency,
   IssueRecord,
   RepositoryRecord,
   StoreIssueInput,
@@ -98,6 +99,7 @@ const toIssueRecord = (row: {
   url: string
   state: "OPEN" | "CLOSED"
   githubCreatedAt: number
+  blockedBy: readonly IssueDependency[]
 }): IssueRecord => ({
   id: row.id,
   repositoryId: row.repositoryId,
@@ -107,6 +109,7 @@ const toIssueRecord = (row: {
   url: row.url,
   state: row.state,
   githubCreatedAt: new Date(row.githubCreatedAt),
+  blockedBy: row.blockedBy,
 })
 
 const toDatabaseError = (error: SqlError) =>
@@ -445,12 +448,33 @@ export const DbServiceLive = Layer.effect(
           })
         }
 
+        for (const dependency of input.blockedBy) {
+          if (
+            !Number.isSafeInteger(dependency.githubIssueNumber) ||
+            dependency.githubIssueNumber <= 0
+          ) {
+            return yield* new InvalidIssueInputError({
+              field: "blockedBy",
+              message: "blockedBy issue numbers must be positive integers",
+            })
+          }
+          if (!URL.canParse(dependency.githubIssueUrl)) {
+            return yield* new InvalidIssueInputError({
+              field: "blockedBy",
+              message: "blockedBy issue URLs must be valid URLs",
+            })
+          }
+        }
+
         yield* ensureRepositoryExists(input.repositoryId)
 
         const now = Date.now()
-        const result = yield* sql
-          .unsafe(
-            `INSERT INTO issue (
+        return yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const result = yield* sql
+                .unsafe(
+                  `INSERT INTO issue (
                id, repository_id, github_issue_number, title, body, url, state,
                github_created_at, created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -463,49 +487,92 @@ export const DbServiceLive = Layer.effect(
                updated_at = excluded.updated_at
              RETURNING id, repository_id, github_issue_number, title, body, url, state,
                github_created_at`,
-            [
-              `issue-${ulid()}`,
-              input.repositoryId,
-              input.githubIssueNumber,
-              input.title,
-              input.body,
-              input.url,
-              input.state,
-              input.githubCreatedAt.getTime(),
-              now,
-              now,
-            ],
+                  [
+                    `issue-${ulid()}`,
+                    input.repositoryId,
+                    input.githubIssueNumber,
+                    input.title,
+                    input.body,
+                    input.url,
+                    input.state,
+                    input.githubCreatedAt.getTime(),
+                    now,
+                    now,
+                  ],
+                )
+                .pipe(Effect.mapError(toDatabaseError))
+
+              const row = result[0] as
+                | {
+                    id: string
+                    repository_id: string
+                    github_issue_number: number
+                    title: string
+                    body: string
+                    url: string
+                    state: "OPEN" | "CLOSED"
+                    github_created_at: number
+                  }
+                | undefined
+              if (!row) {
+                return yield* new DatabaseError({
+                  message: "No issue returned from upsert",
+                })
+              }
+
+              yield* sql
+                .unsafe("DELETE FROM issue_dependency WHERE issue_id = ?", [
+                  row.id,
+                ])
+                .pipe(Effect.mapError(toDatabaseError))
+              const dependencies = [
+                ...new Map(
+                  input.blockedBy.map((dependency) => [
+                    dependency.githubIssueUrl,
+                    dependency,
+                  ]),
+                ).values(),
+              ].sort(
+                (left, right) =>
+                  left.githubIssueNumber - right.githubIssueNumber ||
+                  left.githubIssueUrl.localeCompare(right.githubIssueUrl),
+              )
+              for (const dependency of dependencies) {
+                yield* sql
+                  .unsafe(
+                    `INSERT INTO issue_dependency (
+                 id, issue_id, blocking_github_issue_number,
+                 blocking_github_issue_url, created_at
+               ) VALUES (?, ?, ?, ?, ?)`,
+                    [
+                      `issue-dependency-${ulid()}`,
+                      row.id,
+                      dependency.githubIssueNumber,
+                      dependency.githubIssueUrl,
+                      now,
+                    ],
+                  )
+                  .pipe(Effect.mapError(toDatabaseError))
+              }
+
+              return toIssueRecord({
+                id: row.id,
+                repositoryId: row.repository_id,
+                githubIssueNumber: row.github_issue_number,
+                title: row.title,
+                body: row.body,
+                url: row.url,
+                state: row.state,
+                githubCreatedAt: row.github_created_at,
+                blockedBy: dependencies,
+              })
+            }),
           )
-          .pipe(Effect.mapError(toDatabaseError))
-
-        const row = result[0] as
-          | {
-              id: string
-              repository_id: string
-              github_issue_number: number
-              title: string
-              body: string
-              url: string
-              state: "OPEN" | "CLOSED"
-              github_created_at: number
-            }
-          | undefined
-        if (!row) {
-          return yield* new DatabaseError({
-            message: "No issue returned from upsert",
-          })
-        }
-
-        return toIssueRecord({
-          id: row.id,
-          repositoryId: row.repository_id,
-          githubIssueNumber: row.github_issue_number,
-          title: row.title,
-          body: row.body,
-          url: row.url,
-          state: row.state,
-          githubCreatedAt: row.github_created_at,
-        })
+          .pipe(
+            Effect.mapError((error) =>
+              error instanceof DatabaseError ? error : toDatabaseError(error),
+            ),
+          )
       })
 
     const listIssues = (
@@ -525,6 +592,32 @@ export const DbServiceLive = Layer.effect(
             [repositoryId],
           )
           .pipe(Effect.mapError(toDatabaseError))
+
+        const dependencies = yield* sql
+          .unsafe(
+            `SELECT d.issue_id, d.blocking_github_issue_number,
+               d.blocking_github_issue_url
+             FROM issue_dependency d
+             INNER JOIN issue i ON i.id = d.issue_id
+             WHERE i.repository_id = ?
+             ORDER BY d.blocking_github_issue_number ASC,
+               d.blocking_github_issue_url ASC`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        const dependenciesByIssue = new Map<string, IssueDependency[]>()
+        for (const dependency of dependencies as ReadonlyArray<{
+          issue_id: string
+          blocking_github_issue_number: number
+          blocking_github_issue_url: string
+        }>) {
+          const records = dependenciesByIssue.get(dependency.issue_id) ?? []
+          records.push({
+            githubIssueNumber: dependency.blocking_github_issue_number,
+            githubIssueUrl: dependency.blocking_github_issue_url,
+          })
+          dependenciesByIssue.set(dependency.issue_id, records)
+        }
 
         return (
           issues as ReadonlyArray<{
@@ -547,6 +640,7 @@ export const DbServiceLive = Layer.effect(
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.github_created_at,
+            blockedBy: dependenciesByIssue.get(issue.id) ?? [],
           }),
         )
       })
@@ -557,6 +651,16 @@ export const DbServiceLive = Layer.effect(
     ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
       Effect.gen(function* () {
         yield* ensureRepositoryExists(repositoryId)
+        yield* sql
+          .unsafe(
+            `DELETE FROM issue_dependency
+             WHERE issue_id IN (
+               SELECT id FROM issue
+               WHERE repository_id = ? AND github_issue_number = ?
+             )`,
+            [repositoryId, githubIssueNumber],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
         yield* sql
           .unsafe(
             `DELETE FROM issue

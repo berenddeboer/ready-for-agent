@@ -45,6 +45,15 @@ export default {
                     ]
                 }
             ],
+            "issue": [
+                9,
+                {
+                    "number": [
+                        5,
+                        "Int!"
+                    ]
+                }
+            ],
             "__typename": [
                 3
             ]
@@ -91,6 +100,17 @@ export default {
             ],
             "state": [
                 10
+            ],
+            "blockedBy": [
+                6,
+                {
+                    "first": [
+                        5
+                    ],
+                    "after": [
+                        3
+                    ]
+                }
             ],
             "__typename": [
                 3

@@ -24,6 +24,7 @@ const issue = (
   url: `https://github.com/acme/widgets/issues/${number}`,
   createdAt: new Date(`2026-07-${String(number).padStart(2, "0")}T12:00:00Z`),
   state,
+  blockedBy: [],
 })
 
 describe("GitHubService live implementation", () => {
@@ -41,6 +42,15 @@ describe("GitHubService live implementation", () => {
                 url: "https://github.com/acme/widgets/issues/9",
                 createdAt: "2026-07-09T12:00:00Z",
                 state: "OPEN",
+                blockedBy: {
+                  nodes: [
+                    {
+                      number: 3,
+                      url: "https://github.com/acme/widgets/issues/3",
+                    },
+                  ],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
               },
             ],
             pageInfo: { endCursor: "page-2", hasNextPage: true },
@@ -59,6 +69,10 @@ describe("GitHubService live implementation", () => {
                 url: "https://github.com/acme/widgets/issues/2",
                 createdAt: "2026-07-02T12:00:00Z",
                 state: "CLOSED",
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
               },
             ],
             pageInfo: { endCursor: null, hasNextPage: false },
@@ -85,7 +99,14 @@ describe("GitHubService live implementation", () => {
       url: "https://github.com/acme/widgets/issues/2",
       createdAt: new Date("2026-07-02T12:00:00Z"),
       state: "CLOSED",
+      blockedBy: [],
     })
+    expect(result[1]?.blockedBy).toEqual([
+      {
+        number: 3,
+        url: "https://github.com/acme/widgets/issues/3",
+      },
+    ])
     expect(requests).toHaveLength(2)
 
     const firstRequest = requests[0] as {
@@ -110,10 +131,91 @@ describe("GitHubService live implementation", () => {
       url: true,
       createdAt: true,
       state: true,
+      blockedBy: {
+        __args: { first: 100 },
+        nodes: { number: true, url: true },
+        pageInfo: { endCursor: true, hasNextPage: true },
+      },
     })
 
     const secondRequest = requests[1] as typeof firstRequest
     expect(secondRequest.repository.issues.__args.after).toBe("page-2")
+  })
+
+  it("fetches additional dependency pages only when needed", async () => {
+    const requests: unknown[] = []
+    const responses = [
+      {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 7,
+                title: "Blocked issue",
+                body: "Body",
+                url: "https://github.com/acme/widgets/issues/7",
+                createdAt: "2026-07-07T12:00:00Z",
+                state: "OPEN",
+                blockedBy: {
+                  nodes: [
+                    {
+                      number: 5,
+                      url: "https://github.com/acme/widgets/issues/5",
+                    },
+                  ],
+                  pageInfo: {
+                    endCursor: "dependency-page-2",
+                    hasNextPage: true,
+                  },
+                },
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+      {
+        repository: {
+          issue: {
+            blockedBy: {
+              nodes: [
+                {
+                  number: 2,
+                  url: "https://github.com/acme/widgets/issues/2",
+                },
+              ],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+    ]
+    const client = {
+      query: async (request: unknown) => {
+        requests.push(request)
+        return responses.shift()
+      },
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository),
+    )
+
+    expect(result[0]?.blockedBy.map(({ number }) => number)).toEqual([2, 5])
+    expect(requests).toHaveLength(2)
+    const dependencyRequest = requests[1] as {
+      repository: {
+        issue: {
+          __args: { number: number }
+          blockedBy: { __args: { first: number; after: string } }
+        }
+      }
+    }
+    expect(dependencyRequest.repository.issue.__args).toEqual({ number: 7 })
+    expect(dependencyRequest.repository.issue.blockedBy.__args).toEqual({
+      first: 100,
+      after: "dependency-page-2",
+    })
   })
 
   it("fails when the Repository is missing or inaccessible", async () => {
@@ -163,6 +265,10 @@ describe("GitHubService live implementation", () => {
                 url: "not-a-url",
                 createdAt: "2026-07-01T12:00:00Z",
                 state: "OPEN",
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
               },
             ],
             pageInfo: { endCursor: null, hasNextPage: false },

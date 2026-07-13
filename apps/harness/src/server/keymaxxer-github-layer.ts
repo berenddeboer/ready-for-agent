@@ -17,6 +17,12 @@ const SerializedIssue = Schema.Struct({
   url: Schema.String,
   createdAt: Schema.String,
   state: Schema.Literals(["OPEN", "CLOSED"]),
+  blockedBy: Schema.Array(
+    Schema.Struct({
+      number: Schema.Finite,
+      url: Schema.String,
+    }),
+  ),
 })
 
 const SerializedIssues = Schema.Array(SerializedIssue)
@@ -57,6 +63,15 @@ const parseIssues = (
               throw new Error("Invalid Issue creation time")
             }
             new URL(issue.url)
+            for (const dependency of issue.blockedBy) {
+              if (
+                !Number.isSafeInteger(dependency.number) ||
+                dependency.number <= 0
+              ) {
+                throw new Error("Invalid dependency Issue number")
+              }
+              new URL(dependency.url)
+            }
             return { ...issue, createdAt }
           }),
         catch: () => requestError(repository),

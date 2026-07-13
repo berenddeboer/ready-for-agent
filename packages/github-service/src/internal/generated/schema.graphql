@@ -8,6 +8,7 @@ type Query {
 
 type Repository {
   issues(first: Int, after: String, labels: [String!]): IssueConnection!
+  issue(number: Int!): Issue
 }
 
 type IssueConnection {
@@ -27,6 +28,7 @@ type Issue {
   url: URI!
   createdAt: DateTime!
   state: IssueState!
+  blockedBy(first: Int, after: String): IssueConnection!
 }
 
 enum IssueState {

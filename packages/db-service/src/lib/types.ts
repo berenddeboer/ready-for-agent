@@ -33,6 +33,7 @@ export interface StoreIssueInput {
   readonly url: string
   readonly state: IssueState
   readonly githubCreatedAt: Date
+  readonly blockedBy: readonly IssueDependency[]
 }
 
 export type IssueState = "OPEN" | "CLOSED"
@@ -46,4 +47,10 @@ export interface IssueRecord {
   readonly url: string
   readonly state: IssueState
   readonly githubCreatedAt: Date
+  readonly blockedBy: readonly IssueDependency[]
+}
+
+export interface IssueDependency {
+  readonly githubIssueNumber: number
+  readonly githubIssueUrl: string
 }

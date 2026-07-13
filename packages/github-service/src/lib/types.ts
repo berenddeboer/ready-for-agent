@@ -5,6 +5,11 @@ export interface GitHubRepository {
 
 export type GitHubIssueState = "OPEN" | "CLOSED"
 
+export interface GitHubIssueReference {
+  readonly number: number
+  readonly url: string
+}
+
 export interface ReadyLabeledIssue {
   readonly number: number
   readonly title: string
@@ -12,4 +17,5 @@ export interface ReadyLabeledIssue {
   readonly url: string
   readonly createdAt: Date
   readonly state: GitHubIssueState
+  readonly blockedBy: readonly GitHubIssueReference[]
 }
