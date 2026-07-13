@@ -21,20 +21,11 @@
       "project": ["src/**/*.ts"]
     },
     "packages/graphql-client": {
-      "entry": ["src/index.ts"],
-      "project": [
-        "src/index.ts",
-        "src/generated/index.ts",
-        "src/generated/schema.ts",
-        "src/generated/types.ts"
-      ]
+      "entry": ["src/index.ts"]
     },
     "packages/github-service": {
       "entry": ["test/**/*.{test,spec}.ts"],
-      "project": ["src/**/*.ts", "test/**/*.ts"],
-      "ignoreIssues": {
-        "src/internal/generated/**": ["exports", "types"]
-      }
+      "project": ["src/**/*.ts", "test/**/*.ts"]
     },
     "packages/db": {
       "entry": ["src/bin/migrate.ts"],

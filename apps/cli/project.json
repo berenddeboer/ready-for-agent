@@ -1,0 +1,29 @@
+{
+  "name": "cli",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/cli/src",
+  "projectType": "application",
+  "tags": [],
+  "targets": {
+    "run": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source src/main.ts"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      }
+    }
+  }
+}

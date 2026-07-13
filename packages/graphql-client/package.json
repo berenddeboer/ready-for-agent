@@ -19,9 +19,6 @@
     "generate": "genql --schema ../graphql-schema/schema.graphql --output ./src/generated",
     "typecheck": "tsc --noEmit -p tsconfig.lib.json"
   },
-  "nx": {
-    "name": "graphql-client"
-  },
   "devDependencies": {
     "@genql/cli": "^6.3.3"
   }

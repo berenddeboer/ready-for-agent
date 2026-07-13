@@ -15,8 +15,20 @@
       "dependsOn": [
         "db:migrate",
         {
+          "projects": ["graphql-client", "github-service"],
+          "target": "generate"
+        },
+        {
           "projects": ["keymaxxer-sidecar"],
           "target": "serve"
+        }
+      ]
+    },
+    "serve": {
+      "dependsOn": [
+        {
+          "projects": ["graphql-client", "github-service"],
+          "target": "generate"
         }
       ]
     },

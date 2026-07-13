@@ -7,17 +7,6 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
-  "nx": {
-    "name": "cli",
-    "targets": {
-      "test": {
-        "command": "bun test",
-        "options": {
-          "cwd": "{projectRoot}"
-        }
-      }
-    }
-  },
   "dependencies": {
     "@effect/platform-bun": "^4.0.0-beta.97",
     "@ready-for-agent/graphql-client": "workspace:*",
