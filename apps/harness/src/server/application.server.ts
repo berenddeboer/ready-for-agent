@@ -1,8 +1,8 @@
 import "@tanstack/react-start/server-only"
+import { fileURLToPath } from "node:url"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbServiceLive } from "@ready-for-agent/db-service"
-import { GitHubServiceLive } from "@ready-for-agent/github-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
@@ -11,6 +11,9 @@ import {
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
 import type { ApplicationRequestContext } from "../server-context.js"
+import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
+
+const workspaceRoot = fileURLToPath(new URL("../../../..", import.meta.url))
 
 const keymaxxerLayerFromEnvironment = (
   environment: Partial<Record<string, string | undefined>>,
@@ -30,14 +33,15 @@ export const createApplication = async (
   environment: Partial<Record<string, string | undefined>> = process.env,
 ): Promise<Application> => {
   const databaseLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
+  const keymaxxerLayer = keymaxxerLayerFromEnvironment(environment)
+  const githubLayer = keymaxxerGitHubLayer({ workspaceRoot }).pipe(
+    Layer.provide(keymaxxerLayer),
+  )
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
-    Layer.provideMerge(GitHubServiceLive),
+    Layer.provideMerge(githubLayer),
   )
-  const appLayer = Layer.merge(
-    reconcilerLayer,
-    keymaxxerLayerFromEnvironment(environment),
-  )
+  const appLayer = Layer.merge(reconcilerLayer, keymaxxerLayer)
   const runtime = ManagedRuntime.make(appLayer)
 
   try {
