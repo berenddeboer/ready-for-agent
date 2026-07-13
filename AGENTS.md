@@ -12,6 +12,18 @@ Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wont
 
 Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`.
 
+<!-- effect-solutions:start -->
+
+## Effect
+
+- Before writing Effect code, run `bunx effect-solutions list` and then
+  `bunx effect-solutions <topic>...` for the relevant pattern.
+- Real Effect implementations are available under
+  `~/.local/share/effect-solutions/effect`; use them instead of guessing APIs.
+- Common topics: `services-and-layers`, `data-modeling`, `error-handling`,
+  `config`, `testing`, `cli`.
+
+<!-- effect-solutions:end -->
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->
