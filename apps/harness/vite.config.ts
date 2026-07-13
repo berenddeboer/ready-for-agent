@@ -1,29 +1,23 @@
-import { tanstackRouter } from "@tanstack/router-plugin/vite"
+import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
-const graphqlProxy = {
-  "/graphql": {
-    target: "http://127.0.0.1:3001",
-    changeOrigin: true,
-  },
-}
-
 export default defineConfig({
-  plugins: [
-    tanstackRouter({
-      target: "react",
-      autoCodeSplitting: true,
-    }),
-    react(),
-  ],
+  plugins: [tanstackStart({ spa: { enabled: true } }), react()],
+  resolve: {
+    conditions: ["@ready-for-agent/source"],
+  },
+  ssr: {
+    noExternal: [/^@ready-for-agent\//],
+  },
   server: {
     host: "127.0.0.1",
-    port: 4200,
-    proxy: graphqlProxy,
+    port: Number(process.env.PORT ?? 4200),
+    strictPort: true,
   },
   preview: {
-    port: 4200,
-    proxy: graphqlProxy,
+    host: "127.0.0.1",
+    port: Number(process.env.PORT ?? 4200),
+    strictPort: true,
   },
 })

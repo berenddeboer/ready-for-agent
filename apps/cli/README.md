@@ -10,7 +10,8 @@ Start the harness from the repo root:
 bun nx run harness:dev
 ```
 
-This starts both Vite and the GraphQL API. By default, API development data is
+This starts one TanStack Start application server for both the SPA and GraphQL,
+plus the development-only Keymaxxer sidecar. By default, application data is
 stored in `tmp/ready-for-agent.db`. Set `SQLITE_DATABASE_PATH` to use another
 SQLite/Turso database.
 
@@ -25,7 +26,7 @@ The CLI inspects the local git repository, calls the harness GraphQL endpoint at
 Override the endpoint when the harness is available elsewhere:
 
 ```bash
-READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:3001/graphql \
+READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4200/graphql \
   bun run harness-cli add /path/to/local/repo
 ```
 

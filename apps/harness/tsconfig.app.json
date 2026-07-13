@@ -10,9 +10,23 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "noEmit": true,
-    "rootDir": "src",
+    "rootDir": ".",
     "tsBuildInfoFile": "./out-tsc/app/tsconfig.app.tsbuildinfo",
-    "types": ["vite/client"]
+    "types": ["bun", "vite/client"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "include": ["server.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "references": [
+    {
+      "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/graphql-api/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/db-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/db/tsconfig.lib.json"
+    }
+  ]
 }

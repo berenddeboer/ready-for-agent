@@ -1,0 +1,26 @@
+{
+  "name": "keymaxxer-sidecar",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/keymaxxer-sidecar/src",
+  "projectType": "application",
+  "targets": {
+    "serve": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source src/main.ts"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": ["^build"]
+    }
+  }
+}

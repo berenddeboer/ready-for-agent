@@ -1,0 +1,16 @@
+{
+  "name": "@ready-for-agent/keymaxxer-sidecar",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+  },
+  "dependencies": {
+    "@ready-for-agent/keymaxxer-service": "workspace:*",
+    "effect": "^4.0.0-beta.97"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0"
+  }
+}

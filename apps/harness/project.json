@@ -2,19 +2,42 @@
   "name": "harness",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "targets": {
+    "build": {
+      "dependsOn": ["^build"]
+    },
     "dev": {
       "continuous": true,
       "executor": "nx:run-commands",
       "options": {
-        "command": "vite",
+        "command": "mkdir -p ../../tmp && export KEYMAXXER_SIDECAR_URL=${KEYMAXXER_SIDECAR_URL:-http://127.0.0.1:${KEYMAXXER_SIDECAR_PORT:-5032}} && export SQLITE_DATABASE_PATH=${SQLITE_DATABASE_PATH:-../../tmp/ready-for-agent.db} && bun --conditions @ready-for-agent/source src/server/preflight.ts && vite",
         "cwd": "apps/harness"
       },
       "dependsOn": [
+        "db:migrate",
         {
-          "projects": ["api"],
+          "projects": ["keymaxxer-sidecar"],
           "target": "serve"
         }
       ]
+    },
+    "start": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "mkdir -p ../../tmp && SQLITE_DATABASE_PATH=${SQLITE_DATABASE_PATH:-../../tmp/ready-for-agent.db} bun --conditions @ready-for-agent/source server.ts",
+        "cwd": "apps/harness"
+      },
+      "dependsOn": ["build", "db:migrate"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": ["^build"]
     }
   }
 }

@@ -17,15 +17,6 @@
   "references": [
     {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/graphql-schema/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/db-service/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/db/tsconfig.lib.json"
     }
   ]
 }
