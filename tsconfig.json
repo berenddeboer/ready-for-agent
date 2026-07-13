@@ -41,6 +41,9 @@
     },
     {
       "path": "./packages/opencode"
+    },
+    {
+      "path": "./packages/github-service"
     }
   ]
 }

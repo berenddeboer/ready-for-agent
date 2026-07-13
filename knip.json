@@ -20,6 +20,13 @@
         "src/generated/types.ts"
       ]
     },
+    "packages/github-service": {
+      "entry": ["test/**/*.{test,spec}.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"],
+      "ignoreIssues": {
+        "src/internal/generated/**": ["exports", "types"]
+      }
+    },
     "packages/db": {
       "entry": ["src/bin/migrate.ts"],
       "project": ["src/**/*.{ts,tsx}"]

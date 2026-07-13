@@ -115,6 +115,18 @@
         "@types/bun": "^1.3.0",
       },
     },
+    "packages/github-service": {
+      "name": "@ready-for-agent/github-service",
+      "version": "0.0.1",
+      "dependencies": {
+        "effect": "^3.21.4",
+        "tslib": "^2.3.0",
+      },
+      "devDependencies": {
+        "@genql/cli": "^6.3.3",
+        "@types/bun": "^1.3.0",
+      },
+    },
     "packages/graphql-client": {
       "name": "@ready-for-agent/graphql-client",
       "version": "0.0.1",
@@ -735,6 +747,8 @@
     "@ready-for-agent/db-schema": ["@ready-for-agent/db-schema@workspace:packages/db-schema"],
 
     "@ready-for-agent/db-service": ["@ready-for-agent/db-service@workspace:packages/db-service"],
+
+    "@ready-for-agent/github-service": ["@ready-for-agent/github-service@workspace:packages/github-service"],
 
     "@ready-for-agent/graphql-client": ["@ready-for-agent/graphql-client@workspace:packages/graphql-client"],
 
