@@ -1,6 +1,7 @@
 import { Effect, Layer, Schema } from "effect"
 import {
   AddSecretResponse,
+  FindSecretResponse,
   HasSecretResponse,
   HealthResponse,
   InitializeResponse,
@@ -168,6 +169,14 @@ const makeSidecarService = (
             { name },
           ).pipe(Effect.map((result) => result.hasSecret))
         : Effect.fail(safeError("hasSecret", "Invalid secret name")),
+    findSecret: (input) =>
+      request(
+        "findSecret",
+        "/find-secret",
+        FindSecretResponse,
+        ["name"],
+        input,
+      ).pipe(Effect.map((result) => result.name)),
     addSecret: (input) =>
       validateSecretName(input.name)
         ? request(

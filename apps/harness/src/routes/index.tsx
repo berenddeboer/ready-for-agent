@@ -140,6 +140,24 @@ function RepositoryCard({ repository }: { repository: Repository }) {
     }
   }
 
+  const refreshIssues = useMutation({
+    mutationFn: () =>
+      graphql.mutation({
+        refreshRepository: {
+          __args: { repositoryId: repository.id },
+          fetched: true,
+        },
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: repositoriesQuery.queryKey }),
+        queryClient.invalidateQueries({
+          queryKey: issuesQuery(repository.id).queryKey,
+        }),
+      ])
+    },
+  })
+
   return (
     <article className="relative min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
       <button
@@ -167,24 +185,21 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           <path d="M14 11v5" />
         </svg>
       </button>
-      <div className="flex items-center justify-between gap-4 pr-10">
-        <span className="truncate text-[0.85rem] font-[650] text-slate-500">
-          {repository.githubOwner}
-        </span>
+      <div className="mb-[1.4rem] flex items-center justify-between gap-4 pr-10">
+        <h2 className="m-0 min-w-0 truncate text-2xl tracking-[-0.025em]">
+          <a
+            className="text-slate-900 hover:underline"
+            href={`https://github.com/${repository.githubOwner}/${repository.githubRepo}`}
+          >
+            {repository.githubOwner}/{repository.githubRepo}
+          </a>
+        </h2>
         <span
           className={`shrink-0 rounded-full px-[0.55rem] py-[0.2rem] text-[0.7rem] font-[750] tracking-[0.04em] uppercase ${repository.paused ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}
         >
           {repository.paused ? "Paused" : "Active"}
         </span>
       </div>
-      <h2 className="my-[0.2rem] mb-[1.4rem] wrap-anywhere text-2xl tracking-[-0.025em]">
-        <a
-          className="text-slate-900 hover:underline"
-          href={`https://github.com/${repository.githubOwner}/${repository.githubRepo}`}
-        >
-          {repository.githubRepo}
-        </a>
-      </h2>
       <dl className="m-0 grid gap-[0.8rem]">
         <div className="min-w-0">
           <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
@@ -207,9 +222,40 @@ function RepositoryCard({ repository }: { repository: Repository }) {
         </div>
       </dl>
       <div className="mt-5 border-t border-slate-100 pt-4">
-        <h3 className="m-0 mb-2 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-          Ready-labeled issues
-        </h3>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <h3 className="m-0 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+            Issues
+          </h3>
+          <button
+            type="button"
+            className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-wait disabled:opacity-60"
+            disabled={refreshIssues.isPending}
+            onClick={() => refreshIssues.mutate()}
+            aria-label={
+              refreshIssues.isPending ? "Refreshing issues" : "Refresh issues"
+            }
+            title="Refresh issues"
+          >
+            <svg
+              aria-hidden="true"
+              className={`size-4 ${refreshIssues.isPending ? "animate-spin motion-reduce:animate-none" : ""}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
+              <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+            </svg>
+          </button>
+        </div>
+        {refreshIssues.isError && (
+          <p className="mb-2 text-sm text-red-700" role="alert">
+            Failed to refresh issues.
+          </p>
+        )}
         {repository.issuesReconciledAt === null ? (
           <p className="m-0 text-sm text-slate-500">Not refreshed yet.</p>
         ) : (
