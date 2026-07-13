@@ -212,10 +212,10 @@ function SettingsButton() {
               </p>
             ) : (
               <>
-                <label className="grid gap-1.5 text-sm font-semibold">
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Default model
                   <select
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="defaultModel"
                     value={defaultModel}
                     onChange={(event) => setDefaultModel(event.target.value)}
@@ -235,10 +235,10 @@ function SettingsButton() {
                   </span>
                 </label>
 
-                <label className="grid gap-1.5 text-sm font-semibold">
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Thinking level
                   <select
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="defaultVariant"
                     value={defaultVariant}
                     onChange={(event) => setDefaultVariant(event.target.value)}
