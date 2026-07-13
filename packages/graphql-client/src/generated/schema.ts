@@ -5,15 +5,22 @@
 
 export type Scalars = {
     Boolean: boolean,
-    ID: string,
     String: string,
+    ID: string,
     Int: number,
 }
 
 export interface Query {
     health: Scalars['Boolean']
     repositories: Repository[]
+    config: Config
     __typename: 'Query'
+}
+
+export interface Config {
+    defaultModel: Scalars['String']
+    defaultVariant: Scalars['String']
+    __typename: 'Config'
 }
 
 export interface Repository {
@@ -38,12 +45,21 @@ export interface RepositoryRefresh {
 export interface Mutation {
     addRepository: Repository
     refreshRepository: RepositoryRefresh
+    updateConfig: Config
     __typename: 'Mutation'
 }
 
 export interface QueryGenqlSelection{
     health?: boolean | number
     repositories?: RepositoryGenqlSelection
+    config?: ConfigGenqlSelection
+    __typename?: boolean | number
+    __scalar?: boolean | number
+}
+
+export interface ConfigGenqlSelection{
+    defaultModel?: boolean | number
+    defaultVariant?: boolean | number
     __typename?: boolean | number
     __scalar?: boolean | number
 }
@@ -71,9 +87,12 @@ export interface RepositoryRefreshGenqlSelection{
 
 export interface AddRepositoryInput {githubOwner: Scalars['String'],githubRepo: Scalars['String'],localPath: Scalars['String'],isBare: Scalars['Boolean']}
 
+export interface UpdateConfigInput {defaultModel: Scalars['String'],defaultVariant: Scalars['String']}
+
 export interface MutationGenqlSelection{
     addRepository?: (RepositoryGenqlSelection & { __args: {input: AddRepositoryInput} })
     refreshRepository?: (RepositoryRefreshGenqlSelection & { __args: {repositoryId: Scalars['ID']} })
+    updateConfig?: (ConfigGenqlSelection & { __args: {input: UpdateConfigInput} })
     __typename?: boolean | number
     __scalar?: boolean | number
 }
@@ -83,6 +102,14 @@ export interface MutationGenqlSelection{
     export const isQuery = (obj?: { __typename?: any } | null): obj is Query => {
       if (!obj?.__typename) throw new Error('__typename is missing in "isQuery"')
       return Query_possibleTypes.includes(obj.__typename)
+    }
+    
+
+
+    const Config_possibleTypes: string[] = ['Config']
+    export const isConfig = (obj?: { __typename?: any } | null): obj is Config => {
+      if (!obj?.__typename) throw new Error('__typename is missing in "isConfig"')
+      return Config_possibleTypes.includes(obj.__typename)
     }
     
 

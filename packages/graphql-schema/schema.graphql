@@ -1,6 +1,12 @@
 type Query {
   health: Boolean!
   repositories: [Repository!]!
+  config: Config!
+}
+
+type Config {
+  defaultModel: String!
+  defaultVariant: String!
 }
 
 type Repository {
@@ -27,7 +33,13 @@ input AddRepositoryInput {
   isBare: Boolean!
 }
 
+input UpdateConfigInput {
+  defaultModel: String!
+  defaultVariant: String!
+}
+
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
   refreshRepository(repositoryId: ID!): RepositoryRefresh!
+  updateConfig(input: UpdateConfigInput!): Config!
 }

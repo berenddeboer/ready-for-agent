@@ -4,6 +4,7 @@ import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DbService,
   DbServiceLive,
+  InvalidConfigInputError,
   InvalidIssueInputError,
   InvalidRepositoryInputError,
   LocalPathInUseError,
@@ -33,6 +34,47 @@ describe("DbService", () => {
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
   }
+
+  describe("config", () => {
+    it("returns defaults and persists updates", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          expect(yield* db.getConfig).toEqual({
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultVariant: "low",
+          })
+
+          expect(
+            yield* db.updateConfig({
+              defaultModel: "  anthropic/claude-sonnet-4-5  ",
+              defaultVariant: "  high  ",
+            }),
+          ).toEqual({
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+          })
+          expect(yield* db.getConfig).toEqual({
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+          })
+        }),
+      ))
+
+    it("rejects empty values", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const error = yield* Effect.flip(
+            db.updateConfig({
+              defaultModel: " ",
+              defaultVariant: "high",
+            }),
+          )
+          expect(error).toBeInstanceOf(InvalidConfigInputError)
+        }),
+      ))
+  })
 
   describe("addRepository", () => {
     it("inserts a repository paused with a repo- prefixed id", () =>

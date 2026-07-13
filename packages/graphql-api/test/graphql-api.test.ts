@@ -17,11 +17,18 @@ const repository = {
   issuesReconciledAt: null,
 }
 
+const config = {
+  defaultModel: "opencode/deepseek-v4-flash-free",
+  defaultVariant: "low",
+}
+
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   reconcilerOverrides: Partial<IssueReconcilerShape> = {},
 ) => {
   const db: DbServiceShape = {
+    getConfig: Effect.succeed(config),
+    updateConfig: (input) => Effect.succeed(input),
     addRepository: () => Effect.succeed(repository),
     listRepositories: Effect.succeed([repository]),
     storeIssue: () => Effect.die("not used"),
@@ -125,6 +132,37 @@ describe("GraphQL API", () => {
             paused: repository.paused,
           },
         ],
+      },
+    })
+  })
+
+  test("reads and updates config", async () => {
+    const queryResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query { config { defaultModel defaultVariant } }`,
+      }),
+    )
+    expect(await queryResponse.json()).toEqual({ data: { config } })
+
+    const mutationResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel defaultVariant }
+        }`,
+        variables: {
+          input: {
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+          },
+        },
+      }),
+    )
+    expect(await mutationResponse.json()).toEqual({
+      data: {
+        updateConfig: {
+          defaultModel: "anthropic/claude-sonnet-4-5",
+          defaultVariant: "high",
+        },
       },
     })
   })

@@ -4,6 +4,7 @@ import { createSchema, createYoga } from "graphql-yoga"
 import {
   DatabaseError,
   DbService,
+  InvalidConfigInputError,
   InvalidRepositoryInputError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
@@ -32,6 +33,13 @@ type RefreshRepositoryArgs = {
   repositoryId: string
 }
 
+type UpdateConfigArgs = {
+  input: {
+    defaultModel: string
+    defaultVariant: string
+  }
+}
+
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
   DbService | IssueReconciler,
   unknown
@@ -45,6 +53,11 @@ const toGraphQLError = (error: unknown): GraphQLError => {
         extensions: { code: "REPOSITORY_ALREADY_EXISTS" },
       },
     )
+  }
+  if (error instanceof InvalidConfigInputError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "INVALID_CONFIG_INPUT", field: error.field },
+    })
   }
   if (error instanceof LocalPathInUseError) {
     return new GraphQLError(`Local path already in use: ${error.localPath}`, {
@@ -142,8 +155,36 @@ export const createGraphqlApi = (runtime: GraphqlRuntime) => {
             }
             return result.success
           },
+          config: async () => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.getConfig
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
         },
         Mutation: {
+          updateConfig: async (_parent: unknown, args: UpdateConfigArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.updateConfig(args.input)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
           addRepository: async (_parent: unknown, args: AddRepositoryArgs) => {
             const result = await runtime.runPromise(
               Effect.result(
