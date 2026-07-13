@@ -73,8 +73,11 @@ function RepositoryCards() {
       <div className="rounded-[0.9rem] border border-dashed border-slate-300 px-6 py-12 text-center">
         <h2 className="m-0">No repositories configured</h2>
         <p className="mt-1.5 text-slate-500">
-          Add a repository with the CLI to see it here.
+          Add a local Git repository with the CLI:
         </p>
+        <code className="mt-3 inline-block rounded-md bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800">
+          bun run harness-cli add /path/to/local/repo
+        </code>
       </div>
     )
   }
