@@ -20,6 +20,7 @@ interface GitHubApiIssue {
   readonly url: unknown
   readonly createdAt: unknown
   readonly state: unknown
+  readonly parent: GitHubApiIssueReference | null
   readonly blockedBy: GitHubApiIssueConnection
 }
 
@@ -94,6 +95,7 @@ const toReadyLabeledIssue = (issue: GitHubApiIssue): ReadyLabeledIssue => {
     url: issue.url,
     createdAt,
     state: issue.state,
+    parent: issue.parent === null ? null : toIssueReference(issue.parent),
     blockedBy: mapBlockedByPage(issue.blockedBy),
   }
 }
@@ -137,6 +139,7 @@ export const makeGitHubService = (
                     url: true,
                     createdAt: true,
                     state: true,
+                    parent: { number: true, url: true },
                     blockedBy: {
                       __args: { first: PAGE_SIZE },
                       nodes: { number: true, url: true },

@@ -61,6 +61,8 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
   local.url === remote.url &&
   local.state === remote.state &&
   local.githubCreatedAt.getTime() === remote.createdAt.getTime() &&
+  local.parent?.githubIssueNumber === remote.parent?.number &&
+  local.parent?.githubIssueUrl === remote.parent?.url &&
   local.blockedBy.length === remote.blockedBy.length &&
   local.blockedBy.every((dependency) =>
     remote.blockedBy.some(
@@ -140,6 +142,13 @@ export const IssueReconcilerLive = Layer.effect(
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.createdAt,
+            parent:
+              issue.parent === null
+                ? null
+                : {
+                    githubIssueNumber: issue.parent.number,
+                    githubIssueUrl: issue.parent.url,
+                  },
             blockedBy: issue.blockedBy.map((dependency) => ({
               githubIssueNumber: dependency.number,
               githubIssueUrl: dependency.url,

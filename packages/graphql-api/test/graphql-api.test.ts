@@ -32,6 +32,7 @@ const issue = {
   url: "https://github.com/acme/widgets/issues/42",
   state: "OPEN" as const,
   githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
+  parent: null,
   blockedBy: [],
 }
 
