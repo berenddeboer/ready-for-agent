@@ -42,6 +42,14 @@ const configQuery = {
   },
 }
 
+const modelsQuery = {
+  queryKey: ["models"],
+  queryFn: async () => {
+    const result = await graphql.query({ models: true })
+    return result.models
+  },
+}
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
@@ -103,6 +111,7 @@ function SettingsButton() {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const queryClient = useQueryClient()
   const config = useQuery(configQuery)
+  const models = useQuery(modelsQuery)
   const [defaultModel, setDefaultModel] = useState("")
   const [defaultVariant, setDefaultVariant] = useState("low")
   useEffect(() => {
@@ -130,6 +139,9 @@ function SettingsButton() {
     if (config.isError) {
       void config.refetch()
     }
+    if (models.isError) {
+      void models.refetch()
+    }
     if (config.data) {
       setDefaultModel(config.data.defaultModel)
       setDefaultVariant(config.data.defaultVariant)
@@ -144,6 +156,8 @@ function SettingsButton() {
   }
 
   const standardVariants = ["low", "medium", "high", "max"]
+  const hasUnavailableModel =
+    defaultModel.length > 0 && !models.data?.includes(defaultModel)
   const hasCustomVariant = !standardVariants.includes(defaultVariant)
 
   return (
@@ -190,9 +204,9 @@ function SettingsButton() {
           </div>
 
           <div className="grid gap-5 px-6 py-5">
-            {config.isPending ? (
+            {config.isPending || models.isPending ? (
               <p className="text-sm text-slate-500">Loading settings...</p>
-            ) : config.isError ? (
+            ) : config.isError || models.isError ? (
               <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
                 Settings could not be loaded. Close this dialog and try again.
               </p>
@@ -200,16 +214,24 @@ function SettingsButton() {
               <>
                 <label className="grid gap-1.5 text-sm font-semibold">
                   Default model
-                  <input
-                    className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  <select
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="defaultModel"
                     value={defaultModel}
                     onChange={(event) => setDefaultModel(event.target.value)}
-                    placeholder="provider/model-name"
                     required
-                  />
+                  >
+                    {hasUnavailableModel && (
+                      <option value={defaultModel}>{defaultModel}</option>
+                    )}
+                    {models.data.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
                   <span className="text-xs font-normal text-slate-500">
-                    Use the OpenCode provider/model identifier.
+                    Models available from OpenCode.
                   </span>
                 </label>
 
@@ -259,7 +281,11 @@ function SettingsButton() {
               type="submit"
               className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={
-                config.isPending || config.isError || updateConfig.isPending
+                config.isPending ||
+                config.isError ||
+                models.isPending ||
+                models.isError ||
+                updateConfig.isPending
               }
             >
               {updateConfig.isPending ? "Saving..." : "Save settings"}

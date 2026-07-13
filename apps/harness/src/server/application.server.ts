@@ -1,5 +1,6 @@
 import "@tanstack/react-start/server-only"
 import { fileURLToPath } from "node:url"
+import { BunServices } from "@effect/platform-bun"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbServiceLive } from "@ready-for-agent/db-service"
@@ -10,6 +11,7 @@ import {
   mcpKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
+import { OpencodeLive } from "@ready-for-agent/opencode"
 import type { ApplicationRequestContext } from "../server-context.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 
@@ -41,7 +43,12 @@ export const createApplication = async (
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
   )
-  const appLayer = Layer.merge(reconcilerLayer, keymaxxerLayer)
+  const opencodeLayer = OpencodeLive.pipe(Layer.provide(BunServices.layer))
+  const appLayer = Layer.mergeAll(
+    reconcilerLayer,
+    keymaxxerLayer,
+    opencodeLayer,
+  )
   const runtime = ManagedRuntime.make(appLayer)
 
   try {
@@ -58,7 +65,7 @@ export const createApplication = async (
 
   return {
     context: {
-      graphqlApi: createGraphqlApi(runtime),
+      graphqlApi: createGraphqlApi(runtime, { opencodeCwd: workspaceRoot }),
     },
     dispose: runtime.dispose,
   }

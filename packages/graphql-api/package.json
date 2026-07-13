@@ -20,6 +20,7 @@
     "@ready-for-agent/github-service": "workspace:*",
     "@ready-for-agent/graphql-schema": "workspace:*",
     "@ready-for-agent/issue-reconciler": "workspace:*",
+    "@ready-for-agent/opencode": "workspace:*",
     "effect": "^4.0.0-beta.97",
     "graphql": "^16.11.0",
     "graphql-yoga": "^5.13.0",

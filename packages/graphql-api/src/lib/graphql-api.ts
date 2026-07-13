@@ -19,6 +19,7 @@ import {
   IssueReconciler,
   ReconciliationMutationError,
 } from "@ready-for-agent/issue-reconciler"
+import { Opencode } from "@ready-for-agent/opencode"
 
 type AddRepositoryArgs = {
   input: {
@@ -45,7 +46,7 @@ type IssuesArgs = {
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
-  DbService | IssueReconciler,
+  DbService | IssueReconciler | Opencode,
   unknown
 >
 
@@ -138,7 +139,11 @@ const toNativeResponse = (response: unknown): Response => {
   })
 }
 
-export const createGraphqlApi = (runtime: GraphqlRuntime) => {
+export const createGraphqlApi = (
+  runtime: GraphqlRuntime,
+  options: { readonly opencodeCwd?: string } = {},
+) => {
+  const opencodeCwd = options.opencodeCwd ?? process.cwd()
   const yoga = createYoga({
     schema: createSchema({
       typeDefs,
@@ -165,6 +170,23 @@ export const createGraphqlApi = (runtime: GraphqlRuntime) => {
                 Effect.gen(function* () {
                   const db = yield* DbService
                   return yield* db.getConfig
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          models: async () => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const opencode = yield* Opencode
+                  return yield* opencode.listModels({
+                    cwd: opencodeCwd,
+                    timeout: "30 seconds",
+                  })
                 }),
               ),
             )

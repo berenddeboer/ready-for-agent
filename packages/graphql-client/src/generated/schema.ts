@@ -5,8 +5,8 @@
 
 export type Scalars = {
     Boolean: boolean,
-    ID: string,
     String: string,
+    ID: string,
     Int: number,
 }
 
@@ -14,6 +14,7 @@ export interface Query {
     health: Scalars['Boolean']
     repositories: Repository[]
     config: Config
+    models: Scalars['String'][]
     issues: Issue[]
     __typename: 'Query'
 }
@@ -69,6 +70,7 @@ export interface QueryGenqlSelection{
     health?: boolean | number
     repositories?: RepositoryGenqlSelection
     config?: ConfigGenqlSelection
+    models?: boolean | number
     issues?: (IssueGenqlSelection & { __args: {repositoryId: Scalars['ID']} })
     __typename?: boolean | number
     __scalar?: boolean | number
