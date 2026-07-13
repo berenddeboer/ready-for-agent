@@ -7,6 +7,7 @@ export type Scalars = {
     Boolean: boolean,
     ID: string,
     String: string,
+    Int: number,
 }
 
 export interface Query {
@@ -25,8 +26,18 @@ export interface Repository {
     __typename: 'Repository'
 }
 
+export interface RepositoryRefresh {
+    fetched: Scalars['Int']
+    inserted: Scalars['Int']
+    updated: Scalars['Int']
+    deleted: Scalars['Int']
+    unchanged: Scalars['Int']
+    __typename: 'RepositoryRefresh'
+}
+
 export interface Mutation {
     addRepository: Repository
+    refreshRepository: RepositoryRefresh
     __typename: 'Mutation'
 }
 
@@ -48,10 +59,21 @@ export interface RepositoryGenqlSelection{
     __scalar?: boolean | number
 }
 
+export interface RepositoryRefreshGenqlSelection{
+    fetched?: boolean | number
+    inserted?: boolean | number
+    updated?: boolean | number
+    deleted?: boolean | number
+    unchanged?: boolean | number
+    __typename?: boolean | number
+    __scalar?: boolean | number
+}
+
 export interface AddRepositoryInput {githubOwner: Scalars['String'],githubRepo: Scalars['String'],localPath: Scalars['String'],isBare: Scalars['Boolean']}
 
 export interface MutationGenqlSelection{
     addRepository?: (RepositoryGenqlSelection & { __args: {input: AddRepositoryInput} })
+    refreshRepository?: (RepositoryRefreshGenqlSelection & { __args: {repositoryId: Scalars['ID']} })
     __typename?: boolean | number
     __scalar?: boolean | number
 }
@@ -69,6 +91,14 @@ export interface MutationGenqlSelection{
     export const isRepository = (obj?: { __typename?: any } | null): obj is Repository => {
       if (!obj?.__typename) throw new Error('__typename is missing in "isRepository"')
       return Repository_possibleTypes.includes(obj.__typename)
+    }
+    
+
+
+    const RepositoryRefresh_possibleTypes: string[] = ['RepositoryRefresh']
+    export const isRepositoryRefresh = (obj?: { __typename?: any } | null): obj is RepositoryRefresh => {
+      if (!obj?.__typename) throw new Error('__typename is missing in "isRepositoryRefresh"')
+      return RepositoryRefresh_possibleTypes.includes(obj.__typename)
     }
     
 

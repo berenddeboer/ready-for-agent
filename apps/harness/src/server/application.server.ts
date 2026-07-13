@@ -2,7 +2,9 @@ import "@tanstack/react-start/server-only"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbServiceLive } from "@ready-for-agent/db-service"
+import { GitHubServiceLive } from "@ready-for-agent/github-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
+import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
   KeymaxxerService,
   mcpKeymaxxerLayer,
@@ -27,8 +29,13 @@ export interface Application {
 export const createApplication = async (
   environment: Partial<Record<string, string | undefined>> = process.env,
 ): Promise<Application> => {
+  const databaseLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
+  const reconcilerLayer = IssueReconcilerLive.pipe(
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(GitHubServiceLive),
+  )
   const appLayer = Layer.merge(
-    DbServiceLive.pipe(Layer.provideMerge(DatabaseLive)),
+    reconcilerLayer,
     keymaxxerLayerFromEnvironment(environment),
   )
   const runtime = ManagedRuntime.make(appLayer)

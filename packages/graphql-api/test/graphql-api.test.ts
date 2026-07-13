@@ -1,5 +1,9 @@
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
+import {
+  IssueReconciler,
+  type IssueReconcilerShape,
+} from "@ready-for-agent/issue-reconciler"
 import { createGraphqlApi } from "../src/index.js"
 import { afterEach, describe, expect, test } from "bun:test"
 
@@ -13,7 +17,10 @@ const repository = {
   issuesReconciledAt: null,
 }
 
-const makeRuntime = (dbOverrides: Partial<DbServiceShape> = {}) => {
+const makeRuntime = (
+  dbOverrides: Partial<DbServiceShape> = {},
+  reconcilerOverrides: Partial<IssueReconcilerShape> = {},
+) => {
   const db: DbServiceShape = {
     addRepository: () => Effect.succeed(repository),
     listRepositories: Effect.succeed([repository]),
@@ -23,7 +30,16 @@ const makeRuntime = (dbOverrides: Partial<DbServiceShape> = {}) => {
     markIssuesReconciled: () => Effect.die("not used"),
     ...dbOverrides,
   }
-  return ManagedRuntime.make(Layer.succeed(DbService, db))
+  const reconciler: IssueReconcilerShape = {
+    reconcile: () => Effect.die("not used"),
+    ...reconcilerOverrides,
+  }
+  return ManagedRuntime.make(
+    Layer.merge(
+      Layer.succeed(DbService, db),
+      Layer.succeed(IssueReconciler, reconciler),
+    ),
+  )
 }
 
 const graphqlRequest = (body: unknown, origin?: string) =>
@@ -111,6 +127,86 @@ describe("GraphQL API", () => {
         ],
       },
     })
+  })
+
+  test("refreshes a repository through the reconciler", async () => {
+    let reconciledRepository: typeof repository | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {
+        reconcile: (selectedRepository) => {
+          reconciledRepository = selectedRepository
+          return Effect.succeed({
+            fetched: 1,
+            inserted: 1,
+            updated: 0,
+            deleted: 0,
+            unchanged: 0,
+          })
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RefreshRepository($repositoryId: ID!) {
+          refreshRepository(repositoryId: $repositoryId) {
+            fetched inserted updated deleted unchanged
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        refreshRepository: {
+          fetched: 1,
+          inserted: 1,
+          updated: 0,
+          deleted: 0,
+          unchanged: 0,
+        },
+      },
+    })
+    expect(reconciledRepository).toEqual(repository)
+  })
+
+  test("reports an unknown repository without calling the reconciler", async () => {
+    let reconcilerCalled = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {
+        reconcile: () => {
+          reconcilerCalled = true
+          return Effect.die("not used")
+        },
+      },
+    )
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          refreshRepository(repositoryId: "missing") { fetched }
+        }`,
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Repository not found: missing",
+          extensions: { code: "REPOSITORY_NOT_FOUND" },
+        }),
+      ],
+    })
+    expect(reconcilerCalled).toBe(false)
   })
 
   test("accepts same-origin browser requests", async () => {

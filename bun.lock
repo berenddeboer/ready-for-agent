@@ -40,8 +40,10 @@
       "dependencies": {
         "@ready-for-agent/db": "workspace:*",
         "@ready-for-agent/db-service": "workspace:*",
+        "@ready-for-agent/github-service": "workspace:*",
         "@ready-for-agent/graphql-api": "workspace:*",
         "@ready-for-agent/graphql-client": "workspace:*",
+        "@ready-for-agent/issue-reconciler": "workspace:*",
         "@ready-for-agent/keymaxxer-service": "workspace:*",
         "@tanstack/react-query": "^5.90.0",
         "@tanstack/react-query-devtools": "^5.90.0",
@@ -130,7 +132,9 @@
       "version": "0.0.1",
       "dependencies": {
         "@ready-for-agent/db-service": "workspace:*",
+        "@ready-for-agent/github-service": "workspace:*",
         "@ready-for-agent/graphql-schema": "workspace:*",
+        "@ready-for-agent/issue-reconciler": "workspace:*",
         "effect": "^4.0.0-beta.97",
         "graphql": "^16.11.0",
         "graphql-yoga": "^5.13.0",
