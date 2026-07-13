@@ -30,7 +30,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   shellComponent: RootDocument,
   notFoundComponent: () => (
-    <div className="card">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <p>Page not found.</p>
       <Link to="/">Back home</Link>
     </div>
@@ -43,7 +43,7 @@ function RootDocument({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body>
+      <body className="min-h-screen min-w-80 bg-slate-50 font-sans text-slate-900 antialiased [font-synthesis:none] [text-rendering:optimizeLegibility]">
         {children}
         <Scripts />
       </body>
@@ -53,11 +53,12 @@ function RootDocument({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   return (
-    <div className="shell">
-      <nav className="nav">
+    <div className="mx-auto min-h-screen max-w-6xl p-4 sm:p-6">
+      <nav className="mb-6 flex gap-4 border-b border-slate-200 pb-4">
         <Link
           to="/"
-          activeProps={{ className: "active" }}
+          className="font-medium text-slate-700 hover:underline"
+          activeProps={{ className: "font-bold text-slate-900" }}
           activeOptions={{ exact: true }}
         >
           Home
