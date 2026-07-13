@@ -2,6 +2,7 @@ type Query {
   health: Boolean!
   repositories: [Repository!]!
   config: Config!
+  issues(repositoryId: ID!): [Issue!]!
 }
 
 type Config {
@@ -16,6 +17,23 @@ type Repository {
   localPath: String!
   isBare: Boolean!
   paused: Boolean!
+  issuesReconciledAt: String
+}
+
+enum IssueState {
+  OPEN
+  CLOSED
+}
+
+type Issue {
+  id: ID!
+  repositoryId: ID!
+  githubIssueNumber: Int!
+  title: String!
+  body: String!
+  url: String!
+  state: IssueState!
+  githubCreatedAt: String!
 }
 
 type RepositoryRefresh {

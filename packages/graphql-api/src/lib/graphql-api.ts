@@ -40,6 +40,10 @@ type UpdateConfigArgs = {
   }
 }
 
+type IssuesArgs = {
+  repositoryId: string
+}
+
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
   DbService | IssueReconciler,
   unknown
@@ -169,6 +173,29 @@ export const createGraphqlApi = (runtime: GraphqlRuntime) => {
             }
             return result.success
           },
+          issues: async (_parent: unknown, args: IssuesArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.listIssues(args.repositoryId)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+        },
+        Issue: {
+          githubCreatedAt: (issue: { githubCreatedAt: Date }) =>
+            issue.githubCreatedAt.toISOString(),
+        },
+        Repository: {
+          issuesReconciledAt: (repository: {
+            issuesReconciledAt: Date | null
+          }) => repository.issuesReconciledAt?.toISOString() ?? null,
         },
         Mutation: {
           updateConfig: async (_parent: unknown, args: UpdateConfigArgs) => {
@@ -230,6 +257,7 @@ export const createGraphqlApi = (runtime: GraphqlRuntime) => {
         },
       },
     }),
+    batching: true,
     cors: false,
     fetchAPI: { Response },
     graphqlEndpoint: "/graphql",
