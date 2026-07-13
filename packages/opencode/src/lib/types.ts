@@ -4,6 +4,11 @@ export interface OpencodeRunResult {
   readonly sessionId: string
 }
 
+export interface ListModelsInput {
+  readonly cwd: string
+  readonly timeout?: Duration.Input
+}
+
 export interface StartInput {
   readonly prompt: string
   readonly cwd: string

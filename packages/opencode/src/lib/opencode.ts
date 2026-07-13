@@ -10,6 +10,7 @@ import {
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import type {
   ContinueInput,
+  ListModelsInput,
   OpencodeLayerOptions,
   OpencodeRunResult,
   StartInput,
@@ -33,6 +34,10 @@ export class Opencode extends Context.Service<
     readonly continue: (
       input: ContinueInput,
     ) => Effect.Effect<OpencodeRunResult, OpencodeError>
+    /** Lists models from OpenCode's active providers for the working directory. */
+    readonly listModels: (
+      input: ListModelsInput,
+    ) => Effect.Effect<ReadonlyArray<string>, OpencodeError>
   }
 >()("@ready-for-agent/opencode/Opencode") {
   static layer = (options: OpencodeLayerOptions = {}) =>
@@ -42,6 +47,58 @@ export class Opencode extends Context.Service<
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
+
+        const listModels = (
+          input: ListModelsInput,
+        ): Effect.Effect<ReadonlyArray<string>, OpencodeError> =>
+          Effect.gen(function* () {
+            const timeout = input.timeout ?? defaultTimeout
+            const timeoutMs = Duration.toMillis(timeout)
+            const command = ChildProcess.make(binary, ["models"], {
+              cwd: input.cwd,
+              stdin: "ignore",
+              stderr: "ignore",
+            })
+
+            const result = yield* Effect.scoped(
+              Effect.gen(function* () {
+                const handle = yield* spawner.spawn(command)
+                const collectModels = Stream.decodeText(handle.stdout).pipe(
+                  Stream.splitLines,
+                  Stream.runFold(
+                    (): ReadonlyArray<string> => [],
+                    (models, line) => {
+                      const model = line.trim()
+                      return model.length === 0 ? models : [...models, model]
+                    },
+                  ),
+                )
+
+                const [exitCode, models] = yield* Effect.all(
+                  [handle.exitCode, collectModels],
+                  { concurrency: 2 },
+                )
+
+                return { exitCode: Number(exitCode), models }
+              }),
+            ).pipe(
+              Effect.timeout(timeout),
+              Effect.catchTag("TimeoutError", () =>
+                Effect.fail(
+                  new OpencodeTimeoutError({ cwd: input.cwd, timeoutMs }),
+                ),
+              ),
+            )
+
+            if (result.exitCode !== 0) {
+              return yield* new OpencodeExitError({
+                exitCode: result.exitCode,
+                cwd: input.cwd,
+              })
+            }
+
+            return result.models
+          })
 
         const run = (input: {
           readonly prompt: string
@@ -135,6 +192,7 @@ export class Opencode extends Context.Service<
         return {
           start: (input) => run(input),
           continue: (input) => run(input),
+          listModels,
         }
       }),
     )

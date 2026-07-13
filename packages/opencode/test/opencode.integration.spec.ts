@@ -9,6 +9,22 @@ import { describe, expect, it } from "bun:test"
 const TestLayer = OpencodeLive.pipe(Layer.provide(BunServices.layer))
 
 describe("Opencode integration", () => {
+  it("lists models from OpenCode's active providers", async () => {
+    const models = await Effect.runPromise(
+      Effect.gen(function* () {
+        const opencode = yield* Opencode
+        return yield* opencode.listModels({
+          cwd: process.cwd(),
+          timeout: "30 seconds",
+        })
+      }).pipe(Effect.provide(TestLayer)),
+    )
+
+    expect(models.length).toBeGreaterThan(0)
+    expect(models).toContain("opencode/deepseek-v4-flash-free")
+    expect(models.every((model) => model.includes("/"))).toBe(true)
+  }, 35_000)
+
   it("starts and continues a real Session", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "ready-for-agent-opencode-"))
     let sessionId: string | undefined
