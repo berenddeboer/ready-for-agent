@@ -14,25 +14,45 @@ const PAGE_SIZE = 100
 export type GitHubGraphqlClient = Pick<Client, "query">
 
 interface GitHubApiIssue {
-  readonly number: number
-  readonly title: string
-  readonly body: string
+  readonly number: unknown
+  readonly title: unknown
+  readonly body: unknown
   readonly url: unknown
   readonly createdAt: unknown
-  readonly state: "OPEN" | "CLOSED"
+  readonly state: unknown
 }
 
 const toReadyLabeledIssue = (issue: GitHubApiIssue): ReadyLabeledIssue => {
+  if (!Number.isSafeInteger(issue.number) || Number(issue.number) <= 0) {
+    throw new Error(`Invalid GitHub issue number: ${issue.number}`)
+  }
+  if (typeof issue.title !== "string" || issue.title.trim().length === 0) {
+    throw new Error("Invalid GitHub issue title")
+  }
+  if (typeof issue.body !== "string") {
+    throw new Error("Invalid GitHub issue body")
+  }
+  if (typeof issue.url !== "string") {
+    throw new Error(`Invalid GitHub issue URL: ${issue.url}`)
+  }
+  try {
+    new URL(issue.url)
+  } catch {
+    throw new Error(`Invalid GitHub issue URL: ${issue.url}`)
+  }
+  if (issue.state !== "OPEN" && issue.state !== "CLOSED") {
+    throw new Error(`Invalid GitHub issue state: ${issue.state}`)
+  }
   const createdAt = new Date(String(issue.createdAt))
   if (Number.isNaN(createdAt.getTime())) {
     throw new Error(`Invalid GitHub issue creation time: ${issue.createdAt}`)
   }
 
   return {
-    number: issue.number,
+    number: Number(issue.number),
     title: issue.title,
     body: issue.body,
-    url: String(issue.url),
+    url: issue.url,
     createdAt,
     state: issue.state,
   }

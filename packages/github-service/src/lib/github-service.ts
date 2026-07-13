@@ -14,6 +14,7 @@ export interface GitHubServiceShape {
   >
 }
 
-export class GitHubService extends Context.Tag(
-  "@ready-for-agent/github-service/GitHubService",
-)<GitHubService, GitHubServiceShape>() {}
+export class GitHubService extends Context.Service<
+  GitHubService,
+  GitHubServiceShape
+>()("@ready-for-agent/github-service/GitHubService") {}

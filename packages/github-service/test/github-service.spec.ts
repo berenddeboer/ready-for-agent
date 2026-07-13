@@ -1,4 +1,4 @@
-import { Effect, Either } from "effect"
+import { Effect, Result } from "effect"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -122,12 +122,12 @@ describe("GitHubService live implementation", () => {
     } as GitHubGraphqlClient
 
     const result = await Effect.runPromise(
-      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.either),
+      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.result),
     )
 
-    expect(Either.isLeft(result)).toBe(true)
-    if (Either.isLeft(result)) {
-      expect(result.left).toEqual(
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toEqual(
         new GitHubRepositoryUnavailableError(repository),
       )
     }
@@ -140,13 +140,45 @@ describe("GitHubService live implementation", () => {
     } as GitHubGraphqlClient
 
     const result = await Effect.runPromise(
-      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.either),
+      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.result),
     )
 
-    expect(Either.isLeft(result)).toBe(true)
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(GitHubRequestError)
-      expect(result.left.cause).toBe(cause)
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+      expect(result.failure.cause).toBe(cause)
+    }
+  })
+
+  it("rejects malformed Issue data before returning a partial result", async () => {
+    const client = {
+      query: async () => ({
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Valid title",
+                body: "Valid body",
+                url: "not-a-url",
+                createdAt: "2026-07-01T12:00:00Z",
+                state: "OPEN",
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      }),
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.result),
+    )
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+      expect(result.failure.message).toContain("invalid Issue data")
     }
   })
 
@@ -163,13 +195,13 @@ describe("GitHubService live implementation", () => {
     } as GitHubGraphqlClient
 
     const result = await Effect.runPromise(
-      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.either),
+      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.result),
     )
 
-    expect(Either.isLeft(result)).toBe(true)
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(GitHubRequestError)
-      expect(result.left.message).toContain("omitted the next page cursor")
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+      expect(result.failure.message).toContain("omitted the next page cursor")
     }
   })
 })
@@ -198,10 +230,10 @@ describe("makeGitHubServiceTest", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.listReadyIssues(repository)
-      }).pipe(Effect.provide(layer), Effect.either),
+      }).pipe(Effect.provide(layer), Effect.result),
     )
 
-    expect(result).toEqual(Either.left(error))
+    expect(result).toEqual(Result.fail(error))
   })
 
   it("fails unavailable for a Repository without a fixture", async () => {
@@ -211,11 +243,11 @@ describe("makeGitHubServiceTest", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.listReadyIssues(repository)
-      }).pipe(Effect.provide(layer), Effect.either),
+      }).pipe(Effect.provide(layer), Effect.result),
     )
 
     expect(result).toEqual(
-      Either.left(new GitHubRepositoryUnavailableError(repository)),
+      Result.fail(new GitHubRepositoryUnavailableError(repository)),
     )
   })
 })
