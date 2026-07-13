@@ -23,7 +23,7 @@ export const createKeymaxxerSidecarFetch = (
   let initializePromise: Promise<void> | null = null
 
   const initialize = () => {
-    initializePromise ??= runEffect(keymaxxer.initialize()).catch((error) => {
+    initializePromise ??= runEffect(keymaxxer.initialize).catch((error) => {
       initializePromise = null
       throw error
     })
@@ -120,11 +120,11 @@ const requestBody = async (request: Request): Promise<unknown> => {
   }
 }
 
-const decodeRequest = <A, I>(
-  schema: Schema.Schema<A, I>,
+const decodeRequest = <S extends Schema.ConstraintDecoder<unknown, never>>(
+  schema: S,
   value: unknown,
   keys: readonly string[],
-) => {
+): S["Type"] => {
   assertExactKeys(value, keys)
   try {
     return Schema.decodeUnknownSync(schema)(value)
@@ -142,8 +142,10 @@ const assertExactKeys = (value: unknown, allowedKeys: readonly string[]) => {
   }
 }
 
-const schemaResponse = <A, I>(schema: Schema.Schema<A, I>, value: A) =>
-  Response.json(Schema.encodeSync(schema)(value))
+const schemaResponse = <S extends Schema.ConstraintEncoder<unknown, never>>(
+  schema: S,
+  value: S["Type"],
+) => Response.json(Schema.encodeSync(schema)(value))
 
 const invalidInput = () =>
   Response.json({ error: "invalid request" }, { status: 400 })

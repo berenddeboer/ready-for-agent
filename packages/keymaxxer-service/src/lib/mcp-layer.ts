@@ -31,7 +31,7 @@ export type McpLayerOptions = {
 export const mcpKeymaxxerLayer = (
   options: McpLayerOptions = {},
 ): Layer.Layer<KeymaxxerService> =>
-  Layer.scoped(
+  Layer.effect(
     KeymaxxerService,
     Effect.acquireRelease(
       Effect.sync(() => makeMcpService(options)),
@@ -93,11 +93,10 @@ const makeMcpService = (options: McpLayerOptions) => {
   }
 
   const service: KeymaxxerServiceShape = {
-    initialize: () =>
-      Effect.tryPromise({
-        try: () => listSecretNames().then(() => undefined),
-        catch: () => safeError("initialize", "Keymaxxer initialization failed"),
-      }),
+    initialize: Effect.tryPromise({
+      try: () => listSecretNames().then(() => undefined),
+      catch: () => safeError("initialize", "Keymaxxer initialization failed"),
+    }),
     hasSecret: (name) =>
       validateSecretName(name)
         ? Effect.tryPromise({

@@ -8,7 +8,7 @@ import type {
 } from "./models.js"
 
 export interface KeymaxxerServiceShape {
-  readonly initialize: () => Effect.Effect<void, KeymaxxerError>
+  readonly initialize: Effect.Effect<void, KeymaxxerError>
   readonly hasSecret: (
     name: SecretName,
   ) => Effect.Effect<boolean, KeymaxxerError>
@@ -20,9 +20,10 @@ export interface KeymaxxerServiceShape {
   ) => Effect.Effect<RunWithSecretsResult, KeymaxxerError>
 }
 
-export class KeymaxxerService extends Context.Tag(
-  "@ready-for-agent/keymaxxer-service/KeymaxxerService",
-)<KeymaxxerService, KeymaxxerServiceShape>() {}
+export class KeymaxxerService extends Context.Service<
+  KeymaxxerService,
+  KeymaxxerServiceShape
+>()("@ready-for-agent/keymaxxer-service/KeymaxxerService") {}
 
 export const testKeymaxxerLayer = (
   secretNames: readonly string[] = [],
@@ -31,7 +32,7 @@ export const testKeymaxxerLayer = (
     const secrets = new Set(secretNames)
 
     return {
-      initialize: () => Effect.void,
+      initialize: Effect.void,
       hasSecret: (name: SecretName) => Effect.succeed(secrets.has(name)),
       addSecret: (input: AddSecretInput) =>
         Effect.sync(() => {

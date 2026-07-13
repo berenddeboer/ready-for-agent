@@ -11,7 +11,7 @@ import { describe, expect, test } from "bun:test"
 const fakeService = (
   overrides: Partial<KeymaxxerServiceShape> = {},
 ): KeymaxxerServiceShape => ({
-  initialize: () => Effect.void,
+  initialize: Effect.void,
   hasSecret: () => Effect.succeed(false),
   addSecret: () => Effect.succeed(true),
   runWithSecrets: () =>
@@ -34,10 +34,9 @@ describe("Keymaxxer Sidecar protocol", () => {
       port: 0,
       fetch: createKeymaxxerSidecarFetch(
         fakeService({
-          initialize: () =>
-            Effect.sync(() => {
-              initializeCalls += 1
-            }),
+          initialize: Effect.sync(() => {
+            initializeCalls += 1
+          }),
         }),
       ),
     })
@@ -57,18 +56,17 @@ describe("Keymaxxer Sidecar protocol", () => {
   test("deduplicates initialization and retries after failure", async () => {
     let initializeCalls = 0
     const service = fakeService({
-      initialize: () =>
-        Effect.suspend(() => {
-          initializeCalls += 1
-          return initializeCalls === 1
-            ? Effect.fail(
-                new KeymaxxerError({
-                  operation: "initialize",
-                  message: "failed",
-                }),
-              )
-            : Effect.void
-        }),
+      initialize: Effect.suspend(() => {
+        initializeCalls += 1
+        return initializeCalls === 1
+          ? Effect.fail(
+              new KeymaxxerError({
+                operation: "initialize",
+                message: "failed",
+              }),
+            )
+          : Effect.void
+      }),
     })
     const fetchSidecar = createKeymaxxerSidecarFetch(service)
     const request = () =>
@@ -189,7 +187,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
           const keymaxxer = yield* KeymaxxerService
-          yield* keymaxxer.initialize()
+          yield* keymaxxer.initialize
           const present = yield* keymaxxer.hasSecret("PRESENT_SECRET")
           const added = yield* keymaxxer.addSecret({ name: "NEW_SECRET" })
           const run = yield* keymaxxer.runWithSecrets({
@@ -245,7 +243,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const keymaxxer = yield* KeymaxxerService
-        yield* keymaxxer.initialize()
+        yield* keymaxxer.initialize
       }).pipe(
         Effect.provide(
           sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
@@ -269,7 +267,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
       Effect.exit(
         Effect.gen(function* () {
           const keymaxxer = yield* KeymaxxerService
-          yield* keymaxxer.initialize()
+          yield* keymaxxer.initialize
         }).pipe(
           Effect.provide(
             sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
@@ -297,7 +295,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
       Effect.exit(
         Effect.gen(function* () {
           const keymaxxer = yield* KeymaxxerService
-          yield* keymaxxer.initialize()
+          yield* keymaxxer.initialize
         }).pipe(
           Effect.provide(
             sidecarKeymaxxerLayer("http://127.0.0.1:5032", {

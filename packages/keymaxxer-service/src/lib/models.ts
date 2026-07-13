@@ -21,12 +21,12 @@ export const RunWithSecretsInput = Schema.Struct({
   command: Schema.String,
   cwd: Schema.String,
   secrets: Schema.Array(SecretName),
-  timeoutMs: Schema.Number,
+  timeoutMs: Schema.Finite,
 })
 export type RunWithSecretsInput = typeof RunWithSecretsInput.Type
 
 export const RunWithSecretsResult = Schema.Struct({
-  exitCode: Schema.Number,
+  exitCode: Schema.Finite,
   stdout: Schema.String,
   stderr: Schema.String,
 })
@@ -45,7 +45,7 @@ export const AddSecretResponse = Schema.Struct({ added: Schema.Boolean })
 
 export const protocolVersion = 1 as const
 
-export class KeymaxxerError extends Schema.TaggedError<KeymaxxerError>()(
+export class KeymaxxerError extends Schema.TaggedErrorClass<KeymaxxerError>()(
   "KeymaxxerError",
   {
     operation: Schema.String,

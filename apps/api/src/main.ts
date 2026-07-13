@@ -25,7 +25,7 @@ const runtime = ManagedRuntime.make(AppLayer)
 await runtime.runPromise(
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
-    yield* keymaxxer.initialize()
+    yield* keymaxxer.initialize
   }),
 )
 

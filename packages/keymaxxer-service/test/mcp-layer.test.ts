@@ -68,7 +68,7 @@ describe("MCP Keymaxxer layer", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const keymaxxer = yield* KeymaxxerService
-        yield* keymaxxer.initialize()
+        yield* keymaxxer.initialize
         const added = yield* keymaxxer.addSecret({ name: "NEW_SECRET" })
         const present = yield* keymaxxer.hasSecret("NEW_SECRET")
         const cancelled = yield* keymaxxer.addSecret({
