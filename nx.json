@@ -2,13 +2,8 @@
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "analytics": true,
   "namedInputs": {
-    "default": [
-      "{projectRoot}/**/*",
-      "sharedGlobals"
-    ],
-    "production": [
-      "default"
-    ],
+    "default": ["{projectRoot}/**/*", "sharedGlobals"],
+    "production": ["default"],
     "sharedGlobals": []
   },
   "plugins": [
@@ -54,9 +49,7 @@
   "targetDefaults": {
     "build": {
       "cache": true,
-      "outputs": [
-        "{projectRoot}/dist"
-      ]
+      "outputs": ["{projectRoot}/dist"]
     },
     "knip": {
       "cache": true

@@ -3,9 +3,22 @@
   "ignoreDependencies": ["@swc/helpers", "nx"],
   "ignoreBinaries": ["skills"],
   "workspaces": {
+    "apps/api": {
+      "entry": ["src/main.ts"],
+      "project": ["src/**/*.ts"]
+    },
     "apps/cli": {
       "entry": ["src/main.ts", "src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
+    },
+    "packages/graphql-client": {
+      "entry": ["src/index.ts"],
+      "project": [
+        "src/index.ts",
+        "src/generated/index.ts",
+        "src/generated/schema.ts",
+        "src/generated/types.ts"
+      ]
     },
     "packages/*": {
       "entry": ["src/index.ts", "test/**/*.{test,spec}.ts"],

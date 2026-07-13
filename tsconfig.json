@@ -4,6 +4,9 @@
   "files": [],
   "references": [
     {
+      "path": "./apps/api"
+    },
+    {
       "path": "./apps/cli"
     },
     {
@@ -11,6 +14,12 @@
     },
     {
       "path": "./packages/db-schema"
+    },
+    {
+      "path": "./packages/graphql-client"
+    },
+    {
+      "path": "./packages/graphql-schema"
     },
     {
       "path": "./packages/queue-service"

@@ -1,5 +1,5 @@
 {
-  "name": "@ready-for-agent/db-schema",
+  "name": "@ready-for-agent/graphql-schema",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -13,22 +13,13 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./schema.graphql": "./schema.graphql"
   },
   "scripts": {
-    "generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit -p tsconfig.lib.json"
   },
   "nx": {
-    "name": "db-schema"
-  },
-  "dependencies": {
-    "drizzle-orm": "1.0.0-rc.4-5d5b77c",
-    "effect": "^3.21.4",
-    "tslib": "^2.3.0",
-    "ulidx": "^2.4.1"
-  },
-  "devDependencies": {
-    "drizzle-kit": "1.0.0-rc.4-5d5b77c"
+    "name": "graphql-schema"
   }
 }
