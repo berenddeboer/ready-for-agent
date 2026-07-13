@@ -1,9 +1,10 @@
 export default {
     "scalars": [
         1,
-        3,
-        5,
-        7
+        2,
+        4,
+        6,
+        8
     ],
     "types": {
         "Query": {
@@ -11,40 +12,50 @@ export default {
                 1
             ],
             "repositories": [
-                4
+                5
             ],
             "config": [
-                2
+                3
+            ],
+            "issues": [
+                7,
+                {
+                    "repositoryId": [
+                        2,
+                        "ID!"
+                    ]
+                }
             ],
             "__typename": [
-                3
+                4
             ]
         },
         "Boolean": {},
+        "ID": {},
         "Config": {
             "defaultModel": [
-                3
+                4
             ],
             "defaultVariant": [
-                3
+                4
             ],
             "__typename": [
-                3
+                4
             ]
         },
         "String": {},
         "Repository": {
             "id": [
-                5
+                2
             ],
             "githubOwner": [
-                3
+                4
             ],
             "githubRepo": [
-                3
+                4
             ],
             "localPath": [
-                3
+                4
             ],
             "isBare": [
                 1
@@ -52,90 +63,122 @@ export default {
             "paused": [
                 1
             ],
+            "issuesReconciledAt": [
+                4
+            ],
             "__typename": [
-                3
+                4
             ]
         },
-        "ID": {},
-        "RepositoryRefresh": {
-            "fetched": [
-                7
+        "IssueState": {},
+        "Issue": {
+            "id": [
+                2
             ],
-            "inserted": [
-                7
+            "repositoryId": [
+                2
             ],
-            "updated": [
-                7
+            "githubIssueNumber": [
+                8
             ],
-            "deleted": [
-                7
+            "title": [
+                4
             ],
-            "unchanged": [
-                7
+            "body": [
+                4
+            ],
+            "url": [
+                4
+            ],
+            "state": [
+                6
+            ],
+            "githubCreatedAt": [
+                4
             ],
             "__typename": [
-                3
+                4
             ]
         },
         "Int": {},
+        "RepositoryRefresh": {
+            "fetched": [
+                8
+            ],
+            "inserted": [
+                8
+            ],
+            "updated": [
+                8
+            ],
+            "deleted": [
+                8
+            ],
+            "unchanged": [
+                8
+            ],
+            "__typename": [
+                4
+            ]
+        },
         "AddRepositoryInput": {
             "githubOwner": [
-                3
+                4
             ],
             "githubRepo": [
-                3
+                4
             ],
             "localPath": [
-                3
+                4
             ],
             "isBare": [
                 1
             ],
             "__typename": [
-                3
+                4
             ]
         },
         "UpdateConfigInput": {
             "defaultModel": [
-                3
+                4
             ],
             "defaultVariant": [
-                3
+                4
             ],
             "__typename": [
-                3
+                4
             ]
         },
         "Mutation": {
             "addRepository": [
-                4,
+                5,
                 {
                     "input": [
-                        8,
+                        10,
                         "AddRepositoryInput!"
                     ]
                 }
             ],
             "refreshRepository": [
-                6,
+                9,
                 {
                     "repositoryId": [
-                        5,
+                        2,
                         "ID!"
                     ]
                 }
             ],
             "updateConfig": [
-                2,
+                3,
                 {
                     "input": [
-                        9,
+                        11,
                         "UpdateConfigInput!"
                     ]
                 }
             ],
             "__typename": [
-                3
+                4
             ]
         }
     }

@@ -22,6 +22,17 @@ const config = {
   defaultVariant: "low",
 }
 
+const issue = {
+  id: "issue-test",
+  repositoryId: repository.id,
+  githubIssueNumber: 42,
+  title: "Make repository cards useful",
+  body: "Show the Ready-labeled issues.",
+  url: "https://github.com/acme/widgets/issues/42",
+  state: "OPEN" as const,
+  githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
+}
+
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   reconcilerOverrides: Partial<IssueReconcilerShape> = {},
@@ -114,6 +125,7 @@ describe("GraphQL API", () => {
             localPath
             isBare
             paused
+            issuesReconciledAt
           }
         }`,
       }),
@@ -130,6 +142,7 @@ describe("GraphQL API", () => {
             localPath: repository.localPath,
             isBare: repository.isBare,
             paused: repository.paused,
+            issuesReconciledAt: null,
           },
         ],
       },
@@ -165,6 +178,73 @@ describe("GraphQL API", () => {
         },
       },
     })
+  })
+
+  test("lists issues for a repository", async () => {
+    let requestedRepositoryId: string | undefined
+    await runtime.dispose()
+    runtime = makeRuntime({
+      listIssues: (repositoryId) => {
+        requestedRepositoryId = repositoryId
+        return Effect.succeed([issue])
+      },
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query ListIssues($repositoryId: ID!) {
+          issues(repositoryId: $repositoryId) {
+            id repositoryId githubIssueNumber title body url state githubCreatedAt
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        issues: [
+          {
+            ...issue,
+            githubCreatedAt: issue.githubCreatedAt.toISOString(),
+          },
+        ],
+      },
+    })
+    expect(requestedRepositoryId).toBe(repository.id)
+  })
+
+  test("accepts batched issue queries", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({ listIssues: () => Effect.succeed([issue]) })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest([
+        {
+          query: `query First($repositoryId: ID!) {
+            issues(repositoryId: $repositoryId) { id }
+          }`,
+          variables: { repositoryId: repository.id },
+        },
+        {
+          query: `query Second($repositoryId: ID!) {
+            issues(repositoryId: $repositoryId) { githubIssueNumber }
+          }`,
+          variables: { repositoryId: repository.id },
+        },
+      ]),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual([
+      { data: { issues: [{ id: issue.id }] } },
+      {
+        data: {
+          issues: [{ githubIssueNumber: issue.githubIssueNumber }],
+        },
+      },
+    ])
   })
 
   test("refreshes a repository through the reconciler", async () => {
