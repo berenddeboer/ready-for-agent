@@ -11,6 +11,11 @@ Opinionated agentic software engineering harness to massively increase landed PR
 2. GitHub CLI tool [gh](https://cli.github.com/)
 3. [keymaxxer](https://github.com/glommer/keymaxxer)
 
+The backend starts Keymaxxer through its MCP server. It uses
+`KEYMAXXER_ENTRYPOINT` when set, otherwise prefers the unreleased local source
+at `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present,
+and finally falls back to the installed `keymaxxer` command.
+
 ## Get started
 
 1. Checkout a repo locally.

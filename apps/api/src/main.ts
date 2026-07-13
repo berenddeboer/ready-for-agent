@@ -11,11 +11,23 @@ import {
   RepositoryAlreadyExistsError,
 } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
+import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import { keymaxxerLayerFromEnvironment } from "./keymaxxer-layer.js"
 
 const port = Number(process.env.PORT ?? 3001)
 
-const AppLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
+const AppLayer = Layer.merge(
+  DbServiceLive.pipe(Layer.provideMerge(DatabaseLive)),
+  keymaxxerLayerFromEnvironment(),
+)
 const runtime = ManagedRuntime.make(AppLayer)
+
+await runtime.runPromise(
+  Effect.gen(function* () {
+    const keymaxxer = yield* KeymaxxerService
+    yield* keymaxxer.initialize()
+  }),
+)
 
 type AddRepositoryArgs = {
   input: {
@@ -103,3 +115,11 @@ console.info(
     `http://${server.hostname}:${server.port}`,
   )}`,
 )
+
+const shutdown = async () => {
+  await server.stop(true)
+  await runtime.dispose()
+}
+
+process.once("SIGINT", shutdown)
+process.once("SIGTERM", shutdown)
