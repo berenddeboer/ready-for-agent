@@ -9,6 +9,9 @@ export default {
             "health": [
                 1
             ],
+            "repositories": [
+                2
+            ],
             "__typename": [
                 4
             ]

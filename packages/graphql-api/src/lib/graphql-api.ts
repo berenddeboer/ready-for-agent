@@ -81,6 +81,20 @@ export const createGraphqlApi = (runtime: GraphqlRuntime) => {
       resolvers: {
         Query: {
           health: () => true,
+          repositories: async () => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.listRepositories
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
         },
         Mutation: {
           addRepository: async (_parent: unknown, args: AddRepositoryArgs) => {

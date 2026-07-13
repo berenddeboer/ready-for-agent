@@ -11,6 +11,7 @@ export type Scalars = {
 
 export interface Query {
     health: Scalars['Boolean']
+    repositories: Repository[]
     __typename: 'Query'
 }
 
@@ -31,6 +32,7 @@ export interface Mutation {
 
 export interface QueryGenqlSelection{
     health?: boolean | number
+    repositories?: RepositoryGenqlSelection
     __typename?: boolean | number
     __scalar?: boolean | number
 }

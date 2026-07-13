@@ -1,5 +1,6 @@
 type Query {
   health: Boolean!
+  repositories: [Repository!]!
 }
 
 type Repository {
