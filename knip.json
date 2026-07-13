@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "ignoreDependencies": ["@swc/helpers", "nx"],
+  "ignoreDependencies": ["@swc/helpers", "nx", "tslib"],
   "ignoreBinaries": ["skills"],
   "workspaces": {
     "apps/api": {
@@ -19,6 +19,10 @@
         "src/generated/schema.ts",
         "src/generated/types.ts"
       ]
+    },
+    "packages/db": {
+      "entry": ["src/bin/migrate.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
     },
     "packages/*": {
       "entry": ["src/index.ts", "test/**/*.{test,spec}.ts"],

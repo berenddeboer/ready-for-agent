@@ -1,22 +1,14 @@
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
 import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Config, Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
+import {
+  MigrationsFolderConfig,
+  defaultMigrationsFolder,
+} from "./run-migrations.js"
 import { runSqliteTestMigrations } from "./test-migrations.js"
 import { TypedSqliteDrizzleLayer } from "./typed-drizzle.js"
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = dirname(__filename)
-const defaultMigrationsFolder = join(__dirname, "../../../db-schema/drizzle")
-
-/**
- * Config for the migrations folder path.
- * Override with ConfigProvider.fromMap({ MIGRATIONS_FOLDER: "/custom/path" })
- */
-export const MigrationsFolderConfig = Config.string("MIGRATIONS_FOLDER").pipe(
-  Config.withDefault(defaultMigrationsFolder),
-)
+export { MigrationsFolderConfig, defaultMigrationsFolder }
 
 const runPragmas = (ctx: Context.Context<SqlClient.SqlClient>) =>
   Effect.gen(function* () {

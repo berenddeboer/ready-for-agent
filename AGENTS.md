@@ -48,3 +48,8 @@ Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`
 
 
 <!-- nx configuration end-->
+
+## Nx project config
+
+Put Nx-specific config (`name`, custom targets like `test`/`migrate`/`serve`) in
+each package's `project.json`, not under an `"nx"` key in `package.json`.

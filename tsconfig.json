@@ -28,6 +28,9 @@
       "path": "./packages/db"
     },
     {
+      "path": "./packages/db-service"
+    },
+    {
       "path": "./packages/sqlite-queue-service"
     },
     {

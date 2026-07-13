@@ -1,0 +1,22 @@
+{
+  "name": "api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --watch --conditions @ready-for-agent/source src/main.ts"
+      },
+      "dependsOn": ["db:migrate"]
+    },
+    "start": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source src/main.ts"
+      },
+      "dependsOn": ["db:migrate"]
+    }
+  }
+}
