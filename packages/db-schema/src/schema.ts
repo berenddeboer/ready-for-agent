@@ -35,6 +35,18 @@ export const repository = snakeCase.table(
   ],
 )
 
+export const config = snakeCase.table("config", {
+  id: text().primaryKey().default("default"),
+  defaultModel: text().notNull().default("opencode/deepseek-v4-flash-free"),
+  defaultVariant: text().notNull().default("low"),
+  createdAt: integer({ mode: "number" })
+    .notNull()
+    .$defaultFn(() => Date.now()),
+  updatedAt: integer({ mode: "number" })
+    .notNull()
+    .$defaultFn(() => Date.now()),
+})
+
 export const issue = snakeCase.table(
   "issue",
   {

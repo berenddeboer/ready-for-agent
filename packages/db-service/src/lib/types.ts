@@ -15,6 +15,16 @@ export interface RepositoryRecord {
   readonly issuesReconciledAt: Date | null
 }
 
+export interface ConfigRecord {
+  readonly defaultModel: string
+  readonly defaultVariant: string
+}
+
+export interface UpdateConfigInput {
+  readonly defaultModel: string
+  readonly defaultVariant: string
+}
+
 export interface StoreIssueInput {
   readonly repositoryId: string
   readonly githubIssueNumber: number

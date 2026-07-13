@@ -1,4 +1,9 @@
-import type { QueryClient } from "@tanstack/react-query"
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import {
   HeadContent,
@@ -8,11 +13,33 @@ import {
   createRootRouteWithContext,
 } from "@tanstack/react-router"
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
-import type { ReactNode } from "react"
+import {
+  type FormEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
+import { createClient } from "@ready-for-agent/graphql-client"
 import appCss from "../styles.css?url"
 
 export interface RouterContext {
   queryClient: QueryClient
+}
+
+const graphql = createClient({ url: "/graphql" })
+
+const configQuery = {
+  queryKey: ["config"],
+  queryFn: async () => {
+    const result = await graphql.query({
+      config: {
+        defaultModel: true,
+        defaultVariant: true,
+      },
+    })
+    return result.config
+  },
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
@@ -54,7 +81,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 function RootComponent() {
   return (
     <div className="mx-auto min-h-screen max-w-6xl p-4 sm:p-6">
-      <nav className="mb-6 flex gap-4 border-b border-slate-200 pb-4">
+      <nav className="mb-6 flex items-center gap-4 border-b border-slate-200 pb-4">
         <Link
           to="/"
           className="font-medium text-slate-700 hover:underline"
@@ -63,10 +90,183 @@ function RootComponent() {
         >
           Home
         </Link>
+        <SettingsButton />
       </nav>
       <Outlet />
       <ReactQueryDevtools buttonPosition="bottom-left" />
       <TanStackRouterDevtools position="bottom-right" />
     </div>
+  )
+}
+
+function SettingsButton() {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const queryClient = useQueryClient()
+  const config = useQuery(configQuery)
+  const [defaultModel, setDefaultModel] = useState("")
+  const [defaultVariant, setDefaultVariant] = useState("low")
+  useEffect(() => {
+    if (dialogRef.current?.open && config.data) {
+      setDefaultModel(config.data.defaultModel)
+      setDefaultVariant(config.data.defaultVariant)
+    }
+  }, [config.data])
+  const updateConfig = useMutation({
+    mutationFn: (input: { defaultModel: string; defaultVariant: string }) =>
+      graphql.mutation({
+        updateConfig: {
+          __args: { input },
+          defaultModel: true,
+          defaultVariant: true,
+        },
+      }),
+    onSuccess: ({ updateConfig: updatedConfig }) => {
+      queryClient.setQueryData(configQuery.queryKey, updatedConfig)
+      dialogRef.current?.close()
+    },
+  })
+
+  const openSettings = () => {
+    if (config.isError) {
+      void config.refetch()
+    }
+    if (config.data) {
+      setDefaultModel(config.data.defaultModel)
+      setDefaultVariant(config.data.defaultVariant)
+    }
+    updateConfig.reset()
+    dialogRef.current?.showModal()
+  }
+
+  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    updateConfig.mutate({ defaultModel, defaultVariant })
+  }
+
+  const standardVariants = ["low", "medium", "high", "max"]
+  const hasCustomVariant = !standardVariants.includes(defaultVariant)
+
+  return (
+    <>
+      <button
+        type="button"
+        className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        onClick={openSettings}
+        aria-haspopup="dialog"
+      >
+        <svg
+          aria-hidden="true"
+          className="size-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+        </svg>
+        Settings
+      </button>
+
+      <dialog
+        ref={dialogRef}
+        className="m-auto w-[min(92vw,31rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
+        aria-labelledby="settings-title"
+        onCancel={(event) => {
+          if (updateConfig.isPending) event.preventDefault()
+        }}
+      >
+        <form onSubmit={saveSettings}>
+          <div className="border-b border-slate-200 px-6 py-5">
+            <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
+              Harness defaults
+            </p>
+            <h2 id="settings-title" className="mt-1 text-2xl font-bold">
+              Model settings
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Applied by default when the harness starts a new agent session.
+            </p>
+          </div>
+
+          <div className="grid gap-5 px-6 py-5">
+            {config.isPending ? (
+              <p className="text-sm text-slate-500">Loading settings...</p>
+            ) : config.isError ? (
+              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                Settings could not be loaded. Close this dialog and try again.
+              </p>
+            ) : (
+              <>
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Default model
+                  <input
+                    className="rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    name="defaultModel"
+                    value={defaultModel}
+                    onChange={(event) => setDefaultModel(event.target.value)}
+                    placeholder="provider/model-name"
+                    required
+                  />
+                  <span className="text-xs font-normal text-slate-500">
+                    Use the OpenCode provider/model identifier.
+                  </span>
+                </label>
+
+                <label className="grid gap-1.5 text-sm font-semibold">
+                  Thinking level
+                  <select
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    name="defaultVariant"
+                    value={defaultVariant}
+                    onChange={(event) => setDefaultVariant(event.target.value)}
+                    required
+                  >
+                    {hasCustomVariant && (
+                      <option value={defaultVariant}>{defaultVariant}</option>
+                    )}
+                    {standardVariants.map((variant) => (
+                      <option key={variant} value={variant}>
+                        {variant[0]?.toUpperCase()}
+                        {variant.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs font-normal text-slate-500">
+                    OpenCode calls this the model variant.
+                  </span>
+                </label>
+              </>
+            )}
+
+            {updateConfig.isError && (
+              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                Settings could not be saved. Check the values and try again.
+              </p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <button
+              type="button"
+              className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200"
+              onClick={() => dialogRef.current?.close()}
+              disabled={updateConfig.isPending}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={
+                config.isPending || config.isError || updateConfig.isPending
+              }
+            >
+              {updateConfig.isPending ? "Saving..." : "Save settings"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </>
   )
 }

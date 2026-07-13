@@ -38,6 +38,13 @@ export class InvalidIssueInputError extends Data.TaggedError(
   readonly message: string
 }> {}
 
+export class InvalidConfigInputError extends Data.TaggedError(
+  "InvalidConfigInputError",
+)<{
+  readonly field: "defaultModel" | "defaultVariant"
+  readonly message: string
+}> {}
+
 export class DatabaseError extends Data.TaggedError("DatabaseError")<{
   readonly message: string
   readonly cause?: unknown

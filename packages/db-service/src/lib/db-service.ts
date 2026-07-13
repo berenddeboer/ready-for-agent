@@ -4,6 +4,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
 import {
   DatabaseError,
+  InvalidConfigInputError,
   InvalidIssueInputError,
   InvalidRepositoryInputError,
   LocalPathInUseError,
@@ -12,9 +13,11 @@ import {
 } from "./errors.js"
 import type {
   AddRepositoryInput,
+  ConfigRecord,
   IssueRecord,
   RepositoryRecord,
   StoreIssueInput,
+  UpdateConfigInput,
 } from "./types.js"
 
 const formatSqlError = (error: SqlError): string => {
@@ -113,6 +116,10 @@ const toDatabaseError = (error: SqlError) =>
   })
 
 export interface DbServiceShape {
+  readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
+  readonly updateConfig: (
+    input: UpdateConfigInput,
+  ) => Effect.Effect<ConfigRecord, InvalidConfigInputError | DatabaseError>
   readonly addRepository: (
     input: AddRepositoryInput,
   ) => Effect.Effect<
@@ -156,6 +163,86 @@ export const DbServiceLive = Layer.effect(
   DbService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+
+    const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
+      function* () {
+        const now = Date.now()
+        yield* sql
+          .unsafe(
+            `INSERT OR IGNORE INTO config (
+               id, default_model, default_variant, created_at, updated_at
+             ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', ?, ?)`,
+            [now, now],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+
+        const rows = yield* sql
+          .unsafe(
+            `SELECT default_model, default_variant
+             FROM config WHERE id = 'default'`,
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        const row = rows[0] as
+          | { default_model: string; default_variant: string }
+          | undefined
+        if (!row) {
+          return yield* new DatabaseError({
+            message: "No config returned after initialization",
+          })
+        }
+        return {
+          defaultModel: row.default_model,
+          defaultVariant: row.default_variant,
+        }
+      },
+    )
+
+    const updateConfig = (
+      input: UpdateConfigInput,
+    ): Effect.Effect<ConfigRecord, InvalidConfigInputError | DatabaseError> =>
+      Effect.gen(function* () {
+        const defaultModel = input.defaultModel.trim()
+        if (defaultModel.length === 0) {
+          return yield* new InvalidConfigInputError({
+            field: "defaultModel",
+            message: "defaultModel cannot be empty",
+          })
+        }
+        const defaultVariant = input.defaultVariant.trim()
+        if (defaultVariant.length === 0) {
+          return yield* new InvalidConfigInputError({
+            field: "defaultVariant",
+            message: "defaultVariant cannot be empty",
+          })
+        }
+
+        const now = Date.now()
+        const rows = yield* sql
+          .unsafe(
+            `INSERT INTO config (
+               id, default_model, default_variant, created_at, updated_at
+             ) VALUES ('default', ?, ?, ?, ?)
+             ON CONFLICT (id) DO UPDATE SET
+               default_model = excluded.default_model,
+               default_variant = excluded.default_variant,
+               updated_at = excluded.updated_at
+             RETURNING default_model, default_variant`,
+            [defaultModel, defaultVariant, now, now],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+        const row = rows[0] as
+          | { default_model: string; default_variant: string }
+          | undefined
+        if (!row) {
+          return yield* new DatabaseError({
+            message: "No config returned from update",
+          })
+        }
+        return {
+          defaultModel: row.default_model,
+          defaultVariant: row.default_variant,
+        }
+      })
 
     const addRepository = (
       input: AddRepositoryInput,
@@ -500,6 +587,8 @@ export const DbServiceLive = Layer.effect(
       })
 
     return DbService.of({
+      getConfig,
+      updateConfig,
       addRepository,
       listRepositories,
       storeIssue,
