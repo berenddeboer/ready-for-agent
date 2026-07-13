@@ -1,4 +1,8 @@
-import { useSuspenseQuery } from "@tanstack/react-query"
+import {
+  useMutation,
+  useQueryClient,
+  useSuspenseQuery,
+} from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Suspense } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
@@ -39,6 +43,16 @@ const issuesQuery = (repositoryId: string) => ({
     return result.issues
   },
 })
+
+type Repository = {
+  id: string
+  githubOwner: string
+  githubRepo: string
+  localPath: string
+  isBare: boolean
+  paused: boolean
+  issuesReconciledAt: string | null
+}
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -94,22 +108,66 @@ function RepositoryCards() {
   )
 }
 
-function RepositoryCard({
-  repository,
-}: {
-  repository: {
-    id: string
-    githubOwner: string
-    githubRepo: string
-    localPath: string
-    isBare: boolean
-    paused: boolean
-    issuesReconciledAt: string | null
+function RepositoryCard({ repository }: { repository: Repository }) {
+  const queryClient = useQueryClient()
+  const removeRepository = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        removeRepository: { __args: { repositoryId: repository.id } },
+      })
+      return result.removeRepository
+    },
+    onSuccess: async (repositoryId) => {
+      await queryClient.cancelQueries({ queryKey: repositoriesQuery.queryKey })
+      queryClient.setQueryData<readonly Repository[]>(
+        repositoriesQuery.queryKey,
+        (repositories) => repositories?.filter(({ id }) => id !== repositoryId),
+      )
+      queryClient.removeQueries({ queryKey: ["issues", repositoryId] })
+      await queryClient.invalidateQueries({
+        queryKey: repositoriesQuery.queryKey,
+      })
+    },
+  })
+
+  const confirmRemoval = () => {
+    if (
+      window.confirm(
+        `Remove ${repository.githubOwner}/${repository.githubRepo} and its stored issues?`,
+      )
+    ) {
+      removeRepository.mutate()
+    }
   }
-}) {
+
   return (
-    <article className="min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-      <div className="flex items-center justify-between gap-4">
+    <article className="relative min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
+      <button
+        type="button"
+        className="absolute top-4 right-4 inline-flex size-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-red-50 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-wait disabled:opacity-50"
+        onClick={confirmRemoval}
+        disabled={removeRepository.isPending}
+        aria-label={`Remove ${repository.githubOwner}/${repository.githubRepo}`}
+        title={`Remove ${repository.githubOwner}/${repository.githubRepo}`}
+      >
+        <svg
+          aria-hidden="true"
+          className="size-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M3 6h18" />
+          <path d="M8 6V4h8v2" />
+          <path d="m19 6-1 14H6L5 6" />
+          <path d="M10 11v5" />
+          <path d="M14 11v5" />
+        </svg>
+      </button>
+      <div className="flex items-center justify-between gap-4 pr-10">
         <span className="truncate text-[0.85rem] font-[650] text-slate-500">
           {repository.githubOwner}
         </span>
@@ -160,6 +218,11 @@ function RepositoryCard({
           </Suspense>
         )}
       </div>
+      {removeRepository.isError && (
+        <p className="mt-3 mb-0 text-sm text-red-700" role="alert">
+          Could not remove repository. Please try again.
+        </p>
+      )}
     </article>
   )
 }
