@@ -1,0 +1,17 @@
+{
+  "mcp": {
+    "nx-mcp": {
+      "type": "local",
+      "command": [
+        "npx",
+        "nx",
+        "mcp",
+        "--tools",
+        "*",
+        "--tools",
+        "!cloud_*"
+      ],
+      "enabled": true
+    }
+  }
+}
