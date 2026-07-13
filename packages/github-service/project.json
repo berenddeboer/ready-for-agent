@@ -1,0 +1,29 @@
+{
+  "name": "github-service",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/github-service/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun run generate"
+      },
+      "cache": true,
+      "inputs": ["{projectRoot}/github.graphql", "{projectRoot}/package.json"],
+      "outputs": ["{projectRoot}/src/internal/generated"]
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": ["^build"]
+    }
+  }
+}

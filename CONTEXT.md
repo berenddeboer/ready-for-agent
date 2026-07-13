@@ -30,3 +30,7 @@ _Avoid_: Credential daemon, token cache
 **Session**:
 An opencode conversation identified by opencode’s session id, scoped to a working directory, and continued across one or more prompt runs.
 _Avoid_: chat, thread, conversation (in formal docs)
+
+**Ready-labeled Issue**:
+An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, and GitHub state so consumers can decide whether it is actionable.
+_Avoid_: Ready Issue (can imply that the Issue is open and actionable)

@@ -1,0 +1,29 @@
+{
+  "name": "@ready-for-agent/github-service",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@ready-for-agent/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "genql --schema github.graphql --output ./src/internal/generated"
+  },
+  "dependencies": {
+    "effect": "^3.21.4",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@genql/cli": "^6.3.3",
+    "@types/bun": "^1.3.0"
+  }
+}
