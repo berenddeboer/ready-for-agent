@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema } from "effect"
+import { Effect, Layer, Schema, Semaphore } from "effect"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -71,21 +71,24 @@ export const keymaxxerGitHubLayer = (options: {
     GitHubService,
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
+      const tokenProvisioning = yield* Semaphore.make(1)
+      const ensureToken = tokenProvisioning.withPermits(1)(
+        Effect.gen(function* () {
+          if (yield* keymaxxer.hasSecret(githubTokenName)) return true
+
+          return yield* keymaxxer.addSecret({
+            name: githubTokenName,
+            provider: "github",
+            description: "GitHub token used to refresh configured Repositories",
+            tags: "ready-for-agent,harness,github",
+          })
+        }),
+      )
 
       const service: GitHubServiceShape = {
         listReadyIssues: (repository) =>
           Effect.gen(function* () {
-            const hasToken = yield* keymaxxer.hasSecret(githubTokenName)
-            if (!hasToken) {
-              const added = yield* keymaxxer.addSecret({
-                name: githubTokenName,
-                provider: "github",
-                description:
-                  "GitHub token used to refresh configured Repositories",
-                tags: "ready-for-agent,harness,github",
-              })
-              if (!added) return yield* requestError(repository)
-            }
+            if (!(yield* ensureToken)) return yield* requestError(repository)
 
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)

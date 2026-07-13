@@ -21,11 +21,13 @@ describe("Keymaxxer-backed GitHub layer", () => {
           return tokenPresent
         }),
       addSecret: () =>
-        Effect.sync(() => {
-          tokenAdds += 1
-          tokenPresent = true
-          return true
-        }),
+        Effect.sleep("10 millis").pipe(
+          Effect.map(() => {
+            tokenAdds += 1
+            tokenPresent = true
+            return true
+          }),
+        ),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({
@@ -51,10 +53,13 @@ describe("Keymaxxer-backed GitHub layer", () => {
     const results = await Effect.runPromise(
       Effect.gen(function* () {
         const github = yield* GitHubService
-        return [
-          yield* github.listReadyIssues({ owner: "acme", name: "widgets" }),
-          yield* github.listReadyIssues({ owner: "acme", name: "widgets" }),
-        ]
+        return yield* Effect.all(
+          [
+            github.listReadyIssues({ owner: "acme", name: "widgets" }),
+            github.listReadyIssues({ owner: "acme", name: "widgets" }),
+          ],
+          { concurrency: "unbounded" },
+        )
       }).pipe(Effect.provide(layer)),
     )
 
