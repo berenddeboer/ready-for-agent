@@ -1,7 +1,7 @@
 {
-  "name": "github-service",
+  "name": "graphql-client",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/github-service/src",
+  "sourceRoot": "packages/graphql-client/src",
   "projectType": "library",
   "tags": [],
   "targets": {
@@ -13,18 +13,18 @@
       },
       "cache": true,
       "inputs": [
-        "{projectRoot}/github.graphql",
+        "{workspaceRoot}/packages/graphql-schema/schema.graphql",
         "{projectRoot}/package.json",
         "{workspaceRoot}/bun.lock"
       ],
-      "outputs": ["{projectRoot}/src/internal/generated"]
+      "outputs": ["{projectRoot}/src/generated"]
     },
     "build": {
       "dependsOn": ["generate", "^build"],
       "inputs": [
         "default",
         "^production",
-        "{projectRoot}/github.graphql",
+        "{workspaceRoot}/packages/graphql-schema/schema.graphql",
         "{workspaceRoot}/bun.lock"
       ]
     },
@@ -33,19 +33,9 @@
       "inputs": [
         "default",
         "^production",
-        "{projectRoot}/github.graphql",
+        "{workspaceRoot}/packages/graphql-schema/schema.graphql",
         "{workspaceRoot}/bun.lock"
       ]
-    },
-    "test": {
-      "executor": "nx:run-commands",
-      "options": {
-        "cwd": "{projectRoot}",
-        "command": "bun test"
-      },
-      "inputs": ["default", "^production"],
-      "cache": true,
-      "dependsOn": ["generate", "^build"]
     }
   }
 }
