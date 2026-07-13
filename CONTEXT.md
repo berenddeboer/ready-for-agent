@@ -18,3 +18,11 @@ _Avoid_: Ticket, task (unless referring to a broader concept)
 
 **Issue store**:
 The harness capability that retains Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues.
+
+**Keymaxxer Service**:
+The backend boundary for vault operations. It can determine whether a named secret exists, request that a secret be added, and run a command with named secrets injected without exposing raw secret values to the Harness.
+_Avoid_: Secret store, credential cache
+
+**Keymaxxer Sidecar**:
+A development-only companion process that owns the Keymaxxer MCP session so watched backend reloads do not repeat vault-unlock or secret-use approval prompts.
+_Avoid_: Credential daemon, token cache
