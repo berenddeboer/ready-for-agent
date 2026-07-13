@@ -579,7 +579,7 @@ export const SqliteQueueServiceLive = Layer.succeed(
             })
             .from(schema.jobQueue)
             .where(eq(schema.jobQueue.queue, queue)),
-        ).pipe(Effect.catchAll(() => Effect.succeed([] as const)))
+        ).pipe(Effect.orElseSucceed(() => [] as const))
 
         return (
           stats[0] ?? {

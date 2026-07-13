@@ -1,0 +1,23 @@
+type Query {
+  health: Boolean!
+}
+
+type Repository {
+  id: ID!
+  githubOwner: String!
+  githubRepo: String!
+  localPath: String!
+  isBare: Boolean!
+  paused: Boolean!
+}
+
+input AddRepositoryInput {
+  githubOwner: String!
+  githubRepo: String!
+  localPath: String!
+  isBare: Boolean!
+}
+
+type Mutation {
+  addRepository(input: AddRepositoryInput!): Repository!
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@ready-for-agent/db-schema",
+  "name": "@ready-for-agent/graphql-client",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -16,19 +16,13 @@
     }
   },
   "scripts": {
-    "generate": "drizzle-kit generate",
+    "generate": "genql --schema ../graphql-schema/schema.graphql --output ./src/generated",
     "typecheck": "tsc --noEmit -p tsconfig.lib.json"
   },
   "nx": {
-    "name": "db-schema"
-  },
-  "dependencies": {
-    "drizzle-orm": "1.0.0-rc.4-5d5b77c",
-    "effect": "^3.21.4",
-    "tslib": "^2.3.0",
-    "ulidx": "^2.4.1"
+    "name": "graphql-client"
   },
   "devDependencies": {
-    "drizzle-kit": "1.0.0-rc.4-5d5b77c"
+    "@genql/cli": "^6.3.3"
   }
 }

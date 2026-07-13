@@ -11,13 +11,12 @@
     "noEmit": true,
     "rootDir": "src",
     "tsBuildInfoFile": "./out-tsc/app/tsconfig.app.tsbuildinfo",
-    "types": ["node"]
+    "types": ["bun"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts"],
   "references": [
     {
-      "path": "../../packages/graphql-client/tsconfig.lib.json"
+      "path": "../../packages/graphql-schema/tsconfig.lib.json"
     }
   ]
 }

@@ -162,6 +162,7 @@ export interface QueueServiceShape<R = never> {
   ) => Effect.Effect<QueueStats, InvalidQueueNameError, R>
 }
 
+/** @effect-expect-leaking any */
 export class QueueService extends Context.Tag(
   "@ready-for-agent/queue-service/QueueService",
 )<
