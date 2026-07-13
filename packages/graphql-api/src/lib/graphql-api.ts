@@ -34,6 +34,10 @@ type RefreshRepositoryArgs = {
   repositoryId: string
 }
 
+type RemoveRepositoryArgs = {
+  repositoryId: string
+}
+
 type UpdateConfigArgs = {
   input: {
     defaultModel: string
@@ -240,6 +244,24 @@ export const createGraphqlApi = (
                 Effect.gen(function* () {
                   const db = yield* DbService
                   return yield* db.addRepository(args.input)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          removeRepository: async (
+            _parent: unknown,
+            args: RemoveRepositoryArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  yield* db.removeRepository(args.repositoryId)
+                  return args.repositoryId
                 }),
               ),
             )

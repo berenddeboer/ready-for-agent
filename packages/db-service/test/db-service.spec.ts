@@ -224,6 +224,48 @@ describe("DbService", () => {
       ))
   })
 
+  describe("removeRepository", () => {
+    it("removes the repository, its issues, and issue dependencies", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Remove with repository",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            blockedBy: [
+              {
+                githubIssueNumber: 7,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/7",
+              },
+            ],
+          })
+
+          yield* db.removeRepository(repository.id)
+
+          expect(yield* db.listRepositories).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM issue")).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM issue_dependency")).toEqual(
+            [],
+          )
+        }),
+      ))
+
+    it("fails when the repository does not exist", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const error = yield* Effect.flip(db.removeRepository("repo-missing"))
+
+          expect(error).toBeInstanceOf(RepositoryNotFoundError)
+        }),
+      ))
+  })
+
   describe("issues", () => {
     const addTestRepository = (db: DbService) => db.addRepository(sampleInput)
 

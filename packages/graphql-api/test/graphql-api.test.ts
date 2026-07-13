@@ -54,6 +54,7 @@ const makeRuntime = (
     updateConfig: (input) => Effect.succeed(input),
     addRepository: () => Effect.succeed(repository),
     listRepositories: Effect.succeed([repository]),
+    removeRepository: () => Effect.die("not used"),
     storeIssue: () => Effect.die("not used"),
     listIssues: () => Effect.die("not used"),
     deleteIssue: () => Effect.die("not used"),
@@ -160,6 +161,31 @@ describe("GraphQL API", () => {
         ],
       },
     })
+  })
+
+  test("removes a repository", async () => {
+    let removedRepositoryId: string | undefined
+    await runtime.dispose()
+    runtime = makeRuntime({
+      removeRepository: (repositoryId) => {
+        removedRepositoryId = repositoryId
+        return Effect.void
+      },
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RemoveRepository($repositoryId: ID!) {
+          removeRepository(repositoryId: $repositoryId)
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: { removeRepository: repository.id },
+    })
+    expect(removedRepositoryId).toBe(repository.id)
   })
 
   test("reads and updates config", async () => {

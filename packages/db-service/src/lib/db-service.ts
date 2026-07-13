@@ -145,6 +145,9 @@ export interface DbServiceShape {
     readonly RepositoryRecord[],
     DatabaseError
   >
+  readonly removeRepository: (
+    repositoryId: string,
+  ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
   readonly storeIssue: (
     input: StoreIssueInput,
   ) => Effect.Effect<
@@ -415,6 +418,40 @@ export const DbServiceLive = Layer.effect(
           return yield* new RepositoryNotFoundError({ repositoryId })
         }
       })
+
+    const removeRepository = (
+      repositoryId: string,
+    ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql.unsafe(
+              `DELETE FROM issue_dependency
+               WHERE issue_id IN (
+                 SELECT id FROM issue WHERE repository_id = ?
+               )`,
+              [repositoryId],
+            )
+            yield* sql.unsafe("DELETE FROM issue WHERE repository_id = ?", [
+              repositoryId,
+            ])
+            const result = yield* sql.unsafe(
+              "DELETE FROM repository WHERE id = ? RETURNING id",
+              [repositoryId],
+            )
+
+            if (!result[0]) {
+              return yield* new RepositoryNotFoundError({ repositoryId })
+            }
+          }),
+        )
+        .pipe(
+          Effect.mapError((error) =>
+            error instanceof RepositoryNotFoundError
+              ? error
+              : toDatabaseError(error),
+          ),
+        )
 
     const storeIssue = (
       input: StoreIssueInput,
@@ -731,6 +768,7 @@ export const DbServiceLive = Layer.effect(
       updateConfig,
       addRepository,
       listRepositories,
+      removeRepository,
       storeIssue,
       listIssues,
       deleteIssue,

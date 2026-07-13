@@ -59,6 +59,7 @@ input UpdateConfigInput {
 
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
+  removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RepositoryRefresh!
   updateConfig(input: UpdateConfigInput!): Config!
 }
