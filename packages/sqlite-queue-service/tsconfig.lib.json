@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
+    "emitDeclarationOnly": false,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    {
+      "path": "../db/tsconfig.lib.json"
+    },
+    {
+      "path": "../db-schema/tsconfig.lib.json"
+    },
+    {
+      "path": "../queue-service/tsconfig.lib.json"
+    }
+  ]
+}
