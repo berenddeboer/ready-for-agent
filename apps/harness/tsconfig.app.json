@@ -26,6 +26,12 @@
       "path": "../../packages/graphql-api/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/github-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/issue-reconciler/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/db-service/tsconfig.lib.json"
     },
     {

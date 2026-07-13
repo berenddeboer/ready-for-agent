@@ -13,8 +13,10 @@
   "dependencies": {
     "@ready-for-agent/db": "workspace:*",
     "@ready-for-agent/db-service": "workspace:*",
+    "@ready-for-agent/github-service": "workspace:*",
     "@ready-for-agent/graphql-api": "workspace:*",
     "@ready-for-agent/graphql-client": "workspace:*",
+    "@ready-for-agent/issue-reconciler": "workspace:*",
     "@ready-for-agent/keymaxxer-service": "workspace:*",
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-query-devtools": "^5.90.0",

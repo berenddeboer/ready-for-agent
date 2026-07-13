@@ -2,7 +2,8 @@ export default {
     "scalars": [
         1,
         3,
-        4
+        4,
+        6
     ],
     "types": {
         "Query": {
@@ -42,6 +43,27 @@ export default {
         },
         "ID": {},
         "String": {},
+        "RepositoryRefresh": {
+            "fetched": [
+                6
+            ],
+            "inserted": [
+                6
+            ],
+            "updated": [
+                6
+            ],
+            "deleted": [
+                6
+            ],
+            "unchanged": [
+                6
+            ],
+            "__typename": [
+                4
+            ]
+        },
+        "Int": {},
         "AddRepositoryInput": {
             "githubOwner": [
                 4
@@ -64,8 +86,17 @@ export default {
                 2,
                 {
                     "input": [
-                        5,
+                        7,
                         "AddRepositoryInput!"
+                    ]
+                }
+            ],
+            "refreshRepository": [
+                5,
+                {
+                    "repositoryId": [
+                        3,
+                        "ID!"
                     ]
                 }
             ],

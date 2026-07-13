@@ -2,6 +2,8 @@
 
 Ready for Agent uses a shared backend Keymaxxer Service that never exposes raw secret values. During `harness:dev`, the separate `apps/keymaxxer-sidecar` application owns the long-lived Keymaxxer MCP session so TanStack server reloads do not repeat vault-unlock or secret-use approval prompts; production creates the MCP client in-process and does not run a sidecar.
 
+Keymaxxer is responsible for launching or provisioning application processes with named secrets injected into their environment. It is not a dependency of GitHub domain operations: `GitHubService` obtains `GITHUB_TOKEN` through Effect `Config`, and the GraphQL API invokes the Issue Reconciler without accepting a token argument. This keeps credential delivery at the application boundary instead of coupling GitHub requests or GraphQL resolvers to Keymaxxer.
+
 The sidecar is a development tool attached specifically to `harness:dev` and is restricted to loopback communication. Remote sidecar URLs and remote authentication are deliberately unsupported because the service can execute commands with injected secrets and there is no remote-use requirement.
 
 Because loopback alone does not prevent requests from malicious webpages, operation endpoints reject requests with an `Origin` header and require `application/json`. This causes browser JSON requests to require a CORS preflight, which the sidecar does not permit.

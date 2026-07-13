@@ -15,6 +15,12 @@
     },
     {
       "path": "../graphql-schema/tsconfig.lib.json"
+    },
+    {
+      "path": "../github-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../issue-reconciler/tsconfig.lib.json"
     }
   ]
 }

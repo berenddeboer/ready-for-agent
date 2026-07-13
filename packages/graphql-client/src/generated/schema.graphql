@@ -12,6 +12,14 @@ type Repository {
   paused: Boolean!
 }
 
+type RepositoryRefresh {
+  fetched: Int!
+  inserted: Int!
+  updated: Int!
+  deleted: Int!
+  unchanged: Int!
+}
+
 input AddRepositoryInput {
   githubOwner: String!
   githubRepo: String!
@@ -21,4 +29,5 @@ input AddRepositoryInput {
 
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
+  refreshRepository(repositoryId: ID!): RepositoryRefresh!
 }

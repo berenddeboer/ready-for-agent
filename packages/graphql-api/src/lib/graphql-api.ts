@@ -7,8 +7,17 @@ import {
   InvalidRepositoryInputError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
+  RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
+import {
+  GitHubRepositoryUnavailableError,
+  GitHubRequestError,
+} from "@ready-for-agent/github-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
+import {
+  IssueReconciler,
+  ReconciliationMutationError,
+} from "@ready-for-agent/issue-reconciler"
 
 type AddRepositoryArgs = {
   input: {
@@ -19,7 +28,14 @@ type AddRepositoryArgs = {
   }
 }
 
-export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<DbService, unknown>
+type RefreshRepositoryArgs = {
+  repositoryId: string
+}
+
+export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
+  DbService | IssueReconciler,
+  unknown
+>
 
 const toGraphQLError = (error: unknown): GraphQLError => {
   if (error instanceof RepositoryAlreadyExistsError) {
@@ -39,6 +55,37 @@ const toGraphQLError = (error: unknown): GraphQLError => {
     return new GraphQLError(error.message, {
       extensions: { code: "INVALID_REPOSITORY_INPUT", field: error.field },
     })
+  }
+  if (error instanceof RepositoryNotFoundError) {
+    return new GraphQLError(`Repository not found: ${error.repositoryId}`, {
+      extensions: { code: "REPOSITORY_NOT_FOUND" },
+    })
+  }
+  if (error instanceof GitHubRepositoryUnavailableError) {
+    return new GraphQLError(
+      `GitHub repository is unavailable: ${error.owner}/${error.name}`,
+      { extensions: { code: "GITHUB_REPOSITORY_UNAVAILABLE" } },
+    )
+  }
+  if (error instanceof GitHubRequestError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "GITHUB_REQUEST_ERROR" },
+    })
+  }
+  if (error instanceof ReconciliationMutationError) {
+    return new GraphQLError(
+      `Failed to ${error.operation} while refreshing repository`,
+      {
+        extensions: {
+          code: "REPOSITORY_REFRESH_FAILED",
+          operation: error.operation,
+          ...(error.githubIssueNumber === undefined
+            ? {}
+            : { githubIssueNumber: error.githubIssueNumber }),
+          progress: error.progress,
+        },
+      },
+    )
   }
   if (error instanceof DatabaseError) {
     return new GraphQLError(error.message, {
@@ -103,6 +150,34 @@ export const createGraphqlApi = (runtime: GraphqlRuntime) => {
                 Effect.gen(function* () {
                   const db = yield* DbService
                   return yield* db.addRepository(args.input)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          refreshRepository: async (
+            _parent: unknown,
+            args: RefreshRepositoryArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  const repositories = yield* db.listRepositories
+                  const repository = repositories.find(
+                    ({ id }) => id === args.repositoryId,
+                  )
+                  if (repository === undefined) {
+                    return yield* new RepositoryNotFoundError({
+                      repositoryId: args.repositoryId,
+                    })
+                  }
+
+                  const reconciler = yield* IssueReconciler
+                  return yield* reconciler.reconcile(repository)
                 }),
               ),
             )
