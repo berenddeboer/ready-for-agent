@@ -34,6 +34,33 @@ export const repository = snakeCase.table(
   ],
 )
 
+export const issue = snakeCase.table(
+  "issue",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `issue-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    githubIssueNumber: integer().notNull(),
+    title: text().notNull(),
+    githubCreatedAt: integer({ mode: "number" }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("issue_repository_id_github_issue_number_uidx").on(
+      t.repositoryId,
+      t.githubIssueNumber,
+    ),
+  ],
+)
+
 /**
  * Background job queue (SQS-style visibility timeout semantics).
  * See xplain: type job queue "qjob"

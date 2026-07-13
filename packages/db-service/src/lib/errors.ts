@@ -20,6 +20,19 @@ export class LocalPathInUseError extends Data.TaggedError(
   readonly localPath: string
 }> {}
 
+export class RepositoryNotFoundError extends Data.TaggedError(
+  "RepositoryNotFoundError",
+)<{
+  readonly repositoryId: string
+}> {}
+
+export class InvalidIssueInputError extends Data.TaggedError(
+  "InvalidIssueInputError",
+)<{
+  readonly field: "githubIssueNumber" | "title" | "githubCreatedAt"
+  readonly message: string
+}> {}
+
 export class DatabaseError extends Data.TaggedError("DatabaseError")<{
   readonly message: string
   readonly cause?: unknown
