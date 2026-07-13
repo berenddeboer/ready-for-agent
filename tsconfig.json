@@ -47,6 +47,9 @@
     },
     {
       "path": "./apps/keymaxxer-sidecar"
+    },
+    {
+      "path": "./packages/issue-reconciler"
     }
   ]
 }

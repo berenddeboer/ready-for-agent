@@ -19,6 +19,7 @@ export const repository = snakeCase.table(
     localPath: text().notNull().unique(),
     isBare: integer({ mode: "boolean" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(true),
+    issuesReconciledAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -45,6 +46,9 @@ export const issue = snakeCase.table(
       .references(() => repository.id, { onDelete: "cascade" }),
     githubIssueNumber: integer().notNull(),
     title: text().notNull(),
+    body: text().notNull(),
+    url: text().notNull(),
+    state: text({ enum: ["OPEN", "CLOSED"] }).notNull(),
     githubCreatedAt: integer({ mode: "number" }).notNull(),
     createdAt: integer({ mode: "number" })
       .notNull()

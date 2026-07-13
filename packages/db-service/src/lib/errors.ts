@@ -29,7 +29,12 @@ export class RepositoryNotFoundError extends Data.TaggedError(
 export class InvalidIssueInputError extends Data.TaggedError(
   "InvalidIssueInputError",
 )<{
-  readonly field: "githubIssueNumber" | "title" | "githubCreatedAt"
+  readonly field:
+    | "githubIssueNumber"
+    | "title"
+    | "url"
+    | "state"
+    | "githubCreatedAt"
   readonly message: string
 }> {}
 

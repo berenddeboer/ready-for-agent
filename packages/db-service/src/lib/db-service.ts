@@ -74,6 +74,7 @@ const toRecord = (row: {
   localPath: string
   isBare: boolean | number
   paused: boolean | number
+  issuesReconciledAt: number | null
 }): RepositoryRecord => ({
   id: row.id,
   githubOwner: row.githubOwner,
@@ -81,6 +82,8 @@ const toRecord = (row: {
   localPath: row.localPath,
   isBare: Boolean(row.isBare),
   paused: Boolean(row.paused),
+  issuesReconciledAt:
+    row.issuesReconciledAt === null ? null : new Date(row.issuesReconciledAt),
 })
 
 const toIssueRecord = (row: {
@@ -88,12 +91,18 @@ const toIssueRecord = (row: {
   repositoryId: string
   githubIssueNumber: number
   title: string
+  body: string
+  url: string
+  state: "OPEN" | "CLOSED"
   githubCreatedAt: number
 }): IssueRecord => ({
   id: row.id,
   repositoryId: row.repositoryId,
   githubIssueNumber: row.githubIssueNumber,
   title: row.title,
+  body: row.body,
+  url: row.url,
+  state: row.state,
   githubCreatedAt: new Date(row.githubCreatedAt),
 })
 
@@ -125,6 +134,14 @@ export interface DbServiceShape {
     readonly IssueRecord[],
     RepositoryNotFoundError | DatabaseError
   >
+  readonly deleteIssue: (
+    repositoryId: string,
+    githubIssueNumber: number,
+  ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
+  readonly markIssuesReconciled: (
+    repositoryId: string,
+    reconciledAt: Date,
+  ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
 }
 
 export class DbService extends Context.Service<DbService, DbServiceShape>()(
@@ -186,7 +203,7 @@ export const DbServiceLive = Layer.effect(
             `INSERT INTO repository (
                id, github_owner, github_repo, local_path, is_bare, paused, created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             RETURNING id, github_owner, github_repo, local_path, is_bare, paused`,
+             RETURNING id, github_owner, github_repo, local_path, is_bare, paused, issues_reconciled_at`,
             [
               id,
               githubOwner,
@@ -225,6 +242,7 @@ export const DbServiceLive = Layer.effect(
               local_path: string
               is_bare: boolean | number
               paused: boolean | number
+              issues_reconciled_at: number | null
             }
           | undefined
         if (!row) {
@@ -240,6 +258,7 @@ export const DbServiceLive = Layer.effect(
           localPath: row.local_path,
           isBare: row.is_bare,
           paused: row.paused,
+          issuesReconciledAt: row.issues_reconciled_at,
         })
       })
 
@@ -280,6 +299,18 @@ export const DbServiceLive = Layer.effect(
             message: "title cannot be empty",
           })
         }
+        if (input.url.trim().length === 0) {
+          return yield* new InvalidIssueInputError({
+            field: "url",
+            message: "url cannot be empty",
+          })
+        }
+        if (input.state !== "OPEN" && input.state !== "CLOSED") {
+          return yield* new InvalidIssueInputError({
+            field: "state",
+            message: "state must be OPEN or CLOSED",
+          })
+        }
         if (Number.isNaN(input.githubCreatedAt.getTime())) {
           return yield* new InvalidIssueInputError({
             field: "githubCreatedAt",
@@ -293,18 +324,26 @@ export const DbServiceLive = Layer.effect(
         const result = yield* sql
           .unsafe(
             `INSERT INTO issue (
-               id, repository_id, github_issue_number, title, github_created_at, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+               id, repository_id, github_issue_number, title, body, url, state,
+               github_created_at, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (repository_id, github_issue_number) DO UPDATE SET
                title = excluded.title,
+               body = excluded.body,
+               url = excluded.url,
+               state = excluded.state,
                github_created_at = excluded.github_created_at,
                updated_at = excluded.updated_at
-             RETURNING id, repository_id, github_issue_number, title, github_created_at`,
+             RETURNING id, repository_id, github_issue_number, title, body, url, state,
+               github_created_at`,
             [
               `issue-${ulid()}`,
               input.repositoryId,
               input.githubIssueNumber,
               input.title,
+              input.body,
+              input.url,
+              input.state,
               input.githubCreatedAt.getTime(),
               now,
               now,
@@ -318,6 +357,9 @@ export const DbServiceLive = Layer.effect(
               repository_id: string
               github_issue_number: number
               title: string
+              body: string
+              url: string
+              state: "OPEN" | "CLOSED"
               github_created_at: number
             }
           | undefined
@@ -332,6 +374,9 @@ export const DbServiceLive = Layer.effect(
           repositoryId: row.repository_id,
           githubIssueNumber: row.github_issue_number,
           title: row.title,
+          body: row.body,
+          url: row.url,
+          state: row.state,
           githubCreatedAt: row.github_created_at,
         })
       })
@@ -347,7 +392,8 @@ export const DbServiceLive = Layer.effect(
 
         const issues = yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, title, github_created_at
+            `SELECT id, repository_id, github_issue_number, title, body, url, state,
+               github_created_at
              FROM issue WHERE repository_id = ? ORDER BY github_issue_number ASC`,
             [repositoryId],
           )
@@ -359,6 +405,9 @@ export const DbServiceLive = Layer.effect(
             repository_id: string
             github_issue_number: number
             title: string
+            body: string
+            url: string
+            state: "OPEN" | "CLOSED"
             github_created_at: number
           }>
         ).map((issue) =>
@@ -367,11 +416,55 @@ export const DbServiceLive = Layer.effect(
             repositoryId: issue.repository_id,
             githubIssueNumber: issue.github_issue_number,
             title: issue.title,
+            body: issue.body,
+            url: issue.url,
+            state: issue.state,
             githubCreatedAt: issue.github_created_at,
           }),
         )
       })
 
-    return DbService.of({ addRepository, storeIssue, listIssues })
+    const deleteIssue = (
+      repositoryId: string,
+      githubIssueNumber: number,
+    ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
+      Effect.gen(function* () {
+        yield* ensureRepositoryExists(repositoryId)
+        yield* sql
+          .unsafe(
+            `DELETE FROM issue
+             WHERE repository_id = ? AND github_issue_number = ?`,
+            [repositoryId, githubIssueNumber],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+      })
+
+    const markIssuesReconciled = (
+      repositoryId: string,
+      reconciledAt: Date,
+    ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
+      Effect.gen(function* () {
+        const result = yield* sql
+          .unsafe(
+            `UPDATE repository
+             SET issues_reconciled_at = ?, updated_at = ?
+             WHERE id = ?
+             RETURNING id`,
+            [reconciledAt.getTime(), Date.now(), repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+
+        if (!result[0]) {
+          return yield* new RepositoryNotFoundError({ repositoryId })
+        }
+      })
+
+    return DbService.of({
+      addRepository,
+      storeIssue,
+      listIssues,
+      deleteIssue,
+      markIssuesReconciled,
+    })
   }),
 )

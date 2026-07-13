@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DbService,
@@ -27,6 +28,12 @@ describe("DbService", () => {
     isBare: true,
   }
 
+  const sampleIssueFields = {
+    body: "Issue body",
+    url: "https://github.com/acme/widgets/issues/42",
+    state: "OPEN" as const,
+  }
+
   describe("addRepository", () => {
     it("inserts a repository paused with a repo- prefixed id", () =>
       runTest(
@@ -40,6 +47,7 @@ describe("DbService", () => {
           expect(repo.localPath).toBe("/repos/acme/widgets.git")
           expect(repo.isBare).toBe(true)
           expect(repo.paused).toBe(true)
+          expect(repo.issuesReconciledAt).toBeNull()
         }),
       ))
 
@@ -148,6 +156,7 @@ describe("DbService", () => {
             repositoryId: repository.id,
             githubIssueNumber: 42,
             title: "  Preserve title spacing  ",
+            ...sampleIssueFields,
             githubCreatedAt,
           })
 
@@ -155,6 +164,9 @@ describe("DbService", () => {
           expect(issue.repositoryId).toBe(repository.id)
           expect(issue.githubIssueNumber).toBe(42)
           expect(issue.title).toBe("  Preserve title spacing  ")
+          expect(issue.body).toBe("Issue body")
+          expect(issue.url).toBe("https://github.com/acme/widgets/issues/42")
+          expect(issue.state).toBe("OPEN")
           expect(issue.githubCreatedAt).toEqual(githubCreatedAt)
         }),
       ))
@@ -168,17 +180,23 @@ describe("DbService", () => {
             repositoryId: repository.id,
             githubIssueNumber: 42,
             title: "Original title",
+            ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
           })
           const updated = yield* db.storeIssue({
             repositoryId: repository.id,
             githubIssueNumber: 42,
             title: "Updated title",
+            ...sampleIssueFields,
+            body: "Updated body",
+            state: "CLOSED",
             githubCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
           })
 
           expect(updated.id).toBe(first.id)
           expect(updated.title).toBe("Updated title")
+          expect(updated.body).toBe("Updated body")
+          expect(updated.state).toBe("CLOSED")
           expect(updated.githubCreatedAt).toEqual(
             new Date("2026-07-02T12:00:00.000Z"),
           )
@@ -201,18 +219,21 @@ describe("DbService", () => {
             repositoryId: repository.id,
             githubIssueNumber: 10,
             title: "Tenth",
+            ...sampleIssueFields,
             githubCreatedAt,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
             githubIssueNumber: 2,
             title: "Second",
+            ...sampleIssueFields,
             githubCreatedAt,
           })
           yield* db.storeIssue({
             repositoryId: otherRepository.id,
             githubIssueNumber: 1,
             title: "Other repository",
+            ...sampleIssueFields,
             githubCreatedAt,
           })
 
@@ -234,6 +255,7 @@ describe("DbService", () => {
               repositoryId: repository.id,
               githubIssueNumber: 0,
               title: "Valid title",
+              ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             }),
           )
@@ -255,6 +277,7 @@ describe("DbService", () => {
               repositoryId: repository.id,
               githubIssueNumber: 1,
               title: "   ",
+              ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             }),
           )
@@ -263,6 +286,7 @@ describe("DbService", () => {
               repositoryId: repository.id,
               githubIssueNumber: 1,
               title: "Valid title",
+              ...sampleIssueFields,
               githubCreatedAt: new Date("invalid"),
             }),
           )
@@ -281,6 +305,7 @@ describe("DbService", () => {
               repositoryId: "repo-unknown",
               githubIssueNumber: 1,
               title: "Unknown repository",
+              ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             }),
           )
@@ -288,6 +313,34 @@ describe("DbService", () => {
 
           expect(error).toBeInstanceOf(RepositoryNotFoundError)
           expect(listError).toBeInstanceOf(RepositoryNotFoundError)
+        }),
+      ))
+
+    it("deletes an issue idempotently and records reconciliation success", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* addTestRepository(db)
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Delete me",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          })
+
+          yield* db.deleteIssue(repository.id, 42)
+          yield* db.deleteIssue(repository.id, 42)
+          const reconciledAt = new Date("2026-07-13T08:00:00.000Z")
+          yield* db.markIssuesReconciled(repository.id, reconciledAt)
+
+          expect(yield* db.listIssues(repository.id)).toEqual([])
+          const rows = yield* sql.unsafe(
+            "SELECT issues_reconciled_at FROM repository WHERE id = ?",
+            [repository.id],
+          )
+          expect(rows[0]?.["issues_reconciled_at"]).toBe(reconciledAt.getTime())
         }),
       ))
   })
