@@ -8,7 +8,10 @@ import {
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 
-const githubTokenName = "GITHUB_TOKEN"
+const githubTokenName = (repository: { owner: string; name: string }) =>
+  `GITHUB_TOKEN_${repository.owner}_${repository.name}`
+    .replace(/[^A-Za-z0-9_]/g, "_")
+    .toUpperCase()
 
 const SerializedIssue = Schema.Struct({
   number: Schema.Finite,
@@ -102,30 +105,47 @@ export const keymaxxerGitHubLayer = (options: {
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
       const tokenProvisioning = yield* Semaphore.make(1)
-      const ensureToken = tokenProvisioning.withPermits(1)(
-        Effect.gen(function* () {
-          if (yield* keymaxxer.hasSecret(githubTokenName)) return true
+      const ensureToken = (repository: { owner: string; name: string }) =>
+        tokenProvisioning.withPermits(1)(
+          Effect.gen(function* () {
+            const account = `${repository.owner}/${repository.name}`
+            const existingToken = yield* keymaxxer.findSecret({
+              provider: "github",
+              account,
+            })
+            if (existingToken !== null) return existingToken
 
-          return yield* keymaxxer.addSecret({
-            name: githubTokenName,
-            provider: "github",
-            description: "GitHub token used to refresh configured Repositories",
-            tags: "ready-for-agent,harness,github",
-          })
-        }),
-      )
+            const tokenName = githubTokenName(repository)
+            if (yield* keymaxxer.hasSecret(tokenName)) return null
+
+            const added = yield* keymaxxer.addSecret({
+              name: tokenName,
+              provider: "github",
+              account,
+              environment: "prod",
+              access: "read-only",
+              description: `Fine-grained GitHub token for Ready for Agent on ${repository.owner}/${repository.name}`,
+              tags: "ready-for-agent,harness,github",
+            })
+            if (!added) return null
+            return yield* keymaxxer.findSecret({ provider: "github", account })
+          }),
+        )
 
       const service: GitHubServiceShape = {
         listReadyIssues: (repository) =>
           Effect.gen(function* () {
-            if (!(yield* ensureToken)) return yield* requestError(repository)
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(repository)
+            }
 
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const result = yield* keymaxxer.runWithSecrets({
-              command: `bun --conditions @ready-for-agent/source packages/github-service/src/bin/list-ready-issues.ts ${owner} ${name}`,
+              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/list-ready-issues.ts ${owner} ${name}`,
               cwd: options.workspaceRoot,
-              secrets: [githubTokenName],
+              secrets: [tokenName],
               timeoutMs: 60_000,
             })
 

@@ -2,6 +2,8 @@ import { Effect, Schema } from "effect"
 import {
   AddSecretInput,
   AddSecretResponse,
+  FindSecretInput,
+  FindSecretResponse,
   HasSecretInput,
   HasSecretResponse,
   InitializeResponse,
@@ -60,6 +62,16 @@ export const createKeymaxxerSidecarFetch = (
           if (!validateSecretName(input.name)) return invalidInput()
           return schemaResponse(HasSecretResponse, {
             hasSecret: await runEffect(keymaxxer.hasSecret(input.name)),
+          })
+        }
+        case "/find-secret": {
+          const input = decodeRequest(
+            FindSecretInput,
+            await requestBody(request),
+            ["provider", "account"],
+          )
+          return schemaResponse(FindSecretResponse, {
+            name: await runEffect(keymaxxer.findSecret(input)),
           })
         }
         case "/add-secret": {

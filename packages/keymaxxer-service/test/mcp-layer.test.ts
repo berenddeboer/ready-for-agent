@@ -51,15 +51,137 @@ describe("MCP Keymaxxer layer", () => {
     expect(listCalls).toBe(2)
   })
 
-  test("updates the cache after add and treats cancellation as false", async () => {
+  test("finds a secret by provider and account metadata", async () => {
+    const client: KeymaxxerToolClient = {
+      callTool: async () =>
+        textResult(
+          JSON.stringify([
+            {
+              name: "GITHUB_TOKEN_PROCESSFOCUS_MONOREPO",
+              provider: "github",
+              account: "processfocus/monorepo",
+            },
+          ]),
+        ),
+      close: async () => {},
+    }
+
+    const name = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        return yield* keymaxxer.findSecret({
+          provider: "GitHub",
+          account: "ProcessFocus/Monorepo",
+        })
+      }).pipe(
+        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
+      ),
+    )
+
+    expect(name).toBe("GITHUB_TOKEN_PROCESSFOCUS_MONOREPO")
+  })
+
+  test("refreshes metadata before each secret lookup", async () => {
+    let listCalls = 0
+    const client: KeymaxxerToolClient = {
+      callTool: async () => {
+        listCalls += 1
+        return textResult(
+          JSON.stringify([
+            {
+              name: listCalls === 1 ? "OLD_TOKEN" : "RENAMED_TOKEN",
+              provider: "github",
+              account: "acme/widgets",
+            },
+          ]),
+        )
+      },
+      close: async () => {},
+    }
+
+    const names = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        const first = yield* keymaxxer.findSecret({
+          provider: "github",
+          account: "acme/widgets",
+        })
+        const second = yield* keymaxxer.findSecret({
+          provider: "github",
+          account: "acme/widgets",
+        })
+        return [first, second]
+      }).pipe(
+        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
+      ),
+    )
+
+    expect(names).toEqual(["OLD_TOKEN", "RENAMED_TOKEN"])
+    expect(listCalls).toBe(2)
+  })
+
+  test("rejects multiple secrets for the same provider and account", async () => {
+    const client: KeymaxxerToolClient = {
+      callTool: async () =>
+        textResult(
+          JSON.stringify([
+            {
+              name: "FIRST_TOKEN",
+              provider: "github",
+              account: "acme/widgets",
+            },
+            {
+              name: "SECOND_TOKEN",
+              provider: "github",
+              account: "acme/widgets",
+            },
+          ]),
+        ),
+      close: async () => {},
+    }
+
+    const exit = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        return yield* Effect.exit(
+          keymaxxer.findSecret({
+            provider: "github",
+            account: "acme/widgets",
+          }),
+        )
+      }).pipe(
+        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
+      ),
+    )
+
+    expect(exit._tag).toBe("Failure")
+  })
+
+  test("refreshes user-edited metadata after add and treats cancellation as false", async () => {
     const calls: string[] = []
+    let added = false
     const client: KeymaxxerToolClient = {
       callTool: async ({ arguments: input, name }) => {
         calls.push(name)
-        if (name === "keymaxxer_list") return textResult("[]")
+        if (name === "keymaxxer_list") {
+          return textResult(
+            JSON.stringify(
+              added
+                ? [
+                    {
+                      name: "EDITED_SECRET",
+                      provider: "github",
+                      account: "edited/repository",
+                    },
+                  ]
+                : [],
+            ),
+          )
+        }
         if (input.name === "CANCELLED_SECRET") {
           return textResult("Secret entry cancelled", true)
         }
+        added = true
         return textResult("Secret saved")
       },
       close: async () => {},
@@ -69,19 +191,36 @@ describe("MCP Keymaxxer layer", () => {
       Effect.gen(function* () {
         const keymaxxer = yield* KeymaxxerService
         yield* keymaxxer.initialize
-        const added = yield* keymaxxer.addSecret({ name: "NEW_SECRET" })
-        const present = yield* keymaxxer.hasSecret("NEW_SECRET")
+        const wasAdded = yield* keymaxxer.addSecret({
+          name: "SUGGESTED_SECRET",
+          provider: "github",
+          account: "suggested/repository",
+        })
+        const actualName = yield* keymaxxer.findSecret({
+          provider: "github",
+          account: "edited/repository",
+        })
         const cancelled = yield* keymaxxer.addSecret({
           name: "CANCELLED_SECRET",
         })
-        return { added, present, cancelled }
+        return { wasAdded, actualName, cancelled }
       }).pipe(
         Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
       ),
     )
 
-    expect(result).toEqual({ added: true, present: true, cancelled: false })
-    expect(calls).toEqual(["keymaxxer_list", "keymaxxer_add", "keymaxxer_add"])
+    expect(result).toEqual({
+      wasAdded: true,
+      actualName: "EDITED_SECRET",
+      cancelled: false,
+    })
+    expect(calls).toEqual([
+      "keymaxxer_list",
+      "keymaxxer_add",
+      "keymaxxer_list",
+      "keymaxxer_list",
+      "keymaxxer_add",
+    ])
   })
 
   test("returns non-zero command results with separate output streams", async () => {

@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect"
 import type {
   AddSecretInput,
+  FindSecretInput,
   KeymaxxerError,
   RunWithSecretsInput,
   RunWithSecretsResult,
@@ -12,6 +13,9 @@ export interface KeymaxxerServiceShape {
   readonly hasSecret: (
     name: SecretName,
   ) => Effect.Effect<boolean, KeymaxxerError>
+  readonly findSecret: (
+    input: FindSecretInput,
+  ) => Effect.Effect<SecretName | null, KeymaxxerError>
   readonly addSecret: (
     input: AddSecretInput,
   ) => Effect.Effect<boolean, KeymaxxerError>
@@ -34,6 +38,7 @@ export const testKeymaxxerLayer = (
     return {
       initialize: Effect.void,
       hasSecret: (name: SecretName) => Effect.succeed(secrets.has(name)),
+      findSecret: () => Effect.succeed(null),
       addSecret: (input: AddSecretInput) =>
         Effect.sync(() => {
           secrets.add(input.name)

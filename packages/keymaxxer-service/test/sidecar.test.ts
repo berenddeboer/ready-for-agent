@@ -13,6 +13,7 @@ const fakeService = (
 ): KeymaxxerServiceShape => ({
   initialize: Effect.void,
   hasSecret: () => Effect.succeed(false),
+  findSecret: () => Effect.succeed(null),
   addSecret: () => Effect.succeed(true),
   runWithSecrets: () =>
     Effect.succeed({ exitCode: 0, stdout: "ok", stderr: "" }),
@@ -45,7 +46,7 @@ describe("Keymaxxer Sidecar protocol", () => {
       const response = await fetch(new URL("/health", server.url))
       expect(await response.json()).toEqual({
         status: "ok",
-        protocolVersion: 1,
+        protocolVersion: 2,
       })
       expect(initializeCalls).toBe(0)
     } finally {
@@ -176,6 +177,12 @@ describe("sidecar-backed Keymaxxer layer", () => {
       fetch: createKeymaxxerSidecarFetch(
         fakeService({
           hasSecret: (name) => Effect.succeed(name === "PRESENT_SECRET"),
+          findSecret: ({ account }) =>
+            Effect.succeed(
+              account === "processfocus/monorepo"
+                ? "GITHUB_TOKEN_PROCESSFOCUS_MONOREPO"
+                : null,
+            ),
           addSecret: (input) => Effect.succeed(input.name === "NEW_SECRET"),
           runWithSecrets: () =>
             Effect.succeed({ exitCode: 4, stdout: "out", stderr: "err" }),
@@ -189,6 +196,10 @@ describe("sidecar-backed Keymaxxer layer", () => {
           const keymaxxer = yield* KeymaxxerService
           yield* keymaxxer.initialize
           const present = yield* keymaxxer.hasSecret("PRESENT_SECRET")
+          const found = yield* keymaxxer.findSecret({
+            provider: "github",
+            account: "processfocus/monorepo",
+          })
           const added = yield* keymaxxer.addSecret({ name: "NEW_SECRET" })
           const run = yield* keymaxxer.runWithSecrets({
             command: "false",
@@ -196,12 +207,13 @@ describe("sidecar-backed Keymaxxer layer", () => {
             secrets: ["PRESENT_SECRET"],
             timeoutMs: 100,
           })
-          return { present, added, run }
+          return { present, found, added, run }
         }).pipe(Effect.provide(sidecarKeymaxxerLayer(server.url.toString()))),
       )
 
       expect(result).toEqual({
         present: true,
+        found: "GITHUB_TOKEN_PROCESSFOCUS_MONOREPO",
         added: true,
         run: { exitCode: 4, stdout: "out", stderr: "err" },
       })
@@ -235,7 +247,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
       const path = new URL(input.toString()).pathname
       return Response.json(
         path === "/health"
-          ? { status: "ok", protocolVersion: 1 }
+          ? { status: "ok", protocolVersion: 2 }
           : { initialized: true },
       )
     }
@@ -261,7 +273,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
     let calls = 0
     const fetchImplementation: typeof fetch = async () => {
       calls += 1
-      return Response.json({ status: "ok", protocolVersion: 2 })
+      return Response.json({ status: "ok", protocolVersion: 1 })
     }
     const exit = await Effect.runPromise(
       Effect.exit(

@@ -41,7 +41,7 @@ export const mcpKeymaxxerLayer = (
 
 const makeMcpService = (options: McpLayerOptions) => {
   let clientPromise: Promise<KeymaxxerToolClient> | null = null
-  let secretNamesPromise: Promise<Set<string>> | null = null
+  let secretsPromise: Promise<readonly SecretMetadata[]> | null = null
 
   const getClient = () => {
     clientPromise ??= (
@@ -68,7 +68,7 @@ const makeMcpService = (options: McpLayerOptions) => {
     } catch {
       const failedClient = clientPromise
       clientPromise = null
-      secretNamesPromise = null
+      secretsPromise = null
       await failedClient
         ?.then((client) => client.close())
         .catch(() => undefined)
@@ -76,37 +76,61 @@ const makeMcpService = (options: McpLayerOptions) => {
     }
   }
 
-  const listSecretNames = async (refresh = false) => {
-    if (!refresh && secretNamesPromise !== null) return secretNamesPromise
+  const listSecrets = async (refresh = false) => {
+    if (!refresh && secretsPromise !== null) return secretsPromise
 
-    secretNamesPromise = callTool("hasSecret", "keymaxxer_list", {}).then(
+    secretsPromise = callTool("listSecrets", "keymaxxer_list", {}).then(
       (result) => {
         if (result.isError)
-          throw safeError("hasSecret", "Keymaxxer list failed")
-        return parseSecretNames(result.text)
+          throw safeError("listSecrets", "Keymaxxer list failed")
+        return parseSecrets(result.text)
       },
     )
-    secretNamesPromise.catch(() => {
-      secretNamesPromise = null
+    secretsPromise.catch(() => {
+      secretsPromise = null
     })
-    return secretNamesPromise
+    return secretsPromise
   }
 
   const service: KeymaxxerServiceShape = {
     initialize: Effect.tryPromise({
-      try: () => listSecretNames().then(() => undefined),
+      try: () => listSecrets().then(() => undefined),
       catch: () => safeError("initialize", "Keymaxxer initialization failed"),
     }),
     hasSecret: (name) =>
       validateSecretName(name)
         ? Effect.tryPromise({
             try: async () => {
-              const names = await listSecretNames()
-              return names.has(name) || (await listSecretNames(true)).has(name)
+              const hasName = (secrets: readonly SecretMetadata[]) =>
+                secrets.some((secret) => secret.name === name)
+              return (
+                hasName(await listSecrets()) || hasName(await listSecrets(true))
+              )
             },
             catch: () => safeError("hasSecret", "Keymaxxer list failed"),
           })
         : Effect.fail(safeError("hasSecret", "Invalid secret name")),
+    findSecret: (input) =>
+      Effect.tryPromise({
+        try: async () => {
+          const matches = (await listSecrets(true)).filter(
+            (secret) =>
+              secret.provider?.toLowerCase() === input.provider.toLowerCase() &&
+              secret.account?.toLowerCase() === input.account.toLowerCase(),
+          )
+          if (matches.length > 1) {
+            throw safeError(
+              "findSecret",
+              "Multiple Keymaxxer secrets match provider and account",
+            )
+          }
+          return matches[0]?.name ?? null
+        },
+        catch: (error) =>
+          error instanceof KeymaxxerError
+            ? error
+            : safeError("findSecret", "Keymaxxer list failed"),
+      }),
     addSecret: (input) =>
       validateSecretName(input.name)
         ? Effect.tryPromise({
@@ -116,7 +140,7 @@ const makeMcpService = (options: McpLayerOptions) => {
               if (result.isError) {
                 throw safeError("addSecret", "Keymaxxer add failed")
               }
-              ;(await listSecretNames()).add(input.name)
+              await listSecrets(true)
               return true
             },
             catch: () => safeError("addSecret", "Keymaxxer add failed"),
@@ -153,7 +177,7 @@ const makeMcpService = (options: McpLayerOptions) => {
     close: async () => {
       const current = clientPromise
       clientPromise = null
-      secretNamesPromise = null
+      secretsPromise = null
       await current?.then((client) => client.close()).catch(() => undefined)
     },
   }
@@ -220,22 +244,35 @@ const toolResultText = (result: ToolResult) =>
         .join("\n")
     : ""
 
-const parseSecretNames = (text: string) => {
+type SecretMetadata = {
+  readonly name: string
+  readonly provider: string | null
+  readonly account: string | null
+}
+
+const parseSecrets = (text: string): readonly SecretMetadata[] => {
   const parsed = JSON.parse(text) as unknown
   if (!Array.isArray(parsed)) throw new Error("Invalid secret list")
 
-  const names = new Set<string>()
-  for (const item of parsed) {
+  return parsed.map((item) => {
     if (
-      typeof item === "object" &&
-      item !== null &&
-      "name" in item &&
-      typeof item.name === "string"
+      typeof item !== "object" ||
+      item === null ||
+      !("name" in item) ||
+      typeof item.name !== "string"
     ) {
-      names.add(item.name)
+      throw new Error("Invalid secret list")
     }
-  }
-  return names
+    const provider = "provider" in item ? item.provider : null
+    const account = "account" in item ? item.account : null
+    if (
+      (provider !== null && typeof provider !== "string") ||
+      (account !== null && typeof account !== "string")
+    ) {
+      throw new Error("Invalid secret list")
+    }
+    return { name: item.name, provider, account }
+  })
 }
 
 const parseRunResult = (text: string) => {
