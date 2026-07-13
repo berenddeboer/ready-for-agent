@@ -4,6 +4,7 @@
   "license": "MIT",
   "scripts": {
     "commitlint": "commitlint",
+    "harness-cli": "bun apps/cli/src/main.ts",
     "knip": "knip --no-config-hints",
     "lint": "biome check .",
     "prepare": "bash scripts/install-git-hooks.sh && (effect-language-service patch || true)"

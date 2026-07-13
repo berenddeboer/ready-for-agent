@@ -3,6 +3,10 @@
   "ignoreDependencies": ["@swc/helpers", "nx"],
   "ignoreBinaries": ["skills"],
   "workspaces": {
+    "apps/cli": {
+      "entry": ["src/main.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
     "packages/*": {
       "entry": ["src/index.ts", "test/**/*.{test,spec}.ts"],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]

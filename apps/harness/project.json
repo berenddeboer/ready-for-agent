@@ -1,0 +1,14 @@
+{
+  "name": "harness",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "targets": {
+    "dev": {
+      "continuous": true,
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vite",
+        "cwd": "apps/harness"
+      }
+    }
+  }
+}
