@@ -1,0 +1,25 @@
+{
+  "name": "@ready-for-agent/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+  },
+  "nx": {
+    "name": "cli",
+    "targets": {
+      "test": {
+        "command": "bun test",
+        "options": {
+          "cwd": "{projectRoot}"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@effect/platform-bun": "^4.0.0-beta.97",
+    "effect": "^4.0.0-beta.97"
+  }
+}
