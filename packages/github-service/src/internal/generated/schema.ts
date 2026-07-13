@@ -18,6 +18,7 @@ export interface Query {
 
 export interface Repository {
     issues: IssueConnection
+    issue: (Issue | null)
     __typename: 'Repository'
 }
 
@@ -40,6 +41,7 @@ export interface Issue {
     url: Scalars['URI']
     createdAt: Scalars['DateTime']
     state: IssueState
+    blockedBy: IssueConnection
     __typename: 'Issue'
 }
 
@@ -53,6 +55,7 @@ export interface QueryGenqlSelection{
 
 export interface RepositoryGenqlSelection{
     issues?: (IssueConnectionGenqlSelection & { __args?: {first?: (Scalars['Int'] | null), after?: (Scalars['String'] | null), labels?: (Scalars['String'][] | null)} })
+    issue?: (IssueGenqlSelection & { __args: {number: Scalars['Int']} })
     __typename?: boolean | number
     __scalar?: boolean | number
 }
@@ -78,6 +81,7 @@ export interface IssueGenqlSelection{
     url?: boolean | number
     createdAt?: boolean | number
     state?: boolean | number
+    blockedBy?: (IssueConnectionGenqlSelection & { __args?: {first?: (Scalars['Int'] | null), after?: (Scalars['String'] | null)} })
     __typename?: boolean | number
     __scalar?: boolean | number
 }

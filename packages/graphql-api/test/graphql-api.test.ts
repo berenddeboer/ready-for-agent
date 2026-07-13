@@ -31,6 +31,7 @@ const issue = {
   url: "https://github.com/acme/widgets/issues/42",
   state: "OPEN" as const,
   githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
+  blockedBy: [],
 }
 
 const makeRuntime = (
@@ -206,7 +207,13 @@ describe("GraphQL API", () => {
       data: {
         issues: [
           {
-            ...issue,
+            id: issue.id,
+            repositoryId: issue.repositoryId,
+            githubIssueNumber: issue.githubIssueNumber,
+            title: issue.title,
+            body: issue.body,
+            url: issue.url,
+            state: issue.state,
             githubCreatedAt: issue.githubCreatedAt.toISOString(),
           },
         ],

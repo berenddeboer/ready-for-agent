@@ -77,6 +77,29 @@ export const issue = snakeCase.table(
   ],
 )
 
+export const issueDependency = snakeCase.table(
+  "issue_dependency",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `issue-dependency-${ulid()}`),
+    issueId: text()
+      .notNull()
+      .references(() => issue.id, { onDelete: "cascade" }),
+    blockingGithubIssueNumber: integer().notNull(),
+    blockingGithubIssueUrl: text().notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("issue_dependency_issue_id_blocking_url_uidx").on(
+      t.issueId,
+      t.blockingGithubIssueUrl,
+    ),
+  ],
+)
+
 /**
  * Background job queue (SQS-style visibility timeout semantics).
  * See xplain: type job queue "qjob"

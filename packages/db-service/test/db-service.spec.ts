@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
+  DatabaseError,
   DbService,
   DbServiceLive,
   InvalidConfigInputError,
@@ -33,6 +34,7 @@ describe("DbService", () => {
     body: "Issue body",
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
+    blockedBy: [],
   }
 
   describe("config", () => {
@@ -279,6 +281,101 @@ describe("DbService", () => {
             new Date("2026-07-02T12:00:00.000Z"),
           )
           expect(yield* db.listIssues(repository.id)).toHaveLength(1)
+        }),
+      ))
+
+    it("replaces and lists an issue's blocking dependencies", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* addTestRepository(db)
+          const baseInput = {
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Blocked issue",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          }
+          yield* db.storeIssue({
+            ...baseInput,
+            blockedBy: [
+              {
+                githubIssueNumber: 9,
+                githubIssueUrl: "https://github.com/other/project/issues/9",
+              },
+              {
+                githubIssueNumber: 3,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/3",
+              },
+            ],
+          })
+
+          const stored = yield* db.storeIssue({
+            ...baseInput,
+            blockedBy: [
+              {
+                githubIssueNumber: 5,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/5",
+              },
+            ],
+          })
+
+          expect(stored.blockedBy).toEqual([
+            {
+              githubIssueNumber: 5,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/5",
+            },
+          ])
+          expect((yield* db.listIssues(repository.id))[0]?.blockedBy).toEqual(
+            stored.blockedBy,
+          )
+        }),
+      ))
+
+    it("rolls back the issue and dependencies when replacement fails", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* addTestRepository(db)
+          const original = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Original title",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            blockedBy: [
+              {
+                githubIssueNumber: 3,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/3",
+              },
+            ],
+          })
+          yield* sql.unsafe(`CREATE TRIGGER fail_dependency_insert
+            BEFORE INSERT ON issue_dependency
+            WHEN NEW.blocking_github_issue_number = 5
+            BEGIN
+              SELECT RAISE(ABORT, 'forced dependency insert failure');
+            END`)
+
+          const error = yield* Effect.flip(
+            db.storeIssue({
+              repositoryId: repository.id,
+              githubIssueNumber: 42,
+              title: "Updated title",
+              ...sampleIssueFields,
+              githubCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
+              blockedBy: [
+                {
+                  githubIssueNumber: 5,
+                  githubIssueUrl: "https://github.com/acme/widgets/issues/5",
+                },
+              ],
+            }),
+          )
+
+          expect(error).toBeInstanceOf(DatabaseError)
+          expect(yield* db.listIssues(repository.id)).toEqual([original])
         }),
       ))
 

@@ -41,6 +41,7 @@ const remoteIssue = (
     `2026-07-${String(number).padStart(2, "0")}T00:00:00.000Z`,
   ),
   state: "OPEN",
+  blockedBy: [],
   ...overrides,
 })
 
@@ -58,6 +59,10 @@ const localIssue = (
     url: remote.url,
     githubCreatedAt: remote.createdAt,
     state: remote.state,
+    blockedBy: remote.blockedBy.map((dependency) => ({
+      githubIssueNumber: dependency.number,
+      githubIssueUrl: dependency.url,
+    })),
     ...overrides,
   }
 }
@@ -167,7 +172,19 @@ describe("IssueReconciler", () => {
       ],
     })
     const github = makeGitHubLayer(
-      [remoteIssue(3), remoteIssue(2, { state: "CLOSED" }), remoteIssue(1)],
+      [
+        remoteIssue(3),
+        remoteIssue(2, {
+          state: "CLOSED",
+          blockedBy: [
+            {
+              number: 1,
+              url: "https://github.com/acme/widgets/issues/1",
+            },
+          ],
+        }),
+        remoteIssue(1),
+      ],
       db.actions,
     )
 
@@ -206,6 +223,14 @@ describe("IssueReconciler", () => {
           { githubIssueNumber: 3, state: "OPEN" },
         ])
         expect(db.reconciledAt).toBeInstanceOf(Date)
+        expect(
+          db.stored.find((issue) => issue.githubIssueNumber === 2)?.blockedBy,
+        ).toEqual([
+          {
+            githubIssueNumber: 1,
+            githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+          },
+        ])
       }),
       db.layer,
       github,
@@ -232,6 +257,40 @@ describe("IssueReconciler", () => {
       }),
       db.layer,
       makeGitHubLayer([], db.actions),
+    )
+  })
+
+  it("updates an otherwise unchanged issue when its dependencies change", () => {
+    const db = makeDbFixture({ issues: [localIssue(1)] })
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1, {
+          blockedBy: [
+            {
+              number: 2,
+              url: "https://github.com/acme/widgets/issues/2",
+            },
+          ],
+        }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary.updated).toBe(1)
+        expect(db.actions).toEqual([
+          "list",
+          "github:acme/widgets",
+          "store:1",
+          "mark",
+        ])
+      }),
+      db.layer,
+      github,
     )
   })
 
