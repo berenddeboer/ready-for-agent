@@ -1,0 +1,50 @@
+{
+  "name": "@ready-for-agent/sqlite-queue-service",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@ready-for-agent/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "nx": {
+    "name": "sqlite-queue-service",
+    "targets": {
+      "test": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "bun test"
+        },
+        "inputs": [
+          "default",
+          "^production"
+        ],
+        "cache": true,
+        "dependsOn": [
+          "^build"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@effect/sql": "^0.51.1",
+    "@ready-for-agent/db": "workspace:*",
+    "@ready-for-agent/db-schema": "workspace:*",
+    "@ready-for-agent/queue-service": "workspace:*",
+    "drizzle-orm": "1.0.0-rc.4-5d5b77c",
+    "effect": "^3.21.4",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0"
+  }
+}

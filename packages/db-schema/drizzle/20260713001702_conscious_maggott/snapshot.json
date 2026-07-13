@@ -1,0 +1,341 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "1b31d30a-0fe7-4e3a-8ee4-e9552defc416",
+  "prevIds": [
+    "a1442403-19e5-45e7-b49b-f9a7a594beee"
+  ],
+  "ddl": [
+    {
+      "name": "completed_job",
+      "entityType": "tables"
+    },
+    {
+      "name": "job_queue",
+      "entityType": "tables"
+    },
+    {
+      "name": "repository",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "completed_job"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "queue",
+      "entityType": "columns",
+      "table": "completed_job"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "job_id",
+      "entityType": "columns",
+      "table": "completed_job"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "completed_job"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "completed_job"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "queue",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "job_payload",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "job_attempts",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "5",
+      "generated": null,
+      "name": "job_retry_limit",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "available_at",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "locked_until",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "github_owner",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "github_repo",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "local_path",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "is_bare",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "paused",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "completed_job_pk",
+      "table": "completed_job",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "job_queue_pk",
+      "table": "job_queue",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "repository_pk",
+      "table": "repository",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "queue",
+          "isExpression": false
+        },
+        {
+          "value": "job_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "completed_job_queue_job_id_uidx",
+      "entityType": "indexes",
+      "table": "completed_job"
+    },
+    {
+      "columns": [
+        {
+          "value": "queue",
+          "isExpression": false
+        },
+        {
+          "value": "locked_until",
+          "isExpression": false
+        },
+        {
+          "value": "job_attempts",
+          "isExpression": false
+        },
+        {
+          "value": "available_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "job_queue_ready_idx",
+      "entityType": "indexes",
+      "table": "job_queue"
+    },
+    {
+      "columns": [
+        {
+          "value": "lower(\"github_owner\")",
+          "isExpression": true
+        },
+        {
+          "value": "lower(\"github_repo\")",
+          "isExpression": true
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "repository_github_owner_repo_lower_uidx",
+      "entityType": "indexes",
+      "table": "repository"
+    },
+    {
+      "columns": [
+        "local_path"
+      ],
+      "nameExplicit": false,
+      "name": "repository_local_path_unique",
+      "entityType": "uniques",
+      "table": "repository"
+    }
+  ],
+  "renames": []
+}

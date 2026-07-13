@@ -11,6 +11,18 @@
     },
     {
       "path": "./packages/db-schema"
+    },
+    {
+      "path": "./packages/queue-service"
+    },
+    {
+      "path": "./packages/db"
+    },
+    {
+      "path": "./packages/sqlite-queue-service"
+    },
+    {
+      "path": "./packages/layer-turso-local"
     }
   ]
 }

@@ -54,7 +54,9 @@
   "targetDefaults": {
     "build": {
       "cache": true,
-      "outputs": ["{projectRoot}/dist"]
+      "outputs": [
+        "{projectRoot}/dist"
+      ]
     },
     "knip": {
       "cache": true

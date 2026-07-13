@@ -1,5 +1,5 @@
 {
-  "name": "@ready-for-agent/db-schema",
+  "name": "@ready-for-agent/queue-service",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -15,19 +15,28 @@
       "default": "./dist/index.js"
     }
   },
-  "scripts": {
-    "generate": "drizzle-kit generate",
-    "typecheck": "tsc --noEmit -p tsconfig.lib.json"
-  },
   "nx": {
-    "name": "db-schema"
+    "name": "queue-service",
+    "targets": {
+      "test": {
+        "executor": "nx:run-commands",
+        "options": {
+          "cwd": "{projectRoot}",
+          "command": "bun test"
+        },
+        "inputs": [
+          "default",
+          "^production"
+        ],
+        "cache": true
+      }
+    }
   },
   "dependencies": {
-    "drizzle-orm": "1.0.0-rc.4-5d5b77c",
-    "tslib": "^2.3.0",
-    "ulidx": "^2.4.1"
+    "effect": "^3.21.4",
+    "tslib": "^2.3.0"
   },
   "devDependencies": {
-    "drizzle-kit": "1.0.0-rc.4-5d5b77c"
+    "@types/bun": "^1.3.0"
   }
 }
