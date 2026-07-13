@@ -76,6 +76,7 @@ const makeDbFixture = (options: DbFixtureOptions) => {
 
   const service: DbServiceShape = {
     addRepository: () => Effect.die("not used"),
+    listRepositories: Effect.die("not used"),
     listIssues: () => {
       actions.push("list")
       return options.listError

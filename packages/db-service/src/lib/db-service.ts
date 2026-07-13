@@ -122,6 +122,10 @@ export interface DbServiceShape {
     | LocalPathInUseError
     | DatabaseError
   >
+  readonly listRepositories: Effect.Effect<
+    readonly RepositoryRecord[],
+    DatabaseError
+  >
   readonly storeIssue: (
     input: StoreIssueInput,
   ) => Effect.Effect<
@@ -261,6 +265,42 @@ export const DbServiceLive = Layer.effect(
           issuesReconciledAt: row.issues_reconciled_at,
         })
       })
+
+    const listRepositories: Effect.Effect<
+      readonly RepositoryRecord[],
+      DatabaseError
+    > = Effect.gen(function* () {
+      const repositories = yield* sql
+        .unsafe(
+          `SELECT id, github_owner, github_repo, local_path, is_bare, paused,
+             issues_reconciled_at
+           FROM repository
+           ORDER BY lower(github_owner) ASC, lower(github_repo) ASC`,
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+
+      return (
+        repositories as ReadonlyArray<{
+          id: string
+          github_owner: string
+          github_repo: string
+          local_path: string
+          is_bare: boolean | number
+          paused: boolean | number
+          issues_reconciled_at: number | null
+        }>
+      ).map((row) =>
+        toRecord({
+          id: row.id,
+          githubOwner: row.github_owner,
+          githubRepo: row.github_repo,
+          localPath: row.local_path,
+          isBare: row.is_bare,
+          paused: row.paused,
+          issuesReconciledAt: row.issues_reconciled_at,
+        }),
+      )
+    })
 
     const ensureRepositoryExists = (
       repositoryId: string,
@@ -461,6 +501,7 @@ export const DbServiceLive = Layer.effect(
 
     return DbService.of({
       addRepository,
+      listRepositories,
       storeIssue,
       listIssues,
       deleteIssue,

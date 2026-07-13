@@ -143,6 +143,42 @@ describe("DbService", () => {
       ))
   })
 
+  describe("listRepositories", () => {
+    it("returns an empty list when none exist", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          expect(yield* db.listRepositories).toEqual([])
+        }),
+      ))
+
+    it("returns repositories ordered by owner then name", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const zebra = yield* db.addRepository({
+            githubOwner: "zebra",
+            githubRepo: "tools",
+            localPath: "/repos/zebra/tools.git",
+            isBare: true,
+          })
+          const acmeWidgets = yield* db.addRepository(sampleInput)
+          const acmeApi = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "api",
+            localPath: "/repos/acme/api.git",
+            isBare: false,
+          })
+
+          expect(yield* db.listRepositories).toEqual([
+            acmeApi,
+            acmeWidgets,
+            zebra,
+          ])
+        }),
+      ))
+  })
+
   describe("issues", () => {
     const addTestRepository = (db: DbService) => db.addRepository(sampleInput)
 
