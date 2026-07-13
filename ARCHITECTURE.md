@@ -8,3 +8,4 @@
 - Services are implemented as Effect TS
 - Separate job worker who handles jobs
 - UI is responsive: anything that takes long is put in a queue and handled by the job worker
+- Prefer Bun APIs.
