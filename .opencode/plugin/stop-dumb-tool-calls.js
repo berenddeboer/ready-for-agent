@@ -3,9 +3,14 @@ const gitWithLeadingOptions = String.raw`git\s+(?:-\S+\s+\S+\s+)*`
 
 const bashCommandRules = [
   {
-    matches: (command) => /--skip-nx-cache/.test(command),
+    matches: (command) => /--skip(?:-)?nx(?:-)?cache\b/i.test(command),
     message:
-      "BLOCKED: Using the --skip-nx-cache parameter is forbidden as this is very bad for performance. You seldom need this, if you need it, ask the user to do it.",
+      "BLOCKED: Using --skipNxCache or --skip-nx-cache is forbidden as this is very bad for performance. You seldom need this; if you need it, ask the user to run it.",
+  },
+  {
+    matches: (command) => /\bnx\s+run-many\b/.test(command),
+    message:
+      "BLOCKED: Use bunx nx affected instead of nx run-many so only affected projects run.",
   },
   {
     matches: (command) => /(^|\s)NX_DAEMON=false(\s|$)/.test(command),
