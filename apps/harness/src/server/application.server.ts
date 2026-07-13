@@ -1,5 +1,8 @@
 import "@tanstack/react-start/server-only"
 import { fileURLToPath } from "node:url"
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbServiceLive } from "@ready-for-agent/db-service"
@@ -10,6 +13,7 @@ import {
   mcpKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
+import { OpencodeLive } from "@ready-for-agent/opencode"
 import type { ApplicationRequestContext } from "../server-context.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 
@@ -41,7 +45,15 @@ export const createApplication = async (
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
   )
-  const appLayer = Layer.merge(reconcilerLayer, keymaxxerLayer)
+  const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
+    Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
+  )
+  const opencodeLayer = OpencodeLive.pipe(Layer.provide(opencodePlatformLayer))
+  const appLayer = Layer.mergeAll(
+    reconcilerLayer,
+    keymaxxerLayer,
+    opencodeLayer,
+  )
   const runtime = ManagedRuntime.make(appLayer)
 
   try {
@@ -58,7 +70,7 @@ export const createApplication = async (
 
   return {
     context: {
-      graphqlApi: createGraphqlApi(runtime),
+      graphqlApi: createGraphqlApi(runtime, { opencodeCwd: workspaceRoot }),
     },
     dispose: runtime.dispose,
   }

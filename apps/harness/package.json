@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
+    "@effect/platform-bun": "^4.0.0-beta.97",
     "@ready-for-agent/db": "workspace:*",
     "@ready-for-agent/db-service": "workspace:*",
     "@ready-for-agent/github-service": "workspace:*",
@@ -18,6 +19,7 @@
     "@ready-for-agent/graphql-client": "workspace:*",
     "@ready-for-agent/issue-reconciler": "workspace:*",
     "@ready-for-agent/keymaxxer-service": "workspace:*",
+    "@ready-for-agent/opencode": "workspace:*",
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-query-devtools": "^5.90.0",
     "@tanstack/react-router": "^1.170.17",

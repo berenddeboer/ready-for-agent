@@ -11,7 +11,10 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../db-service/tsconfig.lib.json"
+      "path": "../opencode/tsconfig.lib.json"
+    },
+    {
+      "path": "../issue-reconciler/tsconfig.lib.json"
     },
     {
       "path": "../graphql-schema/tsconfig.lib.json"
@@ -20,7 +23,7 @@
       "path": "../github-service/tsconfig.lib.json"
     },
     {
-      "path": "../issue-reconciler/tsconfig.lib.json"
+      "path": "../db-service/tsconfig.lib.json"
     }
   ]
 }

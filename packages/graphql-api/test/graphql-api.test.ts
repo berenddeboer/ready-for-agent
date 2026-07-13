@@ -4,6 +4,7 @@ import {
   IssueReconciler,
   type IssueReconcilerShape,
 } from "@ready-for-agent/issue-reconciler"
+import { Opencode } from "@ready-for-agent/opencode"
 import { createGraphqlApi } from "../src/index.js"
 import { afterEach, describe, expect, test } from "bun:test"
 
@@ -38,6 +39,15 @@ const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   reconcilerOverrides: Partial<IssueReconcilerShape> = {},
 ) => {
+  const opencode = {
+    start: () => Effect.die("not used"),
+    continue: () => Effect.die("not used"),
+    listModels: () =>
+      Effect.succeed([
+        "opencode/deepseek-v4-flash-free",
+        "anthropic/claude-sonnet-4-5",
+      ]),
+  }
   const db: DbServiceShape = {
     getConfig: Effect.succeed(config),
     updateConfig: (input) => Effect.succeed(input),
@@ -54,9 +64,10 @@ const makeRuntime = (
     ...reconcilerOverrides,
   }
   return ManagedRuntime.make(
-    Layer.merge(
+    Layer.mergeAll(
       Layer.succeed(DbService, db),
       Layer.succeed(IssueReconciler, reconciler),
+      Layer.succeed(Opencode, opencode),
     ),
   )
 }
@@ -177,6 +188,21 @@ describe("GraphQL API", () => {
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultVariant: "high",
         },
+      },
+    })
+  })
+
+  test("lists models provided by OpenCode", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({ query: `query { models }` }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        models: [
+          "opencode/deepseek-v4-flash-free",
+          "anthropic/claude-sonnet-4-5",
+        ],
       },
     })
   })

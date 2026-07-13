@@ -2,6 +2,7 @@ type Query {
   health: Boolean!
   repositories: [Repository!]!
   config: Config!
+  models: [String!]!
   issues(repositoryId: ID!): [Issue!]!
 }
 

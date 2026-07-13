@@ -17,7 +17,13 @@
   "include": ["server.ts", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../packages/opencode/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/issue-reconciler/tsconfig.lib.json"
     },
     {
       "path": "../../packages/graphql-client/tsconfig.lib.json"
@@ -27,9 +33,6 @@
     },
     {
       "path": "../../packages/github-service/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/issue-reconciler/tsconfig.lib.json"
     },
     {
       "path": "../../packages/db-service/tsconfig.lib.json"

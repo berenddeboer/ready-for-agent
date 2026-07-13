@@ -2,7 +2,7 @@ export default {
     "scalars": [
         1,
         2,
-        4,
+        3,
         6,
         8
     ],
@@ -15,47 +15,50 @@ export default {
                 5
             ],
             "config": [
-                3
+                4
+            ],
+            "models": [
+                2
             ],
             "issues": [
                 7,
                 {
                     "repositoryId": [
-                        2,
+                        3,
                         "ID!"
                     ]
                 }
             ],
             "__typename": [
-                4
+                2
             ]
         },
         "Boolean": {},
+        "String": {},
         "ID": {},
         "Config": {
             "defaultModel": [
-                4
-            ],
-            "defaultVariant": [
-                4
-            ],
-            "__typename": [
-                4
-            ]
-        },
-        "String": {},
-        "Repository": {
-            "id": [
                 2
             ],
+            "defaultVariant": [
+                2
+            ],
+            "__typename": [
+                2
+            ]
+        },
+        "Repository": {
+            "id": [
+                3
+            ],
             "githubOwner": [
-                4
+                2
             ],
             "githubRepo": [
-                4
+                2
             ],
             "localPath": [
-                4
+                2
             ],
             "isBare": [
                 1
@@ -64,40 +67,40 @@ export default {
                 1
             ],
             "issuesReconciledAt": [
-                4
+                2
             ],
             "__typename": [
-                4
+                2
             ]
         },
         "IssueState": {},
         "Issue": {
             "id": [
-                2
+                3
             ],
             "repositoryId": [
-                2
+                3
             ],
             "githubIssueNumber": [
                 8
             ],
             "title": [
-                4
+                2
             ],
             "body": [
-                4
+                2
             ],
             "url": [
-                4
+                2
             ],
             "state": [
                 6
             ],
             "githubCreatedAt": [
-                4
+                2
             ],
             "__typename": [
-                4
+                2
             ]
         },
         "Int": {},
@@ -118,35 +121,35 @@ export default {
                 8
             ],
             "__typename": [
-                4
+                2
             ]
         },
         "AddRepositoryInput": {
             "githubOwner": [
-                4
+                2
             ],
             "githubRepo": [
-                4
+                2
             ],
             "localPath": [
-                4
+                2
             ],
             "isBare": [
                 1
             ],
             "__typename": [
-                4
+                2
             ]
         },
         "UpdateConfigInput": {
             "defaultModel": [
-                4
+                2
             ],
             "defaultVariant": [
-                4
+                2
             ],
             "__typename": [
-                4
+                2
             ]
         },
         "Mutation": {
@@ -163,13 +166,13 @@ export default {
                 9,
                 {
                     "repositoryId": [
-                        2,
+                        3,
                         "ID!"
                     ]
                 }
             ],
             "updateConfig": [
-                3,
+                4,
                 {
                     "input": [
                         11,
@@ -178,7 +181,7 @@ export default {
                 }
             ],
             "__typename": [
-                4
+                2
             ]
         }
     }
