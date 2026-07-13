@@ -52,4 +52,13 @@ describe("single application server topology", () => {
     expect(viteConfig).not.toContain("3001")
     expect(viteConfig).not.toContain("proxy")
   })
+
+  test("does not load the Bun platform barrel during Node SSR", async () => {
+    const applicationServer = await readFile(
+      new URL("../src/server/application.server.ts", import.meta.url),
+      "utf8",
+    )
+
+    expect(applicationServer).not.toContain('from "@effect/platform-bun"')
+  })
 })

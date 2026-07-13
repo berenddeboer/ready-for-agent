@@ -1,6 +1,8 @@
 import "@tanstack/react-start/server-only"
 import { fileURLToPath } from "node:url"
-import { BunServices } from "@effect/platform-bun"
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import { Effect, Layer, ManagedRuntime } from "effect"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbServiceLive } from "@ready-for-agent/db-service"
@@ -43,7 +45,10 @@ export const createApplication = async (
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
   )
-  const opencodeLayer = OpencodeLive.pipe(Layer.provide(BunServices.layer))
+  const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
+    Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
+  )
+  const opencodeLayer = OpencodeLive.pipe(Layer.provide(opencodePlatformLayer))
   const appLayer = Layer.mergeAll(
     reconcilerLayer,
     keymaxxerLayer,
