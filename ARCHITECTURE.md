@@ -1,7 +1,9 @@
 # Design
 
-- SPA: no need for SSR
-- API is graphql (genql)
+- SPA uses TanStack Start SPA mode; no need for SSR
+- A single loopback application server serves the SPA and `/graphql`; see `docs/adr/0005-tanstack-start-single-application-server.md`
+- The GraphQL contract, generated genql client, and Yoga handler are separate packages
+- A development-only Keymaxxer sidecar survives application-server reloads; production uses Keymaxxer in-process
 - Database is Turso database (sqlite)
 - Backend is Effect TS
 - Prefixed ULID ids (`{type}-{ulid}`); see `docs/adr/0002-branded-entity-ids.md`.

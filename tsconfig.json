@@ -4,9 +4,6 @@
   "files": [],
   "references": [
     {
-      "path": "./apps/api"
-    },
-    {
       "path": "./apps/cli"
     },
     {
@@ -44,6 +41,12 @@
     },
     {
       "path": "./packages/github-service"
+    },
+    {
+      "path": "./packages/graphql-api"
+    },
+    {
+      "path": "./apps/keymaxxer-sidecar"
     }
   ]
 }

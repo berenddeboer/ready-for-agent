@@ -3,9 +3,18 @@
   "ignoreDependencies": ["@swc/helpers", "nx", "tslib"],
   "ignoreBinaries": ["skills"],
   "workspaces": {
-    "apps/api": {
-      "entry": ["src/main.ts"],
-      "project": ["src/**/*.ts"]
+    "apps/harness": {
+      "entry": [
+        "server.ts",
+        "src/router.tsx",
+        "src/server.ts",
+        "test/**/*.test.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
+    },
+    "apps/keymaxxer-sidecar": {
+      "entry": ["src/main.ts", "test/**/*.test.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
     },
     "apps/cli": {
       "entry": ["src/main.ts", "src/**/*.test.ts"],

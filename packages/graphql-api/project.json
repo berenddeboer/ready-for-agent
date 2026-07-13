@@ -1,0 +1,19 @@
+{
+  "name": "graphql-api",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/graphql-api/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": ["^build"]
+    }
+  }
+}

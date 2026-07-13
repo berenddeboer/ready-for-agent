@@ -24,7 +24,7 @@ The backend boundary for vault operations. It can determine whether a named secr
 _Avoid_: Secret store, credential cache
 
 **Keymaxxer Sidecar**:
-A development-only companion process that owns the Keymaxxer MCP session so watched backend reloads do not repeat vault-unlock or secret-use approval prompts.
+A development-only companion process that owns the Keymaxxer MCP session so watched application-server reloads do not repeat vault-unlock or secret-use approval prompts.
 _Avoid_: Credential daemon, token cache
 
 **Session**:
