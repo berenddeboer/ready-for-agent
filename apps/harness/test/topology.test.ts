@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { createServer } from "vite"
 import { describe, expect, test } from "bun:test"
 
 type Target = {
@@ -51,6 +52,26 @@ describe("single application server topology", () => {
     expect(viteConfig).toContain("enabled: true")
     expect(viteConfig).not.toContain("3001")
     expect(viteConfig).not.toContain("proxy")
+  })
+
+  test("resolves workspace source exports during SSR", async () => {
+    const server = await createServer({
+      configFile: new URL("../vite.config.ts", import.meta.url).pathname,
+      server: { middlewareMode: true },
+    })
+
+    try {
+      const resolved = await server.pluginContainer.resolveId(
+        "@ready-for-agent/issue-reconciler",
+        new URL("../src/server/application.server.ts", import.meta.url)
+          .pathname,
+        { ssr: true },
+      )
+
+      expect(resolved?.id).toEndWith("/packages/issue-reconciler/src/index.ts")
+    } finally {
+      await server.close()
+    }
   })
 
   test("does not load the Bun platform barrel during Node SSR", async () => {

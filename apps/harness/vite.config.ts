@@ -10,6 +10,9 @@ export default defineConfig({
   },
   ssr: {
     noExternal: [/^@ready-for-agent\//],
+    resolve: {
+      conditions: ["@ready-for-agent/source"],
+    },
   },
   server: {
     host: "127.0.0.1",
