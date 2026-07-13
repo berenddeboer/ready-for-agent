@@ -1,4 +1,4 @@
-import { Effect, Either, Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DbService,
@@ -66,19 +66,16 @@ describe("DbService", () => {
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
-          const result = yield* Effect.either(
+          const error = yield* Effect.flip(
             db.addRepository({
               ...sampleInput,
               githubOwner: "   ",
             }),
           )
 
-          expect(Either.isLeft(result)).toBe(true)
-          if (Either.isLeft(result)) {
-            expect(result.left).toBeInstanceOf(InvalidRepositoryInputError)
-            if (result.left instanceof InvalidRepositoryInputError) {
-              expect(result.left.field).toBe("githubOwner")
-            }
+          expect(error).toBeInstanceOf(InvalidRepositoryInputError)
+          if (error instanceof InvalidRepositoryInputError) {
+            expect(error.field).toBe("githubOwner")
           }
         }),
       ))
@@ -89,7 +86,7 @@ describe("DbService", () => {
           const db = yield* DbService
           yield* db.addRepository(sampleInput)
 
-          const result = yield* Effect.either(
+          const error = yield* Effect.flip(
             db.addRepository({
               ...sampleInput,
               githubOwner: "Acme",
@@ -98,10 +95,7 @@ describe("DbService", () => {
             }),
           )
 
-          expect(Either.isLeft(result)).toBe(true)
-          if (Either.isLeft(result)) {
-            expect(result.left).toBeInstanceOf(RepositoryAlreadyExistsError)
-          }
+          expect(error).toBeInstanceOf(RepositoryAlreadyExistsError)
         }),
       ))
 
@@ -111,7 +105,7 @@ describe("DbService", () => {
           const db = yield* DbService
           yield* db.addRepository(sampleInput)
 
-          const result = yield* Effect.either(
+          const error = yield* Effect.flip(
             db.addRepository({
               githubOwner: "other",
               githubRepo: "repo",
@@ -120,10 +114,7 @@ describe("DbService", () => {
             }),
           )
 
-          expect(Either.isLeft(result)).toBe(true)
-          if (Either.isLeft(result)) {
-            expect(result.left).toBeInstanceOf(LocalPathInUseError)
-          }
+          expect(error).toBeInstanceOf(LocalPathInUseError)
         }),
       ))
 
@@ -238,7 +229,7 @@ describe("DbService", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* addTestRepository(db)
-          const result = yield* Effect.either(
+          const error = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
               githubIssueNumber: 0,
@@ -247,12 +238,9 @@ describe("DbService", () => {
             }),
           )
 
-          expect(Either.isLeft(result)).toBe(true)
-          if (Either.isLeft(result)) {
-            expect(result.left).toBeInstanceOf(InvalidIssueInputError)
-            if (result.left instanceof InvalidIssueInputError) {
-              expect(result.left.field).toBe("githubIssueNumber")
-            }
+          expect(error).toBeInstanceOf(InvalidIssueInputError)
+          if (error instanceof InvalidIssueInputError) {
+            expect(error.field).toBe("githubIssueNumber")
           }
         }),
       ))
@@ -262,7 +250,7 @@ describe("DbService", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* addTestRepository(db)
-          const titleResult = yield* Effect.either(
+          const titleError = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
               githubIssueNumber: 1,
@@ -270,7 +258,7 @@ describe("DbService", () => {
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             }),
           )
-          const dateResult = yield* Effect.either(
+          const dateError = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
               githubIssueNumber: 1,
@@ -279,8 +267,8 @@ describe("DbService", () => {
             }),
           )
 
-          expect(Either.isLeft(titleResult)).toBe(true)
-          expect(Either.isLeft(dateResult)).toBe(true)
+          expect(titleError).toBeInstanceOf(InvalidIssueInputError)
+          expect(dateError).toBeInstanceOf(InvalidIssueInputError)
         }),
       ))
 
@@ -288,7 +276,7 @@ describe("DbService", () => {
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
-          const result = yield* Effect.either(
+          const error = yield* Effect.flip(
             db.storeIssue({
               repositoryId: "repo-unknown",
               githubIssueNumber: 1,
@@ -296,16 +284,10 @@ describe("DbService", () => {
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             }),
           )
-          const listResult = yield* Effect.either(db.listIssues("repo-unknown"))
+          const listError = yield* Effect.flip(db.listIssues("repo-unknown"))
 
-          expect(Either.isLeft(result)).toBe(true)
-          expect(Either.isLeft(listResult)).toBe(true)
-          if (Either.isLeft(result)) {
-            expect(result.left).toBeInstanceOf(RepositoryNotFoundError)
-          }
-          if (Either.isLeft(listResult)) {
-            expect(listResult.left).toBeInstanceOf(RepositoryNotFoundError)
-          }
+          expect(error).toBeInstanceOf(RepositoryNotFoundError)
+          expect(listError).toBeInstanceOf(RepositoryNotFoundError)
         }),
       ))
   })

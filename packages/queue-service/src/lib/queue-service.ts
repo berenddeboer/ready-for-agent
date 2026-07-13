@@ -163,20 +163,18 @@ export interface QueueServiceShape<R = never> {
 }
 
 /** @effect-expect-leaking any */
-export class QueueService extends Context.Tag(
-  "@ready-for-agent/queue-service/QueueService",
-)<
+export class QueueService extends Context.Service<
   QueueService,
   // biome-ignore lint/suspicious/noExplicitAny: Required for generic service tag accepting multiple DB implementations
   QueueServiceShape<any>
->() {
+>()("@ready-for-agent/queue-service/QueueService") {
   /**
    * Claim the next available job from the queue with type-safe payload parsing.
    * Returns None if no jobs are available.
    */
-  static claim = <A, I>(
+  static claim = <A>(
     queue: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Schema<A>,
     visibilityTimeout?: Duration.Duration,
   ): Effect.Effect<
     Option.Option<Job<A>>,
@@ -192,7 +190,9 @@ export class QueueService extends Context.Tag(
       }
 
       const rawJob = rawJobOption.value
-      const payload = yield* Schema.decodeUnknown(schema)(rawJob.payload).pipe(
+      const payload = yield* Schema.decodeUnknownEffect(schema)(
+        rawJob.payload,
+      ).pipe(
         Effect.mapError(
           (error) =>
             new PayloadParseError({ queue, jobId: rawJob.jobId, error }),

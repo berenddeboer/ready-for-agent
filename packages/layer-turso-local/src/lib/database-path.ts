@@ -1,14 +1,13 @@
-import { Context, Layer } from "effect"
+import { Context } from "effect"
 import * as Config from "effect/Config"
-import * as ConfigProvider from "effect/ConfigProvider"
 
 /**
  * Human-readable database connection info for logging.
  * Examples: "file://./data/app.db", "./data/app.db"
  */
-export class DatabaseConnectionInfo extends Context.Tag(
+export const DatabaseConnectionInfo = Context.Service<string>(
   "@ready-for-agent/layer-turso-local/DatabaseConnectionInfo",
-)<DatabaseConnectionInfo, string>() {}
+)
 
 export const normalizeDatabasePath = (path: string): string =>
   /^[a-z]+:/.test(path) ? path : `file://${path}`
@@ -39,13 +38,3 @@ export const DatabasePathConfig: Config.Config<string> = Config.string(
 
 export const DATABASE_PATH_NOT_CONFIGURED =
   "Database path not configured. Set SQLITE_DATABASE_PATH environment variable."
-
-/**
- * Layer providing a ConfigProvider with the given database path.
- */
-export const makeDatabaseConfigLayer = (databasePath: string) =>
-  Layer.setConfigProvider(
-    ConfigProvider.fromMap(
-      new Map([["SQLITE_DATABASE_PATH", databasePath]]),
-    ).pipe(ConfigProvider.orElse(() => ConfigProvider.fromEnv())),
-  )

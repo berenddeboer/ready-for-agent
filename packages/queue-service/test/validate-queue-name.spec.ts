@@ -2,6 +2,16 @@ import { Effect } from "effect"
 import { InvalidQueueNameError, validateQueueName } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
+const runValidation = (queueName: string) =>
+  Effect.runPromise(
+    validateQueueName(queueName).pipe(
+      Effect.match({
+        onFailure: (error) => ({ _tag: "Failure" as const, error }),
+        onSuccess: () => ({ _tag: "Success" as const }),
+      }),
+    ),
+  )
+
 describe("validateQueueName", () => {
   it("should succeed for valid queue names", async () => {
     const validNames = [
@@ -24,30 +34,28 @@ describe("validateQueueName", () => {
   })
 
   it("should fail for empty queue name", async () => {
-    const result = await Effect.runPromise(Effect.either(validateQueueName("")))
+    const result = await runValidation("")
 
-    expect(result._tag).toBe("Left")
-    if (result._tag === "Left") {
-      expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-      expect(result.left.message).toContain("cannot be empty")
-      expect(result.left.message).toContain("minimum length is 1 character")
-      expect(result.left.queueName).toBe("")
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") {
+      expect(result.error).toBeInstanceOf(InvalidQueueNameError)
+      expect(result.error.message).toContain("cannot be empty")
+      expect(result.error.message).toContain("minimum length is 1 character")
+      expect(result.error.queueName).toBe("")
     }
   })
 
   it("should fail for queue name exceeding max length", async () => {
     const longName = "a".repeat(81)
-    const result = await Effect.runPromise(
-      Effect.either(validateQueueName(longName)),
-    )
+    const result = await runValidation(longName)
 
-    expect(result._tag).toBe("Left")
-    if (result._tag === "Left") {
-      expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-      expect(result.left.message).toContain("exceeds maximum length")
-      expect(result.left.message).toContain("80 characters")
-      expect(result.left.message).toContain("81")
-      expect(result.left.queueName).toBe(longName)
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") {
+      expect(result.error).toBeInstanceOf(InvalidQueueNameError)
+      expect(result.error.message).toContain("exceeds maximum length")
+      expect(result.error.message).toContain("80 characters")
+      expect(result.error.message).toContain("81")
+      expect(result.error.queueName).toBe(longName)
     }
   })
 
@@ -61,16 +69,14 @@ describe("validateQueueName", () => {
     ]
 
     for (const name of invalidNames) {
-      const result = await Effect.runPromise(
-        Effect.either(validateQueueName(name)),
-      )
+      const result = await runValidation(name)
 
-      expect(result._tag).toBe("Left")
-      if (result._tag === "Left") {
-        expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-        expect(result.left.message).toContain("invalid characters")
-        expect(result.left.message).toContain("Spaces are NOT allowed")
-        expect(result.left.queueName).toBe(name)
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.error).toBeInstanceOf(InvalidQueueNameError)
+        expect(result.error.message).toContain("invalid characters")
+        expect(result.error.message).toContain("Spaces are NOT allowed")
+        expect(result.error.queueName).toBe(name)
       }
     }
   })
@@ -102,15 +108,13 @@ describe("validateQueueName", () => {
     ]
 
     for (const name of invalidNames) {
-      const result = await Effect.runPromise(
-        Effect.either(validateQueueName(name)),
-      )
+      const result = await runValidation(name)
 
-      expect(result._tag).toBe("Left")
-      if (result._tag === "Left") {
-        expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-        expect(result.left.message).toContain("invalid characters")
-        expect(result.left.queueName).toBe(name)
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.error).toBeInstanceOf(InvalidQueueNameError)
+        expect(result.error.message).toContain("invalid characters")
+        expect(result.error.queueName).toBe(name)
       }
     }
   })

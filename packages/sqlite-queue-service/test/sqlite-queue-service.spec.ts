@@ -228,11 +228,11 @@ describe("SqliteQueueService", () => {
         Effect.gen(function* () {
           const queue = yield* QueueService
 
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.acknowledge("non-existent-id"),
           )
 
-          expect(result._tag).toBe("Left")
+          expect(result._tag).toBe("Failure")
         }),
       ))
   })
@@ -307,11 +307,11 @@ describe("SqliteQueueService", () => {
         Effect.gen(function* () {
           const queue = yield* QueueService
 
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.extendVisibility("non-existent-id", Duration.seconds(10)),
           )
 
-          expect(result._tag).toBe("Left")
+          expect(result._tag).toBe("Failure")
         }),
       ))
   })
@@ -418,14 +418,14 @@ describe("SqliteQueueService", () => {
       runTest(
         Effect.gen(function* () {
           const queue = yield* QueueService
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.enqueue("invalid queue", { task: "test" }),
           )
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-            expect(result.left.message).toContain("invalid characters")
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
+            expect(result.failure.message).toContain("invalid characters")
           }
         }),
       ))
@@ -434,13 +434,13 @@ describe("SqliteQueueService", () => {
       runTest(
         Effect.gen(function* () {
           const queue = yield* QueueService
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.enqueue("invalid@queue", { task: "test" }),
           )
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
           }
         }),
       ))
@@ -449,14 +449,14 @@ describe("SqliteQueueService", () => {
       runTest(
         Effect.gen(function* () {
           const queue = yield* QueueService
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.enqueue("", { task: "test" }),
           )
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-            expect(result.left.message).toContain("cannot be empty")
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
+            expect(result.failure.message).toContain("cannot be empty")
           }
         }),
       ))
@@ -466,14 +466,14 @@ describe("SqliteQueueService", () => {
         Effect.gen(function* () {
           const queue = yield* QueueService
           const longName = "a".repeat(81)
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.enqueue(longName, { task: "test" }),
           )
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
-            expect(result.left.message).toContain("exceeds maximum length")
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
+            expect(result.failure.message).toContain("exceeds maximum length")
           }
         }),
       ))
@@ -482,7 +482,7 @@ describe("SqliteQueueService", () => {
       runTest(
         Effect.gen(function* () {
           const queue = yield* QueueService
-          const result = yield* Effect.either(
+          const result = yield* Effect.result(
             queue.enqueueWithDelay(
               "invalid queue",
               { task: "test" },
@@ -490,9 +490,9 @@ describe("SqliteQueueService", () => {
             ),
           )
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
           }
         }),
       ))
@@ -501,11 +501,11 @@ describe("SqliteQueueService", () => {
       runTest(
         Effect.gen(function* () {
           const queue = yield* QueueService
-          const result = yield* Effect.either(queue.rawClaim("invalid@queue"))
+          const result = yield* Effect.result(queue.rawClaim("invalid@queue"))
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
           }
         }),
       ))
@@ -533,11 +533,11 @@ describe("SqliteQueueService", () => {
       runTest(
         Effect.gen(function* () {
           const queue = yield* QueueService
-          const result = yield* Effect.either(queue.getStats("invalid queue"))
+          const result = yield* Effect.result(queue.getStats("invalid queue"))
 
-          expect(result._tag).toBe("Left")
-          if (result._tag === "Left") {
-            expect(result.left).toBeInstanceOf(InvalidQueueNameError)
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(InvalidQueueNameError)
           }
         }),
       ))

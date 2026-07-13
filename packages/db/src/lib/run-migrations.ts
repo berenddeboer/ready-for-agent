@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto"
+import { readFile, readdir } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { SqlClient } from "@effect/sql"
-import { readMigrationFiles } from "drizzle-orm/migrator"
-import { Config, Effect } from "effect"
+import { Config, Effect, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -26,6 +27,36 @@ type MigrationRow = {
   readonly hash: string
 }
 
+export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadError>()(
+  "MigrationReadError",
+  { cause: Schema.Defect() },
+) {}
+
+const readMigrations = (migrationsFolder: string) =>
+  Effect.tryPromise({
+    try: async () => {
+      const entries = await readdir(migrationsFolder, { withFileTypes: true })
+      return Promise.all(
+        entries
+          .filter((entry) => entry.isDirectory())
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(async (entry) => {
+            const sql = await readFile(
+              join(migrationsFolder, entry.name, "migration.sql"),
+              "utf8",
+            )
+            return {
+              hash: createHash("sha256").update(sql).digest("hex"),
+              name: entry.name,
+              folderMillis: Number(entry.name.slice(0, 14)),
+              sql: sql.split("--> statement-breakpoint"),
+            }
+          }),
+      )
+    },
+    catch: (cause) => new MigrationReadError({ cause }),
+  })
+
 /**
  * Apply Drizzle migration SQL files via the current SqlClient.
  * Skips migrations already recorded in __drizzle_migrations.
@@ -33,7 +64,7 @@ type MigrationRow = {
 export const runMigrations = (migrationsFolder: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const migrations = readMigrationFiles({ migrationsFolder })
+    const migrations = yield* readMigrations(migrationsFolder)
 
     yield* sql`
       CREATE TABLE IF NOT EXISTS __drizzle_migrations (

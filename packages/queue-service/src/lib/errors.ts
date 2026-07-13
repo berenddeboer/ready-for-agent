@@ -1,40 +1,53 @@
-import { Data } from "effect"
-import type { ParseError } from "effect/ParseResult"
+import { Schema } from "effect"
 
-export class EnqueueError extends Data.TaggedError("EnqueueError")<{
-  readonly queue: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class EnqueueError extends Schema.TaggedErrorClass<EnqueueError>()(
+  "EnqueueError",
+  {
+    queue: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class ClaimError extends Data.TaggedError("ClaimError")<{
-  readonly queue: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class ClaimError extends Schema.TaggedErrorClass<ClaimError>()(
+  "ClaimError",
+  {
+    queue: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class AcknowledgeError extends Data.TaggedError("AcknowledgeError")<{
-  readonly jobId: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class AcknowledgeError extends Schema.TaggedErrorClass<AcknowledgeError>()(
+  "AcknowledgeError",
+  {
+    jobId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class JobNotFoundError extends Data.TaggedError("JobNotFoundError")<{
-  readonly jobId: string
-}> {}
+export class JobNotFoundError extends Schema.TaggedErrorClass<JobNotFoundError>()(
+  "JobNotFoundError",
+  { jobId: Schema.String },
+) {}
 
-export class InvalidQueueNameError extends Data.TaggedError(
+export class InvalidQueueNameError extends Schema.TaggedErrorClass<InvalidQueueNameError>()(
   "InvalidQueueNameError",
-)<{
-  readonly queueName: string
-  readonly message: string
-}> {}
+  {
+    queueName: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Error thrown when a job payload fails schema validation.
  */
-export class PayloadParseError extends Data.TaggedError("PayloadParseError")<{
-  readonly queue: string
-  readonly jobId: string
-  readonly error: ParseError
-}> {}
+export class PayloadParseError extends Schema.TaggedErrorClass<PayloadParseError>()(
+  "PayloadParseError",
+  {
+    queue: Schema.String,
+    jobId: Schema.String,
+    error: Schema.Defect(),
+  },
+) {}

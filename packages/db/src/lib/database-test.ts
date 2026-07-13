@@ -1,40 +1,40 @@
-import { SqlClient } from "@effect/sql"
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { Context, Effect, Layer } from "effect"
+import { type Config, Effect, Layer } from "effect"
+import type { SqlClient } from "effect/unstable/sql"
+import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
+  type MigrationReadError,
   MigrationsFolderConfig,
   defaultMigrationsFolder,
+  runMigrations,
 } from "./run-migrations.js"
-import { runSqliteTestMigrations } from "./test-migrations.js"
-import { TypedSqliteDrizzleLayer } from "./typed-drizzle.js"
 
 export { MigrationsFolderConfig, defaultMigrationsFolder }
-
-const runPragmas = (ctx: Context.Context<SqlClient.SqlClient>) =>
-  Effect.gen(function* () {
-    const sql = Context.get(ctx, SqlClient.SqlClient)
-    yield* sql`PRAGMA foreign_keys = ON`
-  })
 
 /**
  * In-memory SQLite client for tests.
  */
 export const SqliteTest = SqliteClient.layer({
   filename: ":memory:",
-}).pipe(Layer.tap(runPragmas))
-
-const DrizzleTest = TypedSqliteDrizzleLayer.pipe(Layer.provide(SqliteTest))
+})
 
 const MigrationLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const migrationsFolder = yield* MigrationsFolderConfig
-    yield* runSqliteTestMigrations(migrationsFolder)
+    yield* runMigrations(migrationsFolder)
   }),
 )
 
 /**
  * Full test database layer: in-memory SQLite + migrations + typed Drizzle.
  */
-export const DatabaseTest = MigrationLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(SqliteTest, DrizzleTest)),
-)
+export const DatabaseTest: Layer.Layer<
+  SqlClient.SqlClient | SqliteClient.SqliteClient,
+  Config.ConfigError | MigrationReadError | SqlError
+> = Layer.merge(
+  SqliteTest,
+  MigrationLayer.pipe(Layer.provide(SqliteTest)),
+) as unknown as Layer.Layer<
+  SqlClient.SqlClient | SqliteClient.SqliteClient,
+  Config.ConfigError | MigrationReadError | SqlError
+>
