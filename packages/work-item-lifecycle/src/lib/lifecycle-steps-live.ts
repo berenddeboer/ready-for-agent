@@ -2,6 +2,7 @@ import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { DbService } from "@ready-for-agent/db-service"
 import { Opencode } from "@ready-for-agent/opencode"
+import { commit } from "./commit.js"
 import { createWorktree } from "./create-worktree.js"
 import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
@@ -12,7 +13,7 @@ import { review } from "./review.js"
 
 /**
  * Production LifecycleSteps: Create Worktree, Install Dependencies, Implement,
- * Pre-Commit, and Review.
+ * Pre-Commit, Review, and Commit.
  * Captures platform, database, and OpenCode services so handlers remain
  * `Effect<A>` with no requirements.
  */
@@ -51,6 +52,7 @@ export const LifecycleStepsLive = Layer.effect(
       implement: (context) => withServices(implement(context)),
       preCommit: (context) => withServices(preCommit(context)),
       review: (context) => withServices(review(context)),
+      commit: (context) => withServices(commit(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

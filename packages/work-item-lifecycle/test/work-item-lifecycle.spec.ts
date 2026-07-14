@@ -25,6 +25,7 @@ import {
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
+  CommitFailedError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -55,6 +56,7 @@ describe("WorkItemLifecycle", () => {
     implement: () => Effect.succeed("ses_test_implement_session"),
     preCommit: () => Effect.void,
     review: () => Effect.void,
+    commit: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
 
@@ -513,7 +515,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 5; i++) {
+          for (let i = 0; i < 6; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -574,7 +576,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 5; i++) {
+          for (let i = 0; i < 6; i++) {
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -879,16 +881,25 @@ describe("WorkItemLifecycle", () => {
           const afterReview = yield* claimAndRunPending
           expect(afterReview._tag).toBe("processed")
           if (afterReview._tag === "processed") {
-            expect(afterReview.workItem.state).toBe("complete")
-            expect(afterReview.workItem.worktreePath).toBe(
-              "/tmp/worktrees/acme-widgets-42",
-            )
+            expect(afterReview.workItem.state).toBe("commit")
             expect(afterReview.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterReview.workItem.failureCode).toBeNull()
+          }
+
+          const afterCommit = yield* claimAndRunPending
+          expect(afterCommit._tag).toBe("processed")
+          if (afterCommit._tag === "processed") {
+            expect(afterCommit.workItem.state).toBe("complete")
+            expect(afterCommit.workItem.worktreePath).toBe(
+              "/tmp/worktrees/acme-widgets-42",
+            )
+            expect(afterCommit.workItem.sessionId).toBe(
+              "ses_test_implement_session",
+            )
+            expect(afterCommit.workItem.failureCode).toBeNull()
             expect(
-              afterReview.workItem.stepRuns.map((run) => [
+              afterCommit.workItem.stepRuns.map((run) => [
                 run.step,
                 run.status,
               ]),
@@ -898,6 +909,7 @@ describe("WorkItemLifecycle", () => {
               ["implement", "succeeded"],
               ["pre_commit", "succeeded"],
               ["review", "succeeded"],
+              ["commit", "succeeded"],
             ])
           }
 
@@ -907,7 +919,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(5)
+          expect(final.stepRuns).toHaveLength(6)
         }),
       ))
 
@@ -934,6 +946,10 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.void
         },
+        commit: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
         removeWorktree: () => Effect.void,
       }
 
@@ -955,8 +971,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
 
-          expect(seen).toHaveLength(5)
+          expect(seen).toHaveLength(6)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -979,6 +996,11 @@ describe("WorkItemLifecycle", () => {
           expect(seen[4]!.sessionId).toBe("ses_recorded")
           expect(seen[4]!.model).toBe("anthropic/claude-sonnet-4-5")
           expect(seen[4]!.variant).toBe("high")
+
+          expect(seen[5]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[5]!.sessionId).toBe("ses_recorded")
+          expect(seen[5]!.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(seen[5]!.variant).toBe("high")
         }),
       )
     })
@@ -1009,7 +1031,7 @@ describe("WorkItemLifecycle", () => {
           expect(reviewCalls).toBe(1)
           expect(afterReview._tag).toBe("processed")
           if (afterReview._tag === "processed") {
-            expect(afterReview.workItem.state).toBe("complete")
+            expect(afterReview.workItem.state).toBe("commit")
           }
         }),
       )
@@ -1048,6 +1070,47 @@ describe("WorkItemLifecycle", () => {
             expect(failedRun.status).toBe("failed")
             expect(failedRun.reasonMessage).toBe(
               `Pre-commit validation failed (exit 1)\n${output}`,
+            )
+          }
+        }),
+      )
+    })
+
+    it("persists complete commit output on failure", () => {
+      const output = `commit rejected: ${"x".repeat(9_000)}`
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        commit: (context) =>
+          Effect.fail(
+            new CommitFailedError({
+              message: "git commit failed (exit 1)",
+              worktreePath: context.worktreePath!,
+              exitCode: 1,
+              output,
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const result = yield* claimAndRunPending
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("commit")
+            const failedRun = result.workItem.stepRuns.at(-1)!
+            expect(failedRun.status).toBe("failed")
+            expect(failedRun.reasonMessage).toBe(
+              `git commit failed (exit 1)\n${output}`,
             )
           }
         }),
@@ -1477,6 +1540,7 @@ describe("WorkItemLifecycle", () => {
           implement: Duration.hours(2),
           pre_commit: Duration.minutes(15),
           review: Duration.hours(1),
+          commit: Duration.minutes(5),
         },
       }).pipe(
         Layer.provideMerge(

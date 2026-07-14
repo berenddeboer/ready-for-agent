@@ -25,6 +25,7 @@ import {
   type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
+import { CommitFailedError, CommitStageError } from "./commit-errors.js"
 import {
   ActiveStepRunExistsError,
   IssueBlockedError,
@@ -133,7 +134,9 @@ const conciseMessage = (value: unknown, fallback: string): string => {
 const handlerFailureMessage = (error: unknown): string => {
   if (
     error instanceof PreCommitHookFailedError ||
-    error instanceof PreCommitStageError
+    error instanceof PreCommitStageError ||
+    error instanceof CommitFailedError ||
+    error instanceof CommitStageError
   ) {
     return `${error.message}\n${error.output}`
   }
@@ -288,6 +291,8 @@ const nextOperationalStep = (
     case "pre_commit":
       return "review"
     case "review":
+      return "commit"
+    case "commit":
       return "complete"
   }
 }
@@ -705,6 +710,8 @@ export const makeWorkItemLifecycleLive = (
             return steps.preCommit(context).pipe(Effect.as({}))
           case "review":
             return steps.review(context).pipe(Effect.as({}))
+          case "commit":
+            return steps.commit(context).pipe(Effect.as({}))
         }
       }
 
