@@ -14,7 +14,9 @@ import {
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
 import { OpencodeLive } from "@ready-for-agent/opencode"
+import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import type { ApplicationRequestContext } from "../server-context.js"
+import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 
 const workspaceRoot = fileURLToPath(new URL("../../../..", import.meta.url))
@@ -33,8 +35,13 @@ export interface Application {
   readonly dispose: () => Promise<void>
 }
 
+export interface CreateApplicationOptions {
+  readonly startWorker?: boolean
+}
+
 export const createApplication = async (
   environment: Partial<Record<string, string | undefined>> = process.env,
+  options: CreateApplicationOptions = {},
 ): Promise<Application> => {
   const databaseLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
   const keymaxxerLayer = keymaxxerLayerFromEnvironment(environment)
@@ -45,15 +52,26 @@ export const createApplication = async (
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
   )
+  const queueLayer = SqliteQueueServiceLive.pipe(
+    Layer.provideMerge(databaseLayer),
+  )
+  const workerLayer = JobWorkerLive.pipe(
+    Layer.provideMerge(queueLayer),
+    Layer.provideMerge(reconcilerLayer),
+  )
   const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
   const opencodeLayer = OpencodeLive.pipe(Layer.provide(opencodePlatformLayer))
-  const appLayer = Layer.mergeAll(
-    reconcilerLayer,
-    keymaxxerLayer,
-    opencodeLayer,
-  )
+  const appLayer =
+    options.startWorker === false
+      ? Layer.mergeAll(reconcilerLayer, keymaxxerLayer, opencodeLayer)
+      : Layer.mergeAll(
+          reconcilerLayer,
+          workerLayer,
+          keymaxxerLayer,
+          opencodeLayer,
+        )
   const runtime = ManagedRuntime.make(appLayer)
 
   try {

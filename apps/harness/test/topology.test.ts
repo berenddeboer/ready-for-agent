@@ -82,4 +82,13 @@ describe("single application server topology", () => {
 
     expect(applicationServer).not.toContain('from "@effect/platform-bun"')
   })
+
+  test("does not start the long-lived worker during preflight", async () => {
+    const preflight = await readFile(
+      new URL("../src/server/preflight.ts", import.meta.url),
+      "utf8",
+    )
+
+    expect(preflight).toContain("startWorker: false")
+  })
 })
