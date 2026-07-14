@@ -184,6 +184,7 @@ export const workItem = snakeCase.table(
         "create_worktree",
         "install_dependencies",
         "implement",
+        "pre_commit",
         "review",
         "complete",
         "failed",
@@ -228,7 +229,13 @@ export const stepRun = snakeCase.table(
       .notNull()
       .references(() => workItem.id, { onDelete: "cascade" }),
     step: text({
-      enum: ["create_worktree", "install_dependencies", "implement", "review"],
+      enum: [
+        "create_worktree",
+        "install_dependencies",
+        "implement",
+        "pre_commit",
+        "review",
+      ],
     }).notNull(),
     status: text({
       enum: [

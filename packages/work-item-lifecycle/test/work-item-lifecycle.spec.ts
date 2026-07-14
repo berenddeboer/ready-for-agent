@@ -33,6 +33,7 @@ import {
   type LifecycleStepsShape,
   NonTransactionalQueueError,
   ParentIssueError,
+  PreCommitHookFailedError,
   ResetCleanupError,
   RetryNotEligibleError,
   STEP_RUN_REASON,
@@ -52,6 +53,7 @@ describe("WorkItemLifecycle", () => {
     createWorktree: () => Effect.succeed("/tmp/worktrees/acme-widgets-42"),
     installDependencies: () => Effect.void,
     implement: () => Effect.succeed("ses_test_implement_session"),
+    preCommit: () => Effect.void,
     review: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
@@ -511,7 +513,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < 5; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -572,7 +574,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 4; i++) {
+          for (let i = 0; i < 5; i++) {
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -859,8 +861,17 @@ describe("WorkItemLifecycle", () => {
           const afterImplement = yield* claimAndRunPending
           expect(afterImplement._tag).toBe("processed")
           if (afterImplement._tag === "processed") {
-            expect(afterImplement.workItem.state).toBe("review")
+            expect(afterImplement.workItem.state).toBe("pre_commit")
             expect(afterImplement.workItem.sessionId).toBe(
+              "ses_test_implement_session",
+            )
+          }
+
+          const afterPreCommit = yield* claimAndRunPending
+          expect(afterPreCommit._tag).toBe("processed")
+          if (afterPreCommit._tag === "processed") {
+            expect(afterPreCommit.workItem.state).toBe("review")
+            expect(afterPreCommit.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
           }
@@ -885,6 +896,7 @@ describe("WorkItemLifecycle", () => {
               ["create_worktree", "succeeded"],
               ["install_dependencies", "succeeded"],
               ["implement", "succeeded"],
+              ["pre_commit", "succeeded"],
               ["review", "succeeded"],
             ])
           }
@@ -895,7 +907,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(4)
+          expect(final.stepRuns).toHaveLength(5)
         }),
       ))
 
@@ -914,10 +926,15 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.succeed("ses_recorded")
         },
+        preCommit: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
         review: (context) => {
           seen.push(context)
           return Effect.void
         },
+        removeWorktree: () => Effect.void,
       }
 
       return runWithSteps(
@@ -937,8 +954,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
 
-          expect(seen).toHaveLength(4)
+          expect(seen).toHaveLength(5)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -956,6 +974,11 @@ describe("WorkItemLifecycle", () => {
           expect(seen[3]!.sessionId).toBe("ses_recorded")
           expect(seen[3]!.model).toBe("anthropic/claude-sonnet-4-5")
           expect(seen[3]!.variant).toBe("high")
+
+          expect(seen[4]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[4]!.sessionId).toBe("ses_recorded")
+          expect(seen[4]!.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(seen[4]!.variant).toBe("high")
         }),
       )
     })
@@ -980,12 +1003,52 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
           const afterReview = yield* claimAndRunPending
 
           expect(reviewCalls).toBe(1)
           expect(afterReview._tag).toBe("processed")
           if (afterReview._tag === "processed") {
             expect(afterReview.workItem.state).toBe("complete")
+          }
+        }),
+      )
+    })
+
+    it("persists complete pre-commit hook output on failure", () => {
+      const output = `format failed: ${"x".repeat(9_000)}`
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        preCommit: (context) =>
+          Effect.fail(
+            new PreCommitHookFailedError({
+              message: "Pre-commit validation failed (exit 1)",
+              worktreePath: context.worktreePath!,
+              exitCode: 1,
+              output,
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const result = yield* claimAndRunPending
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("pre_commit")
+            const failedRun = result.workItem.stepRuns.at(-1)!
+            expect(failedRun.status).toBe("failed")
+            expect(failedRun.reasonMessage).toBe(
+              `Pre-commit validation failed (exit 1)\n${output}`,
+            )
           }
         }),
       )
@@ -1412,6 +1475,7 @@ describe("WorkItemLifecycle", () => {
           create_worktree: Duration.millis(20),
           install_dependencies: Duration.minutes(15),
           implement: Duration.hours(2),
+          pre_commit: Duration.minutes(15),
           review: Duration.hours(1),
         },
       }).pipe(

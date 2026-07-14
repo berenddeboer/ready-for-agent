@@ -21,6 +21,7 @@ export type OperationalLifecycleStep =
   | "create_worktree"
   | "install_dependencies"
   | "implement"
+  | "pre_commit"
   | "review"
 
 export type WorkItemState =
@@ -112,6 +113,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   create_worktree: Duration.minutes(5),
   install_dependencies: Duration.minutes(15),
   implement: Duration.hours(2),
+  pre_commit: Duration.minutes(15),
   review: Duration.hours(1),
 }
 

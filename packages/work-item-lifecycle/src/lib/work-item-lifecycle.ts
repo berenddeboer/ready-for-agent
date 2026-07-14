@@ -43,6 +43,10 @@ import {
 } from "./errors.js"
 import { type LifecycleStepContext, LifecycleSteps } from "./lifecycle-steps.js"
 import {
+  PreCommitHookFailedError,
+  PreCommitStageError,
+} from "./pre-commit-errors.js"
+import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
   type OperationalLifecycleStep,
@@ -126,6 +130,16 @@ const conciseMessage = (value: unknown, fallback: string): string => {
   return fallback
 }
 
+const handlerFailureMessage = (error: unknown): string => {
+  if (
+    error instanceof PreCommitHookFailedError ||
+    error instanceof PreCommitStageError
+  ) {
+    return `${error.message}\n${error.output}`
+  }
+  return conciseMessage(error, "Lifecycle Step handler failed")
+}
+
 const classifyHandlerFailure = (
   cause: Cause.Cause<unknown>,
 ): {
@@ -149,7 +163,7 @@ const classifyHandlerFailure = (
     }
     return {
       reasonCode: STEP_RUN_REASON.handlerFailed,
-      reasonMessage: conciseMessage(error, "Lifecycle Step handler failed"),
+      reasonMessage: handlerFailureMessage(error),
     }
   }
 
@@ -270,6 +284,8 @@ const nextOperationalStep = (
     case "install_dependencies":
       return "implement"
     case "implement":
+      return "pre_commit"
+    case "pre_commit":
       return "review"
     case "review":
       return "complete"
@@ -685,6 +701,8 @@ export const makeWorkItemLifecycleLive = (
             return steps
               .implement(context)
               .pipe(Effect.map((sessionId) => ({ sessionId })))
+          case "pre_commit":
+            return steps.preCommit(context).pipe(Effect.as({}))
           case "review":
             return steps.review(context).pipe(Effect.as({}))
         }
