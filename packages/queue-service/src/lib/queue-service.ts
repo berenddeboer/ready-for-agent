@@ -67,15 +67,13 @@ export const validateQueueName = (
 }
 
 /**
- * Queue service interface with generic context type parameter.
- * Different implementations (SQLite/Turso, SQS) can specify their required context.
- *
+ * Queue service interface.
  * Implementations provide rawClaim which returns unparsed payloads.
  * Use QueueService.claim() for type-safe payload parsing with a schema.
  *
- * @template R - The context/dependencies required by the implementation
+ * Method Effects have R = never; backends acquire deps once in their Layer.
  */
-export interface QueueServiceShape<R = never> {
+export interface QueueServiceShape {
   /**
    * Whether enqueue operations should be performed inside database transactions.
    * True for database-backed queues (SQLite, Turso) to avoid lock contention.
@@ -96,7 +94,7 @@ export interface QueueServiceShape<R = never> {
     queue: string,
     payload: P,
     options?: { readonly retryLimit?: number },
-  ) => Effect.Effect<string, EnqueueError | InvalidQueueNameError, R>
+  ) => Effect.Effect<string, EnqueueError | InvalidQueueNameError>
 
   /**
    * Add a job to the queue with a delay before it becomes available.
@@ -107,7 +105,7 @@ export interface QueueServiceShape<R = never> {
     payload: P,
     delay: Duration.Duration,
     options?: { readonly retryLimit?: number },
-  ) => Effect.Effect<string, EnqueueError | InvalidQueueNameError, R>
+  ) => Effect.Effect<string, EnqueueError | InvalidQueueNameError>
 
   /**
    * Claim the next available job from the queue (raw, unparsed payload).
@@ -117,18 +115,14 @@ export interface QueueServiceShape<R = never> {
   readonly rawClaim: (
     queue: string,
     visibilityTimeout?: Duration.Duration,
-  ) => Effect.Effect<
-    Option.Option<RawJob>,
-    ClaimError | InvalidQueueNameError,
-    R
-  >
+  ) => Effect.Effect<Option.Option<RawJob>, ClaimError | InvalidQueueNameError>
 
   /**
    * Mark a job as successfully completed. Removes it from the queue.
    */
   readonly acknowledge: (
     jobId: string,
-  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError, R>
+  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError>
 
   /**
    * Mark a job as failed. The job will be retried after becoming
@@ -142,7 +136,7 @@ export interface QueueServiceShape<R = never> {
       readonly releaseImmediately?: boolean
       readonly retryable?: boolean
     },
-  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError, R>
+  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError>
 
   /**
    * Set a new visibility timeout for a job that needs more processing time.
@@ -152,21 +146,19 @@ export interface QueueServiceShape<R = never> {
   readonly extendVisibility: (
     jobId: string,
     timeout: Duration.Duration,
-  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError, R>
+  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError>
 
   /**
    * Get queue statistics (for monitoring).
    */
   readonly getStats: (
     queue: string,
-  ) => Effect.Effect<QueueStats, InvalidQueueNameError, R>
+  ) => Effect.Effect<QueueStats, InvalidQueueNameError>
 }
 
-/** @effect-expect-leaking any */
 export class QueueService extends Context.Service<
   QueueService,
-  // biome-ignore lint/suspicious/noExplicitAny: Required for generic service tag accepting multiple DB implementations
-  QueueServiceShape<any>
+  QueueServiceShape
 >()("@ready-for-agent/queue-service/QueueService") {
   /**
    * Claim the next available job from the queue with type-safe payload parsing.
@@ -174,7 +166,7 @@ export class QueueService extends Context.Service<
    */
   static claim = <A>(
     queue: string,
-    schema: Schema.Schema<A>,
+    schema: Schema.Decoder<A>,
     visibilityTimeout?: Duration.Duration,
   ): Effect.Effect<
     Option.Option<Job<A>>,

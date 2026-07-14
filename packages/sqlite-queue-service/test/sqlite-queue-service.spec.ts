@@ -8,7 +8,9 @@ import { SqliteQueueServiceLive } from "../src/lib/sqlite-queue-service.js"
 import { describe, expect, it } from "bun:test"
 
 describe("SqliteQueueService", () => {
-  const TestLayer = Layer.mergeAll(SqliteQueueServiceLive, DatabaseTest)
+  const TestLayer = SqliteQueueServiceLive.pipe(
+    Layer.provideMerge(DatabaseTest),
+  )
 
   type TestRequirements = Layer.Layer.Success<typeof TestLayer>
 
