@@ -1066,6 +1066,7 @@ export const makeWorkItemLifecycleLive = (
                 return { _tag: "noop" as const }
               }
 
+              const maxDuration = maxDurations[stepRun.step]
               const context: LifecycleStepContext = {
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
@@ -1074,9 +1075,8 @@ export const makeWorkItemLifecycleLive = (
                 variant: workItem.variant,
                 worktreePath: workItem.worktree_path,
                 sessionId: workItem.session_id,
+                maxDuration,
               }
-
-              const maxDuration = maxDurations[stepRun.step]
 
               const result = yield* Effect.uninterruptibleMask((restore) =>
                 Effect.gen(function* () {
