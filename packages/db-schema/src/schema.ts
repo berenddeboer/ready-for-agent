@@ -186,6 +186,7 @@ export const workItem = snakeCase.table(
         "implement",
         "pre_commit",
         "review",
+        "commit",
         "complete",
         "failed",
         "abandoned",
@@ -235,6 +236,7 @@ export const stepRun = snakeCase.table(
         "implement",
         "pre_commit",
         "review",
+        "commit",
       ],
     }).notNull(),
     status: text({

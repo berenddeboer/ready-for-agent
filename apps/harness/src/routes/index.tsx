@@ -113,6 +113,7 @@ type WorkItemState =
   | "IMPLEMENT"
   | "PRE_COMMIT"
   | "REVIEW"
+  | "COMMIT"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"

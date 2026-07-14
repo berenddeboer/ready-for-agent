@@ -157,6 +157,7 @@ const makeRuntime = (
       implement: Duration.hours(2),
       pre_commit: Duration.minutes(15),
       review: Duration.hours(1),
+      commit: Duration.minutes(5),
     },
     implementNow: unused,
     runStep: unused,

@@ -36,6 +36,9 @@ export interface LifecycleStepsShape {
   readonly review: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
+  readonly commit: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
   readonly removeWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
