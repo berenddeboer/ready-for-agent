@@ -23,6 +23,7 @@ export interface ReadyLabeledIssue {
   readonly createdAt: Date
   readonly state: GitHubIssueState
   readonly parent: GitHubIssueParent | null
+  readonly hasChildren: boolean
   readonly hierarchySupported: boolean
   readonly blockedBy: readonly GitHubIssueReference[]
 }

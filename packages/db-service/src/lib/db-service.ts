@@ -101,6 +101,7 @@ const toIssueRecord = (row: {
   githubCreatedAt: number
   parentGithubIssueNumber: number | null
   parentGithubIssueUrl: string | null
+  hasChildren: number | boolean
   blockedBy: readonly IssueDependency[]
 }): IssueRecord => ({
   id: row.id,
@@ -111,6 +112,7 @@ const toIssueRecord = (row: {
   url: row.url,
   state: row.state,
   githubCreatedAt: new Date(row.githubCreatedAt),
+  hasChildren: Boolean(row.hasChildren),
   parent:
     row.parentGithubIssueNumber === null || row.parentGithubIssueUrl === null
       ? null
@@ -542,20 +544,21 @@ export const DbServiceLive = Layer.effect(
                   `INSERT INTO issue (
                id, repository_id, github_issue_number, title, body, url, state,
                 github_created_at, parent_github_issue_number,
-                parent_github_issue_url, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 parent_github_issue_url, has_children, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (repository_id, github_issue_number) DO UPDATE SET
                title = excluded.title,
                body = excluded.body,
                url = excluded.url,
                 state = excluded.state,
                 github_created_at = excluded.github_created_at,
-                parent_github_issue_number = excluded.parent_github_issue_number,
-                parent_github_issue_url = excluded.parent_github_issue_url,
-                updated_at = excluded.updated_at
+                 parent_github_issue_number = excluded.parent_github_issue_number,
+                 parent_github_issue_url = excluded.parent_github_issue_url,
+                 has_children = excluded.has_children,
+                 updated_at = excluded.updated_at
               RETURNING id, repository_id, github_issue_number, title, body, url, state,
                 github_created_at, parent_github_issue_number,
-                parent_github_issue_url`,
+                 parent_github_issue_url, has_children`,
                   [
                     `issue-${ulid()}`,
                     input.repositoryId,
@@ -567,6 +570,7 @@ export const DbServiceLive = Layer.effect(
                     input.githubCreatedAt.getTime(),
                     input.parent?.githubIssueNumber ?? null,
                     input.parent?.githubIssueUrl ?? null,
+                    input.hasChildren,
                     now,
                     now,
                   ],
@@ -585,6 +589,7 @@ export const DbServiceLive = Layer.effect(
                     github_created_at: number
                     parent_github_issue_number: number | null
                     parent_github_issue_url: string | null
+                    has_children: number
                   }
                 | undefined
               if (!row) {
@@ -639,6 +644,7 @@ export const DbServiceLive = Layer.effect(
                 githubCreatedAt: row.github_created_at,
                 parentGithubIssueNumber: row.parent_github_issue_number,
                 parentGithubIssueUrl: row.parent_github_issue_url,
+                hasChildren: row.has_children,
                 blockedBy: dependencies,
               })
             }),
@@ -663,7 +669,7 @@ export const DbServiceLive = Layer.effect(
           .unsafe(
             `SELECT id, repository_id, github_issue_number, title, body, url, state,
                 github_created_at, parent_github_issue_number,
-                parent_github_issue_url
+                parent_github_issue_url, has_children
              FROM issue WHERE repository_id = ? ORDER BY github_issue_number ASC`,
             [repositoryId],
           )
@@ -707,6 +713,7 @@ export const DbServiceLive = Layer.effect(
             github_created_at: number
             parent_github_issue_number: number | null
             parent_github_issue_url: string | null
+            has_children: number
           }>
         ).map((issue) =>
           toIssueRecord({
@@ -720,6 +727,7 @@ export const DbServiceLive = Layer.effect(
             githubCreatedAt: issue.github_created_at,
             parentGithubIssueNumber: issue.parent_github_issue_number,
             parentGithubIssueUrl: issue.parent_github_issue_url,
+            hasChildren: issue.has_children,
             blockedBy: dependenciesByIssue.get(issue.id) ?? [],
           }),
         )

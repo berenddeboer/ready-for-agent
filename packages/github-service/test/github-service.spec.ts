@@ -25,6 +25,7 @@ const issue = (
   createdAt: new Date(`2026-07-${String(number).padStart(2, "0")}T12:00:00Z`),
   state,
   parent: null,
+  hasChildren: false,
   hierarchySupported: true,
   blockedBy: [],
 })
@@ -51,6 +52,7 @@ describe("GitHubService live implementation", () => {
                   repository: { nameWithOwner: "acme/widgets" },
                   parent: null,
                 },
+                subIssuesSummary: { total: 0 },
                 subIssues: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },
@@ -89,6 +91,7 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-02T12:00:00Z",
                 state: "CLOSED",
                 parent: null,
+                subIssuesSummary: { total: 0 },
                 subIssues: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },
@@ -124,6 +127,7 @@ describe("GitHubService live implementation", () => {
       createdAt: new Date("2026-07-02T12:00:00Z"),
       state: "CLOSED",
       parent: null,
+      hasChildren: false,
       hierarchySupported: true,
       blockedBy: [],
     })
@@ -174,6 +178,7 @@ describe("GitHubService live implementation", () => {
           repository: { nameWithOwner: true },
         },
       },
+      subIssuesSummary: { total: true },
       subIssues: {
         __args: { first: 100 },
         nodes: {
@@ -210,6 +215,7 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-07T12:00:00Z",
                 state: "OPEN",
                 parent: null,
+                subIssuesSummary: { total: 0 },
                 subIssues: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },
@@ -293,6 +299,7 @@ describe("GitHubService live implementation", () => {
         repository: { nameWithOwner: "acme/widgets" },
         parent: null,
       },
+      subIssuesSummary: { total: 0 },
       subIssues: {
         nodes: [],
         pageInfo: { endCursor: null, hasNextPage: false },
@@ -315,6 +322,7 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-01T12:00:00Z",
                 state: "OPEN",
                 parent: null,
+                subIssuesSummary: { total: 1 },
                 subIssues: {
                   nodes: [
                     {
@@ -347,6 +355,7 @@ describe("GitHubService live implementation", () => {
       false,
       false,
     ])
+    expect(result.map(({ hasChildren }) => hasChildren)).toEqual([true, false])
     expect(result[1]?.parent?.isReadyLabeled).toBe(true)
   })
 
@@ -365,6 +374,7 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-01T12:00:00Z",
                 state: "OPEN",
                 parent: null,
+                subIssuesSummary: { total: 1 },
                 subIssues: {
                   nodes: [],
                   pageInfo: {
@@ -473,6 +483,7 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-01T12:00:00Z",
                 state: "OPEN",
                 parent: null,
+                subIssuesSummary: { total: 0 },
                 subIssues: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },

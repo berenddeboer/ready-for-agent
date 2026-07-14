@@ -43,6 +43,8 @@ type Issue {
   url: String!
   state: IssueState!
   githubCreatedAt: String!
+  parent: IssueReference
+  hasChildren: Boolean!
   blockedBy: [IssueReference!]!
 }
 

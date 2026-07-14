@@ -43,6 +43,22 @@ _Avoid_: Ready Issue (can imply that the Issue is open and actionable)
 A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety.
 _Avoid_: Issue tree (implies arbitrary depth), nested Issues
 
+**Parent Issue**:
+A root Issue with one or more direct children. It organizes related work but is not itself a unit the harness works directly.
+_Avoid_: PRD (the relationship does not establish document type), epic
+
+**Child Issue**:
+A direct child of a Parent Issue. In a Supported Issue Hierarchy, a Child Issue has no children of its own.
+_Avoid_: Subtask, nested Issue
+
+**Standalone Issue**:
+A root Issue with no children. It is structurally eligible to be worked directly.
+_Avoid_: Unparented Issue, top-level Issue
+
+**Leaf Issue**:
+An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf Issues are structurally eligible to be worked directly, subject to other workflow constraints.
+_Avoid_: Actionable Issue (actionability also depends on workflow constraints)
+
 **Relevant Issue**:
 A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness: either an open root Issue, or a direct child whose parent is open and Ready-labeled. A closed root Issue, or a child with a closed or non-Ready-labeled parent, is not relevant.
 _Avoid_: Active Issue (a Relevant Issue may be closed), Actionable Issue (actionability also depends on workflow constraints), Visible Issue (presentation-specific)

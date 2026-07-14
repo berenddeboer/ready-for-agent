@@ -64,6 +64,7 @@ export const issue = snakeCase.table(
     githubCreatedAt: integer({ mode: "number" }).notNull(),
     parentGithubIssueNumber: integer(),
     parentGithubIssueUrl: text(),
+    hasChildren: integer({ mode: "boolean" }).notNull().default(false),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),

@@ -13,6 +13,7 @@ import {
   DbService,
   InvalidConfigInputError,
   InvalidRepositoryInputError,
+  type IssueRecord,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
   RepositoryNotFoundError,
@@ -59,6 +60,33 @@ type UpdateConfigArgs = {
 
 type IssuesArgs = {
   repositoryId: string
+}
+
+const workIssueProjection = (
+  issues: readonly IssueRecord[],
+): readonly IssueRecord[] => {
+  const childrenByParent = new Map<number, IssueRecord[]>()
+  for (const issue of issues) {
+    if (issue.parent === null) continue
+    const children = childrenByParent.get(issue.parent.githubIssueNumber) ?? []
+    children.push(issue)
+    childrenByParent.set(issue.parent.githubIssueNumber, children)
+  }
+
+  return issues
+    .filter((issue) => issue.parent === null)
+    .sort((left, right) => left.githubIssueNumber - right.githubIssueNumber)
+    .flatMap((issue) => {
+      if (!issue.hasChildren) return [issue]
+      const children = childrenByParent.get(issue.githubIssueNumber) ?? []
+      if (children.length === 0) return []
+      return [
+        issue,
+        ...children.sort(
+          (left, right) => left.githubIssueNumber - right.githubIssueNumber,
+        ),
+      ]
+    })
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
@@ -284,7 +312,8 @@ export const createGraphqlApi = (
               Effect.result(
                 Effect.gen(function* () {
                   const db = yield* DbService
-                  return yield* db.listIssues(args.repositoryId)
+                  const issues = yield* db.listIssues(args.repositoryId)
+                  return workIssueProjection(issues)
                 }),
               ),
             )

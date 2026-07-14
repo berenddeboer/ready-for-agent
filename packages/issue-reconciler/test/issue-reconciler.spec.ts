@@ -42,6 +42,7 @@ const remoteIssue = (
   ),
   state: "OPEN",
   parent: null,
+  hasChildren: false,
   hierarchySupported: true,
   blockedBy: [],
   ...overrides,
@@ -61,6 +62,7 @@ const localIssue = (
     url: remote.url,
     githubCreatedAt: remote.createdAt,
     state: remote.state,
+    hasChildren: remote.hasChildren,
     parent:
       remote.parent === null
         ? null
@@ -336,6 +338,26 @@ describe("IssueReconciler", () => {
           githubIssueNumber: 9,
           githubIssueUrl: "https://github.com/acme/widgets/issues/9",
         })
+      }),
+      db.layer,
+      github,
+    )
+  })
+
+  it("updates an otherwise unchanged issue when it gains children", () => {
+    const db = makeDbFixture({ issues: [localIssue(1)] })
+    const github = makeGitHubLayer(
+      [remoteIssue(1, { hasChildren: true })],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary.updated).toBe(1)
+        expect(db.stored[0]?.hasChildren).toBe(true)
       }),
       db.layer,
       github,

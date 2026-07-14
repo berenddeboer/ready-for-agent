@@ -53,6 +53,11 @@ const issuesQuery = (repositoryId: string) => ({
         title: true,
         url: true,
         state: true,
+        parent: {
+          githubIssueNumber: true,
+          githubIssueUrl: true,
+        },
+        hasChildren: true,
         blockedBy: {
           githubIssueNumber: true,
           githubIssueUrl: true,
@@ -79,6 +84,23 @@ type RepositoryCredential = {
   configured: boolean
   githubTokenSecretName: string
   githubTokenCreationUrl: string
+}
+
+type RepositoryIssue = {
+  id: string
+  githubIssueNumber: number
+  title: string
+  url: string
+  state: "OPEN" | "CLOSED"
+  parent: {
+    githubIssueNumber: number
+    githubIssueUrl: string
+  } | null
+  hasChildren: boolean
+  blockedBy: readonly {
+    githubIssueNumber: number
+    githubIssueUrl: string
+  }[]
 }
 
 export const Route = createFileRoute("/")({
@@ -464,53 +486,117 @@ function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
     return <p className="m-0 text-sm text-slate-500">No relevant issues.</p>
   }
 
+  const childrenByParent = new Map<number, RepositoryIssue[]>()
+  for (const issue of issues) {
+    if (issue.parent === null) continue
+    const children = childrenByParent.get(issue.parent.githubIssueNumber) ?? []
+    children.push(issue)
+    childrenByParent.set(issue.parent.githubIssueNumber, children)
+  }
+
   return (
     <ul className="m-0 grid list-none gap-2 p-0">
-      {issues.map((issue) => (
-        <li
-          className={`min-w-0 rounded-md text-sm ${issue.blockedBy.length > 0 ? "-mx-2.5 bg-amber-50/70 px-2.5 py-2" : "py-0.5"}`}
-          key={issue.id}
-        >
-          <div className="flex min-w-0 items-start gap-2">
-            <span className="shrink-0 font-mono text-xs leading-5 text-slate-400">
-              #{issue.githubIssueNumber}
-            </span>
-            <a
-              className="min-w-0 flex-1 text-slate-700 hover:text-blue-700 hover:underline"
-              href={issue.url}
+      {issues.map((issue) => {
+        if (issue.parent !== null) return null
+        if (!issue.hasChildren) {
+          return <RepositoryIssueRow issue={issue} key={issue.id} />
+        }
+
+        const children = childrenByParent.get(issue.githubIssueNumber) ?? []
+        const closedChildren = children.filter(
+          (child) => child.state === "CLOSED",
+        ).length
+        return (
+          <li className="min-w-0" key={issue.id}>
+            <details
+              className="group -mx-2.5 rounded-lg bg-slate-50/90 px-2.5 py-1"
+              open
             >
-              {issue.title}
-            </a>
-            {issue.state === "CLOSED" && (
-              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-500 uppercase">
-                Closed
-              </span>
-            )}
-            {issue.blockedBy.length > 0 && (
-              <span className="shrink-0 rounded-full bg-amber-200/70 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-amber-900 uppercase">
-                Blocked
-              </span>
-            )}
-          </div>
-          {issue.blockedBy.length > 0 && (
-            <p className="mt-1.5 mb-0 pl-11 text-xs text-amber-900">
-              Blocked by{" "}
-              {issue.blockedBy.map((blocker, index) => (
-                <span key={blocker.githubIssueUrl}>
-                  {index > 0 && ", "}
-                  <a
-                    className="font-mono font-semibold underline decoration-amber-400 underline-offset-2 hover:text-blue-700"
-                    href={blocker.githubIssueUrl}
-                  >
-                    #{blocker.githubIssueNumber}
-                  </a>
+              <summary className="grid cursor-pointer list-none grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2 py-1.5 marker:content-none">
+                <span className="font-mono text-xs leading-5 font-semibold text-blue-600">
+                  #{issue.githubIssueNumber}
                 </span>
-              ))}
-            </p>
-          )}
-        </li>
-      ))}
+                <a
+                  className="min-w-0 font-semibold text-slate-800 hover:text-blue-700 hover:underline"
+                  href={issue.url}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {issue.title}
+                </a>
+                <span className="flex shrink-0 items-center gap-1.5 text-[0.65rem] font-bold tracking-wide text-slate-500 uppercase">
+                  {closedChildren}/{children.length} closed
+                  <svg
+                    aria-hidden="true"
+                    className="size-3.5 transition-transform group-open:rotate-180"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m6 9 6 6 6-6" />
+                  </svg>
+                </span>
+              </summary>
+              <ul className="relative m-0 grid list-none gap-1.5 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2.5 before:w-0.5 before:rounded-full before:bg-blue-200">
+                {children.map((child) => (
+                  <RepositoryIssueRow issue={child} key={child.id} />
+                ))}
+              </ul>
+            </details>
+          </li>
+        )
+      })}
     </ul>
+  )
+}
+
+function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
+  return (
+    <li
+      className={`min-w-0 rounded-md text-sm ${issue.blockedBy.length > 0 ? "bg-amber-50/70 py-2" : "py-0.5"}`}
+    >
+      <div className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2">
+        <span className="font-mono text-xs leading-5 text-slate-400">
+          #{issue.githubIssueNumber}
+        </span>
+        <a
+          className="min-w-0 text-slate-700 hover:text-blue-700 hover:underline"
+          href={issue.url}
+        >
+          {issue.title}
+        </a>
+        <span className="flex shrink-0 items-center gap-1">
+          {issue.state === "CLOSED" && (
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-500 uppercase">
+              Closed
+            </span>
+          )}
+          {issue.blockedBy.length > 0 && (
+            <span className="rounded-full bg-amber-200/70 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-amber-900 uppercase">
+              Blocked
+            </span>
+          )}
+        </span>
+      </div>
+      {issue.blockedBy.length > 0 && (
+        <p className="mt-1.5 mb-0 pl-11 text-xs text-amber-900">
+          Blocked by{" "}
+          {issue.blockedBy.map((blocker, index) => (
+            <span key={blocker.githubIssueUrl}>
+              {index > 0 && ", "}
+              <a
+                className="font-mono font-semibold underline decoration-amber-400 underline-offset-2 hover:text-blue-700"
+                href={blocker.githubIssueUrl}
+              >
+                #{blocker.githubIssueNumber}
+              </a>
+            </span>
+          ))}
+        </p>
+      )}
+    </li>
   )
 }
 

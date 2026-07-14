@@ -103,6 +103,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
               createdAt: "2026-07-07T12:00:00.000Z",
               state: "OPEN",
               hierarchySupported: true,
+              hasChildren: false,
               parent: {
                 number: 1,
                 url: "https://github.com/acme/widgets/issues/1",
