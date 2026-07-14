@@ -1,5 +1,7 @@
 export * from "./lib/commit.js"
 export * from "./lib/commit-errors.js"
+export * from "./lib/create-pr.js"
+export * from "./lib/create-pr-errors.js"
 export * from "./lib/create-worktree.js"
 export * from "./lib/detect-install-plan.js"
 export * from "./lib/errors.js"

@@ -237,6 +237,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@ready-for-agent/db-service": "workspace:*",
+        "@ready-for-agent/keymaxxer-service": "workspace:*",
         "@ready-for-agent/opencode": "workspace:*",
         "@ready-for-agent/queue-service": "workspace:*",
         "effect": "^4.0.0-beta.97",

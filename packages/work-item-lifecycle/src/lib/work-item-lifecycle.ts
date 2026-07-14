@@ -290,6 +290,8 @@ const nextOperationalStep = (
     case "review":
       return "commit"
     case "commit":
+      return "create_pr"
+    case "create_pr":
       return "complete"
   }
 }
@@ -709,6 +711,8 @@ export const makeWorkItemLifecycleLive = (
             return steps.review(context).pipe(Effect.as({}))
           case "commit":
             return steps.commit(context).pipe(Effect.as({}))
+          case "create_pr":
+            return steps.createPr(context).pipe(Effect.as({}))
         }
       }
 

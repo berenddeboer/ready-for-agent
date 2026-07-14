@@ -114,6 +114,7 @@ type WorkItemState =
   | "PRE_COMMIT"
   | "REVIEW"
   | "COMMIT"
+  | "CREATE_PR"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"
