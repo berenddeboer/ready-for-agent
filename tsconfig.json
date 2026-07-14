@@ -50,6 +50,9 @@
     },
     {
       "path": "./packages/issue-reconciler"
+    },
+    {
+      "path": "./packages/work-item-lifecycle"
     }
   ]
 }
