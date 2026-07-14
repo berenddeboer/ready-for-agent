@@ -25,6 +25,7 @@ const issue = (
   createdAt: new Date(`2026-07-${String(number).padStart(2, "0")}T12:00:00Z`),
   state,
   parent: null,
+  hierarchySupported: true,
   blockedBy: [],
 })
 
@@ -46,6 +47,13 @@ describe("GitHubService live implementation", () => {
                 parent: {
                   number: 1,
                   url: "https://github.com/acme/widgets/issues/1",
+                  state: "OPEN",
+                  repository: { nameWithOwner: "acme/widgets" },
+                  parent: null,
+                },
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
                 },
                 blockedBy: {
                   nodes: [
@@ -75,6 +83,10 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-02T12:00:00Z",
                 state: "CLOSED",
                 parent: null,
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
                 blockedBy: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },
@@ -106,11 +118,14 @@ describe("GitHubService live implementation", () => {
       createdAt: new Date("2026-07-02T12:00:00Z"),
       state: "CLOSED",
       parent: null,
+      hierarchySupported: true,
       blockedBy: [],
     })
     expect(result[1]?.parent).toEqual({
       number: 1,
       url: "https://github.com/acme/widgets/issues/1",
+      state: "OPEN",
+      isReadyLabeled: false,
     })
     expect(result[1]?.blockedBy).toEqual([
       {
@@ -142,7 +157,27 @@ describe("GitHubService live implementation", () => {
       url: true,
       createdAt: true,
       state: true,
-      parent: { number: true, url: true },
+      parent: {
+        number: true,
+        url: true,
+        state: true,
+        repository: { nameWithOwner: true },
+        parent: {
+          number: true,
+          url: true,
+          repository: { nameWithOwner: true },
+        },
+      },
+      subIssues: {
+        __args: { first: 100 },
+        nodes: {
+          number: true,
+          url: true,
+          repository: { nameWithOwner: true },
+          subIssuesSummary: { total: true },
+        },
+        pageInfo: { endCursor: true, hasNextPage: true },
+      },
       blockedBy: {
         __args: { first: 100 },
         nodes: { number: true, url: true },
@@ -169,6 +204,10 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-07T12:00:00Z",
                 state: "OPEN",
                 parent: null,
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
                 blockedBy: {
                   nodes: [
                     {
@@ -231,6 +270,153 @@ describe("GitHubService live implementation", () => {
     })
   })
 
+  it("marks an entire hierarchy unsupported when an unlabeled child has a child", async () => {
+    const child = {
+      number: 2,
+      title: "Direct child",
+      body: "Body",
+      url: "https://github.com/acme/widgets/issues/2",
+      createdAt: "2026-07-02T12:00:00Z",
+      state: "OPEN",
+      parent: {
+        number: 1,
+        url: "https://github.com/acme/widgets/issues/1",
+        state: "OPEN",
+        repository: { nameWithOwner: "acme/widgets" },
+        parent: null,
+      },
+      subIssues: {
+        nodes: [],
+        pageInfo: { endCursor: null, hasNextPage: false },
+      },
+      blockedBy: {
+        nodes: [],
+        pageInfo: { endCursor: null, hasNextPage: false },
+      },
+    }
+    const client = {
+      query: async () => ({
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Root",
+                body: "Body",
+                url: "https://github.com/acme/widgets/issues/1",
+                createdAt: "2026-07-01T12:00:00Z",
+                state: "OPEN",
+                parent: null,
+                subIssues: {
+                  nodes: [
+                    {
+                      number: 3,
+                      url: "https://github.com/acme/widgets/issues/3",
+                      repository: { nameWithOwner: "acme/widgets" },
+                      subIssuesSummary: { total: 1 },
+                    },
+                  ],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+              child,
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      }),
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository),
+    )
+
+    expect(result.map(({ hierarchySupported }) => hierarchySupported)).toEqual([
+      false,
+      false,
+    ])
+    expect(result[1]?.parent?.isReadyLabeled).toBe(true)
+  })
+
+  it("checks every sub-issue page for cross-Repository relationships", async () => {
+    const requests: unknown[] = []
+    const responses = [
+      {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Root",
+                body: "Body",
+                url: "https://github.com/acme/widgets/issues/1",
+                createdAt: "2026-07-01T12:00:00Z",
+                state: "OPEN",
+                parent: null,
+                subIssues: {
+                  nodes: [],
+                  pageInfo: {
+                    endCursor: "sub-issue-page-2",
+                    hasNextPage: true,
+                  },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+      {
+        repository: {
+          issue: {
+            subIssues: {
+              nodes: [
+                {
+                  number: 2,
+                  url: "https://github.com/acme/other/issues/2",
+                  repository: { nameWithOwner: "acme/other" },
+                  subIssuesSummary: { total: 0 },
+                },
+              ],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+    ]
+    const client = {
+      query: async (request: unknown) => {
+        requests.push(request)
+        return responses.shift()
+      },
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository),
+    )
+
+    expect(result[0]?.hierarchySupported).toBe(false)
+    const continuation = requests[1] as {
+      repository: {
+        issue: {
+          subIssues: { __args: { first: number; after: string } }
+        }
+      }
+    }
+    expect(continuation.repository.issue.subIssues.__args).toEqual({
+      first: 100,
+      after: "sub-issue-page-2",
+    })
+  })
+
   it("fails when the Repository is missing or inaccessible", async () => {
     const client = {
       query: async () => ({ repository: null }),
@@ -279,6 +465,10 @@ describe("GitHubService live implementation", () => {
                 createdAt: "2026-07-01T12:00:00Z",
                 state: "OPEN",
                 parent: null,
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
                 blockedBy: {
                   nodes: [],
                   pageInfo: { endCursor: null, hasNextPage: false },

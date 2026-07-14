@@ -72,6 +72,12 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
     ),
   )
 
+const isRelevant = (issue: ReadyLabeledIssue): boolean =>
+  issue.hierarchySupported &&
+  (issue.parent === null
+    ? issue.state === "OPEN"
+    : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled)
+
 export const IssueReconcilerLive = Layer.effect(
   IssueReconciler,
   Effect.gen(function* () {
@@ -91,7 +97,7 @@ export const IssueReconcilerLive = Layer.effect(
         localIssues.map((issue) => [issue.githubIssueNumber, issue]),
       )
       const remoteByNumber = new Map(
-        remoteIssues.map((issue) => [issue.number, issue]),
+        remoteIssues.filter(isRelevant).map((issue) => [issue.number, issue]),
       )
       const authoritativeIssues = [...remoteByNumber.values()]
       const upserts = authoritativeIssues
@@ -112,7 +118,7 @@ export const IssueReconcilerLive = Layer.effect(
         .sort((left, right) => left.githubIssueNumber - right.githubIssueNumber)
 
       const progress = {
-        fetched: authoritativeIssues.length,
+        fetched: remoteIssues.length,
         inserted: 0,
         updated: 0,
         deleted: 0,

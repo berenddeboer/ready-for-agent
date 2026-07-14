@@ -5,7 +5,11 @@ import {
   GitHubRequestError,
 } from "./errors.js"
 import { GitHubService, type GitHubServiceShape } from "./github-service.js"
-import type { GitHubIssueReference, ReadyLabeledIssue } from "./types.js"
+import type {
+  GitHubIssueReference,
+  GitHubIssueState,
+  ReadyLabeledIssue,
+} from "./types.js"
 
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
@@ -20,7 +24,8 @@ interface GitHubApiIssue {
   readonly url: unknown
   readonly createdAt: unknown
   readonly state: unknown
-  readonly parent: GitHubApiIssueReference | null
+  readonly parent: GitHubApiIssueParent | null
+  readonly subIssues: GitHubApiSubIssueConnection
   readonly blockedBy: GitHubApiIssueConnection
 }
 
@@ -35,6 +40,47 @@ interface GitHubApiIssueConnection {
 interface GitHubApiIssueReference {
   readonly number: unknown
   readonly url: unknown
+}
+
+interface GitHubApiRepositoryReference {
+  readonly nameWithOwner: unknown
+}
+
+interface GitHubApiIssueParent extends GitHubApiIssueReference {
+  readonly state: unknown
+  readonly repository: GitHubApiRepositoryReference
+  readonly parent:
+    | (GitHubApiIssueReference & {
+        readonly repository: GitHubApiRepositoryReference
+      })
+    | null
+}
+
+interface GitHubApiSubIssue extends GitHubApiIssueReference {
+  readonly repository: GitHubApiRepositoryReference
+  readonly subIssuesSummary: { readonly total: unknown }
+}
+
+interface GitHubApiSubIssueConnection {
+  readonly nodes: readonly (GitHubApiSubIssue | null)[] | null
+  readonly pageInfo: {
+    readonly endCursor: string | null
+    readonly hasNextPage: boolean
+  }
+}
+
+interface InternalIssueParent extends GitHubIssueReference {
+  readonly state: GitHubIssueState
+  readonly repository: string
+  readonly parent:
+    | (GitHubIssueReference & { readonly repository: string })
+    | null
+}
+
+interface InternalReadyLabeledIssue
+  extends Omit<ReadyLabeledIssue, "parent" | "hierarchySupported"> {
+  readonly parent: InternalIssueParent | null
+  readonly hasUnsupportedDescendants: boolean
 }
 
 const toIssueReference = (
@@ -62,7 +108,63 @@ const mapBlockedByPage = (
     .filter((issue) => issue !== null)
     .map(toIssueReference)
 
-const toReadyLabeledIssue = (issue: GitHubApiIssue): ReadyLabeledIssue => {
+const toRepositoryName = (repository: GitHubApiRepositoryReference): string => {
+  if (
+    typeof repository.nameWithOwner !== "string" ||
+    repository.nameWithOwner.trim() === ""
+  ) {
+    throw new Error("Invalid GitHub Issue repository")
+  }
+  return repository.nameWithOwner
+}
+
+const toIssueState = (state: unknown): GitHubIssueState => {
+  if (state !== "OPEN" && state !== "CLOSED") {
+    throw new Error(`Invalid GitHub issue state: ${state}`)
+  }
+  return state
+}
+
+const toIssueParent = (parent: GitHubApiIssueParent): InternalIssueParent => ({
+  ...toIssueReference(parent),
+  state: toIssueState(parent.state),
+  repository: toRepositoryName(parent.repository),
+  parent:
+    parent.parent === null
+      ? null
+      : {
+          ...toIssueReference(parent.parent),
+          repository: toRepositoryName(parent.parent.repository),
+        },
+})
+
+const pageHasUnsupportedSubIssue = (
+  connection: GitHubApiSubIssueConnection,
+  repositoryName: string,
+): boolean => {
+  if (connection.nodes === null) return true
+
+  return connection.nodes.some((issue) => {
+    if (issue === null) return true
+    toIssueReference(issue)
+    const childRepository = toRepositoryName(issue.repository)
+    if (
+      !Number.isSafeInteger(issue.subIssuesSummary.total) ||
+      Number(issue.subIssuesSummary.total) < 0
+    ) {
+      throw new Error("Invalid GitHub sub-issue count")
+    }
+    return (
+      childRepository.toLowerCase() !== repositoryName.toLowerCase() ||
+      Number(issue.subIssuesSummary.total) > 0
+    )
+  })
+}
+
+const toReadyLabeledIssue = (
+  issue: GitHubApiIssue,
+  repositoryName: string,
+): InternalReadyLabeledIssue => {
   if (!Number.isSafeInteger(issue.number) || Number(issue.number) <= 0) {
     throw new Error(`Invalid GitHub issue number: ${issue.number}`)
   }
@@ -80,9 +182,7 @@ const toReadyLabeledIssue = (issue: GitHubApiIssue): ReadyLabeledIssue => {
   } catch {
     throw new Error(`Invalid GitHub issue URL: ${issue.url}`)
   }
-  if (issue.state !== "OPEN" && issue.state !== "CLOSED") {
-    throw new Error(`Invalid GitHub issue state: ${issue.state}`)
-  }
+  const state = toIssueState(issue.state)
   const createdAt = new Date(String(issue.createdAt))
   if (Number.isNaN(createdAt.getTime())) {
     throw new Error(`Invalid GitHub issue creation time: ${issue.createdAt}`)
@@ -94,8 +194,12 @@ const toReadyLabeledIssue = (issue: GitHubApiIssue): ReadyLabeledIssue => {
     body: issue.body,
     url: issue.url,
     createdAt,
-    state: issue.state,
-    parent: issue.parent === null ? null : toIssueReference(issue.parent),
+    state,
+    parent: issue.parent === null ? null : toIssueParent(issue.parent),
+    hasUnsupportedDescendants: pageHasUnsupportedSubIssue(
+      issue.subIssues,
+      repositoryName,
+    ),
     blockedBy: mapBlockedByPage(issue.blockedBy),
   }
 }
@@ -117,7 +221,8 @@ export const makeGitHubService = (
 ): GitHubServiceShape => ({
   listReadyIssues: (repository) =>
     Effect.gen(function* () {
-      const issues: ReadyLabeledIssue[] = []
+      const issues: InternalReadyLabeledIssue[] = []
+      const repositoryName = `${repository.owner}/${repository.name}`
       let after: string | null = null
 
       while (true) {
@@ -139,7 +244,27 @@ export const makeGitHubService = (
                     url: true,
                     createdAt: true,
                     state: true,
-                    parent: { number: true, url: true },
+                    parent: {
+                      number: true,
+                      url: true,
+                      state: true,
+                      repository: { nameWithOwner: true },
+                      parent: {
+                        number: true,
+                        url: true,
+                        repository: { nameWithOwner: true },
+                      },
+                    },
+                    subIssues: {
+                      __args: { first: PAGE_SIZE },
+                      nodes: {
+                        number: true,
+                        url: true,
+                        repository: { nameWithOwner: true },
+                        subIssuesSummary: { total: true },
+                      },
+                      pageInfo: { endCursor: true, hasNextPage: true },
+                    },
                     blockedBy: {
                       __args: { first: PAGE_SIZE },
                       nodes: { number: true, url: true },
@@ -170,7 +295,7 @@ export const makeGitHubService = (
           if (issueNode === null) continue
 
           const mappedIssue = yield* Effect.try({
-            try: () => toReadyLabeledIssue(issueNode),
+            try: () => toReadyLabeledIssue(issueNode, repositoryName),
             catch: (cause) =>
               new GitHubRequestError({
                 message: `GitHub returned invalid Issue data for ${repository.owner}/${repository.name}`,
@@ -179,6 +304,8 @@ export const makeGitHubService = (
           })
           const blockedBy = [...mappedIssue.blockedBy]
           let blockedByPage = issueNode.blockedBy.pageInfo
+          let hasUnsupportedDescendants = mappedIssue.hasUnsupportedDescendants
+          let subIssuesPage = issueNode.subIssues.pageInfo
 
           while (blockedByPage.hasNextPage) {
             if (blockedByPage.endCursor === null) {
@@ -234,8 +361,69 @@ export const makeGitHubService = (
             blockedByPage = connection.pageInfo
           }
 
+          while (subIssuesPage.hasNextPage) {
+            if (subIssuesPage.endCursor === null) {
+              return yield* new GitHubRequestError({
+                message: `GitHub omitted the sub-issue page cursor for ${repositoryName}#${mappedIssue.number}`,
+              })
+            }
+
+            const subIssueResult = yield* Effect.tryPromise({
+              try: () =>
+                client.query({
+                  repository: {
+                    __args: repository,
+                    issue: {
+                      __args: { number: mappedIssue.number },
+                      subIssues: {
+                        __args: {
+                          first: PAGE_SIZE,
+                          after: subIssuesPage.endCursor,
+                        },
+                        nodes: {
+                          number: true,
+                          url: true,
+                          repository: { nameWithOwner: true },
+                          subIssuesSummary: { total: true },
+                        },
+                        pageInfo: { endCursor: true, hasNextPage: true },
+                      },
+                    },
+                  },
+                }),
+              catch: (cause) =>
+                new GitHubRequestError({
+                  message: `Failed to list sub-issues for ${repositoryName}#${mappedIssue.number}`,
+                  cause,
+                }),
+            })
+            if (subIssueResult.repository === null) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (subIssueResult.repository.issue === null) {
+              hasUnsupportedDescendants = true
+              break
+            }
+
+            const connection = subIssueResult.repository.issue
+              .subIssues as GitHubApiSubIssueConnection
+            hasUnsupportedDescendants =
+              hasUnsupportedDescendants ||
+              (yield* Effect.try({
+                try: () =>
+                  pageHasUnsupportedSubIssue(connection, repositoryName),
+                catch: (cause) =>
+                  new GitHubRequestError({
+                    message: `GitHub returned invalid sub-issue data for ${repositoryName}#${mappedIssue.number}`,
+                    cause,
+                  }),
+              }))
+            subIssuesPage = connection.pageInfo
+          }
+
           issues.push({
             ...mappedIssue,
+            hasUnsupportedDescendants,
             blockedBy: sortDependencies(blockedBy),
           })
         }
@@ -252,7 +440,63 @@ export const makeGitHubService = (
         after = endCursor
       }
 
-      return issues.sort((left, right) => left.number - right.number)
+      const issueUrlKey = (url: string) => url.toLowerCase()
+      const readyIssueUrls = new Set(
+        issues.map((issue) => issueUrlKey(issue.url)),
+      )
+      const hierarchy = (issue: InternalReadyLabeledIssue) => {
+        if (issue.parent === null) {
+          return { rootUrl: issueUrlKey(issue.url), unsupported: false }
+        }
+        if (
+          issue.parent.repository.toLowerCase() !== repositoryName.toLowerCase()
+        ) {
+          return { rootUrl: issueUrlKey(issue.parent.url), unsupported: true }
+        }
+        if (issue.parent.parent === null) {
+          return { rootUrl: issueUrlKey(issue.parent.url), unsupported: false }
+        }
+        return {
+          rootUrl: issueUrlKey(issue.parent.parent.url),
+          unsupported: true,
+        }
+      }
+      const invalidRoots = new Set<string>()
+      for (const issue of issues) {
+        const issueHierarchy = hierarchy(issue)
+        if (issueHierarchy.unsupported || issue.hasUnsupportedDescendants) {
+          invalidRoots.add(issueHierarchy.rootUrl)
+        }
+      }
+
+      return issues
+        .map((issue): ReadyLabeledIssue => {
+          const issueHierarchy = hierarchy(issue)
+          return {
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            url: issue.url,
+            createdAt: issue.createdAt,
+            state: issue.state,
+            parent:
+              issue.parent === null
+                ? null
+                : {
+                    number: issue.parent.number,
+                    url: issue.parent.url,
+                    state: issue.parent.state,
+                    isReadyLabeled: readyIssueUrls.has(
+                      issueUrlKey(issue.parent.url),
+                    ),
+                  },
+            hierarchySupported:
+              !issueHierarchy.unsupported &&
+              !invalidRoots.has(issueHierarchy.rootUrl),
+            blockedBy: issue.blockedBy,
+          }
+        })
+        .sort((left, right) => left.number - right.number)
     }),
 })
 

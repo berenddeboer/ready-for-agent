@@ -224,7 +224,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
       <div className="mt-5 border-t border-slate-100 pt-4">
         <div className="mb-2 flex items-center justify-between gap-3">
           <h3 className="m-0 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Issues
+            Relevant issues
           </h3>
           <button
             type="button"
@@ -277,9 +277,7 @@ function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
   const { data: issues } = useSuspenseQuery(issuesQuery(repositoryId))
 
   if (issues.length === 0) {
-    return (
-      <p className="m-0 text-sm text-slate-500">No Ready-labeled issues.</p>
-    )
+    return <p className="m-0 text-sm text-slate-500">No relevant issues.</p>
   }
 
   return (
