@@ -1,0 +1,3 @@
+# Work Items reference live Issues by GitHub identity
+
+Work Items retain a logical `(Repository, GitHub issue number)` reference without snapshotting Issue title, body, or URL and without a foreign key to the rebuildable Issue projection. Implement Now requires a current open, unblocked Leaf Issue, and every successful step revalidates those conditions before advancement; if the Issue is absent or no longer implementable, the Step Run remains successful but the Work Item becomes terminally Failed with a specific reason. We chose current GitHub-derived input over reproducible snapshots, accepting deliberate temporary dangling references and allowing a deleted projection that reappears before transition to count as the same Issue.
