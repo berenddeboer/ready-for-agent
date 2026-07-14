@@ -1,6 +1,7 @@
 import {
   Cause,
   Context,
+  Duration,
   Effect,
   Exit,
   Layer,
@@ -32,6 +33,7 @@ import {
   RetryNotEligibleError,
   StepRunNotFoundError,
   UnfinishedWorkItemExistsError,
+  WorkItemHasRunningStepError,
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
   WorkItemTerminalError,
@@ -289,6 +291,14 @@ export type RetryError =
   | EnqueueError
   | InvalidQueueNameError
 
+export type AbandonError =
+  | WorkItemNotFoundError
+  | WorkItemTerminalError
+  | WorkItemHasRunningStepError
+  | WorkItemLifecycleDatabaseError
+  | AcknowledgeError
+  | JobNotFoundError
+
 export type RunStepResult =
   | {
       readonly _tag: "processed"
@@ -310,6 +320,9 @@ export interface WorkItemLifecycleShape {
   readonly retry: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, RetryError>
+  readonly abandon: (
+    workItemId: string,
+  ) => Effect.Effect<WorkItemRecord, AbandonError>
   readonly getWorkItem: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, GetWorkItemError>
@@ -811,6 +824,70 @@ export const makeWorkItemLifecycleLive = (
           )
         })
 
+      const completeInterruptedStep = (input: {
+        readonly stepRun: StepRunRow
+        readonly reasonMessage: string
+        readonly cause?: Cause.Cause<unknown>
+      }): Effect.Effect<void, RunStepError> =>
+        Effect.gen(function* () {
+          const now = Date.now()
+          const { stepRun, reasonMessage, cause } = input
+
+          if (cause) {
+            yield* Effect.logWarning("Lifecycle Step interrupted", {
+              workItemId: stepRun.work_item_id,
+              stepRunId: stepRun.id,
+              step: stepRun.step,
+              reasonMessage,
+              cause: Cause.pretty(cause),
+            })
+          }
+
+          yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                yield* sql.unsafe(
+                  `UPDATE step_run
+                 SET status = 'interrupted',
+                     finished_at = ?,
+                     reason_code = ?,
+                     reason_message = ?,
+                     updated_at = ?
+                 WHERE id = ? AND status = 'running'`,
+                  [
+                    now,
+                    STEP_RUN_REASON.interrupted,
+                    reasonMessage,
+                    now,
+                    stepRun.id,
+                  ],
+                )
+
+                if (stepRun.queue_job_id !== null) {
+                  yield* queue
+                    .acknowledge(stepRun.queue_job_id)
+                    .pipe(
+                      Effect.catchTag("JobNotFoundError", () => Effect.void),
+                    )
+                }
+              }),
+            )
+            .pipe(Effect.catch(catchTransactionError))
+        })
+
+      const acknowledgeStaleDelivery = (
+        stepRun: StepRunRow,
+      ): Effect.Effect<void, RunStepError> =>
+        Effect.gen(function* () {
+          if (stepRun.queue_job_id === null) {
+            return
+          }
+          yield* queue.acknowledge(stepRun.queue_job_id).pipe(
+            Effect.catchTag("JobNotFoundError", () => Effect.void),
+            Effect.mapError((error): RunStepError => error),
+          )
+        })
+
       const runStep = Effect.fn("WorkItemLifecycle.runStep")(function* (
         stepRunId: string,
       ) {
@@ -854,6 +931,29 @@ export const makeWorkItemLifecycleLive = (
 
         const afterStart = startedRows[0]
         if (!afterStart) {
+          const current = yield* loadStepRunRow(stepRunId)
+          if (current?.status === "running") {
+            const maxDurationMs = Duration.toMillis(maxDurations[current.step])
+            const startedMs = current.started_at ?? 0
+            const leaseExpired = Date.now() - startedMs >= maxDurationMs
+            if (leaseExpired) {
+              yield* completeInterruptedStep({
+                stepRun: current,
+                reasonMessage:
+                  "Visibility lease expired while the Step Run was still Running",
+              })
+            }
+            return { _tag: "noop" as const }
+          }
+          if (
+            current &&
+            (current.status === "succeeded" ||
+              current.status === "failed" ||
+              current.status === "interrupted" ||
+              current.status === "cancelled")
+          ) {
+            yield* acknowledgeStaleDelivery(current)
+          }
           return { _tag: "noop" as const }
         }
 
@@ -868,37 +968,211 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const maxDuration = maxDurations[stepRun.step]
-        const handlerExit = yield* Effect.exit(
-          Effect.suspend(() => runHandler(stepRun.step, context)).pipe(
-            Effect.timeout(maxDuration),
-          ),
+
+        const result = yield* Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const handlerExit = yield* Effect.exit(
+              restore(
+                Effect.suspend(() => runHandler(stepRun.step, context)).pipe(
+                  Effect.timeout(maxDuration),
+                ),
+              ),
+            )
+
+            if (Exit.isFailure(handlerExit)) {
+              const classification = classifyHandlerFailure(handlerExit.cause)
+              const isTimeout =
+                classification.reasonCode === STEP_RUN_REASON.timeout
+              if (!isTimeout && Cause.hasInterruptsOnly(handlerExit.cause)) {
+                yield* completeInterruptedStep({
+                  stepRun: afterStart,
+                  reasonMessage:
+                    "Lifecycle Step was interrupted before an outcome could be established",
+                  cause: handlerExit.cause,
+                })
+                const interrupted = yield* getWorkItem(workItem.id).pipe(
+                  Effect.catchTag(
+                    "WorkItemNotFoundError",
+                    (error) =>
+                      new WorkItemLifecycleDatabaseError({
+                        message: `Work Item missing after interruption: ${error.workItemId}`,
+                        cause: error,
+                      }),
+                  ),
+                )
+                return {
+                  _tag: "processed" as const,
+                  workItem: interrupted,
+                }
+              }
+
+              const failed = yield* completeFailedStep({
+                stepRun: afterStart,
+                workItem,
+                reasonCode: classification.reasonCode,
+                reasonMessage: classification.reasonMessage,
+                cause: handlerExit.cause,
+              })
+              return { _tag: "processed" as const, workItem: failed }
+            }
+
+            const revalidation = yield* revalidateIssue(
+              workItem.repository_id,
+              workItem.github_issue_number,
+            )
+
+            const completed = yield* completeSuccessfulStep({
+              stepRun: afterStart,
+              workItem,
+              output: handlerExit.value,
+              revalidation,
+            })
+
+            return { _tag: "processed" as const, workItem: completed }
+          }),
         )
 
-        if (Exit.isFailure(handlerExit)) {
-          const classification = classifyHandlerFailure(handlerExit.cause)
-          const failed = yield* completeFailedStep({
-            stepRun: afterStart,
-            workItem,
-            reasonCode: classification.reasonCode,
-            reasonMessage: classification.reasonMessage,
-            cause: handlerExit.cause,
-          })
-          return { _tag: "processed" as const, workItem: failed }
+        return result
+      })
+
+      const abandon = Effect.fn("WorkItemLifecycle.abandon")(function* (
+        workItemId: string,
+      ) {
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (!workItem) {
+          return yield* new WorkItemNotFoundError({ workItemId })
         }
 
-        const revalidation = yield* revalidateIssue(
-          workItem.repository_id,
-          workItem.github_issue_number,
+        if (isTerminalWorkItemState(workItem.state)) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: workItem.state,
+          })
+        }
+
+        const now = Date.now()
+
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const abandonedRows = (yield* sql.unsafe(
+                `UPDATE work_item
+                 SET state = 'abandoned',
+                     state_ready_at = ?,
+                     updated_at = ?
+                 WHERE id = ?
+                   AND state NOT IN ('complete', 'failed', 'abandoned')
+                   AND NOT EXISTS (
+                     SELECT 1 FROM step_run
+                     WHERE step_run.work_item_id = work_item.id
+                       AND step_run.status = 'running'
+                   )
+                 RETURNING id`,
+                [now, now, workItemId],
+              )) as readonly { readonly id: string }[]
+
+              if (!abandonedRows[0]) {
+                const current = yield* loadWorkItemRow(workItemId)
+                if (!current) {
+                  return yield* new WorkItemNotFoundError({ workItemId })
+                }
+                if (isTerminalWorkItemState(current.state)) {
+                  return yield* new WorkItemTerminalError({
+                    workItemId,
+                    state: current.state,
+                  })
+                }
+
+                const runningRows = (yield* sql.unsafe(
+                  `SELECT id FROM step_run
+                   WHERE work_item_id = ? AND status = 'running'
+                   ORDER BY queued_at DESC, id DESC
+                   LIMIT 1`,
+                  [workItemId],
+                )) as readonly { readonly id: string }[]
+                return yield* new WorkItemHasRunningStepError({
+                  workItemId,
+                  stepRunId: runningRows[0]?.id ?? "unknown",
+                })
+              }
+
+              const cancelledRows = (yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'cancelled',
+                     finished_at = ?,
+                     reason_code = ?,
+                     reason_message = ?,
+                     updated_at = ?
+                 WHERE work_item_id = ? AND status = 'queued'
+                 RETURNING queue_job_id`,
+                [
+                  now,
+                  STEP_RUN_REASON.abandoned,
+                  "Work Item was abandoned before the Step Run started",
+                  now,
+                  workItemId,
+                ],
+              )) as readonly { readonly queue_job_id: string | null }[]
+
+              for (const cancelled of cancelledRows) {
+                if (cancelled.queue_job_id !== null) {
+                  yield* queue
+                    .acknowledge(cancelled.queue_job_id)
+                    .pipe(
+                      Effect.catchTag("JobNotFoundError", () => Effect.void),
+                    )
+                }
+              }
+            }),
+          )
+          .pipe(
+            Effect.catch((error): Effect.Effect<never, AbandonError> => {
+              if (
+                error instanceof WorkItemNotFoundError ||
+                error instanceof WorkItemTerminalError ||
+                error instanceof WorkItemHasRunningStepError
+              ) {
+                return Effect.fail(error)
+              }
+              if (error instanceof WorkItemLifecycleDatabaseError) {
+                return Effect.fail(error)
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                ((error as { _tag: string })._tag === "AcknowledgeError" ||
+                  (error as { _tag: string })._tag === "JobNotFoundError")
+              ) {
+                return Effect.fail(error as AcknowledgeError | JobNotFoundError)
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error as { _tag: string })._tag === "SqlError"
+              ) {
+                return Effect.fail(toDatabaseError(error as SqlError))
+              }
+              return Effect.fail(
+                new WorkItemLifecycleDatabaseError({
+                  message: `Unexpected transaction failure: ${String(error)}`,
+                  cause: error,
+                }),
+              )
+            }),
+          )
+
+        return yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after abandon: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
         )
-
-        const completed = yield* completeSuccessfulStep({
-          stepRun: afterStart,
-          workItem,
-          output: handlerExit.value,
-          revalidation,
-        })
-
-        return { _tag: "processed" as const, workItem: completed }
       })
 
       const retry = Effect.fn("WorkItemLifecycle.retry")(function* (
@@ -1232,6 +1506,7 @@ export const makeWorkItemLifecycleLive = (
         implementNow,
         runStep,
         retry,
+        abandon,
         getWorkItem,
         listWorkItemsForIssue,
       })

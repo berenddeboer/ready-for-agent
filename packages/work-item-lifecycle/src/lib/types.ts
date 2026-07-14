@@ -89,6 +89,8 @@ export const STEP_RUN_REASON = {
   handlerFailed: "handler_failed",
   handlerDefect: "handler_defect",
   timeout: "timeout",
+  interrupted: "interrupted",
+  abandoned: "abandoned",
 } as const
 
 export type StepRunReasonCode =

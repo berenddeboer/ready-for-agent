@@ -1,4 +1,13 @@
-import { Cause, Duration, Effect, Layer, Option, Result } from "effect"
+import {
+  Cause,
+  Deferred,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Result,
+} from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
@@ -23,6 +32,7 @@ import {
   STEP_RUN_REASON,
   UnfinishedWorkItemExistsError,
   WORK_ITEM_LIFECYCLE_QUEUE,
+  WorkItemHasRunningStepError,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   WorkItemNotFoundError,
@@ -421,7 +431,6 @@ describe("WorkItemLifecycle", () => {
       runTest(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
-          const sql = yield* SqlClient.SqlClient
           const { repository, issue } = yield* seedActionableIssue
 
           const first = yield* lifecycle.implementNow(
@@ -429,11 +438,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          // Terminalize via SQL so a second Implement Now is allowed; abandon is a later ticket.
-          yield* sql.unsafe(
-            `UPDATE work_item SET state = 'abandoned', updated_at = ? WHERE id = ?`,
-            [Date.now(), first.id],
-          )
+          yield* lifecycle.abandon(first.id)
           yield* Effect.sleep("2 millis")
 
           const second = yield* lifecycle.implementNow(
@@ -1480,6 +1485,402 @@ describe("WorkItemLifecycle", () => {
           expect(
             final.stepRuns.filter((run) => run.status === "failed"),
           ).toHaveLength(1)
+        }),
+      )
+    })
+  })
+
+  describe("delivery safety and interruption", () => {
+    it("acknowledges a stale delivery without invoking a handler", () => {
+      let createCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => {
+          createCalls += 1
+          return Effect.succeed("/tmp/worktrees/stale-delivery")
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          const jobId = created.stepRuns[0]!.queueJobId!
+
+          const first = yield* lifecycle.runStep(stepRunId)
+          expect(first._tag).toBe("processed")
+          expect(createCalls).toBe(1)
+
+          const second = yield* lifecycle.runStep(stepRunId)
+          expect(second).toEqual({ _tag: "noop" })
+          expect(createCalls).toBe(1)
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(remaining)).toBe(true)
+          if (Option.isSome(remaining)) {
+            expect(remaining.value.jobId).not.toBe(jobId)
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("install_dependencies")
+          expect(
+            final.stepRuns.filter((run) => run.step === "create_worktree"),
+          ).toHaveLength(1)
+        }),
+      )
+    })
+
+    it("marks a Running Step Run Interrupted on lease-expiry redelivery without rerunning the handler", () => {
+      let createCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => {
+          createCalls += 1
+          return Effect.succeed("/tmp/worktrees/should-not-rerun")
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          const jobId = created.stepRuns[0]!.queueJobId!
+          const now = Date.now()
+          const startedAt =
+            now -
+            Duration.toMillis(lifecycle.maxDurations.create_worktree) -
+            1_000
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [startedAt, now, stepRunId],
+          )
+          yield* sql.unsafe(
+            `UPDATE job_queue
+             SET locked_until = ?, updated_at = ?
+             WHERE id = ?`,
+            [now - 1, now, jobId],
+          )
+
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isNone(claimed)) {
+            return yield* Effect.die("expected redelivered lifecycle job")
+          }
+          expect(claimed.value.jobId).toBe(jobId)
+
+          const result = yield* lifecycle.runStep(stepRunId)
+          expect(result._tag).toBe("noop")
+          expect(createCalls).toBe(0)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("create_worktree")
+          const run = final.stepRuns[0]!
+          expect(run.status).toBe("interrupted")
+          expect(run.reasonCode).toBe(STEP_RUN_REASON.interrupted)
+          expect(run.reasonMessage).toBeTruthy()
+          expect(run.startedAt).toBeInstanceOf(Date)
+          expect(run.finishedAt).toBeInstanceOf(Date)
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.stepRuns).toHaveLength(2)
+          expect(retried.stepRuns[0]!.status).toBe("interrupted")
+          expect(retried.stepRuns[1]!.status).toBe("queued")
+        }),
+      )
+    })
+
+    it("records Interrupted when the handler is fiber-interrupted before an outcome is established", () => {
+      const hangForever: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Effect.gen(function* () {
+            yield* Effect.sleep("10 seconds")
+            return "/tmp/worktrees/never"
+          }),
+      }
+
+      return runWithSteps(
+        hangForever,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+
+          const fiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
+          yield* Effect.sleep("30 millis")
+          yield* Fiber.interrupt(fiber)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("create_worktree")
+          const run = final.stepRuns[0]!
+          expect(run.status).toBe("interrupted")
+          expect(run.reasonCode).toBe(STEP_RUN_REASON.interrupted)
+          expect(run.finishedAt).toBeInstanceOf(Date)
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.stepRuns[1]!.status).toBe("queued")
+        }),
+      )
+    })
+  })
+
+  describe("abandon", () => {
+    it("abandons a Queued Work Item, cancels the Step Run, and removes its queue job", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          const abandoned = yield* lifecycle.abandon(created.id)
+          expect(abandoned.state).toBe("abandoned")
+          expect(abandoned.stepRuns).toHaveLength(1)
+          const run = abandoned.stepRuns[0]!
+          expect(run.status).toBe("cancelled")
+          expect(run.startedAt).toBeNull()
+          expect(run.finishedAt).toBeInstanceOf(Date)
+          expect(run.reasonCode).toBe(STEP_RUN_REASON.abandoned)
+          expect(run.reasonMessage).toBeTruthy()
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const late = yield* lifecycle.runStep(run.id)
+          expect(late).toEqual({ _tag: "noop" })
+
+          const next = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(next.id).not.toBe(created.id)
+          expect(next.state).toBe("create_worktree")
+
+          const listed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(listed.map((item) => item.id)).toEqual([created.id, next.id])
+          expect(listed[0]!.state).toBe("abandoned")
+        }),
+      ))
+
+    it("abandons after Failed or Interrupted runs while preserving Step Run history", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.fail(new Error("fail then abandon")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(job)).toBe(true)
+          if (Option.isNone(job)) {
+            return yield* Effect.die("expected job")
+          }
+          yield* lifecycle.runStep(
+            (job.value.payload as { stepRunId: string }).stepRunId,
+          )
+
+          const afterFail = yield* lifecycle.getWorkItem(created.id)
+          expect(afterFail.stepRuns[0]!.status).toBe("failed")
+
+          const abandoned = yield* lifecycle.abandon(created.id)
+          expect(abandoned.state).toBe("abandoned")
+          expect(abandoned.stepRuns).toHaveLength(1)
+          expect(abandoned.stepRuns[0]!.status).toBe("failed")
+          expect(abandoned.stepRuns[0]!.reasonMessage).toContain(
+            "fail then abandon",
+          )
+
+          const second = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const now = Date.now()
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'interrupted',
+                 started_at = ?,
+                 finished_at = ?,
+                 reason_code = ?,
+                 reason_message = 'worker lost',
+                 updated_at = ?
+             WHERE id = ?`,
+            [
+              now,
+              now,
+              STEP_RUN_REASON.interrupted,
+              now,
+              second.stepRuns[0]!.id,
+            ],
+          )
+          if (second.stepRuns[0]!.queueJobId) {
+            yield* queue
+              .acknowledge(second.stepRuns[0]!.queueJobId)
+              .pipe(Effect.catch(() => Effect.void))
+          }
+
+          const abandonedInterrupted = yield* lifecycle.abandon(second.id)
+          expect(abandonedInterrupted.state).toBe("abandoned")
+          expect(abandonedInterrupted.stepRuns[0]!.status).toBe("interrupted")
+
+          const third = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(third.id).not.toBe(created.id)
+          expect(third.id).not.toBe(second.id)
+
+          const listed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(listed).toHaveLength(3)
+          expect(listed.map((item) => item.state)).toEqual([
+            "abandoned",
+            "abandoned",
+            "create_worktree",
+          ])
+        }),
+      )
+    })
+
+    it("rejects abandon for terminal Work Items and while a Step Run is Running", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [Date.now(), Date.now(), created.stepRuns[0]!.id],
+          )
+
+          const runningError = yield* Effect.flip(lifecycle.abandon(created.id))
+          expect(runningError).toBeInstanceOf(WorkItemHasRunningStepError)
+          if (runningError instanceof WorkItemHasRunningStepError) {
+            expect(runningError.workItemId).toBe(created.id)
+            expect(runningError.stepRunId).toBe(created.stepRuns[0]!.id)
+          }
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'failed', finished_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [Date.now(), Date.now(), created.stepRuns[0]!.id],
+          )
+          const abandoned = yield* lifecycle.abandon(created.id)
+          expect(abandoned.state).toBe("abandoned")
+
+          const terminalError = yield* Effect.flip(
+            lifecycle.abandon(created.id),
+          )
+          expect(terminalError).toBeInstanceOf(WorkItemTerminalError)
+          if (terminalError instanceof WorkItemTerminalError) {
+            expect(terminalError.state).toBe("abandoned")
+          }
+
+          yield* sql.unsafe(
+            `UPDATE work_item SET state = 'complete', updated_at = ? WHERE id = ?`,
+            [Date.now(), created.id],
+          )
+          const completeError = yield* Effect.flip(
+            lifecycle.abandon(created.id),
+          )
+          expect(completeError).toBeInstanceOf(WorkItemTerminalError)
+        }),
+      ))
+
+    it("cannot abandon while a concurrently started handler is Running", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const release = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as("/tmp/worktrees/concurrent-abandon"),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          const running = yield* Effect.forkChild(
+            lifecycle.runStep(created.stepRuns[0]!.id),
+          )
+          yield* Deferred.await(started)
+
+          const error = yield* Effect.flip(lifecycle.abandon(created.id))
+          expect(error).toBeInstanceOf(WorkItemHasRunningStepError)
+          expect((yield* lifecycle.getWorkItem(created.id)).state).toBe(
+            "create_worktree",
+          )
+
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(running)
         }),
       )
     })
