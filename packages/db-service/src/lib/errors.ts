@@ -36,6 +36,7 @@ export class InvalidIssueInputError extends Data.TaggedError(
     | "state"
     | "githubCreatedAt"
     | "parent"
+    | "parentPosition"
     | "blockedBy"
   readonly message: string
 }> {}

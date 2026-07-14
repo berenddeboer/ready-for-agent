@@ -35,6 +35,7 @@ describe("DbService", () => {
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
     parent: null,
+    parentPosition: null,
     hasChildren: false,
     blockedBy: [],
   }
@@ -410,6 +411,7 @@ describe("DbService", () => {
 
           const withParent = yield* db.storeIssue({
             ...baseInput,
+            parentPosition: 4,
             parent: {
               githubIssueNumber: 7,
               githubIssueUrl: "https://github.com/acme/widgets/issues/7",
@@ -419,8 +421,12 @@ describe("DbService", () => {
             githubIssueNumber: 7,
             githubIssueUrl: "https://github.com/acme/widgets/issues/7",
           })
+          expect(withParent.parentPosition).toBe(4)
           expect((yield* db.listIssues(repository.id))[0]?.parent).toEqual(
             withParent.parent,
+          )
+          expect((yield* db.listIssues(repository.id))[0]?.parentPosition).toBe(
+            4,
           )
 
           const withoutParent = yield* db.storeIssue({
@@ -428,6 +434,7 @@ describe("DbService", () => {
             parent: null,
           })
           expect(withoutParent.parent).toBeNull()
+          expect(withoutParent.parentPosition).toBeNull()
           expect((yield* db.listIssues(repository.id))[0]?.parent).toBeNull()
         }),
       ))

@@ -83,7 +83,10 @@ interface InternalIssueParent extends GitHubIssueReference {
 }
 
 interface InternalReadyLabeledIssue
-  extends Omit<ReadyLabeledIssue, "parent" | "hierarchySupported"> {
+  extends Omit<
+    ReadyLabeledIssue,
+    "parent" | "parentPosition" | "hierarchySupported"
+  > {
   readonly parent: InternalIssueParent | null
   readonly hasUnsupportedDescendants: boolean
 }
@@ -167,6 +170,19 @@ const pageHasUnsupportedSubIssue = (
   })
 }
 
+const recordSubIssuePositions = (
+  connection: GitHubApiSubIssueConnection,
+  positions: Map<string, number>,
+  offset: number,
+): number => {
+  for (const [index, issue] of (connection.nodes ?? []).entries()) {
+    if (issue !== null) {
+      positions.set(toIssueReference(issue).url.toLowerCase(), offset + index)
+    }
+  }
+  return offset + (connection.nodes?.length ?? 0)
+}
+
 const toReadyLabeledIssue = (
   issue: GitHubApiIssue,
   repositoryName: string,
@@ -235,6 +251,7 @@ export const makeGitHubService = (
   listReadyIssues: (repository) =>
     Effect.gen(function* () {
       const issues: InternalReadyLabeledIssue[] = []
+      const subIssuePositions = new Map<string, number>()
       const repositoryName = `${repository.owner}/${repository.name}`
       let after: string | null = null
 
@@ -320,6 +337,19 @@ export const makeGitHubService = (
           let blockedByPage = issueNode.blockedBy.pageInfo
           let hasUnsupportedDescendants = mappedIssue.hasUnsupportedDescendants
           let subIssuesPage = issueNode.subIssues.pageInfo
+          let subIssueOffset = yield* Effect.try({
+            try: () =>
+              recordSubIssuePositions(
+                issueNode.subIssues,
+                subIssuePositions,
+                0,
+              ),
+            catch: (cause) =>
+              new GitHubRequestError({
+                message: `GitHub returned invalid sub-issue data for ${repositoryName}#${mappedIssue.number}`,
+                cause,
+              }),
+          })
 
           while (blockedByPage.hasNextPage) {
             if (blockedByPage.endCursor === null) {
@@ -432,6 +462,19 @@ export const makeGitHubService = (
                     cause,
                   }),
               }))
+            subIssueOffset = yield* Effect.try({
+              try: () =>
+                recordSubIssuePositions(
+                  connection,
+                  subIssuePositions,
+                  subIssueOffset,
+                ),
+              catch: (cause) =>
+                new GitHubRequestError({
+                  message: `GitHub returned invalid sub-issue data for ${repositoryName}#${mappedIssue.number}`,
+                  cause,
+                }),
+            })
             subIssuesPage = connection.pageInfo
           }
 
@@ -494,6 +537,10 @@ export const makeGitHubService = (
             createdAt: issue.createdAt,
             state: issue.state,
             hasChildren: issue.hasChildren,
+            parentPosition:
+              issue.parent === null
+                ? null
+                : (subIssuePositions.get(issueUrlKey(issue.url)) ?? null),
             parent:
               issue.parent === null
                 ? null

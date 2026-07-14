@@ -104,6 +104,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
               state: "OPEN",
               hierarchySupported: true,
               hasChildren: false,
+              parentPosition: 0,
               parent: {
                 number: 1,
                 url: "https://github.com/acme/widgets/issues/1",
