@@ -26,6 +26,14 @@ export class RepositoryNotFoundError extends Data.TaggedError(
   readonly repositoryId: string
 }> {}
 
+export class RepositoryHasRunningStepError extends Data.TaggedError(
+  "RepositoryHasRunningStepError",
+)<{
+  readonly repositoryId: string
+  readonly stepRunId: string
+  readonly workItemId: string
+}> {}
+
 export class InvalidIssueInputError extends Data.TaggedError(
   "InvalidIssueInputError",
 )<{

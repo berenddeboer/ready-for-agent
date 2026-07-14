@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, PubSub, Stream } from "effect"
+import { Clock, Context, Effect, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
@@ -9,6 +9,7 @@ import {
   InvalidRepositoryInputError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
+  RepositoryHasRunningStepError,
   RepositoryNotFoundError,
 } from "./errors.js"
 import type {
@@ -154,7 +155,10 @@ export interface DbServiceShape {
   >
   readonly removeRepository: (
     repositoryId: string,
-  ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
+  ) => Effect.Effect<
+    void,
+    RepositoryNotFoundError | RepositoryHasRunningStepError | DatabaseError
+  >
   readonly storeIssue: (
     input: StoreIssueInput,
   ) => Effect.Effect<
@@ -432,11 +436,86 @@ export const DbServiceLive = Layer.effect(
 
     const removeRepository = (
       repositoryId: string,
-    ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
+    ): Effect.Effect<
+      void,
+      RepositoryNotFoundError | RepositoryHasRunningStepError | DatabaseError
+    > =>
       Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
+              const running = (yield* sql.unsafe(
+                `SELECT step_run.id AS step_run_id, step_run.work_item_id AS work_item_id
+                 FROM step_run
+                 INNER JOIN work_item ON work_item.id = step_run.work_item_id
+                 WHERE work_item.repository_id = ?
+                   AND step_run.status = 'running'
+                 ORDER BY step_run.queued_at ASC, step_run.id ASC
+                 LIMIT 1`,
+                [repositoryId],
+              )) as readonly {
+                readonly step_run_id: string
+                readonly work_item_id: string
+              }[]
+
+              if (running[0]) {
+                return yield* new RepositoryHasRunningStepError({
+                  repositoryId,
+                  stepRunId: running[0].step_run_id,
+                  workItemId: running[0].work_item_id,
+                })
+              }
+
+              yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'cancelled',
+                     finished_at = ?,
+                     reason_code = 'repository_removed',
+                     reason_message = 'Repository was removed before the Step Run started',
+                     updated_at = ?
+                 WHERE status = 'queued'
+                   AND work_item_id IN (
+                     SELECT id FROM work_item WHERE repository_id = ?
+                   )`,
+                [now, now, repositoryId],
+              )
+
+              yield* sql.unsafe(
+                `DELETE FROM job_queue
+                 WHERE id IN (
+                   SELECT step_run.queue_job_id
+                   FROM step_run
+                   INNER JOIN work_item ON work_item.id = step_run.work_item_id
+                   WHERE work_item.repository_id = ?
+                     AND step_run.queue_job_id IS NOT NULL
+                 )`,
+                [repositoryId],
+              )
+
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET state = 'abandoned',
+                     state_ready_at = ?,
+                     updated_at = ?
+                 WHERE repository_id = ?
+                   AND state NOT IN ('complete', 'failed', 'abandoned')`,
+                [now, now, repositoryId],
+              )
+
+              yield* sql.unsafe(
+                `DELETE FROM step_run
+                 WHERE work_item_id IN (
+                   SELECT id FROM work_item WHERE repository_id = ?
+                 )`,
+                [repositoryId],
+              )
+
+              yield* sql.unsafe(
+                `DELETE FROM work_item WHERE repository_id = ?`,
+                [repositoryId],
+              )
+
               yield* sql.unsafe(
                 `DELETE FROM issue_dependency
                WHERE issue_id IN (
@@ -459,7 +538,8 @@ export const DbServiceLive = Layer.effect(
           )
           .pipe(
             Effect.mapError((error) =>
-              error instanceof RepositoryNotFoundError
+              error instanceof RepositoryNotFoundError ||
+              error instanceof RepositoryHasRunningStepError
                 ? error
                 : toDatabaseError(error),
             ),
