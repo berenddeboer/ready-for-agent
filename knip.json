@@ -1,13 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "ignoreDependencies": ["@swc/helpers", "nx", "tslib"],
+  "ignoreDependencies": ["@swc/helpers", "effect-solutions", "nx", "tslib"],
   "ignoreBinaries": ["skills"],
+  "ignoreFiles": [".opencode/plugin/**"],
   "workspaces": {
     "apps/harness": {
       "entry": [
         "server.ts",
         "src/router.tsx",
         "src/server.ts",
+        "src/styles.css",
         "test/**/*.test.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
@@ -24,7 +26,7 @@
       "entry": ["src/index.ts"]
     },
     "packages/github-service": {
-      "entry": ["test/**/*.{test,spec}.ts"],
+      "entry": ["src/bin/list-ready-issues.ts", "test/**/*.{test,spec}.ts"],
       "project": ["src/**/*.ts", "test/**/*.ts"]
     },
     "packages/db": {
