@@ -42,6 +42,12 @@ export class WorkItemNotFoundError extends Data.TaggedError(
   readonly workItemId: string
 }> {}
 
+export class StepRunNotFoundError extends Data.TaggedError(
+  "StepRunNotFoundError",
+)<{
+  readonly stepRunId: string
+}> {}
+
 export class WorkItemLifecycleDatabaseError extends Data.TaggedError(
   "WorkItemLifecycleDatabaseError",
 )<{

@@ -7,8 +7,10 @@ import {
   type RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
+  type AcknowledgeError,
   EnqueueError,
   InvalidQueueNameError,
+  type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
 import {
@@ -17,10 +19,12 @@ import {
   IssueNotOpenError,
   NonTransactionalQueueError,
   ParentIssueError,
+  StepRunNotFoundError,
   UnfinishedWorkItemExistsError,
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
 } from "./errors.js"
+import { type LifecycleStepContext, LifecycleSteps } from "./lifecycle-steps.js"
 import {
   type OperationalLifecycleStep,
   type StepRunId,
@@ -136,6 +140,21 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
+const nextOperationalStep = (
+  step: OperationalLifecycleStep,
+): OperationalLifecycleStep | "complete" => {
+  switch (step) {
+    case "create_worktree":
+      return "install_dependencies"
+    case "install_dependencies":
+      return "implement"
+    case "implement":
+      return "review"
+    case "review":
+      return "complete"
+  }
+}
+
 export type ImplementNowError =
   | IssueNotFoundError
   | IssueNotOpenError
@@ -154,11 +173,34 @@ export type GetWorkItemError =
 
 export type ListWorkItemsError = WorkItemLifecycleDatabaseError
 
+export type RunStepError =
+  | StepRunNotFoundError
+  | WorkItemNotFoundError
+  | WorkItemLifecycleDatabaseError
+  | EnqueueError
+  | InvalidQueueNameError
+  | AcknowledgeError
+  | JobNotFoundError
+  | RepositoryNotFoundError
+  | DatabaseError
+
+export type RunStepResult =
+  | {
+      readonly _tag: "processed"
+      readonly workItem: WorkItemRecord
+    }
+  | {
+      readonly _tag: "noop"
+    }
+
 export interface WorkItemLifecycleShape {
   readonly implementNow: (
     repositoryId: string,
     githubIssueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  readonly runStep: (
+    stepRunId: string,
+  ) => Effect.Effect<RunStepResult, RunStepError>
   readonly getWorkItem: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, GetWorkItemError>
@@ -179,6 +221,7 @@ export const WorkItemLifecycleLive = Layer.effect(
     const sql = yield* SqlClient.SqlClient
     const db = yield* DbService
     const queue = yield* QueueService
+    const steps = yield* LifecycleSteps
 
     if (!queue.queueInTransaction) {
       return yield* new NonTransactionalQueueError({
@@ -306,6 +349,362 @@ export const WorkItemLifecycleLive = Layer.effect(
       )
     })
 
+    const loadStepRunRow = (
+      stepRunId: string,
+    ): Effect.Effect<StepRunRow | null, WorkItemLifecycleDatabaseError> =>
+      Effect.gen(function* () {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
+                    started_at, finished_at, reason_code, reason_message
+             FROM step_run
+             WHERE id = ?
+             LIMIT 1`,
+            [stepRunId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
+        return rows[0] ?? null
+      })
+
+    const loadWorkItemRow = (
+      workItemId: string,
+    ): Effect.Effect<WorkItemRow | null, WorkItemLifecycleDatabaseError> =>
+      Effect.gen(function* () {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT id, repository_id, github_issue_number, model, variant, state,
+                    state_ready_at, worktree_path, session_id, failure_code,
+                    failure_message, created_at, updated_at
+             FROM work_item
+             WHERE id = ?
+             LIMIT 1`,
+            [workItemId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
+        return rows[0] ?? null
+      })
+
+    const revalidateIssue = (
+      repositoryId: string,
+      githubIssueNumber: number,
+    ): Effect.Effect<
+      | { readonly ok: true }
+      | {
+          readonly ok: false
+          readonly failureCode: string
+          readonly failureMessage: string
+        },
+      RepositoryNotFoundError | DatabaseError
+    > =>
+      Effect.gen(function* () {
+        const issues = yield* db.listIssues(repositoryId)
+        const issue = issues.find(
+          (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+        )
+
+        if (!issue) {
+          return {
+            ok: false as const,
+            failureCode: "issue_not_found",
+            failureMessage: `Issue #${githubIssueNumber} is no longer present in the Issue store`,
+          }
+        }
+
+        if (issue.state !== "OPEN") {
+          return {
+            ok: false as const,
+            failureCode: "issue_not_open",
+            failureMessage: `Issue #${githubIssueNumber} is ${issue.state}, not OPEN`,
+          }
+        }
+
+        if (issue.hasChildren) {
+          return {
+            ok: false as const,
+            failureCode: "issue_is_parent",
+            failureMessage: `Issue #${githubIssueNumber} has children and is no longer a Leaf Issue`,
+          }
+        }
+
+        if (issue.blockedBy.length > 0) {
+          return {
+            ok: false as const,
+            failureCode: "issue_blocked",
+            failureMessage: `Issue #${githubIssueNumber} is blocked by ${issue.blockedBy.length} Issue(s)`,
+          }
+        }
+
+        return { ok: true as const }
+      })
+
+    const encodeStepJob = (stepRunId: string) =>
+      Schema.decodeUnknownEffect(WorkItemStepJob)({
+        _tag: "work-item-step",
+        stepRunId,
+      }).pipe(
+        Effect.mapError(
+          (error) =>
+            new WorkItemLifecycleDatabaseError({
+              message: `Failed to encode work-item-step payload: ${String(error)}`,
+              cause: error,
+            }),
+        ),
+      )
+
+    const runHandler = (
+      step: OperationalLifecycleStep,
+      context: LifecycleStepContext,
+    ): Effect.Effect<{
+      readonly worktreePath?: string
+      readonly sessionId?: string
+    }> => {
+      switch (step) {
+        case "create_worktree":
+          return steps
+            .createWorktree(context)
+            .pipe(Effect.map((worktreePath) => ({ worktreePath })))
+        case "install_dependencies":
+          return steps.installDependencies(context).pipe(Effect.as({}))
+        case "implement":
+          return steps
+            .implement(context)
+            .pipe(Effect.map((sessionId) => ({ sessionId })))
+        case "review":
+          return steps.review(context).pipe(Effect.as({}))
+      }
+    }
+
+    const catchTransactionError = <A>(
+      error: unknown,
+    ): Effect.Effect<A, RunStepError> => {
+      if (error instanceof WorkItemLifecycleDatabaseError) {
+        return Effect.fail(error)
+      }
+      if (error instanceof EnqueueError) {
+        return Effect.fail(error)
+      }
+      if (error instanceof InvalidQueueNameError) {
+        return Effect.fail(error)
+      }
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        (error as { _tag: string })._tag === "SqlError"
+      ) {
+        return Effect.fail(toDatabaseError(error as SqlError))
+      }
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        ((error as { _tag: string })._tag === "AcknowledgeError" ||
+          (error as { _tag: string })._tag === "JobNotFoundError")
+      ) {
+        return Effect.fail(error as AcknowledgeError | JobNotFoundError)
+      }
+      return Effect.fail(
+        new WorkItemLifecycleDatabaseError({
+          message: `Unexpected transaction failure: ${String(error)}`,
+          cause: error,
+        }),
+      )
+    }
+
+    const completeSuccessfulStep = (input: {
+      readonly stepRun: StepRunRow
+      readonly workItem: WorkItemRow
+      readonly output: {
+        readonly worktreePath?: string
+        readonly sessionId?: string
+      }
+      readonly revalidation:
+        | { readonly ok: true }
+        | {
+            readonly ok: false
+            readonly failureCode: string
+            readonly failureMessage: string
+          }
+    }): Effect.Effect<WorkItemRecord, RunStepError> =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        const { stepRun, workItem, output, revalidation } = input
+        const nextStep = nextOperationalStep(stepRun.step)
+        const worktreePath = output.worktreePath ?? workItem.worktree_path
+        const sessionId = output.sessionId ?? workItem.session_id
+
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'succeeded', finished_at = ?, updated_at = ?
+                 WHERE id = ? AND status = 'running'`,
+                [now, now, stepRun.id],
+              )
+
+              if (!revalidation.ok) {
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = 'failed',
+                       state_ready_at = ?,
+                       failure_code = ?,
+                       failure_message = ?,
+                       worktree_path = ?,
+                       session_id = ?,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [
+                    now,
+                    revalidation.failureCode,
+                    revalidation.failureMessage,
+                    worktreePath,
+                    sessionId,
+                    now,
+                    workItem.id,
+                  ],
+                )
+              } else if (nextStep === "complete") {
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = 'complete',
+                       state_ready_at = ?,
+                       worktree_path = ?,
+                       session_id = ?,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, worktreePath, sessionId, now, workItem.id],
+                )
+              } else {
+                const nextStepRunId = makeStepRunId()
+
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = ?,
+                       state_ready_at = ?,
+                       worktree_path = ?,
+                       session_id = ?,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [nextStep, now, worktreePath, sessionId, now, workItem.id],
+                )
+
+                yield* sql.unsafe(
+                  `INSERT INTO step_run (
+                     id, work_item_id, step, status, queue_job_id, queued_at,
+                     started_at, finished_at, reason_code, reason_message,
+                     created_at, updated_at
+                   ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                  [nextStepRunId, workItem.id, nextStep, now, now, now],
+                )
+
+                const payload = yield* encodeStepJob(nextStepRunId)
+                const jobId = yield* queue.enqueue(
+                  WORK_ITEM_LIFECYCLE_QUEUE,
+                  payload,
+                  { retryLimit: 1 },
+                )
+
+                yield* sql.unsafe(
+                  `UPDATE step_run
+                   SET queue_job_id = ?, updated_at = ?
+                   WHERE id = ?`,
+                  [jobId, now, nextStepRunId],
+                )
+              }
+
+              if (stepRun.queue_job_id !== null) {
+                yield* queue.acknowledge(stepRun.queue_job_id)
+              }
+            }),
+          )
+          .pipe(Effect.catch(catchTransactionError))
+
+        return yield* getWorkItem(workItem.id).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after step completion: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+      })
+
+    const runStep = Effect.fn("WorkItemLifecycle.runStep")(function* (
+      stepRunId: string,
+    ) {
+      const stepRun = yield* loadStepRunRow(stepRunId)
+      if (!stepRun) {
+        return yield* new StepRunNotFoundError({ stepRunId })
+      }
+
+      const workItem = yield* loadWorkItemRow(stepRun.work_item_id)
+      if (!workItem) {
+        return yield* new WorkItemNotFoundError({
+          workItemId: stepRun.work_item_id,
+        })
+      }
+
+      const startedAt = Date.now()
+      const startedRows = (yield* sql
+        .unsafe(
+          `UPDATE step_run
+           SET status = 'running', started_at = ?, updated_at = ?
+           WHERE id = ?
+             AND status = 'queued'
+             AND step = ?
+             AND EXISTS (
+               SELECT 1 FROM work_item
+               WHERE work_item.id = step_run.work_item_id
+                 AND work_item.state = step_run.step
+                 AND work_item.state NOT IN ('complete', 'failed', 'abandoned')
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM step_run AS other
+                WHERE other.work_item_id = step_run.work_item_id
+                  AND other.status = 'running'
+                  AND other.id != step_run.id
+              )
+            RETURNING id, work_item_id, step, status, queue_job_id, queued_at,
+                      started_at, finished_at, reason_code, reason_message`,
+          [startedAt, startedAt, stepRunId, stepRun.step],
+        )
+        .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
+
+      const afterStart = startedRows[0]
+      if (!afterStart) {
+        return { _tag: "noop" as const }
+      }
+
+      const context: LifecycleStepContext = {
+        workItemId: workItem.id as WorkItemId,
+        repositoryId: workItem.repository_id,
+        githubIssueNumber: workItem.github_issue_number,
+        model: workItem.model,
+        variant: workItem.variant,
+        worktreePath: workItem.worktree_path,
+        sessionId: workItem.session_id,
+      }
+
+      const output = yield* runHandler(stepRun.step, context)
+
+      const revalidation = yield* revalidateIssue(
+        workItem.repository_id,
+        workItem.github_issue_number,
+      )
+
+      const completed = yield* completeSuccessfulStep({
+        stepRun: afterStart,
+        workItem,
+        output,
+        revalidation,
+      })
+
+      return { _tag: "processed" as const, workItem: completed }
+    })
+
     const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(function* (
       repositoryId: string,
       githubIssueNumber: number,
@@ -350,10 +749,10 @@ export const WorkItemLifecycleLive = Layer.effect(
         githubIssueNumber,
       )
       const unfinished = existing.find(
-        (workItem) =>
-          workItem.state !== "complete" &&
-          workItem.state !== "failed" &&
-          workItem.state !== "abandoned",
+        (item) =>
+          item.state !== "complete" &&
+          item.state !== "failed" &&
+          item.state !== "abandoned",
       )
       if (unfinished) {
         return yield* unfinishedWorkItemExistsError(
@@ -400,18 +799,7 @@ export const WorkItemLifecycleLive = Layer.effect(
               [stepRunId, workItemId, step, now, now, now],
             )
 
-            const payload = yield* Schema.decodeUnknownEffect(WorkItemStepJob)({
-              _tag: "work-item-step",
-              stepRunId,
-            }).pipe(
-              Effect.mapError(
-                (error) =>
-                  new WorkItemLifecycleDatabaseError({
-                    message: `Failed to encode work-item-step payload: ${String(error)}`,
-                    cause: error,
-                  }),
-              ),
-            )
+            const payload = yield* encodeStepJob(stepRunId)
 
             const jobId = yield* queue.enqueue(
               WORK_ITEM_LIFECYCLE_QUEUE,
@@ -478,6 +866,7 @@ export const WorkItemLifecycleLive = Layer.effect(
 
     return WorkItemLifecycle.of({
       implementNow,
+      runStep,
       getWorkItem,
       listWorkItemsForIssue,
     })
