@@ -8,13 +8,11 @@ import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
 import { preCommit } from "./pre-commit.js"
 import { removeWorktree } from "./remove-worktree.js"
-
-const notImplemented = (step: string) =>
-  Effect.die(new Error(`Lifecycle Step ${step} is not implemented yet`))
+import { review } from "./review.js"
 
 /**
  * Production LifecycleSteps: Create Worktree, Install Dependencies, Implement,
- * and Pre-Commit; Review arrives in a later ticket.
+ * Pre-Commit, and Review.
  * Captures platform, database, and OpenCode services so handlers remain
  * `Effect<A>` with no requirements.
  */
@@ -52,7 +50,7 @@ export const LifecycleStepsLive = Layer.effect(
         withServices(installDependencies(context)),
       implement: (context) => withServices(implement(context)),
       preCommit: (context) => withServices(preCommit(context)),
-      review: () => notImplemented("review"),
+      review: (context) => withServices(review(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),
