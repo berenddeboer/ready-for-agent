@@ -25,6 +25,7 @@ const rawSql = (query: string) => Object.assign([query], { raw: [query] })
 
 type MigrationRow = {
   readonly hash: string
+  readonly name: string | null
 }
 
 export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadError>()(
@@ -77,30 +78,40 @@ export const runMigrations = (migrationsFolder: string) =>
     `
 
     const appliedRows = (yield* sql`
-      SELECT hash FROM __drizzle_migrations
+      SELECT hash, name FROM __drizzle_migrations
     `) as ReadonlyArray<MigrationRow>
     const appliedHashes = new Set(appliedRows.map((row) => row.hash))
+    const appliedNames = new Set(
+      appliedRows.flatMap((row) => (row.name === null ? [] : [row.name])),
+    )
 
     for (const migration of migrations) {
-      if (appliedHashes.has(migration.hash)) {
+      if (
+        appliedNames.has(migration.name) ||
+        appliedHashes.has(migration.hash)
+      ) {
         continue
       }
 
-      for (const query of migration.sql) {
-        if (query.trim().length > 0) {
-          yield* sql(rawSql(query))
-        }
-      }
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          for (const query of migration.sql) {
+            if (query.trim().length > 0) {
+              yield* sql(rawSql(query))
+            }
+          }
 
-      yield* sql`
-        INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
-        VALUES (
-          ${migration.hash},
-          ${migration.folderMillis},
-          ${migration.name},
-          ${new Date().toISOString()}
-        )
-      `
+          yield* sql`
+            INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
+            VALUES (
+              ${migration.hash},
+              ${migration.folderMillis},
+              ${migration.name},
+              ${new Date().toISOString()}
+            )
+          `
+        }),
+      )
     }
   })
 
