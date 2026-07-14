@@ -1,4 +1,12 @@
-import { DateTime, Deferred, Duration, Effect, Layer, Option } from "effect"
+import {
+  DateTime,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  ManagedRuntime,
+  Option,
+} from "effect"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DatabaseError,
@@ -11,11 +19,14 @@ import {
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
+import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import {
   IssueReconciler,
   IssueReconcilerLive,
   type IssueReconcilerShape,
 } from "@ready-for-agent/issue-reconciler"
+import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import { Opencode } from "@ready-for-agent/opencode"
 import {
   ClaimError,
   QueueService,
@@ -62,9 +73,15 @@ const rawJob = (payload: unknown): RawJob => {
 
 const unused = () => Effect.die("not used")
 
-const dbLayer = (repositories: readonly RepositoryRecord[] = [repository]) =>
+const dbLayer = (
+  repositories: readonly RepositoryRecord[] = [repository],
+  notifyIssuesChanged: (repositoryId: string) => Effect.Effect<void> = () =>
+    Effect.void,
+) =>
   Layer.succeed(DbService, {
     repositoryChanges: Effect.die("not used") as never,
+    issueChanges: Effect.die("not used") as never,
+    notifyIssuesChanged,
     getConfig: unused(),
     updateConfig: unused,
     addRepository: unused,
@@ -237,6 +254,187 @@ describe("Job worker", () => {
           ),
         ),
       )
+    }
+  })
+
+  test("publishes Issues-changed invalidation only after successful reconciliation", async () => {
+    const successJob = rawJob(refreshPayload)
+    const failureJob = rawJob(refreshPayload)
+    const acknowledged = await Effect.runPromise(Deferred.make<string>())
+    const failed = await Effect.runPromise(Deferred.make<string>())
+    const notifications: string[] = []
+    let calls = 0
+    const reconciler = Layer.succeed(IssueReconciler, {
+      reconcile: () =>
+        Effect.gen(function* () {
+          calls += 1
+          if (calls === 1) {
+            return {
+              fetched: 0,
+              inserted: 0,
+              updated: 0,
+              deleted: 0,
+              unchanged: 0,
+            }
+          }
+          return yield* Effect.fail(
+            new DatabaseError({ message: "reconciliation failed" }),
+          )
+        }),
+    } satisfies IssueReconcilerShape)
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        expect(yield* Deferred.await(acknowledged)).toBe(successJob.jobId)
+        expect(notifications).toEqual([repository.id])
+        expect(yield* Deferred.await(failed)).toBe(failureJob.jobId)
+        expect(notifications).toEqual([repository.id])
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          [successJob, failureJob],
+          (jobId) => Deferred.succeed(acknowledged, jobId),
+          (jobId) => Deferred.succeed(failed, jobId),
+        ),
+        dbLayer([repository], (repositoryId) =>
+          Effect.sync(() => {
+            notifications.push(repositoryId)
+          }),
+        ),
+        reconciler,
+      ),
+    )
+  })
+
+  test("delivers only successful worker invalidations through GraphQL", async () => {
+    const jobs: RawJob[] = []
+    const acknowledged = await Effect.runPromise(Deferred.make<string>())
+    const failed = await Effect.runPromise(Deferred.make<string>())
+    let reconciliations = 0
+    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+    const queue = queueLayer(
+      jobs,
+      (jobId) => Deferred.succeed(acknowledged, jobId),
+      (jobId) => Deferred.succeed(failed, jobId),
+    )
+    const reconciler = Layer.succeed(IssueReconciler, {
+      reconcile: () =>
+        Effect.gen(function* () {
+          reconciliations += 1
+          if (reconciliations === 2) {
+            return yield* Effect.fail(
+              new DatabaseError({ message: "reconciliation failed" }),
+            )
+          }
+          return {
+            fetched: 0,
+            inserted: 0,
+            updated: 0,
+            deleted: 0,
+            unchanged: 0,
+          }
+        }),
+    } satisfies IssueReconcilerShape)
+    const keymaxxer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.die("not used"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () => Effect.die("not used"),
+    })
+    const opencode = Layer.succeed(Opencode, {
+      start: () => Effect.die("not used"),
+      continue: () => Effect.die("not used"),
+      listModels: () => Effect.die("not used"),
+    })
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(database, queue, reconciler, keymaxxer, opencode),
+    )
+    const controller = new AbortController()
+
+    try {
+      const added = await runtime.runPromise(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          return yield* db.addRepository({
+            githubOwner: repository.githubOwner,
+            githubRepo: repository.githubRepo,
+            localPath: repository.localPath,
+            isBare: true,
+          })
+        }),
+      )
+      const successJob = rawJob({
+        _tag: "refresh-repository",
+        repositoryId: RepositoryId.make(added.id),
+      })
+      const failureJob = rawJob({
+        _tag: "refresh-repository",
+        repositoryId: RepositoryId.make(added.id),
+      })
+      jobs.push(successJob, failureJob)
+
+      const response = await createGraphqlApi(runtime).fetch(
+        new Request("http://127.0.0.1:4200/graphql", {
+          method: "POST",
+          headers: {
+            accept: "text/event-stream",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            query: `subscription {
+              issuesChanged(repositoryId: "${added.id}")
+            }`,
+          }),
+          signal: controller.signal,
+        }),
+      )
+      const reader = response.body?.getReader()
+      if (reader === undefined) throw new Error("Subscription has no body")
+
+      const invalidation = (async () => {
+        let event = ""
+        const decoder = new TextDecoder()
+        while (!event.includes('"data":{"issuesChanged":true}')) {
+          const next = await reader.read()
+          if (next.done) {
+            throw new Error("Subscription ended before invalidation")
+          }
+          event += decoder.decode(next.value, { stream: true })
+        }
+        return event
+      })()
+      await Bun.sleep(0)
+      runtime.runFork(runJobWorker())
+
+      expect(await runtime.runPromise(Deferred.await(acknowledged))).toBe(
+        successJob.jobId,
+      )
+      expect(await invalidation).toContain('"data":{"issuesChanged":true}')
+
+      expect(await runtime.runPromise(Deferred.await(failed))).toBe(
+        failureJob.jobId,
+      )
+      const secondEvent = reader
+        .read()
+        .then(({ value }) =>
+          value === undefined ? "" : new TextDecoder().decode(value),
+        )
+        .catch(() => "")
+      const unexpectedInvalidation = await Promise.race([
+        secondEvent.then((chunk) =>
+          chunk.includes('"data":{"issuesChanged":true}'),
+        ),
+        Bun.sleep(20).then(() => false),
+      ])
+      expect(unexpectedInvalidation).toBe(false)
+    } finally {
+      controller.abort()
+      await runtime.dispose()
     }
   })
 

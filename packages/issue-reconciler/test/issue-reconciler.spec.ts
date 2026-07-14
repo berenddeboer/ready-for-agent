@@ -94,6 +94,8 @@ const makeDbFixture = (options: DbFixtureOptions) => {
 
   const service: DbServiceShape = {
     repositoryChanges: Stream.never,
+    issueChanges: Stream.never,
+    notifyIssuesChanged: () => Effect.void,
     addRepository: () => Effect.die("not used"),
     listRepositories: Effect.die("not used"),
     listIssues: () => {

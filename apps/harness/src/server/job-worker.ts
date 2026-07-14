@@ -42,7 +42,9 @@ const refreshRepository = (repositoryId: RepositoryId) =>
       return yield* new RepositoryNotFoundError({ repositoryId })
     }
 
-    return yield* reconciler.reconcile(repository)
+    const summary = yield* reconciler.reconcile(repository)
+    yield* db.notifyIssuesChanged(repositoryId)
+    return summary
   })
 
 export interface JobWorkerOptions {
