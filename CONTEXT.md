@@ -9,7 +9,7 @@ A GitHub repository the harness is configured to work on, identified by owner an
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **Paused**:
-A Repository state in which the harness does not process the repo (no issue polling, worktrees, or jobs) while keeping the configuration. New Repositories start paused until deliberately unpaused.
+A Repository state in which the harness does not autonomously process the Repository while keeping its configuration. Explicit operator requests, including a manual Refresh Job, remain allowed; new Repositories start paused until deliberately unpaused.
 _Avoid_: Disabled, inactive, enabled=false
 
 **Issue**:
@@ -22,6 +22,10 @@ The harness capability that retains the Repository's current working set of Rele
 **Issue Reconciler**:
 The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from GitHub's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
 _Avoid_: GitHub Reconciler (too broad), Issue Synchronizer (suggests bidirectional updates)
+
+**Refresh Job**:
+A durable request for the Issue Reconciler to reconcile one Repository. Acceptance of a Refresh Job does not mean reconciliation has completed.
+_Avoid_: Refresh (ambiguous between the request and its execution), sync job
 
 **Keymaxxer Service**:
 The backend boundary for vault operations. It can determine whether a named secret exists, request that a secret be added, and run a command with named secrets injected without exposing raw secret values to the Harness.
