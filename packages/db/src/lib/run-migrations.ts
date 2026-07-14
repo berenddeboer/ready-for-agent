@@ -25,7 +25,6 @@ const rawSql = (query: string) => Object.assign([query], { raw: [query] })
 
 type MigrationRow = {
   readonly hash: string
-  readonly name: string | null
 }
 
 export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadError>()(
@@ -78,18 +77,12 @@ export const runMigrations = (migrationsFolder: string) =>
     `
 
     const appliedRows = (yield* sql`
-      SELECT hash, name FROM __drizzle_migrations
+      SELECT hash FROM __drizzle_migrations
     `) as ReadonlyArray<MigrationRow>
     const appliedHashes = new Set(appliedRows.map((row) => row.hash))
-    const appliedNames = new Set(
-      appliedRows.flatMap((row) => (row.name === null ? [] : [row.name])),
-    )
 
     for (const migration of migrations) {
-      if (
-        appliedNames.has(migration.name) ||
-        appliedHashes.has(migration.hash)
-      ) {
+      if (appliedHashes.has(migration.hash)) {
         continue
       }
 

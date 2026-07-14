@@ -8,7 +8,6 @@ import { runMigrations } from "../src/lib/run-migrations.js"
 import { afterEach, describe, expect, it } from "bun:test"
 
 const temporaryDirectories: Array<string> = []
-const rawSql = (query: string) => Object.assign([query], { raw: [query] })
 
 const migrationFolder = async (name: string, migrationSql: string) => {
   const root = await mkdtemp(join(tmpdir(), "db-migrations-"))
@@ -28,42 +27,6 @@ afterEach(async () => {
 })
 
 describe("runMigrations", () => {
-  it("does not replay an applied migration whose contents changed", async () => {
-    const name = "20260714011733_hard_umar"
-    const folder = await migrationFolder(
-      name,
-      "ALTER TABLE issue ADD has_children integer NOT NULL DEFAULT false;",
-    )
-
-    const appliedMigrations = await Effect.runPromise(
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql(rawSql("CREATE TABLE issue (has_children integer)"))
-        yield* sql(
-          rawSql(`
-          CREATE TABLE __drizzle_migrations (
-            id INTEGER PRIMARY KEY,
-            hash text NOT NULL,
-            created_at numeric,
-            name text,
-            applied_at TEXT
-          )
-        `),
-        )
-        yield* sql`
-          INSERT INTO __drizzle_migrations (hash, created_at, name)
-          VALUES ('original-hash', 20260714011733, ${name})
-        `
-        yield* runMigrations(folder)
-        return yield* sql`
-          SELECT name FROM __drizzle_migrations ORDER BY id
-        `
-      }).pipe(Effect.provide(SqliteTest)),
-    )
-
-    expect(appliedMigrations).toEqual([{ name }])
-  })
-
   it("rolls back all statements when a migration fails", async () => {
     const folder = await migrationFolder(
       "20260714120000_broken",
