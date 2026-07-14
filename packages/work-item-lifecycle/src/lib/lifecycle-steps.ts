@@ -30,6 +30,9 @@ export interface LifecycleStepsShape {
   readonly implement: (
     context: LifecycleStepContext,
   ) => Effect.Effect<string, unknown>
+  readonly preCommit: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
   readonly review: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
