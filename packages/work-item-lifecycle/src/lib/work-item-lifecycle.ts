@@ -591,10 +591,13 @@ export const makeWorkItemLifecycleLive = (
       const runHandler = (
         step: OperationalLifecycleStep,
         context: LifecycleStepContext,
-      ): Effect.Effect<{
-        readonly worktreePath?: string
-        readonly sessionId?: string
-      }> => {
+      ): Effect.Effect<
+        {
+          readonly worktreePath?: string
+          readonly sessionId?: string
+        },
+        unknown
+      > => {
         switch (step) {
           case "create_worktree":
             return steps

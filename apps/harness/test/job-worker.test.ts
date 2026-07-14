@@ -35,6 +35,11 @@ import {
   makeJobId,
 } from "@ready-for-agent/queue-service"
 import {
+  WorkItemLifecycle,
+  WorkItemStepJob,
+  makeStepRunId,
+} from "@ready-for-agent/work-item-lifecycle"
+import {
   JOBS_QUEUE,
   JOB_RECOVERY_RETRY_LIMIT,
   JOB_VISIBILITY_TIMEOUT,
@@ -98,28 +103,40 @@ const queueLayer = (
   onAcknowledge: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
   onFail: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
   onClaim?: () => Effect.Effect<Option.Option<RawJob>, ClaimError>,
+  runStep: (
+    stepRunId: string,
+  ) => Effect.Effect<{ readonly _tag: "noop" }> = () =>
+    Effect.succeed({ _tag: "noop" as const }),
 ) =>
-  Layer.succeed(QueueService, {
-    queueInTransaction: true,
-    enqueue: unused,
-    enqueueWithDelay: unused,
-    rawClaim: (_queue, visibilityTimeout) =>
-      Effect.gen(function* () {
-        expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
-          Duration.toMillis(JOB_VISIBILITY_TIMEOUT),
-        )
-        if (onClaim !== undefined) return yield* onClaim()
-        return Option.fromNullishOr(jobs.shift())
-      }),
-    acknowledge: (jobId) => onAcknowledge(jobId).pipe(Effect.asVoid),
-    fail: (jobId, options) =>
-      Effect.gen(function* () {
-        expect(options?.retryable).toBe(false)
-        yield* onFail(jobId)
-      }),
-    extendVisibility: unused,
-    getStats: unused,
-  } satisfies QueueServiceShape)
+  Layer.merge(
+    Layer.succeed(QueueService, {
+      queueInTransaction: true,
+      enqueue: unused,
+      enqueueWithDelay: unused,
+      rawClaim: (_queue, visibilityTimeout) =>
+        Effect.gen(function* () {
+          expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
+            Duration.toMillis(JOB_VISIBILITY_TIMEOUT),
+          )
+          if (onClaim !== undefined) return yield* onClaim()
+          return Option.fromNullishOr(jobs.shift())
+        }),
+      acknowledge: (jobId) => onAcknowledge(jobId).pipe(Effect.asVoid),
+      fail: (jobId, options) =>
+        Effect.gen(function* () {
+          expect(options?.retryable).toBe(false)
+          yield* onFail(jobId)
+        }),
+      extendVisibility: unused,
+      getStats: unused,
+    } satisfies QueueServiceShape),
+    Layer.succeed(WorkItemLifecycle, {
+      implementNow: unused,
+      runStep,
+      getWorkItem: unused,
+      listWorkItemsForIssue: unused,
+    }),
+  )
 
 const runScoped = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
@@ -168,6 +185,40 @@ describe("Job worker", () => {
       payload: refreshPayload,
       retryLimit: JOB_RECOVERY_RETRY_LIMIT,
     })
+  })
+
+  test("dispatches a Work Item Lifecycle Job and acknowledges a stale no-op", async () => {
+    const stepRunId = makeStepRunId()
+    const payload = WorkItemStepJob.make({ stepRunId })
+    const job = rawJob(payload)
+    const acknowledged = await Effect.runPromise(Deferred.make<string>())
+    const dispatched = await Effect.runPromise(Deferred.make<string>())
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        expect(yield* Deferred.await(dispatched)).toBe(stepRunId)
+        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+      }),
+      Layer.merge(
+        queueLayer(
+          [job],
+          (jobId) => Deferred.succeed(acknowledged, jobId),
+          undefined,
+          undefined,
+          (receivedStepRunId) =>
+            Deferred.succeed(dispatched, receivedStepRunId).pipe(
+              Effect.as({ _tag: "noop" as const }),
+            ),
+        ),
+        Layer.merge(
+          dbLayer(),
+          Layer.succeed(IssueReconciler, { reconcile: unused }),
+        ),
+      ),
+    )
   })
 
   test("reconciles the Issue store and acknowledges after success", async () => {

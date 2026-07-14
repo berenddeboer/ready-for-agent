@@ -7,6 +7,10 @@ import {
 } from "@ready-for-agent/db-service"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
 import { QueueService } from "@ready-for-agent/queue-service"
+import {
+  WorkItemLifecycle,
+  WorkItemStepJob,
+} from "@ready-for-agent/work-item-lifecycle"
 
 export const JOBS_QUEUE = "jobs"
 export const JOB_VISIBILITY_TIMEOUT = Duration.minutes(5)
@@ -17,7 +21,7 @@ const RefreshRepositoryJob = Schema.TaggedStruct("refresh-repository", {
   repositoryId: RepositoryId,
 })
 
-const JobPayload = Schema.Union([RefreshRepositoryJob])
+const JobPayload = Schema.Union([RefreshRepositoryJob, WorkItemStepJob])
 
 export const enqueueRefreshRepositoryJob = (repositoryId: RepositoryId) =>
   Effect.gen(function* () {
@@ -75,19 +79,41 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
       if (Option.isNone(claimed)) return true
 
       const job = claimed.value
-      const result = yield* Effect.result(
-        refreshRepository(job.payload.repositoryId),
-      )
+      switch (job.payload._tag) {
+        case "refresh-repository": {
+          const result = yield* Effect.result(
+            refreshRepository(job.payload.repositoryId),
+          )
 
-      if (result._tag === "Failure") {
-        yield* Effect.logError("Refresh Job failed", {
-          jobId: job.jobId,
-          repositoryId: job.payload.repositoryId,
-          error: result.failure,
-        })
-        yield* queue.fail(job.jobId, { retryable: false })
-      } else {
-        yield* queue.acknowledge(job.jobId)
+          if (result._tag === "Failure") {
+            yield* Effect.logError("Refresh Job failed", {
+              jobId: job.jobId,
+              repositoryId: job.payload.repositoryId,
+              error: result.failure,
+            })
+            yield* queue.fail(job.jobId, { retryable: false })
+          } else {
+            yield* queue.acknowledge(job.jobId)
+          }
+          break
+        }
+        case "work-item-step": {
+          const lifecycle = yield* WorkItemLifecycle
+          const result = yield* Effect.result(
+            lifecycle.runStep(job.payload.stepRunId),
+          )
+
+          if (result._tag === "Failure") {
+            yield* Effect.logError("Work Item Lifecycle Job failed", {
+              jobId: job.jobId,
+              stepRunId: job.payload.stepRunId,
+              error: result.failure,
+            })
+          } else if (result.success._tag === "noop") {
+            yield* queue.acknowledge(job.jobId)
+          }
+          break
+        }
       }
 
       return false
