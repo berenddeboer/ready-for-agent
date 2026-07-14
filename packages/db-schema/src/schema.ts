@@ -162,3 +162,101 @@ export const completedJob = snakeCase.table(
   },
   (t) => [uniqueIndex("completed_job_queue_job_id_uidx").on(t.queue, t.jobId)],
 )
+
+/**
+ * Durable operator-requested implementation attempt for one Issue.
+ * See xplain: type work item "wi"
+ */
+export const workItem = snakeCase.table(
+  "work_item",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `wi-${ulid()}`),
+    repositoryId: text()
+      .notNull()
+      .references(() => repository.id, { onDelete: "cascade" }),
+    githubIssueNumber: integer().notNull(),
+    model: text().notNull(),
+    variant: text().notNull(),
+    state: text({
+      enum: [
+        "create_worktree",
+        "install_dependencies",
+        "implement",
+        "review",
+        "complete",
+        "failed",
+        "abandoned",
+      ],
+    }).notNull(),
+    stateReadyAt: integer({ mode: "number" }).notNull(),
+    worktreePath: text(),
+    sessionId: text(),
+    failureCode: text(),
+    failureMessage: text(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("work_item_one_unfinished_uidx")
+      .on(t.repositoryId, t.githubIssueNumber)
+      .where(sql`${t.state} NOT IN ('complete', 'failed', 'abandoned')`),
+    index("work_item_repository_issue_created_idx").on(
+      t.repositoryId,
+      t.githubIssueNumber,
+      t.createdAt,
+    ),
+  ],
+)
+
+/**
+ * One scheduled execution attempt for a Work Item Lifecycle Step.
+ * See xplain: type step run "srun"
+ */
+export const stepRun = snakeCase.table(
+  "step_run",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `srun-${ulid()}`),
+    workItemId: text()
+      .notNull()
+      .references(() => workItem.id, { onDelete: "cascade" }),
+    step: text({
+      enum: ["create_worktree", "install_dependencies", "implement", "review"],
+    }).notNull(),
+    status: text({
+      enum: [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "interrupted",
+        "cancelled",
+      ],
+    }).notNull(),
+    queueJobId: text(),
+    queuedAt: integer({ mode: "number" }).notNull(),
+    startedAt: integer({ mode: "number" }),
+    finishedAt: integer({ mode: "number" }),
+    reasonCode: text(),
+    reasonMessage: text(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("step_run_one_active_uidx")
+      .on(t.workItemId)
+      .where(sql`${t.status} IN ('queued', 'running')`),
+    index("step_run_work_item_id_queued_at_idx").on(t.workItemId, t.queuedAt),
+  ],
+)
