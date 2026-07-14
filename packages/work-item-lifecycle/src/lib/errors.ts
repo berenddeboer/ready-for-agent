@@ -1,6 +1,7 @@
 import { Data } from "effect"
 
 export * from "./create-worktree-errors.js"
+export * from "./install-dependencies-errors.js"
 
 export class NonTransactionalQueueError extends Data.TaggedError(
   "NonTransactionalQueueError",

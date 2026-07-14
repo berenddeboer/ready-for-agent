@@ -21,6 +21,9 @@
     },
     {
       "path": "../db/tsconfig.lib.json"
+    },
+    {
+      "path": "../opencode/tsconfig.lib.json"
     }
   ]
 }

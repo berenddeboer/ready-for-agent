@@ -1,15 +1,19 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { DbService } from "@ready-for-agent/db-service"
+import { Opencode } from "@ready-for-agent/opencode"
 import { createWorktree } from "./create-worktree.js"
+import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
 
 const notImplemented = (step: string) =>
   Effect.die(new Error(`Lifecycle Step ${step} is not implemented yet`))
 
 /**
- * Production LifecycleSteps: real Create Worktree; other steps arrive in later tickets.
- * Captures platform and database services so handlers remain `Effect<A>` with no requirements.
+ * Production LifecycleSteps: Create Worktree and Install Dependencies;
+ * Implement and Review arrive in later tickets.
+ * Captures platform, database, and OpenCode services so handlers remain
+ * `Effect<A>` with no requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,
@@ -18,6 +22,7 @@ export const LifecycleStepsLive = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const opencode = yield* Opencode
 
     const withServices = <A, E>(
       effect: Effect.Effect<
@@ -27,6 +32,7 @@ export const LifecycleStepsLive = Layer.effect(
         | FileSystem.FileSystem
         | Path.Path
         | ChildProcessSpawner.ChildProcessSpawner
+        | Opencode
       >,
     ) =>
       effect.pipe(
@@ -34,11 +40,13 @@ export const LifecycleStepsLive = Layer.effect(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(Opencode, opencode),
       )
 
     return LifecycleSteps.of({
       createWorktree: (context) => withServices(createWorktree(context)),
-      installDependencies: () => notImplemented("install_dependencies"),
+      installDependencies: (context) =>
+        withServices(installDependencies(context)),
       implement: () => notImplemented("implement"),
       review: () => notImplemented("review"),
     })
