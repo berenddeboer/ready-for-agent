@@ -76,3 +76,10 @@ export class RetryNotEligibleError extends Data.TaggedError(
   readonly workItemId: string
   readonly reason: string
 }> {}
+
+export class WorkItemHasRunningStepError extends Data.TaggedError(
+  "WorkItemHasRunningStepError",
+)<{
+  readonly workItemId: string
+  readonly stepRunId: string
+}> {}
