@@ -1008,11 +1008,28 @@ function WorkItemLifecycleStatus({
           {canReset && (
             <button
               type="button"
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-red-300 hover:text-red-700 disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex size-7 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-wait disabled:opacity-60"
               disabled={actionsPending}
               onClick={() => reset.mutate()}
+              aria-label={reset.isPending ? "Resetting job" : "Reset job"}
+              title={reset.isPending ? "Resetting..." : "Reset"}
             >
-              {reset.isPending ? "Resetting..." : "Reset"}
+              <svg
+                aria-hidden="true"
+                className="size-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="m19 6-1 14H6L5 6" />
+                <path d="M10 11v5" />
+                <path d="M14 11v5" />
+              </svg>
             </button>
           )}
           {canRetry && (
