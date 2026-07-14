@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import {
   DatabaseError,
   DbService,
@@ -89,6 +89,7 @@ const makeDbFixture = (options: DbFixtureOptions) => {
   let reconciledAt: Date | undefined
 
   const service: DbServiceShape = {
+    repositoryChanges: Stream.never,
     addRepository: () => Effect.die("not used"),
     listRepositories: Effect.die("not used"),
     listIssues: () => {

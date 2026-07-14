@@ -1,4 +1,4 @@
-import { Effect, Layer } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
@@ -80,6 +80,24 @@ describe("DbService", () => {
   })
 
   describe("addRepository", () => {
+    it("publishes successful membership changes", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const changes = yield* db.repositoryChanges.pipe(
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkChild,
+          )
+          yield* Effect.yieldNow
+
+          const repository = yield* db.addRepository(sampleInput)
+          yield* db.removeRepository(repository.id)
+
+          expect(yield* Fiber.join(changes)).toEqual([undefined, undefined])
+        }),
+      ))
+
     it("inserts a repository paused with a repo- prefixed id", () =>
       runTest(
         Effect.gen(function* () {

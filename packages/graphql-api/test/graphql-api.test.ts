@@ -1,4 +1,4 @@
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { Effect, Layer, ManagedRuntime, Stream } from "effect"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import {
   IssueReconciler,
@@ -55,6 +55,7 @@ const makeRuntime = (
       ]),
   }
   const db: DbServiceShape = {
+    repositoryChanges: Stream.never,
     getConfig: Effect.succeed(config),
     updateConfig: (input) => Effect.succeed(input),
     addRepository: () => Effect.succeed(repository),
@@ -141,6 +142,30 @@ describe("GraphQL API", () => {
         },
       },
     })
+  })
+
+  test("streams repository membership changes", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({ repositoryChanges: Stream.make(undefined) })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      new Request("http://127.0.0.1:4200/graphql", {
+        method: "POST",
+        headers: {
+          accept: "text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          query: "subscription { repositoriesChanged }",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+    expect(await response.text()).toContain(
+      '"data":{"repositoriesChanged":true}',
+    )
   })
 
   test("lists repositories", async () => {

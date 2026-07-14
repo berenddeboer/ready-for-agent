@@ -1,4 +1,11 @@
-import { Data, Effect, type ManagedRuntime, Result, Semaphore } from "effect"
+import {
+  Data,
+  Effect,
+  type ManagedRuntime,
+  Result,
+  Semaphore,
+  Stream,
+} from "effect"
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
 import {
@@ -295,6 +302,20 @@ export const createGraphqlApi = (
           issuesReconciledAt: (repository: {
             issuesReconciledAt: Date | null
           }) => repository.issuesReconciledAt?.toISOString() ?? null,
+        },
+        Subscription: {
+          repositoriesChanged: {
+            subscribe: async () =>
+              runtime.runPromise(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* Stream.toAsyncIterableEffect(
+                    db.repositoryChanges,
+                  )
+                }),
+              ),
+            resolve: () => true,
+          },
         },
         Mutation: {
           updateConfig: async (_parent: unknown, args: UpdateConfigArgs) => {

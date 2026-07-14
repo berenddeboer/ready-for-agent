@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, PubSub, Stream } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
@@ -128,6 +128,7 @@ const toDatabaseError = (error: SqlError) =>
   })
 
 export interface DbServiceShape {
+  readonly repositoryChanges: Stream.Stream<void>
   readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
   readonly updateConfig: (
     input: UpdateConfigInput,
@@ -178,6 +179,7 @@ export const DbServiceLive = Layer.effect(
   DbService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const repositoryChanges = yield* PubSub.unbounded<void>()
 
     const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
       function* () {
@@ -357,7 +359,7 @@ export const DbServiceLive = Layer.effect(
           })
         }
 
-        return toRecord({
+        const repository = toRecord({
           id: row.id,
           githubOwner: row.github_owner,
           githubRepo: row.github_repo,
@@ -366,6 +368,8 @@ export const DbServiceLive = Layer.effect(
           paused: row.paused,
           issuesReconciledAt: row.issues_reconciled_at,
         })
+        yield* PubSub.publish(repositoryChanges, undefined)
+        return repository
       })
 
     const listRepositories: Effect.Effect<
@@ -422,36 +426,39 @@ export const DbServiceLive = Layer.effect(
     const removeRepository = (
       repositoryId: string,
     ): Effect.Effect<void, RepositoryNotFoundError | DatabaseError> =>
-      sql
-        .withTransaction(
-          Effect.gen(function* () {
-            yield* sql.unsafe(
-              `DELETE FROM issue_dependency
+      Effect.gen(function* () {
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* sql.unsafe(
+                `DELETE FROM issue_dependency
                WHERE issue_id IN (
                  SELECT id FROM issue WHERE repository_id = ?
                )`,
-              [repositoryId],
-            )
-            yield* sql.unsafe("DELETE FROM issue WHERE repository_id = ?", [
-              repositoryId,
-            ])
-            const result = yield* sql.unsafe(
-              "DELETE FROM repository WHERE id = ? RETURNING id",
-              [repositoryId],
-            )
+                [repositoryId],
+              )
+              yield* sql.unsafe("DELETE FROM issue WHERE repository_id = ?", [
+                repositoryId,
+              ])
+              const result = yield* sql.unsafe(
+                "DELETE FROM repository WHERE id = ? RETURNING id",
+                [repositoryId],
+              )
 
-            if (!result[0]) {
-              return yield* new RepositoryNotFoundError({ repositoryId })
-            }
-          }),
-        )
-        .pipe(
-          Effect.mapError((error) =>
-            error instanceof RepositoryNotFoundError
-              ? error
-              : toDatabaseError(error),
-          ),
-        )
+              if (!result[0]) {
+                return yield* new RepositoryNotFoundError({ repositoryId })
+              }
+            }),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              error instanceof RepositoryNotFoundError
+                ? error
+                : toDatabaseError(error),
+            ),
+          )
+        yield* PubSub.publish(repositoryChanges, undefined)
+      })
 
     const storeIssue = (
       input: StoreIssueInput,
@@ -764,6 +771,7 @@ export const DbServiceLive = Layer.effect(
       })
 
     return DbService.of({
+      repositoryChanges: Stream.fromPubSub(repositoryChanges),
       getConfig,
       updateConfig,
       addRepository,

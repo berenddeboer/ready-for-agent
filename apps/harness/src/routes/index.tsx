@@ -4,8 +4,9 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Suspense, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { streamRepositoryChanges } from "../repository-live.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
 
@@ -102,31 +103,108 @@ function HomePage() {
 }
 
 function RepositoryCards() {
+  const queryClient = useQueryClient()
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
+  const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let controller: AbortController | undefined
+    let finishRetry: (() => void) | undefined
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let warningTimer: ReturnType<typeof setTimeout> | undefined
+
+    const startWarningTimer = () => {
+      warningTimer ??= setTimeout(() => {
+        if (!cancelled) setLiveUpdatesUnavailable(true)
+      }, 10_000)
+    }
+    const refresh = async () => {
+      await queryClient.fetchQuery({ ...repositoriesQuery, staleTime: 0 })
+      if (cancelled) return
+      if (warningTimer !== undefined) clearTimeout(warningTimer)
+      warningTimer = undefined
+      setLiveUpdatesUnavailable(false)
+    }
+    const subscribe = async () => {
+      startWarningTimer()
+      while (!cancelled) {
+        controller = new AbortController()
+        try {
+          await streamRepositoryChanges({
+            signal: controller.signal,
+            onConnected: refresh,
+            onChange: refresh,
+          })
+        } catch {
+          if (cancelled) return
+        }
+        controller.abort()
+        startWarningTimer()
+        await new Promise<void>((resolve) => {
+          finishRetry = resolve
+          retryTimer = setTimeout(resolve, 1_000)
+        })
+        finishRetry = undefined
+      }
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refresh().catch(startWarningTimer)
+      }
+    }
+
+    document.addEventListener("visibilitychange", refreshWhenVisible)
+    void subscribe()
+
+    return () => {
+      cancelled = true
+      controller?.abort()
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+      finishRetry?.()
+      if (warningTimer !== undefined) clearTimeout(warningTimer)
+      document.removeEventListener("visibilitychange", refreshWhenVisible)
+    }
+  }, [queryClient])
+
+  const warning = liveUpdatesUnavailable ? (
+    <p
+      className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+      role="status"
+    >
+      Live updates are unavailable. Repository information may be out of date.
+    </p>
+  ) : null
 
   if (repositories.length === 0) {
     return (
-      <div className="rounded-[0.9rem] border border-dashed border-slate-300 px-6 py-12 text-center">
-        <h2 className="m-0">No repositories configured</h2>
-        <p className="mt-1.5 text-slate-500">
-          Add a local Git repository with the CLI:
-        </p>
-        <code className="mt-3 inline-block rounded-md bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800">
-          bun run harness-cli add /path/to/local/repo
-        </code>
-      </div>
+      <>
+        {warning}
+        <div className="rounded-[0.9rem] border border-dashed border-slate-300 px-6 py-12 text-center">
+          <h2 className="m-0">No repositories configured</h2>
+          <p className="mt-1.5 text-slate-500">
+            Add a local Git repository with the CLI:
+          </p>
+          <code className="mt-3 inline-block rounded-md bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800">
+            bun run harness-cli add /path/to/local/repo
+          </code>
+        </div>
+      </>
     )
   }
 
   return (
-    <section
-      className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-4"
-      aria-label="Configured repositories"
-    >
-      {repositories.map((repository) => (
-        <RepositoryCard key={repository.id} repository={repository} />
-      ))}
-    </section>
+    <>
+      {warning}
+      <section
+        className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-4"
+        aria-label="Configured repositories"
+      >
+        {repositories.map((repository) => (
+          <RepositoryCard key={repository.id} repository={repository} />
+        ))}
+      </section>
+    </>
   )
 }
 
