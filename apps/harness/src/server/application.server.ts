@@ -67,6 +67,7 @@ export const createApplication = async (
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(queueLayer),
+    Layer.provideMerge(opencodeLayer),
     Layer.provide(opencodePlatformLayer),
   )
   const workerLayer = JobWorkerLive.pipe(
