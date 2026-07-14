@@ -78,3 +78,7 @@ type Mutation {
   refreshRepository(repositoryId: ID!): RepositoryRefresh!
   updateConfig(input: UpdateConfigInput!): Config!
 }
+
+type Subscription {
+  repositoriesChanged: Boolean!
+}
