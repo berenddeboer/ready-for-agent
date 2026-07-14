@@ -111,6 +111,7 @@ type WorkItemState =
   | "CREATE_WORKTREE"
   | "INSTALL_DEPENDENCIES"
   | "IMPLEMENT"
+  | "PRE_COMMIT"
   | "REVIEW"
   | "COMPLETE"
   | "FAILED"
@@ -129,6 +130,7 @@ type WorkItem = {
   repositoryId: string
   githubIssueNumber: number
   state: WorkItemState
+  sessionId: string | null
   failureMessage: string | null
   createdAt: string
   stepRuns: readonly {
@@ -139,24 +141,29 @@ type WorkItem = {
   }[]
 }
 
+const workItemFields = {
+  id: true,
+  repositoryId: true,
+  githubIssueNumber: true,
+  state: true,
+  sessionId: true,
+  failureMessage: true,
+  createdAt: true,
+  stepRuns: {
+    id: true,
+    step: true,
+    status: true,
+    reasonMessage: true,
+  },
+} as const
+
 const workItemsQuery = (repositoryId: string) => ({
   queryKey: ["work-items", repositoryId],
   queryFn: async (): Promise<readonly WorkItem[]> => {
     const result = await graphql.query({
       workItems: {
         __args: { repositoryId },
-        id: true,
-        repositoryId: true,
-        githubIssueNumber: true,
-        state: true,
-        failureMessage: true,
-        createdAt: true,
-        stepRuns: {
-          id: true,
-          step: true,
-          status: true,
-          reasonMessage: true,
-        },
+        ...workItemFields,
       },
     })
     return result.workItems
@@ -702,18 +709,7 @@ function RepositoryIssueRow({
             repositoryId: issue.repositoryId,
             githubIssueNumber: issue.githubIssueNumber,
           },
-          id: true,
-          repositoryId: true,
-          githubIssueNumber: true,
-          state: true,
-          failureMessage: true,
-          createdAt: true,
-          stepRuns: {
-            id: true,
-            step: true,
-            status: true,
-            reasonMessage: true,
-          },
+          ...workItemFields,
         },
       })
       return result.implementNow
@@ -875,6 +871,14 @@ function RepositoryJobs({ repositoryId }: { repositoryId: string }) {
               {formatLifecycleLabel(workItem.state)}
             </span>
           </div>
+          {workItem.sessionId !== null && workItem.sessionId !== "" && (
+            <p
+              className="mt-1 mb-0 truncate font-mono text-[0.7rem] text-slate-500"
+              title={workItem.sessionId}
+            >
+              Session {workItem.sessionId}
+            </p>
+          )}
           <WorkItemLifecycleStatus workItem={workItem} compact />
         </li>
       ))}
@@ -920,18 +924,7 @@ function WorkItemLifecycleStatus({
       const result = await graphql.mutation({
         retryWorkItem: {
           __args: { workItemId: workItem.id },
-          id: true,
-          repositoryId: true,
-          githubIssueNumber: true,
-          state: true,
-          failureMessage: true,
-          createdAt: true,
-          stepRuns: {
-            id: true,
-            step: true,
-            status: true,
-            reasonMessage: true,
-          },
+          ...workItemFields,
         },
       })
       return result.retryWorkItem
