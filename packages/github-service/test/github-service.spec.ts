@@ -60,6 +60,12 @@ describe("GitHubService live implementation", () => {
                     {
                       number: 3,
                       url: "https://github.com/acme/widgets/issues/3",
+                      state: "OPEN",
+                    },
+                    {
+                      number: 4,
+                      url: "https://github.com/acme/widgets/issues/4",
+                      state: "CLOSED",
                     },
                   ],
                   pageInfo: { endCursor: null, hasNextPage: false },
@@ -180,7 +186,7 @@ describe("GitHubService live implementation", () => {
       },
       blockedBy: {
         __args: { first: 100 },
-        nodes: { number: true, url: true },
+        nodes: { number: true, url: true, state: true },
         pageInfo: { endCursor: true, hasNextPage: true },
       },
     })
@@ -213,6 +219,7 @@ describe("GitHubService live implementation", () => {
                     {
                       number: 5,
                       url: "https://github.com/acme/widgets/issues/5",
+                      state: "OPEN",
                     },
                   ],
                   pageInfo: {
@@ -234,6 +241,7 @@ describe("GitHubService live implementation", () => {
                 {
                   number: 2,
                   url: "https://github.com/acme/widgets/issues/2",
+                  state: "OPEN",
                 },
               ],
               pageInfo: { endCursor: null, hasNextPage: false },
