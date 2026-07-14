@@ -8,9 +8,14 @@ import {
   Option,
   Result,
 } from "effect"
+import { TestClock } from "effect/testing"
 import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
-import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import {
+  DbService,
+  DbServiceLive,
+  RepositoryHasRunningStepError,
+} from "@ready-for-agent/db-service"
 import {
   EnqueueError,
   type JobId,
@@ -81,6 +86,18 @@ describe("WorkItemLifecycle", () => {
     steps: LifecycleStepsShape,
     test: Effect.Effect<A, E, TestRequirements>,
   ): Promise<A> => Effect.runPromise(Effect.provide(test, makeTestLayer(steps)))
+
+  const runWithTestClock = <A, E>(
+    test: Effect.Effect<A, E, TestRequirements | TestClock.TestClock>,
+  ): Promise<A> =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.provide(
+          test,
+          TestLayer.pipe(Layer.provideMerge(TestClock.layer())),
+        ),
+      ),
+    )
 
   const sampleRepository = {
     githubOwner: "acme",
@@ -468,6 +485,267 @@ describe("WorkItemLifecycle", () => {
           expect(error).toBeInstanceOf(WorkItemNotFoundError)
         }),
       ))
+
+    it("lists Complete, Failed, and Abandoned attempts in creation order", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const claimAndRun = Effect.gen(function* () {
+            const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+            expect(Option.isSome(job)).toBe(true)
+            if (Option.isNone(job)) {
+              return yield* Effect.die("expected job")
+            }
+            return yield* lifecycle.runStep(
+              (job.value.payload as { stepRunId: string }).stepRunId,
+            )
+          })
+
+          const complete = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let i = 0; i < 4; i++) {
+            yield* claimAndRun
+          }
+          expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
+            "complete",
+          )
+
+          const failed = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          const failJob = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          if (Option.isNone(failJob)) {
+            return yield* Effect.die("expected job")
+          }
+          yield* lifecycle.runStep(
+            (failJob.value.payload as { stepRunId: string }).stepRunId,
+          )
+          expect((yield* lifecycle.getWorkItem(failed.id)).state).toBe("failed")
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+          })
+
+          const abandonedQueued = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* lifecycle.abandon(abandonedQueued.id)
+
+          const listed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(listed.map((item) => item.state)).toEqual([
+            "complete",
+            "failed",
+            "abandoned",
+          ])
+          expect(listed.map((item) => item.id)).toEqual([
+            complete.id,
+            failed.id,
+            abandonedQueued.id,
+          ])
+        }),
+      ))
+
+    it("allows Implement Now after terminal Complete and Failed attempts", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const first = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let i = 0; i < 4; i++) {
+            const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+            expect(Option.isSome(job)).toBe(true)
+            if (Option.isNone(job)) {
+              return yield* Effect.die("expected job")
+            }
+            yield* lifecycle.runStep(
+              (job.value.payload as { stepRunId: string }).stepRunId,
+            )
+          }
+          expect((yield* lifecycle.getWorkItem(first.id)).state).toBe(
+            "complete",
+          )
+
+          const second = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(second.id).not.toBe(first.id)
+          expect(second.state).toBe("create_worktree")
+
+          const unfinishedBlocks = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+          )
+          expect(unfinishedBlocks).toBeInstanceOf(UnfinishedWorkItemExistsError)
+        }),
+      ))
+
+    it("derives queue wait, execution duration, and state residence from timestamps", () =>
+      runWithTestClock(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* TestClock.setTime(1_000)
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          yield* TestClock.setTime(4_000)
+          const queuedOnly = yield* lifecycle.getWorkItem(created.id)
+          expect(queuedOnly.stepRuns[0]!.queueWaitMs).toBe(3_000)
+          expect(queuedOnly.stepRuns[0]!.executionDurationMs).toBeNull()
+          expect(queuedOnly.stateResidenceMs).toBe(3_000)
+
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(job)).toBe(true)
+          if (Option.isNone(job)) {
+            return yield* Effect.die("expected job")
+          }
+
+          yield* TestClock.setTime(6_000)
+          const afterSuccess = yield* lifecycle.runStep(
+            (job.value.payload as { stepRunId: string }).stepRunId,
+          )
+          expect(afterSuccess._tag).toBe("processed")
+          if (afterSuccess._tag !== "processed") {
+            return
+          }
+
+          const createRun = afterSuccess.workItem.stepRuns[0]!
+          expect(createRun.status).toBe("succeeded")
+          expect(createRun.queueWaitMs).toBe(5_000)
+          expect(createRun.executionDurationMs).toBe(0)
+
+          const installQueued = afterSuccess.workItem.stepRuns[1]!
+          expect(installQueued.status).toBe("queued")
+          expect(installQueued.queueWaitMs).toBe(0)
+          expect(afterSuccess.workItem.stateResidenceMs).toBe(0)
+
+          yield* TestClock.setTime(9_000)
+          const afterAbandon = yield* lifecycle.abandon(created.id)
+          const cancelled = afterAbandon.stepRuns.find(
+            (run) => run.status === "cancelled",
+          )!
+          expect(cancelled.queueWaitMs).toBe(3_000)
+          expect(cancelled.executionDurationMs).toBeNull()
+          expect(afterAbandon.stateResidenceMs).toBe(0)
+        }),
+      ))
+
+    it("derives timings across retries, interruption, and currently running work", async () => {
+      const failingSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.fail(new Error("first attempt")),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              const lifecycle = yield* WorkItemLifecycle
+              const queue = yield* QueueService
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+
+              yield* TestClock.setTime(10_000)
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              yield* TestClock.setTime(12_000)
+              const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+              if (Option.isNone(job)) {
+                return yield* Effect.die("expected job")
+              }
+              yield* lifecycle.runStep(
+                (job.value.payload as { stepRunId: string }).stepRunId,
+              )
+
+              const afterFail = yield* lifecycle.getWorkItem(created.id)
+              expect(afterFail.stepRuns[0]!.status).toBe("failed")
+              expect(afterFail.stepRuns[0]!.queueWaitMs).toBe(2_000)
+              expect(afterFail.stepRuns[0]!.executionDurationMs).toBe(0)
+
+              yield* TestClock.setTime(15_000)
+              const retried = yield* lifecycle.retry(created.id)
+              expect(retried.stepRuns).toHaveLength(2)
+              expect(retried.stepRuns[1]!.status).toBe("queued")
+              expect(retried.stepRuns[1]!.queueWaitMs).toBe(0)
+
+              yield* TestClock.setTime(18_000)
+              const afterQueueWait = yield* lifecycle.getWorkItem(created.id)
+              expect(afterQueueWait.stepRuns[1]!.queueWaitMs).toBe(3_000)
+
+              yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'interrupted',
+                     started_at = ?,
+                     finished_at = ?,
+                     reason_code = ?,
+                     reason_message = 'worker lost',
+                     updated_at = ?
+                 WHERE id = ?`,
+                [
+                  16_000,
+                  17_000,
+                  STEP_RUN_REASON.interrupted,
+                  17_000,
+                  afterQueueWait.stepRuns[1]!.id,
+                ],
+              )
+              if (afterQueueWait.stepRuns[1]!.queueJobId) {
+                yield* queue
+                  .acknowledge(afterQueueWait.stepRuns[1]!.queueJobId)
+                  .pipe(Effect.catch(() => Effect.void))
+              }
+
+              const interrupted = yield* lifecycle.getWorkItem(created.id)
+              expect(interrupted.stepRuns[1]!.queueWaitMs).toBe(1_000)
+              expect(interrupted.stepRuns[1]!.executionDurationMs).toBe(1_000)
+
+              yield* TestClock.setTime(20_000)
+              const third = yield* lifecycle.retry(created.id)
+              yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'running', started_at = ?, updated_at = ?
+                 WHERE id = ?`,
+                [21_000, 21_000, third.stepRuns[2]!.id],
+              )
+              yield* TestClock.setTime(24_000)
+              const running = yield* lifecycle.getWorkItem(created.id)
+              expect(running.stepRuns[2]!.queueWaitMs).toBe(1_000)
+              expect(running.stepRuns[2]!.executionDurationMs).toBe(3_000)
+              expect(running.stateResidenceMs).toBe(14_000)
+            }),
+            makeTestLayer(failingSteps).pipe(
+              Layer.provideMerge(TestClock.layer()),
+            ),
+          ),
+        ),
+      )
+    })
   })
 
   describe("queue requirements", () => {
@@ -1884,5 +2162,149 @@ describe("WorkItemLifecycle", () => {
         }),
       )
     })
+  })
+
+  describe("Repository removal", () => {
+    it("rejects removal while a Step Run is Running and leaves data unchanged", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [Date.now(), Date.now(), created.stepRuns[0]!.id],
+          )
+
+          const error = yield* Effect.flip(db.removeRepository(repository.id))
+          expect(error).toBeInstanceOf(RepositoryHasRunningStepError)
+          if (error instanceof RepositoryHasRunningStepError) {
+            expect(error.repositoryId).toBe(repository.id)
+            expect(error.stepRunId).toBe(created.stepRuns[0]!.id)
+            expect(error.workItemId).toBe(created.id)
+          }
+
+          expect(yield* db.listRepositories).toHaveLength(1)
+          expect(
+            yield* lifecycle.listWorkItemsForIssue(
+              repository.id,
+              issue.githubIssueNumber,
+            ),
+          ).toHaveLength(1)
+          const jobs = yield* sql.unsafe(
+            "SELECT id FROM job_queue WHERE id = ?",
+            [created.stepRuns[0]!.queueJobId],
+          )
+          expect(jobs).toHaveLength(1)
+          expect(
+            (yield* lifecycle.getWorkItem(created.id)).stepRuns[0]!.status,
+          ).toBe("running")
+        }),
+      ))
+
+    it("removes queued and Failed history with the Repository when nothing is Running", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.fail(new Error("failed before removal")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const failed = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const failedJob = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          if (Option.isNone(failedJob)) {
+            return yield* Effect.die("expected job")
+          }
+          yield* lifecycle.runStep(
+            (failedJob.value.payload as { stepRunId: string }).stepRunId,
+          )
+          const afterFailure = yield* lifecycle.getWorkItem(failed.id)
+          expect(afterFailure.stepRuns[0]!.status).toBe("failed")
+
+          yield* lifecycle.abandon(failed.id)
+
+          const stillQueued = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(stillQueued.state).toBe("create_worktree")
+          expect(
+            (yield* lifecycle.listWorkItemsForIssue(
+              repository.id,
+              issue.githubIssueNumber,
+            )).map((item) => item.state),
+          ).toEqual(["abandoned", "create_worktree"])
+
+          yield* db.removeRepository(repository.id)
+
+          expect(yield* db.listRepositories).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM work_item")).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM step_run")).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM issue")).toEqual([])
+          expect(
+            yield* sql.unsafe("SELECT id FROM job_queue WHERE id IN (?, ?)", [
+              failed.stepRuns[0]!.queueJobId,
+              stillQueued.stepRuns[0]!.queueJobId,
+            ]),
+          ).toEqual([])
+        }),
+      )
+    })
+
+    it("rolls back all lifecycle and Repository changes when removal fails", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `CREATE TRIGGER reject_repository_removal
+             BEFORE DELETE ON repository
+             BEGIN
+               SELECT RAISE(ABORT, 'injected removal failure');
+             END`,
+          )
+
+          const error = yield* Effect.flip(db.removeRepository(repository.id))
+          expect(error._tag).toBe("DatabaseError")
+
+          expect(yield* db.listRepositories).toHaveLength(1)
+          expect(yield* db.listIssues(repository.id)).toHaveLength(1)
+          const unchanged = yield* lifecycle.getWorkItem(created.id)
+          expect(unchanged.state).toBe("create_worktree")
+          expect(unchanged.stepRuns[0]!.status).toBe("queued")
+
+          const queued = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(queued)).toBe(true)
+          if (Option.isSome(queued)) {
+            expect(queued.value.jobId).toBe(created.stepRuns[0]!.queueJobId)
+          }
+        }),
+      ))
   })
 })

@@ -10,6 +10,7 @@ import {
   InvalidRepositoryInputError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
+  RepositoryHasRunningStepError,
   RepositoryNotFoundError,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -282,6 +283,90 @@ describe("DbService", () => {
           const error = yield* Effect.flip(db.removeRepository("repo-missing"))
 
           expect(error).toBeInstanceOf(RepositoryNotFoundError)
+        }),
+      ))
+
+    it("rejects removal when a Step Run is Running", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, model, variant, state,
+               state_ready_at, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 42, 'model', 'low', 'create_worktree', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-running-remove-test", repository.id, now, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO step_run (
+               id, work_item_id, step, status, queue_job_id, queued_at,
+               started_at, finished_at, reason_code, reason_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 'create_worktree', 'running', 'qjob-1', ?, ?, NULL, NULL, NULL, ?, ?)`,
+            [
+              "srun-running-remove-test",
+              "wi-running-remove-test",
+              now,
+              now,
+              now,
+              now,
+            ],
+          )
+
+          const error = yield* Effect.flip(db.removeRepository(repository.id))
+          expect(error).toBeInstanceOf(RepositoryHasRunningStepError)
+          expect(yield* db.listRepositories).toHaveLength(1)
+          expect(yield* sql.unsafe("SELECT id FROM work_item")).toHaveLength(1)
+        }),
+      ))
+
+    it("deletes lifecycle history and queued jobs when no Step Run is Running", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, model, variant, state,
+               state_ready_at, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 42, 'model', 'low', 'create_worktree', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-queued-remove-test", repository.id, now, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO step_run (
+               id, work_item_id, step, status, queue_job_id, queued_at,
+               started_at, finished_at, reason_code, reason_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 'create_worktree', 'queued', 'qjob-queued-remove', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["srun-queued-remove-test", "wi-queued-remove-test", now, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO job_queue (
+               id, queue, job_payload, job_attempts, job_retry_limit,
+               available_at, locked_until, created_at, updated_at
+             ) VALUES (?, 'jobs', '{}', 0, 1, ?, NULL, ?, ?)`,
+            ["qjob-queued-remove", now, now, now],
+          )
+
+          yield* db.removeRepository(repository.id)
+
+          expect(yield* db.listRepositories).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM work_item")).toEqual([])
+          expect(yield* sql.unsafe("SELECT id FROM step_run")).toEqual([])
+          expect(
+            yield* sql.unsafe(
+              "SELECT id FROM job_queue WHERE id = 'qjob-queued-remove'",
+            ),
+          ).toEqual([])
         }),
       ))
   })

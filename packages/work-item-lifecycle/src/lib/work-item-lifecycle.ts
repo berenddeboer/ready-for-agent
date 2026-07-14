@@ -1,5 +1,6 @@
 import {
   Cause,
+  Clock,
   Context,
   Duration,
   Effect,
@@ -205,7 +206,23 @@ type StepRunRow = {
   readonly reason_message: string | null
 }
 
-const toStepRunRecord = (row: StepRunRow): StepRunRecord => ({
+const deriveQueueWaitMs = (row: StepRunRow, nowMs: number): number => {
+  const endMs = row.started_at ?? row.finished_at ?? nowMs
+  return Math.max(0, endMs - row.queued_at)
+}
+
+const deriveExecutionDurationMs = (
+  row: StepRunRow,
+  nowMs: number,
+): number | null => {
+  if (row.started_at === null) {
+    return null
+  }
+  const endMs = row.finished_at ?? nowMs
+  return Math.max(0, endMs - row.started_at)
+}
+
+const toStepRunRecord = (row: StepRunRow, nowMs: number): StepRunRecord => ({
   id: row.id as StepRunId,
   workItemId: row.work_item_id as WorkItemId,
   step: row.step,
@@ -216,11 +233,14 @@ const toStepRunRecord = (row: StepRunRow): StepRunRecord => ({
   finishedAt: row.finished_at === null ? null : new Date(row.finished_at),
   reasonCode: row.reason_code,
   reasonMessage: row.reason_message,
+  queueWaitMs: deriveQueueWaitMs(row, nowMs),
+  executionDurationMs: deriveExecutionDurationMs(row, nowMs),
 })
 
 const toWorkItemRecord = (
   row: WorkItemRow,
   stepRuns: readonly StepRunRecord[],
+  nowMs: number,
 ): WorkItemRecord => ({
   id: row.id as WorkItemId,
   repositoryId: row.repository_id,
@@ -235,6 +255,7 @@ const toWorkItemRecord = (
   failureMessage: row.failure_message,
   createdAt: new Date(row.created_at),
   updatedAt: new Date(row.updated_at),
+  stateResidenceMs: Math.max(0, nowMs - row.state_ready_at),
   stepRuns,
 })
 
@@ -405,6 +426,7 @@ export const makeWorkItemLifecycleLive = (
 
       const loadStepRuns = (
         workItemIds: readonly string[],
+        nowMs: number,
       ): Effect.Effect<
         Map<string, StepRunRecord[]>,
         WorkItemLifecycleDatabaseError
@@ -422,13 +444,13 @@ export const makeWorkItemLifecycleLive = (
                     started_at, finished_at, reason_code, reason_message
              FROM step_run
              WHERE work_item_id IN (${placeholders})
-             ORDER BY queued_at ASC, id ASC`,
+             ORDER BY queued_at ASC, rowid ASC`,
               [...workItemIds],
             )
             .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
 
           for (const row of rows) {
-            const record = toStepRunRecord(row)
+            const record = toStepRunRecord(row, nowMs)
             const existing = byWorkItem.get(row.work_item_id)
             if (existing) {
               existing.push(record)
@@ -442,6 +464,7 @@ export const makeWorkItemLifecycleLive = (
       const getWorkItem = Effect.fn("WorkItemLifecycle.getWorkItem")(function* (
         workItemId: string,
       ) {
+        const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
             `SELECT id, repository_id, github_issue_number, model, variant, state,
@@ -459,13 +482,18 @@ export const makeWorkItemLifecycleLive = (
           return yield* new WorkItemNotFoundError({ workItemId })
         }
 
-        const stepRunsByWorkItem = yield* loadStepRuns([row.id])
-        return toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [])
+        const stepRunsByWorkItem = yield* loadStepRuns([row.id], nowMs)
+        return toWorkItemRecord(
+          row,
+          stepRunsByWorkItem.get(row.id) ?? [],
+          nowMs,
+        )
       })
 
       const listWorkItemsForIssue = Effect.fn(
         "WorkItemLifecycle.listWorkItemsForIssue",
       )(function* (repositoryId: string, githubIssueNumber: number) {
+        const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
             `SELECT id, repository_id, github_issue_number, model, variant, state,
@@ -480,9 +508,10 @@ export const makeWorkItemLifecycleLive = (
 
         const stepRunsByWorkItem = yield* loadStepRuns(
           rows.map((row) => row.id),
+          nowMs,
         )
         return rows.map((row) =>
-          toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? []),
+          toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
         )
       })
 
@@ -667,7 +696,7 @@ export const makeWorkItemLifecycleLive = (
             }
       }): Effect.Effect<WorkItemRecord, RunStepError> =>
         Effect.gen(function* () {
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const { stepRun, workItem, output, revalidation } = input
           const nextStep = nextOperationalStep(stepRun.step)
           const worktreePath = output.worktreePath ?? workItem.worktree_path
@@ -780,7 +809,7 @@ export const makeWorkItemLifecycleLive = (
         readonly cause: Cause.Cause<unknown>
       }): Effect.Effect<WorkItemRecord, RunStepError> =>
         Effect.gen(function* () {
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const { stepRun, workItem, reasonCode, reasonMessage, cause } = input
 
           yield* Effect.logError("Lifecycle Step handler failed", {
@@ -833,7 +862,7 @@ export const makeWorkItemLifecycleLive = (
         readonly cause?: Cause.Cause<unknown>
       }): Effect.Effect<void, RunStepError> =>
         Effect.gen(function* () {
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const { stepRun, reasonMessage, cause } = input
 
           if (cause) {
@@ -906,28 +935,28 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        const startedAt = Date.now()
+        const startedAt = yield* Clock.currentTimeMillis
         const startedRows = (yield* sql
           .unsafe(
             `UPDATE step_run
-           SET status = 'running', started_at = ?, updated_at = ?
-           WHERE id = ?
-             AND status = 'queued'
-             AND step = ?
-             AND EXISTS (
-               SELECT 1 FROM work_item
-               WHERE work_item.id = step_run.work_item_id
-                 AND work_item.state = step_run.step
-                 AND work_item.state NOT IN ('complete', 'failed', 'abandoned')
-             )
-             AND NOT EXISTS (
-               SELECT 1 FROM step_run AS other
-                WHERE other.work_item_id = step_run.work_item_id
-                  AND other.status = 'running'
-                  AND other.id != step_run.id
+            SET status = 'running', started_at = ?, updated_at = ?
+            WHERE id = ?
+              AND status = 'queued'
+              AND step = ?
+              AND EXISTS (
+                SELECT 1 FROM work_item
+                WHERE work_item.id = step_run.work_item_id
+                  AND work_item.state = step_run.step
+                  AND work_item.state NOT IN ('complete', 'failed', 'abandoned')
               )
-            RETURNING id, work_item_id, step, status, queue_job_id, queued_at,
-                      started_at, finished_at, reason_code, reason_message`,
+              AND NOT EXISTS (
+                SELECT 1 FROM step_run AS other
+                 WHERE other.work_item_id = step_run.work_item_id
+                   AND other.status = 'running'
+                   AND other.id != step_run.id
+               )
+             RETURNING id, work_item_id, step, status, queue_job_id, queued_at,
+                       started_at, finished_at, reason_code, reason_message`,
             [startedAt, startedAt, stepRunId, stepRun.step],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
@@ -938,7 +967,8 @@ export const makeWorkItemLifecycleLive = (
           if (current?.status === "running") {
             const maxDurationMs = Duration.toMillis(maxDurations[current.step])
             const startedMs = current.started_at ?? 0
-            const leaseExpired = Date.now() - startedMs >= maxDurationMs
+            const nowMs = yield* Clock.currentTimeMillis
+            const leaseExpired = nowMs - startedMs >= maxDurationMs
             if (leaseExpired) {
               yield* completeInterruptedStep({
                 stepRun: current,
@@ -1053,24 +1083,24 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        const now = Date.now()
+        const now = yield* Clock.currentTimeMillis
 
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
               const abandonedRows = (yield* sql.unsafe(
                 `UPDATE work_item
-                 SET state = 'abandoned',
-                     state_ready_at = ?,
-                     updated_at = ?
-                 WHERE id = ?
-                   AND state NOT IN ('complete', 'failed', 'abandoned')
-                   AND NOT EXISTS (
-                     SELECT 1 FROM step_run
-                     WHERE step_run.work_item_id = work_item.id
-                       AND step_run.status = 'running'
-                   )
-                 RETURNING id`,
+                  SET state = 'abandoned',
+                      state_ready_at = ?,
+                      updated_at = ?
+                  WHERE id = ?
+                    AND state NOT IN ('complete', 'failed', 'abandoned')
+                    AND NOT EXISTS (
+                      SELECT 1 FROM step_run
+                      WHERE step_run.work_item_id = work_item.id
+                        AND step_run.status = 'running'
+                    )
+                  RETURNING id`,
                 [now, now, workItemId],
               )) as readonly { readonly id: string }[]
 
@@ -1245,7 +1275,7 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        const now = Date.now()
+        const now = yield* Clock.currentTimeMillis
         const nextStepRunId = makeStepRunId()
 
         yield* sql
@@ -1404,7 +1434,7 @@ export const makeWorkItemLifecycleLive = (
           const config = yield* db.getConfig
           const workItemId = makeWorkItemId()
           const stepRunId = makeStepRunId()
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const step: OperationalLifecycleStep = "create_worktree"
 
           const createdId = yield* sql
