@@ -86,21 +86,25 @@ export const runMigrations = (migrationsFolder: string) =>
         continue
       }
 
-      for (const query of migration.sql) {
-        if (query.trim().length > 0) {
-          yield* sql(rawSql(query))
-        }
-      }
+      yield* sql.withTransaction(
+        Effect.gen(function* () {
+          for (const query of migration.sql) {
+            if (query.trim().length > 0) {
+              yield* sql(rawSql(query))
+            }
+          }
 
-      yield* sql`
-        INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
-        VALUES (
-          ${migration.hash},
-          ${migration.folderMillis},
-          ${migration.name},
-          ${new Date().toISOString()}
-        )
-      `
+          yield* sql`
+            INSERT INTO __drizzle_migrations (hash, created_at, name, applied_at)
+            VALUES (
+              ${migration.hash},
+              ${migration.folderMillis},
+              ${migration.name},
+              ${new Date().toISOString()}
+            )
+          `
+        }),
+      )
     }
   })
 
