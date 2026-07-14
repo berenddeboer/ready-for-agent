@@ -135,6 +135,7 @@ const queueLayer = (
       runStep,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
+      listWorkItemsForRepository: unused,
     }),
   )
 

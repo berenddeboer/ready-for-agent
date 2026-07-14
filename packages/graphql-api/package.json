@@ -23,6 +23,7 @@
     "@ready-for-agent/keymaxxer-service": "workspace:*",
     "@ready-for-agent/opencode": "workspace:*",
     "@ready-for-agent/queue-service": "workspace:*",
+    "@ready-for-agent/work-item-lifecycle": "workspace:*",
     "effect": "^4.0.0-beta.97",
     "graphql": "^16.11.0",
     "graphql-yoga": "^5.13.0",

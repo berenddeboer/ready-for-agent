@@ -31,6 +31,19 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { EnqueueError, QueueService } from "@ready-for-agent/queue-service"
+import {
+  ActiveStepRunExistsError,
+  IssueBlockedError,
+  IssueNotFoundError,
+  IssueNotOpenError,
+  ParentIssueError,
+  RetryNotEligibleError,
+  UnfinishedWorkItemExistsError,
+  WorkItemLifecycle,
+  WorkItemLifecycleDatabaseError,
+  WorkItemNotFoundError,
+  WorkItemTerminalError,
+} from "@ready-for-agent/work-item-lifecycle"
 
 type AddRepositoryArgs = {
   input: {
@@ -62,6 +75,18 @@ type UpdateConfigArgs = {
 
 type IssuesArgs = {
   repositoryId: string
+}
+
+type WorkItemsArgs = IssuesArgs & {
+  githubIssueNumber?: number
+}
+
+type ImplementNowArgs = IssuesArgs & {
+  githubIssueNumber: number
+}
+
+type WorkItemArgs = {
+  workItemId: string
 }
 
 const childIssueCategory = (issue: IssueRecord): number => {
@@ -98,7 +123,12 @@ const workIssueProjection = (
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
-  DbService | IssueReconciler | KeymaxxerService | Opencode | QueueService,
+  | DbService
+  | IssueReconciler
+  | KeymaxxerService
+  | Opencode
+  | QueueService
+  | WorkItemLifecycle,
   unknown
 >
 
@@ -144,6 +174,69 @@ const repositoryCredential = (
 })
 
 const toGraphQLError = (error: unknown): GraphQLError => {
+  if (error instanceof IssueNotFoundError) {
+    return new GraphQLError(
+      `Issue #${error.githubIssueNumber} was not found in repository ${error.repositoryId}`,
+      { extensions: { code: "ISSUE_NOT_FOUND" } },
+    )
+  }
+  if (error instanceof IssueNotOpenError) {
+    return new GraphQLError(
+      `Issue #${error.githubIssueNumber} is ${error.state}, not OPEN`,
+      { extensions: { code: "ISSUE_NOT_OPEN" } },
+    )
+  }
+  if (error instanceof ParentIssueError) {
+    return new GraphQLError(
+      `Issue #${error.githubIssueNumber} has child issues and cannot be implemented directly`,
+      { extensions: { code: "ISSUE_IS_PARENT" } },
+    )
+  }
+  if (error instanceof IssueBlockedError) {
+    return new GraphQLError(
+      `Issue #${error.githubIssueNumber} is blocked by ${error.blockerCount} issue(s)`,
+      { extensions: { code: "ISSUE_BLOCKED" } },
+    )
+  }
+  if (error instanceof UnfinishedWorkItemExistsError) {
+    return new GraphQLError(
+      `Issue #${error.githubIssueNumber} already has an unfinished Work Item`,
+      {
+        extensions: {
+          code: "UNFINISHED_WORK_ITEM_EXISTS",
+          workItemId: error.workItemId,
+        },
+      },
+    )
+  }
+  if (error instanceof WorkItemLifecycleDatabaseError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "WORK_ITEM_LIFECYCLE_DATABASE_ERROR" },
+    })
+  }
+  if (error instanceof WorkItemNotFoundError) {
+    return new GraphQLError(`Work Item not found: ${error.workItemId}`, {
+      extensions: { code: "WORK_ITEM_NOT_FOUND" },
+    })
+  }
+  if (error instanceof WorkItemTerminalError) {
+    return new GraphQLError(
+      `Work Item ${error.workItemId} is already ${error.state}`,
+      { extensions: { code: "WORK_ITEM_TERMINAL" } },
+    )
+  }
+  if (error instanceof ActiveStepRunExistsError) {
+    return new GraphQLError(
+      `Work Item ${error.workItemId} already has an active Step Run`,
+      { extensions: { code: "ACTIVE_STEP_RUN_EXISTS" } },
+    )
+  }
+  if (error instanceof RetryNotEligibleError) {
+    return new GraphQLError(
+      `Work Item ${error.workItemId} cannot be retried: ${error.reason}`,
+      { extensions: { code: "RETRY_NOT_ELIGIBLE" } },
+    )
+  }
   if (error instanceof RepositoryCredentialError) {
     return new GraphQLError(error.message, {
       extensions: { code: "REPOSITORY_CREDENTIAL_ERROR" },
@@ -338,6 +431,27 @@ export const createGraphqlApi = (
             }
             return result.success
           },
+          workItems: async (_parent: unknown, args: WorkItemsArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return args.githubIssueNumber === undefined
+                    ? yield* lifecycle.listWorkItemsForRepository(
+                        args.repositoryId,
+                      )
+                    : yield* lifecycle.listWorkItemsForIssue(
+                        args.repositoryId,
+                        args.githubIssueNumber,
+                      )
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
         },
         Issue: {
           githubCreatedAt: (issue: { githubCreatedAt: Date }) =>
@@ -347,6 +461,25 @@ export const createGraphqlApi = (
           issuesReconciledAt: (repository: {
             issuesReconciledAt: Date | null
           }) => repository.issuesReconciledAt?.toISOString() ?? null,
+        },
+        WorkItem: {
+          state: (workItem: { state: string }) => workItem.state.toUpperCase(),
+          stateReadyAt: (workItem: { stateReadyAt: Date }) =>
+            workItem.stateReadyAt.toISOString(),
+          createdAt: (workItem: { createdAt: Date }) =>
+            workItem.createdAt.toISOString(),
+          updatedAt: (workItem: { updatedAt: Date }) =>
+            workItem.updatedAt.toISOString(),
+        },
+        StepRun: {
+          step: (stepRun: { step: string }) => stepRun.step.toUpperCase(),
+          status: (stepRun: { status: string }) => stepRun.status.toUpperCase(),
+          queuedAt: (stepRun: { queuedAt: Date }) =>
+            stepRun.queuedAt.toISOString(),
+          startedAt: (stepRun: { startedAt: Date | null }) =>
+            stepRun.startedAt?.toISOString() ?? null,
+          finishedAt: (stepRun: { finishedAt: Date | null }) =>
+            stepRun.finishedAt?.toISOString() ?? null,
         },
         Subscription: {
           repositoriesChanged: {
@@ -545,6 +678,37 @@ export const createGraphqlApi = (
                     id: jobId,
                     repositoryId: repository.id,
                   }
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          implementNow: async (_parent: unknown, args: ImplementNowArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.implementNow(
+                    args.repositoryId,
+                    args.githubIssueNumber,
+                  )
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          retryWorkItem: async (_parent: unknown, args: WorkItemArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.retry(args.workItemId)
                 }),
               ),
             )

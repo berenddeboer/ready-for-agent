@@ -11,6 +11,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../work-item-lifecycle/tsconfig.lib.json"
+    },
+    {
       "path": "../queue-service/tsconfig.lib.json"
     },
     {

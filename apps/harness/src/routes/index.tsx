@@ -1,5 +1,6 @@
 import {
   useMutation,
+  useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query"
@@ -50,6 +51,7 @@ const issuesQuery = (repositoryId: string) => ({
       issues: {
         __args: { repositoryId },
         id: true,
+        repositoryId: true,
         githubIssueNumber: true,
         title: true,
         url: true,
@@ -89,6 +91,7 @@ type RepositoryCredential = {
 
 type RepositoryIssue = {
   id: string
+  repositoryId: string
   githubIssueNumber: number
   title: string
   url: string
@@ -103,6 +106,74 @@ type RepositoryIssue = {
     githubIssueUrl: string
   }[]
 }
+
+type WorkItemState =
+  | "CREATE_WORKTREE"
+  | "INSTALL_DEPENDENCIES"
+  | "IMPLEMENT"
+  | "REVIEW"
+  | "COMPLETE"
+  | "FAILED"
+  | "ABANDONED"
+
+type StepRunStatus =
+  | "QUEUED"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "INTERRUPTED"
+  | "CANCELLED"
+
+type WorkItem = {
+  id: string
+  repositoryId: string
+  githubIssueNumber: number
+  state: WorkItemState
+  failureMessage: string | null
+  createdAt: string
+  stepRuns: readonly {
+    id: string
+    step: WorkItemState
+    status: StepRunStatus
+    reasonMessage: string | null
+  }[]
+}
+
+const workItemsQuery = (repositoryId: string) => ({
+  queryKey: ["work-items", repositoryId],
+  queryFn: async (): Promise<readonly WorkItem[]> => {
+    const result = await graphql.query({
+      workItems: {
+        __args: { repositoryId },
+        id: true,
+        repositoryId: true,
+        githubIssueNumber: true,
+        state: true,
+        failureMessage: true,
+        createdAt: true,
+        stepRuns: {
+          id: true,
+          step: true,
+          status: true,
+          reasonMessage: true,
+        },
+      },
+    })
+    return result.workItems
+  },
+})
+
+const terminalWorkItemStates: readonly WorkItemState[] = [
+  "COMPLETE",
+  "FAILED",
+  "ABANDONED",
+]
+
+const formatLifecycleLabel = (value: string) =>
+  value
+    .toLowerCase()
+    .replaceAll("_", " ")
+    .replace(/^./, (first) => first.toUpperCase())
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -255,6 +326,9 @@ function RepositoryCards() {
 function RepositoryCard({ repository }: { repository: Repository }) {
   const queryClient = useQueryClient()
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
+  const jobsQuery = workItemsQuery(repository.id)
+  const { data: workItems = [], isLoading: workItemsLoading } =
+    useQuery(jobsQuery)
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -480,9 +554,21 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           <p className="m-0 text-sm text-slate-500">Not refreshed yet.</p>
         ) : (
           <Suspense fallback={<RepositoryIssuesSkeleton />}>
-            <RepositoryIssues repositoryId={repository.id} />
+            <RepositoryIssues
+              repositoryId={repository.id}
+              workItems={workItems}
+              workItemsLoading={workItemsLoading}
+            />
           </Suspense>
         )}
+      </div>
+      <div className="mt-5 border-t border-slate-100 pt-4">
+        <h3 className="mb-2 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+          Jobs
+        </h3>
+        <Suspense fallback={<RepositoryJobsSkeleton />}>
+          <RepositoryJobs repositoryId={repository.id} />
+        </Suspense>
       </div>
       {removeRepository.isError && (
         <p className="mt-3 mb-0 text-sm text-red-700" role="alert">
@@ -493,7 +579,15 @@ function RepositoryCard({ repository }: { repository: Repository }) {
   )
 }
 
-function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
+function RepositoryIssues({
+  repositoryId,
+  workItems,
+  workItemsLoading,
+}: {
+  repositoryId: string
+  workItems: readonly WorkItem[]
+  workItemsLoading: boolean
+}) {
   const { data: issues } = useSuspenseQuery(issuesQuery(repositoryId))
 
   if (issues.length === 0) {
@@ -513,7 +607,14 @@ function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
       {issues.map((issue) => {
         if (issue.parent !== null) return null
         if (!issue.hasChildren) {
-          return <RepositoryIssueRow issue={issue} key={issue.id} />
+          return (
+            <RepositoryIssueRow
+              issue={issue}
+              key={issue.id}
+              workItems={workItems}
+              workItemsLoading={workItemsLoading}
+            />
+          )
         }
 
         const children = childrenByParent.get(issue.githubIssueNumber) ?? []
@@ -555,7 +656,12 @@ function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
               </summary>
               <ul className="relative m-0 grid list-none gap-1.5 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2.5 before:w-0.5 before:rounded-full before:bg-blue-200">
                 {children.map((child) => (
-                  <RepositoryIssueRow issue={child} key={child.id} />
+                  <RepositoryIssueRow
+                    issue={child}
+                    key={child.id}
+                    workItems={workItems}
+                    workItemsLoading={workItemsLoading}
+                  />
                 ))}
               </ul>
             </details>
@@ -566,9 +672,59 @@ function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
   )
 }
 
-function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
+function RepositoryIssueRow({
+  issue,
+  workItems,
+  workItemsLoading,
+}: {
+  issue: RepositoryIssue
+  workItems: readonly WorkItem[]
+  workItemsLoading: boolean
+}) {
   const isActionable = issue.state === "OPEN" && issue.blockedBy.length === 0
   const [menuOpen, setMenuOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const query = workItemsQuery(issue.repositoryId)
+  const issueWorkItems = workItems.filter(
+    (workItem) => workItem.githubIssueNumber === issue.githubIssueNumber,
+  )
+  const latestWorkItem = issueWorkItems.at(-1)
+  const hasUnfinishedWorkItem =
+    latestWorkItem !== undefined &&
+    !terminalWorkItemStates.includes(latestWorkItem.state)
+  const canImplement =
+    isActionable && !workItemsLoading && !hasUnfinishedWorkItem
+  const implementNow = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        implementNow: {
+          __args: {
+            repositoryId: issue.repositoryId,
+            githubIssueNumber: issue.githubIssueNumber,
+          },
+          id: true,
+          repositoryId: true,
+          githubIssueNumber: true,
+          state: true,
+          failureMessage: true,
+          createdAt: true,
+          stepRuns: {
+            id: true,
+            step: true,
+            status: true,
+            reasonMessage: true,
+          },
+        },
+      })
+      return result.implementNow
+    },
+    onSuccess: (workItem) => {
+      queryClient.setQueryData<readonly WorkItem[]>(
+        query.queryKey,
+        (current) => [...(current ?? []), workItem],
+      )
+    },
+  })
 
   useEffect(() => {
     if (!menuOpen) return
@@ -614,7 +770,7 @@ function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
               Blocked
             </span>
           )}
-          {isActionable && (
+          {canImplement && (
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
@@ -644,9 +800,13 @@ function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
                     type="button"
                     role="menuitem"
                     className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    onClick={() => setMenuOpen(false)}
+                    disabled={implementNow.isPending}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      implementNow.mutate()
+                    }}
                   >
-                    Implement now
+                    {implementNow.isPending ? "Starting..." : "Implement now"}
                   </button>
                 </div>
               )}
@@ -654,6 +814,14 @@ function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
           )}
         </span>
       </div>
+      {latestWorkItem !== undefined && (
+        <WorkItemLifecycleStatus workItem={latestWorkItem} />
+      )}
+      {implementNow.isError && (
+        <p className="mt-1.5 mb-0 pl-11 text-xs text-red-700" role="alert">
+          Could not start implementation. Refresh the issues and try again.
+        </p>
+      )}
       {issue.blockedBy.length > 0 && (
         <p className="mt-1.5 mb-0 pl-11 text-xs text-amber-900">
           Blocked by{" "}
@@ -671,6 +839,174 @@ function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
         </p>
       )}
     </li>
+  )
+}
+
+function RepositoryJobs({ repositoryId }: { repositoryId: string }) {
+  const { data: workItems } = useSuspenseQuery({
+    ...workItemsQuery(repositoryId),
+    refetchInterval: ({ state }) => {
+      const items = state.data as readonly WorkItem[] | undefined
+      return items?.some((item) => {
+        const latestRun = item.stepRuns.at(-1)
+        return latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING"
+      })
+        ? 1_000
+        : false
+    },
+  })
+
+  if (workItems.length === 0) {
+    return <p className="m-0 text-sm text-slate-500">No jobs yet.</p>
+  }
+
+  return (
+    <ul className="m-0 grid list-none gap-2 p-0" aria-label="Repository jobs">
+      {[...workItems].reverse().map((workItem) => (
+        <li
+          className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
+          key={workItem.id}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-mono text-xs font-semibold text-blue-600">
+              Issue #{workItem.githubIssueNumber}
+            </span>
+            <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
+              {formatLifecycleLabel(workItem.state)}
+            </span>
+          </div>
+          <WorkItemLifecycleStatus workItem={workItem} compact />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function RepositoryJobsSkeleton() {
+  return (
+    <div
+      className="grid gap-2"
+      role="status"
+      aria-label="Loading jobs"
+      aria-busy="true"
+    >
+      <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+      <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+    </div>
+  )
+}
+
+function WorkItemLifecycleStatus({
+  workItem,
+  compact = false,
+}: {
+  workItem: WorkItem
+  compact?: boolean
+}) {
+  const queryClient = useQueryClient()
+  const latestRun = workItem.stepRuns.at(-1)
+  const isTerminal = terminalWorkItemStates.includes(workItem.state)
+  const status = isTerminal
+    ? workItem.state
+    : (latestRun?.status ?? workItem.state)
+  const message = workItem.failureMessage ?? latestRun?.reasonMessage
+  const canRetry =
+    compact &&
+    !isTerminal &&
+    (latestRun?.status === "FAILED" || latestRun?.status === "INTERRUPTED")
+  const retry = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        retryWorkItem: {
+          __args: { workItemId: workItem.id },
+          id: true,
+          repositoryId: true,
+          githubIssueNumber: true,
+          state: true,
+          failureMessage: true,
+          createdAt: true,
+          stepRuns: {
+            id: true,
+            step: true,
+            status: true,
+            reasonMessage: true,
+          },
+        },
+      })
+      return result.retryWorkItem
+    },
+    onSuccess: (retried) => {
+      queryClient.setQueryData<readonly WorkItem[]>(
+        workItemsQuery(workItem.repositoryId).queryKey,
+        (current) =>
+          current?.map((candidate) =>
+            candidate.id === retried.id ? retried : candidate,
+          ),
+      )
+    },
+  })
+
+  return (
+    <div
+      className={
+        compact
+          ? "mt-2"
+          : "mt-2 ml-11 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-semibold text-slate-700">
+          {formatLifecycleLabel(workItem.state)}
+        </span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase ${
+            status === "FAILED" || status === "INTERRUPTED"
+              ? "bg-red-100 text-red-700"
+              : status === "COMPLETE" || status === "SUCCEEDED"
+                ? "bg-green-100 text-green-700"
+                : status === "ABANDONED" || status === "CANCELLED"
+                  ? "bg-slate-200 text-slate-600"
+                  : "bg-blue-100 text-blue-700"
+          }`}
+        >
+          {formatLifecycleLabel(status)}
+        </span>
+      </div>
+      {workItem.stepRuns.length > 0 && (
+        <ol
+          className="mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
+          aria-label="Lifecycle steps"
+        >
+          {workItem.stepRuns.map((stepRun) => (
+            <li
+              className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
+              key={stepRun.id}
+            >
+              {formatLifecycleLabel(stepRun.step)}:{" "}
+              {formatLifecycleLabel(stepRun.status)}
+            </li>
+          ))}
+        </ol>
+      )}
+      {message !== null && message !== undefined && (
+        <p className="mt-1.5 mb-0 text-xs text-red-700">{message}</p>
+      )}
+      {canRetry && (
+        <button
+          type="button"
+          className="mt-2 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-wait disabled:opacity-60"
+          disabled={retry.isPending}
+          onClick={() => retry.mutate()}
+        >
+          {retry.isPending ? "Retrying..." : "Retry"}
+        </button>
+      )}
+      {retry.isError && (
+        <p className="mt-1.5 mb-0 text-xs text-red-700" role="alert">
+          Could not retry this job.
+        </p>
+      )}
+    </div>
   )
 }
 
