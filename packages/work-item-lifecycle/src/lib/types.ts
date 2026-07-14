@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Duration, Schema } from "effect"
 import { ulid } from "ulidx"
 
 export const WorkItemId = Schema.String.pipe(
@@ -79,3 +79,33 @@ export const TERMINAL_WORK_ITEM_STATES = [
   "failed",
   "abandoned",
 ] as const satisfies readonly WorkItemState[]
+
+export const isTerminalWorkItemState = (
+  state: WorkItemState,
+): state is (typeof TERMINAL_WORK_ITEM_STATES)[number] =>
+  (TERMINAL_WORK_ITEM_STATES as readonly string[]).includes(state)
+
+export const STEP_RUN_REASON = {
+  handlerFailed: "handler_failed",
+  handlerDefect: "handler_defect",
+  timeout: "timeout",
+} as const
+
+export type StepRunReasonCode =
+  (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
+
+export type LifecycleMaxDurations = {
+  readonly [Step in OperationalLifecycleStep]: Duration.Duration
+}
+
+/** Default maximum Effect durations per Lifecycle Step (also used as visibility leases). */
+export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
+  create_worktree: Duration.minutes(5),
+  install_dependencies: Duration.minutes(15),
+  implement: Duration.hours(2),
+  review: Duration.hours(1),
+}
+
+export type WorkItemLifecycleConfig = {
+  readonly maxDurations?: LifecycleMaxDurations
+}
