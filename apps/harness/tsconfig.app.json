@@ -39,6 +39,12 @@
     },
     {
       "path": "../../packages/db/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/queue-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/sqlite-queue-service/tsconfig.lib.json"
     }
   ]
 }

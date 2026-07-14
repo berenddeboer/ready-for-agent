@@ -1,3 +1,11 @@
+import { Schema } from "effect"
+
+export const RepositoryId = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^repo-[0-9A-HJKMNP-TV-Z]{26}$/)),
+  Schema.brand("RepositoryId"),
+)
+export type RepositoryId = typeof RepositoryId.Type
+
 export interface AddRepositoryInput {
   readonly githubOwner: string
   readonly githubRepo: string
