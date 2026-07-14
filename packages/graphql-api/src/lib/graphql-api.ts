@@ -1,4 +1,4 @@
-import { Effect, type ManagedRuntime, Result } from "effect"
+import { Data, Effect, type ManagedRuntime, Result, Semaphore } from "effect"
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
 import {
@@ -19,6 +19,7 @@ import {
   IssueReconciler,
   ReconciliationMutationError,
 } from "@ready-for-agent/issue-reconciler"
+import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 
 type AddRepositoryArgs = {
@@ -38,6 +39,10 @@ type RemoveRepositoryArgs = {
   repositoryId: string
 }
 
+type RepositoryCredentialArgs = {
+  repositoryId: string
+}
+
 type UpdateConfigArgs = {
   input: {
     defaultModel: string
@@ -50,11 +55,54 @@ type IssuesArgs = {
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
-  DbService | IssueReconciler | Opencode,
+  DbService | IssueReconciler | KeymaxxerService | Opencode,
   unknown
 >
 
+type Repository = {
+  id: string
+  githubOwner: string
+  githubRepo: string
+}
+
+class RepositoryCredentialError extends Data.TaggedError(
+  "RepositoryCredentialError",
+)<{ readonly message: string }> {}
+
+const githubTokenSecretName = (repository: Repository) =>
+  `GITHUB_TOKEN_${repository.githubOwner}_${repository.githubRepo}`
+    .replace(/[^A-Za-z0-9_]/g, "_")
+    .toUpperCase()
+
+const githubTokenCreationUrl = (repository: Repository) => {
+  const url = new URL("https://github.com/settings/personal-access-tokens/new")
+  url.searchParams.set("name", "Ready For Agent")
+  url.searchParams.set(
+    "description",
+    `Ready For Agent token for ${repository.githubOwner}/${repository.githubRepo}`,
+  )
+  url.searchParams.set("target_name", repository.githubOwner)
+  url.searchParams.set("expires_in", "90")
+  url.searchParams.set("issues", "read")
+  return url.toString()
+}
+
+const repositoryCredential = (
+  repository: Repository,
+  existingToken: string | null,
+) => ({
+  repositoryId: repository.id,
+  configured: existingToken !== null,
+  githubTokenSecretName: existingToken ?? githubTokenSecretName(repository),
+  githubTokenCreationUrl: githubTokenCreationUrl(repository),
+})
+
 const toGraphQLError = (error: unknown): GraphQLError => {
+  if (error instanceof RepositoryCredentialError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "REPOSITORY_CREDENTIAL_ERROR" },
+    })
+  }
   if (error instanceof RepositoryAlreadyExistsError) {
     return new GraphQLError(
       `Repository ${error.githubOwner}/${error.githubRepo} already exists`,
@@ -148,6 +196,7 @@ export const createGraphqlApi = (
   options: { readonly opencodeCwd?: string } = {},
 ) => {
   const opencodeCwd = options.opencodeCwd ?? process.cwd()
+  const tokenProvisioning = Effect.runSync(Semaphore.make(1))
   const yoga = createYoga({
     schema: createSchema({
       typeDefs,
@@ -160,6 +209,30 @@ export const createGraphqlApi = (
                 Effect.gen(function* () {
                   const db = yield* DbService
                   return yield* db.listRepositories
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          repositoryCredentials: async () => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  const repositories = yield* db.listRepositories
+                  const keymaxxer = yield* KeymaxxerService
+                  const tokenNames = yield* keymaxxer.findSecrets(
+                    repositories.map((repository) => ({
+                      provider: "github",
+                      account: `${repository.githubOwner}/${repository.githubRepo}`,
+                    })),
+                  )
+                  return repositories.map((repository, index) =>
+                    repositoryCredential(repository, tokenNames[index] ?? null),
+                  )
                 }),
               ),
             )
@@ -245,6 +318,74 @@ export const createGraphqlApi = (
                   const db = yield* DbService
                   return yield* db.addRepository(args.input)
                 }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          addRepositoryGitHubToken: async (
+            _parent: unknown,
+            args: RepositoryCredentialArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                tokenProvisioning.withPermits(1)(
+                  Effect.gen(function* () {
+                    const db = yield* DbService
+                    const repositories = yield* db.listRepositories
+                    const repository = repositories.find(
+                      ({ id }) => id === args.repositoryId,
+                    )
+                    if (repository === undefined) {
+                      return yield* new RepositoryNotFoundError({
+                        repositoryId: args.repositoryId,
+                      })
+                    }
+
+                    const keymaxxer = yield* KeymaxxerService
+                    const account = `${repository.githubOwner}/${repository.githubRepo}`
+                    const existingToken = yield* keymaxxer.findSecret({
+                      provider: "github",
+                      account,
+                    })
+                    let tokenName = existingToken
+                    if (tokenName === null) {
+                      tokenName = githubTokenSecretName(repository)
+                      if (yield* keymaxxer.hasSecret(tokenName)) {
+                        return yield* new RepositoryCredentialError({
+                          message: `Keymaxxer secret ${tokenName} already exists for another account`,
+                        })
+                      }
+                      const added = yield* keymaxxer.addSecret({
+                        name: tokenName,
+                        provider: "github",
+                        account,
+                        environment: "prod",
+                        access: "read-only",
+                        description: `Fine-grained GitHub token for Ready for Agent on ${account}`,
+                        tags: "ready-for-agent,harness,github",
+                      })
+                      if (!added) {
+                        return yield* new RepositoryCredentialError({
+                          message: "Keymaxxer GitHub token setup was cancelled",
+                        })
+                      }
+                      tokenName = yield* keymaxxer.findSecret({
+                        provider: "github",
+                        account,
+                      })
+                      if (tokenName === null) {
+                        return yield* new RepositoryCredentialError({
+                          message:
+                            "The saved Keymaxxer secret does not match this GitHub repository",
+                        })
+                      }
+                    }
+                    return repositoryCredential(repository, tokenName)
+                  }),
+                ),
               ),
             )
             if (Result.isFailure(result)) {

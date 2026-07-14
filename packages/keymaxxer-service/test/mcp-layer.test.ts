@@ -81,6 +81,38 @@ describe("MCP Keymaxxer layer", () => {
     expect(name).toBe("GITHUB_TOKEN_PROCESSFOCUS_MONOREPO")
   })
 
+  test("finds multiple secrets with one vault listing", async () => {
+    let listCalls = 0
+    const client: KeymaxxerToolClient = {
+      callTool: async () => {
+        listCalls += 1
+        return textResult(
+          JSON.stringify([
+            { name: "FIRST_TOKEN", provider: "github", account: "acme/one" },
+            { name: "SECOND_TOKEN", provider: "github", account: "acme/two" },
+          ]),
+        )
+      },
+      close: async () => {},
+    }
+
+    const names = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        return yield* keymaxxer.findSecrets([
+          { provider: "github", account: "acme/one" },
+          { provider: "github", account: "acme/two" },
+          { provider: "github", account: "acme/missing" },
+        ])
+      }).pipe(
+        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
+      ),
+    )
+
+    expect(names).toEqual(["FIRST_TOKEN", "SECOND_TOKEN", null])
+    expect(listCalls).toBe(1)
+  })
+
   test("refreshes metadata before each secret lookup", async () => {
     let listCalls = 0
     const client: KeymaxxerToolClient = {

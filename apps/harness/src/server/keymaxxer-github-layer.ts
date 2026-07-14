@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema, Semaphore } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -7,11 +7,6 @@ import {
   type ReadyLabeledIssue,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-
-const githubTokenName = (repository: { owner: string; name: string }) =>
-  `GITHUB_TOKEN_${repository.owner}_${repository.name}`
-    .replace(/[^A-Za-z0-9_]/g, "_")
-    .toUpperCase()
 
 const SerializedIssue = Schema.Struct({
   number: Schema.Finite,
@@ -104,33 +99,11 @@ export const keymaxxerGitHubLayer = (options: {
     GitHubService,
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
-      const tokenProvisioning = yield* Semaphore.make(1)
       const ensureToken = (repository: { owner: string; name: string }) =>
-        tokenProvisioning.withPermits(1)(
-          Effect.gen(function* () {
-            const account = `${repository.owner}/${repository.name}`
-            const existingToken = yield* keymaxxer.findSecret({
-              provider: "github",
-              account,
-            })
-            if (existingToken !== null) return existingToken
-
-            const tokenName = githubTokenName(repository)
-            if (yield* keymaxxer.hasSecret(tokenName)) return null
-
-            const added = yield* keymaxxer.addSecret({
-              name: tokenName,
-              provider: "github",
-              account,
-              environment: "prod",
-              access: "read-only",
-              description: `Fine-grained GitHub token for Ready for Agent on ${repository.owner}/${repository.name}`,
-              tags: "ready-for-agent,harness,github",
-            })
-            if (!added) return null
-            return yield* keymaxxer.findSecret({ provider: "github", account })
-          }),
-        )
+        keymaxxer.findSecret({
+          provider: "github",
+          account: `${repository.owner}/${repository.name}`,
+        })
 
       const service: GitHubServiceShape = {
         listReadyIssues: (repository) =>

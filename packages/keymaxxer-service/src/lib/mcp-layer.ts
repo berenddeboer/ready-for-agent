@@ -92,6 +92,26 @@ const makeMcpService = (options: McpLayerOptions) => {
     return secretsPromise
   }
 
+  const findSecretNames = async (
+    inputs: readonly { readonly provider: string; readonly account: string }[],
+  ) => {
+    const secrets = await listSecrets(true)
+    return inputs.map((input) => {
+      const matches = secrets.filter(
+        (secret) =>
+          secret.provider?.toLowerCase() === input.provider.toLowerCase() &&
+          secret.account?.toLowerCase() === input.account.toLowerCase(),
+      )
+      if (matches.length > 1) {
+        throw safeError(
+          "findSecrets",
+          "Multiple Keymaxxer secrets match provider and account",
+        )
+      }
+      return matches[0]?.name ?? null
+    })
+  }
+
   const service: KeymaxxerServiceShape = {
     initialize: Effect.tryPromise({
       try: () => listSecrets().then(() => undefined),
@@ -112,24 +132,19 @@ const makeMcpService = (options: McpLayerOptions) => {
         : Effect.fail(safeError("hasSecret", "Invalid secret name")),
     findSecret: (input) =>
       Effect.tryPromise({
-        try: async () => {
-          const matches = (await listSecrets(true)).filter(
-            (secret) =>
-              secret.provider?.toLowerCase() === input.provider.toLowerCase() &&
-              secret.account?.toLowerCase() === input.account.toLowerCase(),
-          )
-          if (matches.length > 1) {
-            throw safeError(
-              "findSecret",
-              "Multiple Keymaxxer secrets match provider and account",
-            )
-          }
-          return matches[0]?.name ?? null
-        },
+        try: () => findSecretNames([input]).then(([name]) => name ?? null),
         catch: (error) =>
           error instanceof KeymaxxerError
             ? error
             : safeError("findSecret", "Keymaxxer list failed"),
+      }),
+    findSecrets: (inputs) =>
+      Effect.tryPromise({
+        try: () => findSecretNames(inputs),
+        catch: (error) =>
+          error instanceof KeymaxxerError
+            ? error
+            : safeError("findSecrets", "Keymaxxer list failed"),
       }),
     addSecret: (input) =>
       validateSecretName(input.name)

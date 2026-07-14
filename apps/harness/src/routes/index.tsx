@@ -4,7 +4,7 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Suspense } from "react"
+import { Suspense, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -22,8 +22,22 @@ const repositoriesQuery = {
         paused: true,
         issuesReconciledAt: true,
       },
+      repositoryCredentials: {
+        repositoryId: true,
+        configured: true,
+        githubTokenSecretName: true,
+        githubTokenCreationUrl: true,
+      },
     })
-    return result.repositories
+    return result.repositories.map((repository) => {
+      const credential = result.repositoryCredentials.find(
+        ({ repositoryId }) => repositoryId === repository.id,
+      )
+      if (credential === undefined) {
+        throw new Error(`Missing credential status for ${repository.id}`)
+      }
+      return { ...repository, credential }
+    })
   },
 }
 
@@ -52,6 +66,14 @@ type Repository = {
   isBare: boolean
   paused: boolean
   issuesReconciledAt: string | null
+  credential: RepositoryCredential
+}
+
+type RepositoryCredential = {
+  repositoryId: string
+  configured: boolean
+  githubTokenSecretName: string
+  githubTokenCreationUrl: string
 }
 
 export const Route = createFileRoute("/")({
@@ -110,6 +132,7 @@ function RepositoryCards() {
 
 function RepositoryCard({ repository }: { repository: Repository }) {
   const queryClient = useQueryClient()
+  const [githubTokenCreated, setGithubTokenCreated] = useState(false)
   const removeRepository = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -155,6 +178,32 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           queryKey: issuesQuery(repository.id).queryKey,
         }),
       ])
+    },
+  })
+
+  const addGitHubToken = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        addRepositoryGitHubToken: {
+          __args: { repositoryId: repository.id },
+          repositoryId: true,
+          configured: true,
+          githubTokenSecretName: true,
+          githubTokenCreationUrl: true,
+        },
+      })
+      return result.addRepositoryGitHubToken
+    },
+    onSuccess: (credential) => {
+      queryClient.setQueryData<readonly Repository[]>(
+        repositoriesQuery.queryKey,
+        (repositories) =>
+          repositories?.map((candidate) =>
+            candidate.id === repository.id
+              ? { ...candidate, credential }
+              : candidate,
+          ),
+      )
     },
   })
 
@@ -221,6 +270,53 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           </dd>
         </div>
       </dl>
+      {!repository.credential.configured && (
+        <div className="mt-5 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-950">
+          <strong>GitHub token required</strong>
+          {githubTokenCreated ? (
+            <p className="m-0">
+              Store the generated token as{" "}
+              <code className="font-bold">
+                {repository.credential.githubTokenSecretName}
+              </code>{" "}
+              in Keymaxxer.
+            </p>
+          ) : (
+            <p className="m-0">
+              Create a fine-grained token, choose{" "}
+              <strong>Only select repositories</strong>, and select{" "}
+              <code className="font-bold">{repository.githubRepo}</code>.
+            </p>
+          )}
+          {githubTokenCreated ? (
+            <button
+              type="button"
+              className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900 disabled:cursor-wait disabled:opacity-60"
+              disabled={addGitHubToken.isPending}
+              onClick={() => addGitHubToken.mutate()}
+            >
+              {addGitHubToken.isPending
+                ? "Waiting for Keymaxxer"
+                : "Store in Keymaxxer"}
+            </button>
+          ) : (
+            <a
+              className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white no-underline transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900"
+              href={repository.credential.githubTokenCreationUrl}
+              onClick={() => setGithubTokenCreated(true)}
+              rel="noreferrer"
+              target="_blank"
+            >
+              Create GitHub token
+            </a>
+          )}
+          {addGitHubToken.isError && (
+            <p className="m-0 text-red-700" role="alert">
+              Keymaxxer setup was cancelled or failed.
+            </p>
+          )}
+        </div>
+      )}
       <div className="mt-5 border-t border-slate-100 pt-4">
         <div className="mb-2 flex items-center justify-between gap-3">
           <h3 className="m-0 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
@@ -229,12 +325,18 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           <button
             type="button"
             className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-wait disabled:opacity-60"
-            disabled={refreshIssues.isPending}
+            disabled={
+              refreshIssues.isPending || !repository.credential.configured
+            }
             onClick={() => refreshIssues.mutate()}
             aria-label={
               refreshIssues.isPending ? "Refreshing issues" : "Refresh issues"
             }
-            title="Refresh issues"
+            title={
+              repository.credential.configured
+                ? "Refresh issues"
+                : "Add a GitHub token before refreshing issues"
+            }
           >
             <svg
               aria-hidden="true"
