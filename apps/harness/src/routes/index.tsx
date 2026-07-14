@@ -553,6 +553,28 @@ function RepositoryIssues({ repositoryId }: { repositoryId: string }) {
 }
 
 function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
+  const isActionable = issue.state === "OPEN" && issue.blockedBy.length === 0
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest(`[data-issue-menu="${issue.id}"]`)) return
+      setMenuOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false)
+    }
+    document.addEventListener("pointerdown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [issue.id, menuOpen])
+
   return (
     <li
       className={`min-w-0 rounded-md text-sm ${issue.blockedBy.length > 0 ? "bg-amber-50/70 py-2" : "py-0.5"}`}
@@ -576,6 +598,44 @@ function RepositoryIssueRow({ issue }: { issue: RepositoryIssue }) {
           {issue.blockedBy.length > 0 && (
             <span className="rounded-full bg-amber-200/70 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-amber-900 uppercase">
               Blocked
+            </span>
+          )}
+          {isActionable && (
+            <span className="relative" data-issue-menu={issue.id}>
+              <button
+                type="button"
+                className="inline-flex size-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                aria-label={`Actions for issue #${issue.githubIssueNumber}`}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => setMenuOpen((open) => !open)}
+              >
+                <svg
+                  aria-hidden="true"
+                  className="size-4"
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
+                >
+                  <circle cx="12" cy="5" r="1.75" />
+                  <circle cx="12" cy="12" r="1.75" />
+                  <circle cx="12" cy="19" r="1.75" />
+                </svg>
+              </button>
+              {menuOpen && (
+                <div
+                  role="menu"
+                  className="absolute top-full right-0 z-10 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    onClick={() => setMenuOpen(false)}
+                  >
+                    Implement now
+                  </button>
+                </div>
+              )}
             </span>
           )}
         </span>
