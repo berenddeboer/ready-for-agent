@@ -2,10 +2,18 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Effect, type Layer } from "effect"
+import { Effect, Layer, type Layer as LayerType } from "effect"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
+  KeymaxxerError,
+  KeymaxxerService,
+  type KeymaxxerServiceShape,
+  type RunWithSecretsInput,
+} from "@ready-for-agent/keymaxxer-service"
+import {
+  RemoveWorktreeCredentialError,
+  RemoveWorktreeRemoteError,
   createWorktree,
   makeWorkItemId,
   removeWorktree,
@@ -16,18 +24,35 @@ import { describe, expect, it } from "bun:test"
 
 const PlatformLayer = BunServices.layer
 
+const stubKeymaxxer = (
+  overrides: Partial<KeymaxxerServiceShape> = {},
+): Layer.Layer<KeymaxxerService> =>
+  Layer.succeed(KeymaxxerService, {
+    initialize: Effect.void,
+    hasSecret: () => Effect.succeed(true),
+    findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+    findSecrets: () => Effect.succeed([]),
+    addSecret: () => Effect.succeed(true),
+    runWithSecrets: () =>
+      Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" }),
+    ...overrides,
+  })
+
 const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    | Layer.Layer.Success<typeof PlatformLayer>
-    | Layer.Layer.Success<typeof DbServiceLive>
+    | LayerType.Layer.Success<typeof PlatformLayer>
+    | LayerType.Layer.Success<typeof DbServiceLive>
+    | KeymaxxerService
   >,
+  keymaxxerLayer: Layer.Layer<KeymaxxerService> = stubKeymaxxer(),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(DbServiceLive),
       Effect.provide(DatabaseTest),
+      Effect.provide(keymaxxerLayer),
       Effect.provide(PlatformLayer),
     ),
   )
@@ -196,6 +221,212 @@ describe("removeWorktree", () => {
       )
 
       expect(await Bun.file(join(path, "README.md")).exists()).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("closes an open remote PR for the Work Item branch and drops the remote branch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-remote-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      const branch = workItemBranchName({
+        githubOwner: "acme",
+        githubRepo: "widgets",
+        githubIssueNumber: 42,
+        workItemId,
+      })
+      const commands: string[] = []
+
+      await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+
+          const context = {
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            model: "opencode/test",
+            variant: "low",
+            worktreePath: null,
+            sessionId: null,
+          } as const
+
+          yield* createWorktree(context)
+          yield* removeWorktree(context)
+        }),
+        stubKeymaxxer({
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          runWithSecrets: (input: RunWithSecretsInput) => {
+            commands.push(input.command)
+            if (input.command.includes("'gh' 'pr' 'list'")) {
+              return Effect.succeed({
+                exitCode: 0,
+                stdout: '[{"number":77}]',
+                stderr: "",
+              })
+            }
+            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
+          },
+        }),
+      )
+
+      expect(commands.length).toBe(3)
+      expect(commands[0]).toContain('GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
+      expect(commands[0]).toContain('GITHUB_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
+      expect(commands[0]).toContain("'gh' 'pr' 'list'")
+      expect(commands[0]).toContain(branch)
+      expect(commands[0]).toContain("acme/widgets")
+      expect(commands[1]).toContain("'gh' 'pr' 'close' '77'")
+      expect(commands[1]).toContain("acme/widgets")
+      expect(commands[2]).toContain("'gh' 'api' '-X' 'DELETE'")
+      expect(commands[2]).toContain(`git/refs/heads/${branch}`)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("succeeds when no open PR or remote branch exists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-remote-absent-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      let listCalls = 0
+      let deleteCalls = 0
+
+      await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+
+          yield* removeWorktree({
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            model: "opencode/test",
+            variant: "low",
+            worktreePath: null,
+            sessionId: null,
+          })
+        }),
+        stubKeymaxxer({
+          runWithSecrets: (input) => {
+            if (input.command.includes("'gh' 'pr' 'list'")) {
+              listCalls += 1
+              return Effect.succeed({
+                exitCode: 0,
+                stdout: "[]",
+                stderr: "",
+              })
+            }
+            if (input.command.includes("git/refs/heads/")) {
+              deleteCalls += 1
+              return Effect.succeed({
+                exitCode: 1,
+                stdout: "",
+                stderr: "Not Found",
+              })
+            }
+            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
+          },
+        }),
+      )
+
+      expect(listCalls).toBe(1)
+      expect(deleteCalls).toBe(1)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("fails when no GitHub credential is configured", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-no-cred-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+
+      const error = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+
+          return yield* removeWorktree({
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            model: "opencode/test",
+            variant: "low",
+            worktreePath: null,
+            sessionId: null,
+          }).pipe(Effect.flip)
+        }),
+        stubKeymaxxer({ findSecret: () => Effect.succeed(null) }),
+      )
+
+      expect(error).toBeInstanceOf(RemoveWorktreeCredentialError)
+      expect((error as RemoveWorktreeCredentialError).message).toContain(
+        "No GitHub credential is configured for acme/widgets",
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("maps Keymaxxer remote command failure", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-remote-fail-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+
+      const error = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+
+          return yield* removeWorktree({
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            model: "opencode/test",
+            variant: "low",
+            worktreePath: null,
+            sessionId: null,
+          }).pipe(Effect.flip)
+        }),
+        stubKeymaxxer({
+          runWithSecrets: () =>
+            Effect.fail(
+              new KeymaxxerError({
+                operation: "runWithSecrets",
+                message: "process failed",
+              }),
+            ),
+        }),
+      )
+
+      expect(error).toBeInstanceOf(RemoveWorktreeRemoteError)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
