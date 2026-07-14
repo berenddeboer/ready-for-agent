@@ -37,6 +37,7 @@ const issue = {
   state: "OPEN" as const,
   githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
   parent: null,
+  hasChildren: false,
   blockedBy: [
     {
       githubIssueNumber: 17,
@@ -407,6 +408,8 @@ describe("GraphQL API", () => {
         query: `query ListIssues($repositoryId: ID!) {
           issues(repositoryId: $repositoryId) {
             id repositoryId githubIssueNumber title body url state githubCreatedAt
+            parent { githubIssueNumber githubIssueUrl }
+            hasChildren
             blockedBy { githubIssueNumber githubIssueUrl }
           }
         }`,
@@ -427,12 +430,76 @@ describe("GraphQL API", () => {
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.githubCreatedAt.toISOString(),
+            parent: issue.parent,
+            hasChildren: issue.hasChildren,
             blockedBy: issue.blockedBy,
           },
         ],
       },
     })
     expect(requestedRepositoryId).toBe(repository.id)
+  })
+
+  test("returns standalone and grouped child work in root order", async () => {
+    const makeIssue = (
+      githubIssueNumber: number,
+      overrides: Partial<typeof issue> = {},
+    ) => ({
+      ...issue,
+      id: `issue-${githubIssueNumber}`,
+      githubIssueNumber,
+      title: `Issue ${githubIssueNumber}`,
+      url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+      blockedBy: [],
+      ...overrides,
+    })
+    const parent = makeIssue(10, { hasChildren: true })
+    const parentReference = {
+      githubIssueNumber: 10,
+      githubIssueUrl: parent.url,
+    }
+    await runtime.dispose()
+    runtime = makeRuntime({
+      listIssues: () =>
+        Effect.succeed([
+          makeIssue(20, { hasChildren: true }),
+          makeIssue(12, { parent: parentReference, state: "CLOSED" }),
+          makeIssue(3),
+          parent,
+          makeIssue(11, { parent: parentReference }),
+        ]),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query ListIssues($repositoryId: ID!) {
+          issues(repositoryId: $repositoryId) {
+            githubIssueNumber hasChildren
+            parent { githubIssueNumber }
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        issues: [
+          { githubIssueNumber: 3, hasChildren: false, parent: null },
+          { githubIssueNumber: 10, hasChildren: true, parent: null },
+          {
+            githubIssueNumber: 11,
+            hasChildren: false,
+            parent: { githubIssueNumber: 10 },
+          },
+          {
+            githubIssueNumber: 12,
+            hasChildren: false,
+            parent: { githubIssueNumber: 10 },
+          },
+        ],
+      },
+    })
   })
 
   test("accepts batched issue queries", async () => {

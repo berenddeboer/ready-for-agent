@@ -16,6 +16,7 @@ const SerializedIssue = Schema.Struct({
   createdAt: Schema.String,
   state: Schema.Literals(["OPEN", "CLOSED"]),
   hierarchySupported: Schema.Boolean,
+  hasChildren: Schema.Boolean,
   parent: Schema.NullOr(
     Schema.Struct({
       number: Schema.Finite,

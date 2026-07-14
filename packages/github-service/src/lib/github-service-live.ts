@@ -25,6 +25,7 @@ interface GitHubApiIssue {
   readonly createdAt: unknown
   readonly state: unknown
   readonly parent: GitHubApiIssueParent | null
+  readonly subIssuesSummary: { readonly total: unknown }
   readonly subIssues: GitHubApiSubIssueConnection
   readonly blockedBy: GitHubApiIssueConnection
 }
@@ -188,6 +189,12 @@ const toReadyLabeledIssue = (
     throw new Error(`Invalid GitHub issue URL: ${issue.url}`)
   }
   const state = toIssueState(issue.state)
+  if (
+    !Number.isSafeInteger(issue.subIssuesSummary.total) ||
+    Number(issue.subIssuesSummary.total) < 0
+  ) {
+    throw new Error("Invalid GitHub sub-issue count")
+  }
   const createdAt = new Date(String(issue.createdAt))
   if (Number.isNaN(createdAt.getTime())) {
     throw new Error(`Invalid GitHub issue creation time: ${issue.createdAt}`)
@@ -201,6 +208,7 @@ const toReadyLabeledIssue = (
     createdAt,
     state,
     parent: issue.parent === null ? null : toIssueParent(issue.parent),
+    hasChildren: Number(issue.subIssuesSummary.total) > 0,
     hasUnsupportedDescendants: pageHasUnsupportedSubIssue(
       issue.subIssues,
       repositoryName,
@@ -260,6 +268,7 @@ export const makeGitHubService = (
                         repository: { nameWithOwner: true },
                       },
                     },
+                    subIssuesSummary: { total: true },
                     subIssues: {
                       __args: { first: PAGE_SIZE },
                       nodes: {
@@ -484,6 +493,7 @@ export const makeGitHubService = (
             url: issue.url,
             createdAt: issue.createdAt,
             state: issue.state,
+            hasChildren: issue.hasChildren,
             parent:
               issue.parent === null
                 ? null

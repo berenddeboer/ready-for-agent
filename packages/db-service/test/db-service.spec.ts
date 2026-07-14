@@ -35,6 +35,7 @@ describe("DbService", () => {
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
     parent: null,
+    hasChildren: false,
     blockedBy: [],
   }
 
@@ -410,6 +411,34 @@ describe("DbService", () => {
           })
           expect(withoutParent.parent).toBeNull()
           expect((yield* db.listIssues(repository.id))[0]?.parent).toBeNull()
+        }),
+      ))
+
+    it("stores and replaces whether an issue has children", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* addTestRepository(db)
+          const baseInput = {
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Parent issue",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+          }
+
+          expect(
+            (yield* db.storeIssue({ ...baseInput, hasChildren: true }))
+              .hasChildren,
+          ).toBe(true)
+          expect((yield* db.listIssues(repository.id))[0]?.hasChildren).toBe(
+            true,
+          )
+
+          expect(
+            (yield* db.storeIssue({ ...baseInput, hasChildren: false }))
+              .hasChildren,
+          ).toBe(false)
         }),
       ))
 
