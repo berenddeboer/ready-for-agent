@@ -53,12 +53,9 @@ type IssueReference {
   githubIssueUrl: String!
 }
 
-type RepositoryRefresh {
-  fetched: Int!
-  inserted: Int!
-  updated: Int!
-  deleted: Int!
-  unchanged: Int!
+type RefreshJob {
+  id: ID!
+  repositoryId: ID!
 }
 
 input AddRepositoryInput {
@@ -77,10 +74,11 @@ type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
-  refreshRepository(repositoryId: ID!): RepositoryRefresh!
+  refreshRepository(repositoryId: ID!): RefreshJob!
   updateConfig(input: UpdateConfigInput!): Config!
 }
 
 type Subscription {
   repositoriesChanged: Boolean!
+  issuesChanged(repositoryId: ID!): Boolean!
 }

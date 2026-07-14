@@ -65,10 +65,16 @@ export const createApplication = async (
   const opencodeLayer = OpencodeLive.pipe(Layer.provide(opencodePlatformLayer))
   const appLayer =
     options.startWorker === false
-      ? Layer.mergeAll(reconcilerLayer, keymaxxerLayer, opencodeLayer)
+      ? Layer.mergeAll(
+          reconcilerLayer,
+          queueLayer,
+          keymaxxerLayer,
+          opencodeLayer,
+        )
       : Layer.mergeAll(
           reconcilerLayer,
           workerLayer,
+          queueLayer,
           keymaxxerLayer,
           opencodeLayer,
         )

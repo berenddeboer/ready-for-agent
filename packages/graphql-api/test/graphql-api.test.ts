@@ -9,11 +9,17 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
+import {
+  EnqueueError,
+  QueueService,
+  type QueueServiceShape,
+  makeJobId,
+} from "@ready-for-agent/queue-service"
 import { createGraphqlApi } from "../src/index.js"
 import { afterEach, describe, expect, test } from "bun:test"
 
 const repository = {
-  id: "repo-test",
+  id: "repo-01J00000000000000000000000",
   githubOwner: "acme",
   githubRepo: "widgets",
   localPath: "/repos/acme/widgets.git",
@@ -51,6 +57,7 @@ const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   reconcilerOverrides: Partial<IssueReconcilerShape> = {},
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
+  queueOverrides: Partial<QueueServiceShape> = {},
 ) => {
   const opencode = {
     start: () => Effect.die("not used"),
@@ -63,6 +70,8 @@ const makeRuntime = (
   }
   const db: DbServiceShape = {
     repositoryChanges: Stream.never,
+    issueChanges: Stream.never,
+    notifyIssuesChanged: () => Effect.void,
     getConfig: Effect.succeed(config),
     updateConfig: (input) => Effect.succeed(input),
     addRepository: () => Effect.succeed(repository),
@@ -87,12 +96,24 @@ const makeRuntime = (
     runWithSecrets: () => Effect.die("not used"),
     ...keymaxxerOverrides,
   }
+  const queue: QueueServiceShape = {
+    queueInTransaction: true,
+    enqueue: () => Effect.succeed(makeJobId()),
+    enqueueWithDelay: () => Effect.die("not used"),
+    rawClaim: () => Effect.die("not used"),
+    acknowledge: () => Effect.die("not used"),
+    fail: () => Effect.die("not used"),
+    extendVisibility: () => Effect.die("not used"),
+    getStats: () => Effect.die("not used"),
+    ...queueOverrides,
+  }
   return ManagedRuntime.make(
     Layer.mergeAll(
       Layer.succeed(DbService, db),
       Layer.succeed(IssueReconciler, reconciler),
       Layer.succeed(KeymaxxerService, keymaxxer),
       Layer.succeed(Opencode, opencode),
+      Layer.succeed(QueueService, queue),
     ),
   )
 }
@@ -580,22 +601,43 @@ describe("GraphQL API", () => {
     ])
   })
 
-  test("refreshes a repository through the reconciler", async () => {
-    let reconciledRepository: typeof repository | undefined
+  test("accepts a Refresh Job for a Paused Repository without reconciling", async () => {
+    const jobId = makeJobId()
+    let reconcilerCalled = false
+    let enqueued:
+      | {
+          queue: string
+          payload: Record<string, unknown>
+          retryLimit: number | undefined
+        }
+      | undefined
     await runtime.dispose()
     runtime = makeRuntime(
       {},
       {
-        reconcile: (selectedRepository) => {
-          reconciledRepository = selectedRepository
-          return Effect.succeed({
-            fetched: 1,
-            inserted: 1,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-          })
+        reconcile: () => {
+          reconcilerCalled = true
+          return Effect.die("not used")
         },
+      },
+      {
+        findSecret: ({ account, provider }) =>
+          Effect.succeed(
+            provider === "github" && account === "acme/widgets"
+              ? "GITHUB_TOKEN_ACME_WIDGETS"
+              : null,
+          ),
+      },
+      {
+        enqueue: (queueName, payload, options) =>
+          Effect.sync(() => {
+            enqueued = {
+              queue: queueName,
+              payload,
+              retryLimit: options?.retryLimit,
+            }
+            return jobId
+          }),
       },
     )
 
@@ -603,7 +645,8 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation RefreshRepository($repositoryId: ID!) {
           refreshRepository(repositoryId: $repositoryId) {
-            fetched inserted updated deleted unchanged
+            id
+            repositoryId
           }
         }`,
         variables: {
@@ -616,18 +659,25 @@ describe("GraphQL API", () => {
     expect(await response.json()).toEqual({
       data: {
         refreshRepository: {
-          fetched: 1,
-          inserted: 1,
-          updated: 0,
-          deleted: 0,
-          unchanged: 0,
+          id: jobId,
+          repositoryId: repository.id,
         },
       },
     })
-    expect(reconciledRepository).toEqual(repository)
+    expect(repository.paused).toBe(true)
+    expect(reconcilerCalled).toBe(false)
+    expect(enqueued).toEqual({
+      queue: "jobs",
+      payload: {
+        _tag: "refresh-repository",
+        repositoryId: repository.id,
+      },
+      retryLimit: 1,
+    })
   })
 
-  test("reports an unknown repository without calling the reconciler", async () => {
+  test("rejects refresh for an unknown repository without enqueueing", async () => {
+    let enqueued = false
     let reconcilerCalled = false
     await runtime.dispose()
     runtime = makeRuntime(
@@ -638,11 +688,18 @@ describe("GraphQL API", () => {
           return Effect.die("not used")
         },
       },
+      {},
+      {
+        enqueue: () => {
+          enqueued = true
+          return Effect.succeed(makeJobId())
+        },
+      },
     )
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation {
-          refreshRepository(repositoryId: "missing") { fetched }
+          refreshRepository(repositoryId: "missing") { id repositoryId }
         }`,
       }),
     )
@@ -657,7 +714,122 @@ describe("GraphQL API", () => {
         }),
       ],
     })
+    expect(enqueued).toBe(false)
     expect(reconcilerCalled).toBe(false)
+  })
+
+  test("rejects refresh when the Repository has no GitHub credential", async () => {
+    let enqueued = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed(null),
+      },
+      {
+        enqueue: () => {
+          enqueued = true
+          return Effect.succeed(makeJobId())
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          refreshRepository(repositoryId: "${repository.id}") {
+            id
+            repositoryId
+          }
+        }`,
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: expect.stringMatching(/credential|token|configured/i),
+          extensions: { code: "REPOSITORY_CREDENTIAL_ERROR" },
+        }),
+      ],
+    })
+    expect(enqueued).toBe(false)
+  })
+
+  test("reports enqueue failure without accepting a Refresh Job", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      },
+      {
+        enqueue: () =>
+          Effect.fail(
+            new EnqueueError({
+              queue: "jobs",
+              message: "queue unavailable",
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          refreshRepository(repositoryId: "${repository.id}") {
+            id
+            repositoryId
+          }
+        }`,
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "queue unavailable",
+          extensions: { code: "ENQUEUE_ERROR" },
+        }),
+      ],
+    })
+  })
+
+  test("streams Repository-specific issue invalidations", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      issueChanges: Stream.make(
+        repository.id,
+        "repo-01J11111111111111111111111",
+      ),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      new Request("http://127.0.0.1:4200/graphql", {
+        method: "POST",
+        headers: {
+          accept: "text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          query: `subscription {
+            issuesChanged(repositoryId: "${repository.id}")
+          }`,
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toContain("text/event-stream")
+    const body = await response.text()
+    expect(body).toContain('"data":{"issuesChanged":true}')
+    expect(body.match(/"data":\{"issuesChanged":true\}/g)?.length).toBe(1)
   })
 
   test("accepts same-origin browser requests", async () => {

@@ -16,6 +16,7 @@ import {
   type IssueRecord,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
+  RepositoryId,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
@@ -24,11 +25,12 @@ import {
 } from "@ready-for-agent/github-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import {
-  IssueReconciler,
+  type IssueReconciler,
   ReconciliationMutationError,
 } from "@ready-for-agent/issue-reconciler"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
+import { EnqueueError, QueueService } from "@ready-for-agent/queue-service"
 
 type AddRepositoryArgs = {
   input: {
@@ -96,9 +98,12 @@ const workIssueProjection = (
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
-  DbService | IssueReconciler | KeymaxxerService | Opencode,
+  DbService | IssueReconciler | KeymaxxerService | Opencode | QueueService,
   unknown
 >
+
+const JOBS_QUEUE = "jobs"
+const JOB_RECOVERY_RETRY_LIMIT = 1
 
 type Repository = {
   id: string
@@ -201,6 +206,11 @@ const toGraphQLError = (error: unknown): GraphQLError => {
   if (error instanceof DatabaseError) {
     return new GraphQLError(error.message, {
       extensions: { code: "DATABASE_ERROR" },
+    })
+  }
+  if (error instanceof EnqueueError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "ENQUEUE_ERROR" },
     })
   }
   if (error instanceof GraphQLError) {
@@ -351,6 +361,22 @@ export const createGraphqlApi = (
               ),
             resolve: () => true,
           },
+          issuesChanged: {
+            subscribe: async (_parent: unknown, args: RefreshRepositoryArgs) =>
+              runtime.runPromise(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* Stream.toAsyncIterableEffect(
+                    db.issueChanges.pipe(
+                      Stream.filter(
+                        (repositoryId) => repositoryId === args.repositoryId,
+                      ),
+                    ),
+                  )
+                }),
+              ),
+            resolve: () => true,
+          },
         },
         Mutation: {
           updateConfig: async (_parent: unknown, args: UpdateConfigArgs) => {
@@ -485,8 +511,30 @@ export const createGraphqlApi = (
                     })
                   }
 
-                  const reconciler = yield* IssueReconciler
-                  return yield* reconciler.reconcile(repository)
+                  const keymaxxer = yield* KeymaxxerService
+                  const credential = yield* keymaxxer.findSecret({
+                    provider: "github",
+                    account: `${repository.githubOwner}/${repository.githubRepo}`,
+                  })
+                  if (credential === null) {
+                    return yield* new RepositoryCredentialError({
+                      message: `GitHub credential is not configured for ${repository.githubOwner}/${repository.githubRepo}`,
+                    })
+                  }
+
+                  const queue = yield* QueueService
+                  const jobId = yield* queue.enqueue(
+                    JOBS_QUEUE,
+                    {
+                      _tag: "refresh-repository",
+                      repositoryId: RepositoryId.make(repository.id),
+                    },
+                    { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+                  )
+                  return {
+                    id: jobId,
+                    repositoryId: repository.id,
+                  }
                 }),
               ),
             )

@@ -272,17 +272,10 @@ function RepositoryCard({ repository }: { repository: Repository }) {
       graphql.mutation({
         refreshRepository: {
           __args: { repositoryId: repository.id },
-          fetched: true,
+          id: true,
+          repositoryId: true,
         },
       }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: repositoriesQuery.queryKey }),
-        queryClient.invalidateQueries({
-          queryKey: issuesQuery(repository.id).queryKey,
-        }),
-      ])
-    },
   })
 
   const addGitHubToken = useMutation({

@@ -133,6 +133,8 @@ const toDatabaseError = (error: SqlError) =>
 
 export interface DbServiceShape {
   readonly repositoryChanges: Stream.Stream<void>
+  readonly issueChanges: Stream.Stream<string>
+  readonly notifyIssuesChanged: (repositoryId: string) => Effect.Effect<void>
   readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
   readonly updateConfig: (
     input: UpdateConfigInput,
@@ -184,6 +186,7 @@ export const DbServiceLive = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const repositoryChanges = yield* PubSub.unbounded<void>()
+    const issueChanges = yield* PubSub.unbounded<string>()
 
     const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
       function* () {
@@ -797,8 +800,13 @@ export const DbServiceLive = Layer.effect(
         }
       })
 
+    const notifyIssuesChanged = (repositoryId: string): Effect.Effect<void> =>
+      PubSub.publish(issueChanges, repositoryId).pipe(Effect.asVoid)
+
     return DbService.of({
       repositoryChanges: Stream.fromPubSub(repositoryChanges),
+      issueChanges: Stream.fromPubSub(issueChanges),
+      notifyIssuesChanged,
       getConfig,
       updateConfig,
       addRepository,
