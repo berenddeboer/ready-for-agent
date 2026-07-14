@@ -158,6 +158,7 @@ const makeRuntime = (
       pre_commit: Duration.minutes(15),
       review: Duration.hours(1),
       commit: Duration.minutes(5),
+      create_pr: Duration.minutes(10),
     },
     implementNow: unused,
     runStep: unused,
@@ -334,6 +335,12 @@ describe("GraphQL API", () => {
         ),
       },
     ])
+    const creationUrl = new URL(
+      body.data.repositoryCredentials[0]!.githubTokenCreationUrl as string,
+    )
+    expect(creationUrl.searchParams.get("issues")).toBe("read")
+    expect(creationUrl.searchParams.get("contents")).toBe("write")
+    expect(creationUrl.searchParams.get("pull_requests")).toBe("write")
   })
 
   test("opens Keymaxxer setup for a missing repository token", async () => {
@@ -393,7 +400,7 @@ describe("GraphQL API", () => {
       provider: "github",
       account: "acme/widgets",
       environment: "prod",
-      access: "read-only",
+      access: "read-write",
       description:
         "Fine-grained GitHub token for Ready for Agent on acme/widgets",
       tags: "ready-for-agent,harness,github",

@@ -1,8 +1,10 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { DbService } from "@ready-for-agent/db-service"
+import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { commit } from "./commit.js"
+import { createPr } from "./create-pr.js"
 import { createWorktree } from "./create-worktree.js"
 import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
@@ -13,15 +15,16 @@ import { review } from "./review.js"
 
 /**
  * Production LifecycleSteps: Create Worktree, Install Dependencies, Implement,
- * Pre-Commit, Review, and Commit (OpenCode continues the Implement Session for
- * Review and Commit; Pre-Commit remains harness git validation).
- * Captures platform, database, and OpenCode services so handlers remain
- * `Effect<A>` with no requirements.
+ * Pre-Commit, Review, Commit, and Create PR (OpenCode continues the Implement
+ * Session for Review, Commit, and Create PR; Pre-Commit remains harness git
+ * validation). Captures platform, database, Keymaxxer, and OpenCode services so
+ * handlers remain `Effect<A>` with no requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,
   Effect.gen(function* () {
     const db = yield* DbService
+    const keymaxxer = yield* KeymaxxerService
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -32,6 +35,7 @@ export const LifecycleStepsLive = Layer.effect(
         A,
         E,
         | DbService
+        | KeymaxxerService
         | FileSystem.FileSystem
         | Path.Path
         | ChildProcessSpawner.ChildProcessSpawner
@@ -40,6 +44,7 @@ export const LifecycleStepsLive = Layer.effect(
     ) =>
       effect.pipe(
         Effect.provideService(DbService, db),
+        Effect.provideService(KeymaxxerService, keymaxxer),
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
@@ -54,6 +59,7 @@ export const LifecycleStepsLive = Layer.effect(
       preCommit: (context) => withServices(preCommit(context)),
       review: (context) => withServices(review(context)),
       commit: (context) => withServices(commit(context)),
+      createPr: (context) => withServices(createPr(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

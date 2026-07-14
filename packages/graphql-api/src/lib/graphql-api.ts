@@ -163,6 +163,8 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("target_name", repository.githubOwner)
   url.searchParams.set("expires_in", "90")
   url.searchParams.set("issues", "read")
+  url.searchParams.set("contents", "write")
+  url.searchParams.set("pull_requests", "write")
   return url.toString()
 }
 
@@ -606,7 +608,7 @@ export const createGraphqlApi = (
                         provider: "github",
                         account,
                         environment: "prod",
-                        access: "read-only",
+                        access: "read-write",
                         description: `Fine-grained GitHub token for Ready for Agent on ${account}`,
                         tags: "ready-for-agent,harness,github",
                       })

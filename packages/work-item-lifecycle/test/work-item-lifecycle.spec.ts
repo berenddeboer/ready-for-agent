@@ -26,6 +26,7 @@ import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
   CommitOpenCodeError,
+  CreatePrOpenCodeError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -57,6 +58,7 @@ describe("WorkItemLifecycle", () => {
     preCommit: () => Effect.void,
     review: () => Effect.void,
     commit: () => Effect.void,
+    createPr: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
 
@@ -515,7 +517,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 6; i++) {
+          for (let i = 0; i < 7; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -576,7 +578,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 6; i++) {
+          for (let i = 0; i < 7; i++) {
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -890,16 +892,25 @@ describe("WorkItemLifecycle", () => {
           const afterCommit = yield* claimAndRunPending
           expect(afterCommit._tag).toBe("processed")
           if (afterCommit._tag === "processed") {
-            expect(afterCommit.workItem.state).toBe("complete")
-            expect(afterCommit.workItem.worktreePath).toBe(
-              "/tmp/worktrees/acme-widgets-42",
-            )
+            expect(afterCommit.workItem.state).toBe("create_pr")
             expect(afterCommit.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterCommit.workItem.failureCode).toBeNull()
+          }
+
+          const afterCreatePr = yield* claimAndRunPending
+          expect(afterCreatePr._tag).toBe("processed")
+          if (afterCreatePr._tag === "processed") {
+            expect(afterCreatePr.workItem.state).toBe("complete")
+            expect(afterCreatePr.workItem.worktreePath).toBe(
+              "/tmp/worktrees/acme-widgets-42",
+            )
+            expect(afterCreatePr.workItem.sessionId).toBe(
+              "ses_test_implement_session",
+            )
+            expect(afterCreatePr.workItem.failureCode).toBeNull()
             expect(
-              afterCommit.workItem.stepRuns.map((run) => [
+              afterCreatePr.workItem.stepRuns.map((run) => [
                 run.step,
                 run.status,
               ]),
@@ -910,6 +921,7 @@ describe("WorkItemLifecycle", () => {
               ["pre_commit", "succeeded"],
               ["review", "succeeded"],
               ["commit", "succeeded"],
+              ["create_pr", "succeeded"],
             ])
           }
 
@@ -919,7 +931,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(6)
+          expect(final.stepRuns).toHaveLength(7)
         }),
       ))
 
@@ -950,6 +962,10 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.void
         },
+        createPr: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
         removeWorktree: () => Effect.void,
       }
 
@@ -972,8 +988,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
 
-          expect(seen).toHaveLength(6)
+          expect(seen).toHaveLength(7)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -1001,6 +1018,11 @@ describe("WorkItemLifecycle", () => {
           expect(seen[5]!.sessionId).toBe("ses_recorded")
           expect(seen[5]!.model).toBe("anthropic/claude-sonnet-4-5")
           expect(seen[5]!.variant).toBe("high")
+
+          expect(seen[6]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[6]!.sessionId).toBe("ses_recorded")
+          expect(seen[6]!.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(seen[6]!.variant).toBe("high")
         }),
       )
     })
@@ -1109,6 +1131,46 @@ describe("WorkItemLifecycle", () => {
             expect(failedRun.status).toBe("failed")
             expect(failedRun.reasonMessage).toBe(
               "OpenCode failed to commit the Work Item changes",
+            )
+          }
+        }),
+      )
+    })
+
+    it("persists create PR OpenCode failure message", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createPr: () =>
+          Effect.fail(
+            new CreatePrOpenCodeError({
+              message: "OpenCode failed to create a pull request",
+              worktreePath: "/tmp/worktrees/acme-widgets-42",
+              sessionId: "ses_test_implement_session",
+            }),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const result = yield* claimAndRunPending
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("create_pr")
+            const failedRun = result.workItem.stepRuns.at(-1)!
+            expect(failedRun.status).toBe("failed")
+            expect(failedRun.reasonMessage).toBe(
+              "OpenCode failed to create a pull request",
             )
           }
         }),
@@ -1539,6 +1601,7 @@ describe("WorkItemLifecycle", () => {
           pre_commit: Duration.minutes(15),
           review: Duration.hours(1),
           commit: Duration.minutes(5),
+          create_pr: Duration.minutes(10),
         },
       }).pipe(
         Layer.provideMerge(

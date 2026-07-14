@@ -24,6 +24,7 @@ export type OperationalLifecycleStep =
   | "pre_commit"
   | "review"
   | "commit"
+  | "create_pr"
 
 export type WorkItemState =
   | OperationalLifecycleStep
@@ -117,6 +118,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   pre_commit: Duration.minutes(15),
   review: Duration.hours(1),
   commit: Duration.minutes(5),
+  create_pr: Duration.minutes(10),
 }
 
 export type WorkItemLifecycleConfig = {

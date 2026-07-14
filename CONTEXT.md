@@ -84,7 +84,7 @@ An Implementable Issue with no unfinished Work Item. Only an Actionable Issue ma
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, or a terminal Complete, Failed, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, or a terminal Complete, Failed, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending.
 _Avoid_: Last completed step, phase
 
 **Step Run**:
@@ -108,7 +108,7 @@ A terminal Work Item that cannot advance because a lifecycle precondition, such 
 _Avoid_: Failed Step Run, Abandoned
 
 **Complete Work Item**:
-A terminal Work Item for which Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, and Commit all executed successfully. Complete does not mean review approved the changes, a pull request exists, or GitHub closed the Issue.
+A terminal Work Item for which Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, and Create PR all executed successfully. Complete does not mean review approved the changes or GitHub closed the Issue.
 _Avoid_: Approved, merged, done Issue
 
 **Relevant Issue**:

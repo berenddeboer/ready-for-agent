@@ -10,6 +10,8 @@ Because loopback alone does not prevent requests from malicious webpages, operat
 
 Development uses fixed loopback port `5032`, overridable with `KEYMAXXER_SIDECAR_PORT`; `harness:dev` selects it through `KEYMAXXER_SIDECAR_URL`. A port conflict fails fast and names the override instead of choosing a dynamic port that Nx cannot communicate to the application process.
 
+The same Repository credential is injected into the OpenCode Create PR continuation as `GH_TOKEN` and `GITHUB_TOKEN`. New tokens therefore request Issue read, Contents write, and Pull requests write permissions and are recorded as read-write credentials.
+
 The MCP launcher preserves the known-good development precedence: `KEYMAXXER_ENTRYPOINT`, then `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present, then the installed `keymaxxer` command. The machine-specific fallback is deliberate while Ready for Agent depends on unreleased local Keymaxxer features.
 
 The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values. Those tokens must not cross into the credential broker process.

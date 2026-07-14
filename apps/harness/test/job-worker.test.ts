@@ -138,6 +138,7 @@ const queueLayer = (
         pre_commit: Duration.minutes(15),
         review: Duration.hours(1),
         commit: Duration.minutes(5),
+        create_pr: Duration.minutes(10),
       },
       implementNow: unused,
       runStep,
