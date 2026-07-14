@@ -99,6 +99,10 @@ _Avoid_: Queue redelivery, resume
 An operator-directed transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. Repository removal may apply it automatically to non-running Work Items before deleting that Repository's lifecycle history; an Abandoned Work Item no longer prevents a later Implement Now request for the same Issue.
 _Avoid_: Delete, cancel
 
+**Reset**:
+An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history.
+_Avoid_: Abandon, Retry, cancel
+
 **Failed Work Item**:
 A terminal Work Item that cannot advance because a lifecycle precondition, such as the referenced Issue still existing, was not met. Its Step Run retains the outcome of the Effect itself, and the Work Item records the separate failure reason.
 _Avoid_: Failed Step Run, Abandoned

@@ -1,4 +1,4 @@
-import { Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import {
   IssueReconciler,
@@ -18,10 +18,14 @@ import {
 import {
   WorkItemLifecycle,
   type WorkItemLifecycleShape,
+  WorkItemNotFoundError,
   type WorkItemRecord,
+  makeWorkItemId,
 } from "@ready-for-agent/work-item-lifecycle"
 import { createGraphqlApi } from "../src/index.js"
 import { afterEach, describe, expect, test } from "bun:test"
+
+const unused = () => Effect.die("not used")
 
 const repository = {
   id: "repo-01J00000000000000000000000",
@@ -147,14 +151,20 @@ const makeRuntime = (
     ...queueOverrides,
   }
   const lifecycle: WorkItemLifecycleShape = {
-    maxDurations: {} as WorkItemLifecycleShape["maxDurations"],
-    implementNow: () => Effect.die("not used"),
-    runStep: () => Effect.die("not used"),
-    retry: () => Effect.die("not used"),
-    abandon: () => Effect.die("not used"),
-    getWorkItem: () => Effect.die("not used"),
-    listWorkItemsForIssue: () => Effect.die("not used"),
-    listWorkItemsForRepository: () => Effect.die("not used"),
+    maxDurations: {
+      create_worktree: Duration.minutes(5),
+      install_dependencies: Duration.minutes(15),
+      implement: Duration.hours(2),
+      review: Duration.hours(1),
+    },
+    implementNow: unused,
+    runStep: unused,
+    retry: unused,
+    abandon: unused,
+    reset: unused,
+    getWorkItem: unused,
+    listWorkItemsForIssue: unused,
+    listWorkItemsForRepository: unused,
     ...lifecycleOverrides,
   }
   return ManagedRuntime.make(
@@ -443,6 +453,72 @@ describe("GraphQL API", () => {
       data: { removeRepository: repository.id },
     })
     expect(removedRepositoryId).toBe(repository.id)
+  })
+
+  test("resets a Work Item", async () => {
+    const workItemId = makeWorkItemId()
+    let resetWorkItemId: string | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        reset: (id) => {
+          resetWorkItemId = id
+          return Effect.succeed(workItemId)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ResetWorkItem($workItemId: ID!) {
+          resetWorkItem(workItemId: $workItemId)
+        }`,
+        variables: { workItemId },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: { resetWorkItem: workItemId },
+    })
+    expect(resetWorkItemId).toBe(workItemId)
+  })
+
+  test("maps missing Work Item reset to WORK_ITEM_NOT_FOUND", async () => {
+    const workItemId = "wi-01AAAAAAAAAAAAAAAAAAAAAAAA"
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        reset: (id) =>
+          Effect.fail(new WorkItemNotFoundError({ workItemId: id })),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ResetWorkItem($workItemId: ID!) {
+          resetWorkItem(workItemId: $workItemId)
+        }`,
+        variables: { workItemId },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: `Work Item not found: ${workItemId}`,
+          extensions: { code: "WORK_ITEM_NOT_FOUND" },
+        }),
+      ],
+    })
   })
 
   test("reads and updates config", async () => {

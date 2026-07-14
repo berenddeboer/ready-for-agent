@@ -33,6 +33,7 @@ import {
   type LifecycleStepsShape,
   NonTransactionalQueueError,
   ParentIssueError,
+  ResetCleanupError,
   RetryNotEligibleError,
   STEP_RUN_REASON,
   UnfinishedWorkItemExistsError,
@@ -52,6 +53,7 @@ describe("WorkItemLifecycle", () => {
     installDependencies: () => Effect.void,
     implement: () => Effect.succeed("ses_test_implement_session"),
     review: () => Effect.void,
+    removeWorktree: () => Effect.void,
   }
 
   const SuccessfulStepsLive = Layer.succeed(
@@ -2304,6 +2306,239 @@ describe("WorkItemLifecycle", () => {
           if (Option.isSome(queued)) {
             expect(queued.value.jobId).toBe(created.stepRuns[0]!.queueJobId)
           }
+        }),
+      ))
+  })
+
+  describe("reset", () => {
+    it("deletes a Queued Work Item, acks its job, and allows Implement Now again", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          const deletedId = yield* lifecycle.reset(created.id)
+          expect(deletedId).toBe(created.id)
+
+          const missing = yield* Effect.flip(lifecycle.getWorkItem(created.id))
+          expect(missing).toBeInstanceOf(WorkItemNotFoundError)
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const listed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(listed).toHaveLength(0)
+
+          const next = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(next.id).not.toBe(created.id)
+          expect(next.state).toBe("create_worktree")
+        }),
+      ))
+
+    it("interrupts a Running Step Run, deletes history, and proceeds", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [Date.now(), Date.now(), created.stepRuns[0]!.id],
+          )
+
+          const deletedId = yield* lifecycle.reset(created.id)
+          expect(deletedId).toBe(created.id)
+
+          const missing = yield* Effect.flip(lifecycle.getWorkItem(created.id))
+          expect(missing).toBeInstanceOf(WorkItemNotFoundError)
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const next = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(next.id).not.toBe(created.id)
+        }),
+      ))
+
+    it("interrupts and awaits the active handler before cleanup", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const interrupted = await Effect.runPromise(Deferred.make<void>())
+      const cleanupStarted = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(interrupted, undefined)),
+          ),
+        removeWorktree: () =>
+          Deferred.await(interrupted).pipe(
+            Effect.andThen(Deferred.succeed(cleanupStarted, undefined)),
+            Effect.asVoid,
+          ),
+      }
+
+      await runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          if (Option.isNone(job)) {
+            return yield* Effect.die("expected job")
+          }
+
+          const runFiber = yield* lifecycle
+            .runStep((job.value.payload as { stepRunId: string }).stepRunId)
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(started)
+
+          expect(yield* lifecycle.reset(created.id)).toBe(created.id)
+          expect(yield* Deferred.isDone(interrupted)).toBe(true)
+          expect(yield* Deferred.isDone(cleanupStarted)).toBe(true)
+          yield* Fiber.join(runFiber)
+
+          const missing = yield* Effect.flip(lifecycle.getWorkItem(created.id))
+          expect(missing).toBeInstanceOf(WorkItemNotFoundError)
+        }),
+      )
+    })
+
+    it("preserves the Work Item when worktree cleanup fails", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        removeWorktree: () => Effect.fail(new Error("worktree is locked")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          const error = yield* Effect.flip(lifecycle.reset(created.id))
+          expect(error).toBeInstanceOf(ResetCleanupError)
+
+          const preserved = yield* lifecycle.getWorkItem(created.id)
+          expect(preserved.id).toBe(created.id)
+          expect(preserved.stepRuns[0]!.status).toBe("queued")
+        }),
+      )
+    })
+
+    it("deletes terminal Work Items including Complete and Abandoned", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* lifecycle.abandon(created.id)
+
+          const deletedId = yield* lifecycle.reset(created.id)
+          expect(deletedId).toBe(created.id)
+
+          const listed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(listed).toHaveLength(0)
+        }),
+      ))
+
+    it("calls removeWorktree with Work Item context before finishing", () => {
+      const seen: LifecycleStepContext[] = []
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.succeed("/tmp/worktrees/reset-me"),
+        removeWorktree: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(job)).toBe(true)
+          if (Option.isNone(job)) {
+            return yield* Effect.die("expected job")
+          }
+          yield* lifecycle.runStep(
+            (job.value.payload as { stepRunId: string }).stepRunId,
+          )
+
+          const afterCreate = yield* lifecycle.getWorkItem(created.id)
+          expect(afterCreate.worktreePath).toBe("/tmp/worktrees/reset-me")
+
+          yield* lifecycle.reset(created.id)
+
+          expect(seen).toHaveLength(1)
+          expect(seen[0]).toEqual({
+            workItemId: created.id,
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            model: afterCreate.model,
+            variant: afterCreate.variant,
+            worktreePath: "/tmp/worktrees/reset-me",
+            sessionId: null,
+          })
+        }),
+      )
+    })
+
+    it("rejects reset for an unknown Work Item", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const error = yield* Effect.flip(
+            lifecycle.reset("wi-01AAAAAAAAAAAAAAAAAAAAAAAA"),
+          )
+          expect(error).toBeInstanceOf(WorkItemNotFoundError)
         }),
       ))
   })

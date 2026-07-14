@@ -5,6 +5,7 @@ import { Opencode } from "@ready-for-agent/opencode"
 import { createWorktree } from "./create-worktree.js"
 import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
+import { removeWorktree } from "./remove-worktree.js"
 
 const notImplemented = (step: string) =>
   Effect.die(new Error(`Lifecycle Step ${step} is not implemented yet`))
@@ -49,6 +50,7 @@ export const LifecycleStepsLive = Layer.effect(
         withServices(installDependencies(context)),
       implement: () => notImplemented("implement"),
       review: () => notImplemented("review"),
+      removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),
 )

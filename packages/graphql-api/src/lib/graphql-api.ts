@@ -37,6 +37,7 @@ import {
   IssueNotFoundError,
   IssueNotOpenError,
   ParentIssueError,
+  ResetCleanupError,
   RetryNotEligibleError,
   UnfinishedWorkItemExistsError,
   WorkItemLifecycle,
@@ -88,6 +89,8 @@ type ImplementNowArgs = IssuesArgs & {
 type WorkItemArgs = {
   workItemId: string
 }
+
+type ResetWorkItemArgs = WorkItemArgs
 
 const childIssueCategory = (issue: IssueRecord): number => {
   if (issue.state === "CLOSED") return 2
@@ -304,6 +307,21 @@ const toGraphQLError = (error: unknown): GraphQLError => {
   if (error instanceof EnqueueError) {
     return new GraphQLError(error.message, {
       extensions: { code: "ENQUEUE_ERROR" },
+    })
+  }
+  if (error instanceof WorkItemNotFoundError) {
+    return new GraphQLError(`Work Item not found: ${error.workItemId}`, {
+      extensions: { code: "WORK_ITEM_NOT_FOUND" },
+    })
+  }
+  if (error instanceof WorkItemLifecycleDatabaseError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "DATABASE_ERROR" },
+    })
+  }
+  if (error instanceof ResetCleanupError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "RESET_CLEANUP_FAILED" },
     })
   }
   if (error instanceof GraphQLError) {
@@ -628,6 +646,20 @@ export const createGraphqlApi = (
                   const db = yield* DbService
                   yield* db.removeRepository(args.repositoryId)
                   return args.repositoryId
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          resetWorkItem: async (_parent: unknown, args: ResetWorkItemArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.reset(args.workItemId)
                 }),
               ),
             )

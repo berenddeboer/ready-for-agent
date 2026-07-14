@@ -131,8 +131,17 @@ const queueLayer = (
       getStats: unused,
     } satisfies QueueServiceShape),
     Layer.succeed(WorkItemLifecycle, {
+      maxDurations: {
+        create_worktree: Duration.minutes(5),
+        install_dependencies: Duration.minutes(15),
+        implement: Duration.hours(2),
+        review: Duration.hours(1),
+      },
       implementNow: unused,
       runStep,
+      retry: unused,
+      abandon: unused,
+      reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: unused,

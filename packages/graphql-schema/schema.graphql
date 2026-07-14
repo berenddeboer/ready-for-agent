@@ -128,6 +128,7 @@ type Mutation {
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
   retryWorkItem(workItemId: ID!): WorkItem!
+  resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
 }
 
