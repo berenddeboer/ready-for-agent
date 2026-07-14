@@ -1,12 +1,19 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Effect, type Layer } from "effect"
+import { Duration, Effect, Layer } from "effect"
+import {
+  Opencode,
+  OpencodeExitError,
+  OpencodeTimeoutError,
+  SessionIdNotFoundError,
+} from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
-  CommitFailedError,
   CommitInvalidWorktreeContextError,
+  CommitOpenCodeError,
+  CommitSessionContextMissingError,
   CommitWorktreeContextMissingError,
   commit,
   makeWorkItemId,
@@ -15,58 +22,61 @@ import { describe, expect, it } from "bun:test"
 
 const PlatformLayer = BunServices.layer
 
-const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
+const baseContext = (
+  worktreePath: string | null,
+  overrides: Partial<LifecycleStepContext> = {},
+): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
   githubIssueNumber: 91,
   model: "opencode/test-model",
   variant: "high",
   worktreePath,
-  sessionId: "ses_commit",
+  sessionId: "ses_implement_session",
+  ...overrides,
 })
 
+const stubOpencode = (impl: {
+  readonly start?: (input: {
+    readonly prompt: string
+    readonly cwd: string
+    readonly model: string
+    readonly variant: string
+    readonly timeout?: Duration.Input
+  }) => Effect.Effect<{ sessionId: string }, never>
+  readonly continue?: (input: {
+    readonly sessionId: string
+    readonly prompt: string
+    readonly cwd: string
+    readonly model: string
+    readonly variant: string
+    readonly timeout?: Duration.Input
+  }) => Effect.Effect<{ sessionId: string }, never>
+}) =>
+  Layer.succeed(
+    Opencode,
+    Opencode.of({
+      start: (input) =>
+        impl.start?.(input) ??
+        Effect.succeed({ sessionId: "ses_start_should_not_run" }),
+      continue: (input) =>
+        impl.continue?.(input) ??
+        Effect.succeed({ sessionId: "ses_commit_default" }),
+      listModels: () => Effect.succeed([]),
+    }),
+  )
+
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Layer.Layer.Success<typeof PlatformLayer>>,
-): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(PlatformLayer)))
+  effect: Effect.Effect<A, E, Opencode>,
+  opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
+): Promise<A> =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(opencodeLayer), Effect.provide(PlatformLayer)),
+  )
 
-const initGitRepo = async (root: string) => {
-  const runGit = async (...args: string[]) => {
-    const proc = Bun.spawn(["git", ...args], {
-      cwd: root,
-      stdout: "ignore",
-      stderr: "pipe",
-    })
-    const exitCode = await proc.exited
-    if (exitCode !== 0) {
-      const stderr = await new Response(proc.stderr).text()
-      throw new Error(`git ${args.join(" ")} failed: ${stderr}`)
-    }
-  }
-  await runGit("init")
-  await runGit("config", "user.email", "test@example.com")
-  await runGit("config", "user.name", "Test")
-  await runGit("commit", "--allow-empty", "-m", "init")
-}
-
-const gitStdout = async (root: string, ...args: string[]) => {
-  const proc = Bun.spawn(["git", ...args], {
-    cwd: root,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const exitCode = await proc.exited
-  const stdout = await new Response(proc.stdout).text()
-  if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text()
-    throw new Error(`git ${args.join(" ")} failed: ${stderr}`)
-  }
-  return stdout.trim()
-}
-
-const withTempGit = async (assert: (root: string) => Promise<void>) => {
+const withTemp = async (assert: (root: string) => Promise<void>) => {
   const root = await mkdtemp(join(tmpdir(), "rfa-commit-"))
   try {
-    await initGitRepo(root)
     await assert(root)
   } finally {
     await rm(root, { recursive: true, force: true })
@@ -85,55 +95,124 @@ describe("commit", () => {
     expect(error).toBeInstanceOf(CommitInvalidWorktreeContextError)
   })
 
-  it("creates a commit for staged implementation changes", () =>
-    withTempGit(async (root) => {
-      await writeFile(join(root, "change.txt"), "implemented\n")
-      await run(commit(baseContext(root)))
-      const message = await gitStdout(root, "log", "-1", "--pretty=%s")
-      expect(message).toBe("Implement #91")
-      const subjectFiles = await gitStdout(
-        root,
-        "show",
-        "--name-only",
-        "--pretty=format:",
-        "HEAD",
+  it("rejects missing Session context", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        commit(baseContext(root, { sessionId: null })).pipe(Effect.flip),
       )
-      expect(subjectFiles).toContain("change.txt")
+      expect(error).toBeInstanceOf(CommitSessionContextMissingError)
     }))
 
-  it("succeeds without creating a commit when the index is empty", () =>
-    withTempGit(async (root) => {
-      const before = await gitStdout(root, "rev-parse", "HEAD")
-      await run(commit(baseContext(root)))
-      const after = await gitStdout(root, "rev-parse", "HEAD")
-      expect(after).toBe(before)
+  it("rejects blank Session context", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        commit(baseContext(root, { sessionId: "   " })).pipe(Effect.flip),
+      )
+      expect(error).toBeInstanceOf(CommitSessionContextMissingError)
     }))
 
-  it("is re-entrant after a successful commit", () =>
-    withTempGit(async (root) => {
-      await writeFile(join(root, "change.txt"), "implemented\n")
-      await run(commit(baseContext(root)))
-      const first = await gitStdout(root, "rev-parse", "HEAD")
-      await run(commit(baseContext(root)))
-      const second = await gitStdout(root, "rev-parse", "HEAD")
-      expect(second).toBe(first)
+  it("continues the Implement Session with a commit prompt that closes the Issue", () =>
+    withTemp(async (root) => {
+      let continued: {
+        sessionId: string
+        prompt: string
+        cwd: string
+        model: string
+        variant: string
+        timeout?: Duration.Input
+      } | null = null
+      let started = false
+
+      await run(
+        commit(
+          baseContext(root, {
+            sessionId: "ses_from_implement",
+            githubIssueNumber: 2039,
+            model: "opencode/commit-model",
+            variant: "max",
+            maxDuration: Duration.minutes(10),
+          }),
+        ),
+        stubOpencode({
+          start: () => {
+            started = true
+            return Effect.succeed({ sessionId: "ses_wrong" })
+          },
+          continue: (input) => {
+            continued = input
+            return Effect.succeed({ sessionId: "ses_from_implement" })
+          },
+        }),
+      )
+
+      expect(started).toBe(false)
+      expect(continued).not.toBeNull()
+      expect(continued!.sessionId).toBe("ses_from_implement")
+      expect(continued!.cwd).toBe(root)
+      expect(continued!.model).toBe("opencode/commit-model")
+      expect(continued!.variant).toBe("max")
+      expect(Duration.toMillis(continued!.timeout!)).toBe(
+        Duration.toMillis(Duration.minutes(10)),
+      )
+      expect(continued!.prompt).toContain("Create a git commit")
+      expect(continued!.prompt).toContain("closes GitHub issue #2039")
+      expect(continued!.prompt).toContain("Do not open a pull request")
     }))
 
-  it("fails when git commit exits non-zero", () =>
-    withTempGit(async (root) => {
-      await mkdir(join(root, ".git", "hooks"), { recursive: true })
-      await writeFile(
-        join(root, ".git", "hooks", "commit-msg"),
-        "#!/usr/bin/env bash\necho 'commit-msg rejected' >&2\nexit 1\n",
-        { mode: 0o755 },
+  it("maps OpenCode exit failure", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        commit(baseContext(root)).pipe(Effect.flip),
+        Layer.succeed(
+          Opencode,
+          Opencode.of({
+            start: () => Effect.succeed({ sessionId: "unused" }),
+            continue: () =>
+              Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
+            listModels: () => Effect.succeed([]),
+          }),
+        ),
       )
-      await writeFile(join(root, "change.txt"), "implemented\n")
-      const error = await run(commit(baseContext(root)).pipe(Effect.flip))
-      expect(error).toBeInstanceOf(CommitFailedError)
-      expect((error as CommitFailedError).worktreePath).toBe(root)
-      expect((error as CommitFailedError).exitCode).toBe(1)
-      expect((error as CommitFailedError).output).toContain(
-        "commit-msg rejected",
+      expect(error).toBeInstanceOf(CommitOpenCodeError)
+      expect((error as CommitOpenCodeError).worktreePath).toBe(root)
+      expect((error as CommitOpenCodeError).sessionId).toBe(
+        "ses_implement_session",
       )
+    }))
+
+  it("maps OpenCode timeout failure", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        commit(baseContext(root)).pipe(Effect.flip),
+        Layer.succeed(
+          Opencode,
+          Opencode.of({
+            start: () => Effect.succeed({ sessionId: "unused" }),
+            continue: () =>
+              Effect.fail(
+                new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
+              ),
+            listModels: () => Effect.succeed([]),
+          }),
+        ),
+      )
+      expect(error).toBeInstanceOf(CommitOpenCodeError)
+    }))
+
+  it("maps missing Session ID from OpenCode", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        commit(baseContext(root)).pipe(Effect.flip),
+        Layer.succeed(
+          Opencode,
+          Opencode.of({
+            start: () => Effect.succeed({ sessionId: "unused" }),
+            continue: () =>
+              Effect.fail(new SessionIdNotFoundError({ cwd: root })),
+            listModels: () => Effect.succeed([]),
+          }),
+        ),
+      )
+      expect(error).toBeInstanceOf(CommitOpenCodeError)
     }))
 })

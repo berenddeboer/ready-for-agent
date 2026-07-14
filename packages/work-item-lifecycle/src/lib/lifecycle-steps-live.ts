@@ -13,7 +13,8 @@ import { review } from "./review.js"
 
 /**
  * Production LifecycleSteps: Create Worktree, Install Dependencies, Implement,
- * Pre-Commit, Review, and Commit.
+ * Pre-Commit, Review, and Commit (OpenCode continues the Implement Session for
+ * Review and Commit; Pre-Commit remains harness git validation).
  * Captures platform, database, and OpenCode services so handlers remain
  * `Effect<A>` with no requirements.
  */

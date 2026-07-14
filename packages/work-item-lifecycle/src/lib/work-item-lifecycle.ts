@@ -25,7 +25,6 @@ import {
   type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
-import { CommitFailedError, CommitStageError } from "./commit-errors.js"
 import {
   ActiveStepRunExistsError,
   IssueBlockedError,
@@ -134,9 +133,7 @@ const conciseMessage = (value: unknown, fallback: string): string => {
 const handlerFailureMessage = (error: unknown): string => {
   if (
     error instanceof PreCommitHookFailedError ||
-    error instanceof PreCommitStageError ||
-    error instanceof CommitFailedError ||
-    error instanceof CommitStageError
+    error instanceof PreCommitStageError
   ) {
     return `${error.message}\n${error.output}`
   }

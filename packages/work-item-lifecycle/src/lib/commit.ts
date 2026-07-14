@@ -1,12 +1,13 @@
-import { Effect, FileSystem, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, FileSystem } from "effect"
+import { Opencode } from "@ready-for-agent/opencode"
 import {
-  CommitFailedError,
   CommitInvalidWorktreeContextError,
-  CommitStageError,
+  CommitOpenCodeError,
+  CommitSessionContextMissingError,
   CommitWorktreeContextMissingError,
 } from "./commit-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -40,89 +41,62 @@ const resolveWorktreePath = (context: LifecycleStepContext) =>
     return worktreePath
   })
 
-const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make("git", args, {
-      cwd,
-      stdin: "ignore",
-    })
-
-    return yield* Effect.scoped(
-      Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
-        const [exitCode, stdout, stderr] = yield* Effect.all(
-          [
-            handle.exitCode,
-            Stream.decodeText(handle.stdout).pipe(Stream.mkString),
-            Stream.decodeText(handle.stderr).pipe(Stream.mkString),
-          ],
-          { concurrency: 3 },
-        )
-        const output = [stdout, stderr]
-          .map((part) => part.trim())
-          .filter((part) => part.length > 0)
-          .join("\n")
-        return {
-          exitCode: Number(exitCode),
-          output,
-        }
+const resolveSessionId = (context: LifecycleStepContext) => {
+  const sessionId = context.sessionId
+  if (sessionId === null || sessionId.trim() === "") {
+    return Effect.fail(
+      new CommitSessionContextMissingError({
+        workItemId: context.workItemId,
+        message:
+          "Commit requires a Session ID persisted by a successful Implement Step Run",
       }),
     )
-  })
+  }
+  return Effect.succeed(sessionId)
+}
 
-const commitMessage = (context: LifecycleStepContext): string =>
-  `Implement #${context.githubIssueNumber}`
+const buildCommitPrompt = (githubIssueNumber: number) =>
+  [
+    "Create a git commit for the implementation changes in this worktree.",
+    "Follow this repository's commit message conventions (for example conventional commits if the repo uses them).",
+    `The commit message must mention that it closes GitHub issue #${githubIssueNumber}.`,
+    "Stage only the relevant implementation changes, then commit.",
+    "If there is nothing left to commit, succeed without creating an empty commit.",
+    "Do not open a pull request.",
+  ].join("\n")
 
 /**
  * Production Commit Lifecycle Step.
- * Stages all worktree changes and creates a local git commit when the index is
- * non-empty. A clean index after staging succeeds without creating a commit so
- * re-runs and already-committed worktrees remain re-entrant.
+ * Continues the Implement OpenCode Session in the Work Item worktree and asks
+ * it to create the local git commit, including that the commit closes the
+ * Work Item's GitHub Issue. Success means the command exited successfully;
+ * the step does not inspect the resulting git history.
  */
 export const commit = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
+    const sessionId = yield* resolveSessionId(context)
+    const prompt = buildCommitPrompt(context.githubIssueNumber)
 
-    const stage = yield* runGitInWorktree(worktreePath, ["add", "-A"])
-    if (stage.exitCode !== 0) {
-      return yield* new CommitStageError({
-        message: `Failed to stage worktree changes before commit (exit ${stage.exitCode})`,
-        worktreePath,
-        exitCode: stage.exitCode,
-        output: stage.output || "(no output)",
+    const opencode = yield* Opencode
+    yield* opencode
+      .continue({
+        sessionId,
+        prompt,
+        cwd: worktreePath,
+        model: context.model,
+        variant: context.variant,
+        timeout: context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.commit,
       })
-    }
-
-    const staged = yield* runGitInWorktree(worktreePath, [
-      "diff",
-      "--cached",
-      "--quiet",
-    ])
-    // git diff --quiet: 0 = no diff, 1 = has diff, other = error
-    if (staged.exitCode === 0) {
-      return
-    }
-    if (staged.exitCode !== 1) {
-      return yield* new CommitFailedError({
-        message: `Failed to inspect staged changes before commit (exit ${staged.exitCode})`,
-        worktreePath,
-        exitCode: staged.exitCode,
-        output: staged.output || "(no output)",
-      })
-    }
-
-    const result = yield* runGitInWorktree(worktreePath, [
-      "commit",
-      "-m",
-      commitMessage(context),
-    ])
-    if (result.exitCode !== 0) {
-      return yield* new CommitFailedError({
-        message: `git commit failed (exit ${result.exitCode})`,
-        worktreePath,
-        exitCode: result.exitCode,
-        output: result.output || "(no output)",
-      })
-    }
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new CommitOpenCodeError({
+              message: "OpenCode failed to commit the Work Item changes",
+              worktreePath,
+              sessionId,
+              cause,
+            }),
+        ),
+      )
   })
