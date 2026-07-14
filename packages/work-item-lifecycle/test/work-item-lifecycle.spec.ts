@@ -25,7 +25,7 @@ import {
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
-  CommitFailedError,
+  CommitOpenCodeError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -1076,17 +1076,15 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("persists complete commit output on failure", () => {
-      const output = `commit rejected: ${"x".repeat(9_000)}`
+    it("persists commit OpenCode failure message", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        commit: (context) =>
+        commit: () =>
           Effect.fail(
-            new CommitFailedError({
-              message: "git commit failed (exit 1)",
-              worktreePath: context.worktreePath!,
-              exitCode: 1,
-              output,
+            new CommitOpenCodeError({
+              message: "OpenCode failed to commit the Work Item changes",
+              worktreePath: "/tmp/worktrees/acme-widgets-42",
+              sessionId: "ses_test_implement_session",
             }),
           ),
       }
@@ -1110,7 +1108,7 @@ describe("WorkItemLifecycle", () => {
             const failedRun = result.workItem.stepRuns.at(-1)!
             expect(failedRun.status).toBe("failed")
             expect(failedRun.reasonMessage).toBe(
-              `git commit failed (exit 1)\n${output}`,
+              "OpenCode failed to commit the Work Item changes",
             )
           }
         }),

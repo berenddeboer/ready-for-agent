@@ -15,22 +15,24 @@ export class CommitInvalidWorktreeContextError extends Data.TaggedError(
   readonly message: string
 }> {}
 
-export class CommitStageError extends Data.TaggedError("CommitStageError")<{
+export class CommitSessionContextMissingError extends Data.TaggedError(
+  "CommitSessionContextMissingError",
+)<{
+  readonly workItemId: string
   readonly message: string
-  readonly worktreePath: string
-  readonly exitCode: number
-  readonly output: string
 }> {}
 
-export class CommitFailedError extends Data.TaggedError("CommitFailedError")<{
+export class CommitOpenCodeError extends Data.TaggedError(
+  "CommitOpenCodeError",
+)<{
   readonly message: string
   readonly worktreePath: string
-  readonly exitCode: number
-  readonly output: string
+  readonly sessionId?: string
+  readonly cause?: unknown
 }> {}
 
 export type CommitError =
   | CommitWorktreeContextMissingError
   | CommitInvalidWorktreeContextError
-  | CommitStageError
-  | CommitFailedError
+  | CommitSessionContextMissingError
+  | CommitOpenCodeError
