@@ -7,7 +7,7 @@ import type {
   JobNotFoundError,
 } from "./errors.js"
 import { InvalidQueueNameError, PayloadParseError } from "./errors.js"
-import type { Job, Payload, QueueStats, RawJob } from "./types.js"
+import type { Job, JobId, Payload, QueueStats, RawJob } from "./types.js"
 
 /**
  * Maximum length for AWS SQS Standard queue names.
@@ -94,7 +94,7 @@ export interface QueueServiceShape {
     queue: string,
     payload: P,
     options?: { readonly retryLimit?: number },
-  ) => Effect.Effect<string, EnqueueError | InvalidQueueNameError>
+  ) => Effect.Effect<JobId, EnqueueError | InvalidQueueNameError>
 
   /**
    * Add a job to the queue with a delay before it becomes available.
@@ -105,7 +105,7 @@ export interface QueueServiceShape {
     payload: P,
     delay: Duration.Duration,
     options?: { readonly retryLimit?: number },
-  ) => Effect.Effect<string, EnqueueError | InvalidQueueNameError>
+  ) => Effect.Effect<JobId, EnqueueError | InvalidQueueNameError>
 
   /**
    * Claim the next available job from the queue (raw, unparsed payload).

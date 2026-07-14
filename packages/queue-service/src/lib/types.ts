@@ -1,4 +1,13 @@
-import { type DateTime, Duration } from "effect"
+import { type DateTime, Duration, Schema } from "effect"
+import { ulid } from "ulidx"
+
+export const JobId = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^qjob-[0-9A-HJKMNP-TV-Z]{26}$/)),
+  Schema.brand("JobId"),
+)
+export type JobId = typeof JobId.Type
+
+export const makeJobId = (): JobId => JobId.make(`qjob-${ulid()}`)
 
 export type Payload = Record<string, unknown>
 
@@ -13,7 +22,7 @@ export const DEFAULT_MAX_RETRIES = 5
  * The payload is unknown and needs to be parsed with a schema.
  */
 export interface RawJob {
-  readonly jobId: string
+  readonly jobId: JobId
   readonly queue: string
   readonly payload: unknown
   readonly attempts: number
@@ -26,7 +35,7 @@ export interface RawJob {
  * A job with a typed payload after schema parsing.
  */
 export interface Job<A> {
-  readonly jobId: string
+  readonly jobId: JobId
   readonly queue: string
   readonly payload: A
   readonly attempts: number

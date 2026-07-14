@@ -7,6 +7,8 @@ import {
 import { SqliteQueueServiceLive } from "../src/lib/sqlite-queue-service.js"
 import { describe, expect, it } from "bun:test"
 
+const JOB_ID_PATTERN = /^qjob-[0-9A-HJKMNP-TV-Z]{26}$/
+
 describe("SqliteQueueService", () => {
   const TestLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(DatabaseTest),
@@ -28,9 +30,7 @@ describe("SqliteQueueService", () => {
 
           const jobId = yield* queue.enqueue("test-queue", { task: "test" })
 
-          expect(jobId).toBeDefined()
-          expect(typeof jobId).toBe("string")
-          expect(jobId.length).toBeGreaterThan(0)
+          expect(jobId).toMatch(JOB_ID_PATTERN)
         }),
       ))
 
@@ -74,10 +74,30 @@ describe("SqliteQueueService", () => {
             Duration.seconds(60),
           )
 
-          expect(jobId).toBeDefined()
+          expect(jobId).toMatch(JOB_ID_PATTERN)
 
           const job = yield* queue.rawClaim("delayed-queue")
           expect(Option.isNone(job)).toBe(true)
+        }),
+      ))
+
+    it("should preserve a delayed job ID when claimed", () =>
+      runTest(
+        Effect.gen(function* () {
+          const queue = yield* QueueService
+          const jobId = yield* queue.enqueueWithDelay(
+            "delayed-round-trip-queue",
+            { task: "delayed" },
+            Duration.zero,
+          )
+
+          expect(jobId).toMatch(JOB_ID_PATTERN)
+
+          const job = yield* queue.rawClaim("delayed-round-trip-queue")
+          expect(Option.isSome(job)).toBe(true)
+          if (Option.isSome(job)) {
+            expect(job.value.jobId).toBe(jobId)
+          }
         }),
       ))
   })
@@ -91,6 +111,7 @@ describe("SqliteQueueService", () => {
           const jobId = yield* queue.enqueue("claim-queue", {
             task: "to-claim",
           })
+          expect(jobId).toMatch(JOB_ID_PATTERN)
           const job = yield* queue.rawClaim("claim-queue")
 
           expect(Option.isSome(job)).toBe(true)

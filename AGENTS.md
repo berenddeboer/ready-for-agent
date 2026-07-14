@@ -12,6 +12,11 @@ Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wont
 
 Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`.
 
+### Compatibility
+
+Do not add support for legacy behavior, deprecations, or migration paths without
+explicit user confirmation.
+
 <!-- effect-solutions:start -->
 
 ## Effect

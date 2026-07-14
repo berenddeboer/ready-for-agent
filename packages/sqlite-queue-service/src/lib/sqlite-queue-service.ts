@@ -8,8 +8,10 @@ import {
   DEFAULT_MAX_RETRIES,
   DEFAULT_VISIBILITY_TIMEOUT,
   EnqueueError,
+  JobId,
   JobNotFoundError,
   QueueService,
+  makeJobId,
   validateQueueName,
 } from "@ready-for-agent/queue-service"
 
@@ -61,7 +63,7 @@ type JobRow = {
 }
 
 const rawJob = (row: JobRow): RawJob => ({
-  jobId: row.id,
+  jobId: JobId.make(row.id),
   queue: row.queue,
   payload: JSON.parse(row.job_payload),
   attempts: row.job_attempts,
@@ -85,11 +87,13 @@ export const SqliteQueueServiceLive = Layer.effect(
         Effect.gen(function* () {
           yield* validateQueueName(queue)
           const now = Date.now()
+          const jobId = makeJobId()
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
               `INSERT INTO job_queue (id, queue, job_payload, job_retry_limit, available_at, locked_until, created_at, updated_at)
-               VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, NULL, ?, ?) RETURNING id`,
+               VALUES (?, ?, ?, ?, ?, NULL, ?, ?) RETURNING id`,
               [
+                jobId,
                 queue,
                 JSON.stringify(payload),
                 options?.retryLimit === undefined
@@ -116,7 +120,7 @@ export const SqliteQueueServiceLive = Layer.effect(
               queue,
               message: "No job ID returned from insert",
             })
-          return row.id
+          return JobId.make(row.id)
         }),
       enqueueWithDelay: <P extends Payload>(
         queue: string,
@@ -127,11 +131,13 @@ export const SqliteQueueServiceLive = Layer.effect(
         Effect.gen(function* () {
           yield* validateQueueName(queue)
           const now = Date.now()
+          const jobId = makeJobId()
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
               `INSERT INTO job_queue (id, queue, job_payload, job_retry_limit, available_at, locked_until, created_at, updated_at)
-               VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, NULL, ?, ?) RETURNING id`,
+               VALUES (?, ?, ?, ?, ?, NULL, ?, ?) RETURNING id`,
               [
+                jobId,
                 queue,
                 JSON.stringify(payload),
                 options?.retryLimit === undefined
@@ -158,7 +164,7 @@ export const SqliteQueueServiceLive = Layer.effect(
               queue,
               message: "No job ID returned from insert",
             })
-          return row.id
+          return JobId.make(row.id)
         }),
       rawClaim: (
         queue: string,
