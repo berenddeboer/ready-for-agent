@@ -48,6 +48,7 @@
         "@ready-for-agent/opencode": "workspace:*",
         "@ready-for-agent/queue-service": "workspace:*",
         "@ready-for-agent/sqlite-queue-service": "workspace:*",
+        "@ready-for-agent/work-item-lifecycle": "workspace:*",
         "@tanstack/react-query": "^5.90.0",
         "@tanstack/react-query-devtools": "^5.90.0",
         "@tanstack/react-router": "^1.170.17",
@@ -241,6 +242,7 @@
         "ulidx": "^2.4.1",
       },
       "devDependencies": {
+        "@effect/platform-bun": "^4.0.0-beta.97",
         "@ready-for-agent/db": "workspace:*",
         "@ready-for-agent/sqlite-queue-service": "workspace:*",
         "@types/bun": "^1.3.0",

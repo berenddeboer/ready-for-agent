@@ -17,6 +17,15 @@
   "include": ["server.ts", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../packages/work-item-lifecycle/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/sqlite-queue-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/queue-service/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/opencode/tsconfig.lib.json"
     },
     {
@@ -39,12 +48,6 @@
     },
     {
       "path": "../../packages/db/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/queue-service/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/sqlite-queue-service/tsconfig.lib.json"
     }
   ]
 }

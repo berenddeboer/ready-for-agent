@@ -15,6 +15,10 @@ import {
 } from "@ready-for-agent/keymaxxer-service"
 import { OpencodeLive } from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
+import {
+  LifecycleStepsLive,
+  WorkItemLifecycleLive,
+} from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../server-context.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
@@ -55,14 +59,21 @@ export const createApplication = async (
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
   )
-  const workerLayer = JobWorkerLive.pipe(
-    Layer.provideMerge(queueLayer),
-    Layer.provideMerge(reconcilerLayer),
-  )
   const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
   const opencodeLayer = OpencodeLive.pipe(Layer.provide(opencodePlatformLayer))
+  const lifecycleLayer = WorkItemLifecycleLive.pipe(
+    Layer.provideMerge(LifecycleStepsLive),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(queueLayer),
+    Layer.provide(opencodePlatformLayer),
+  )
+  const workerLayer = JobWorkerLive.pipe(
+    Layer.provideMerge(queueLayer),
+    Layer.provideMerge(reconcilerLayer),
+    Layer.provideMerge(lifecycleLayer),
+  )
   const appLayer =
     options.startWorker === false
       ? Layer.mergeAll(
@@ -70,6 +81,7 @@ export const createApplication = async (
           queueLayer,
           keymaxxerLayer,
           opencodeLayer,
+          lifecycleLayer,
         )
       : Layer.mergeAll(
           reconcilerLayer,
@@ -77,6 +89,7 @@ export const createApplication = async (
           queueLayer,
           keymaxxerLayer,
           opencodeLayer,
+          lifecycleLayer,
         )
   const runtime = ManagedRuntime.make(appLayer)
 

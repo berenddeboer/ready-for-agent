@@ -22,6 +22,7 @@
     "@ready-for-agent/opencode": "workspace:*",
     "@ready-for-agent/queue-service": "workspace:*",
     "@ready-for-agent/sqlite-queue-service": "workspace:*",
+    "@ready-for-agent/work-item-lifecycle": "workspace:*",
     "@tanstack/react-query": "^5.90.0",
     "@tanstack/react-query-devtools": "^5.90.0",
     "@tanstack/react-router": "^1.170.17",

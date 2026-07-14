@@ -22,12 +22,16 @@ export interface LifecycleStepContext {
 export interface LifecycleStepsShape {
   readonly createWorktree: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<string>
+  ) => Effect.Effect<string, unknown>
   readonly installDependencies: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void>
-  readonly implement: (context: LifecycleStepContext) => Effect.Effect<string>
-  readonly review: (context: LifecycleStepContext) => Effect.Effect<void>
+  ) => Effect.Effect<void, unknown>
+  readonly implement: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<string, unknown>
+  readonly review: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
 }
 
 export class LifecycleSteps extends Context.Service<
