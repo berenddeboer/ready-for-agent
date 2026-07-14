@@ -914,6 +914,7 @@ function WorkItemLifecycleStatus({
     compact &&
     !isTerminal &&
     (latestRun?.status === "FAILED" || latestRun?.status === "INTERRUPTED")
+  const canReset = compact
   const retry = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -945,6 +946,23 @@ function WorkItemLifecycleStatus({
       )
     },
   })
+  const reset = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        resetWorkItem: {
+          __args: { workItemId: workItem.id },
+        },
+      })
+      return result.resetWorkItem
+    },
+    onSuccess: (deletedId) => {
+      queryClient.setQueryData<readonly WorkItem[]>(
+        workItemsQuery(workItem.repositoryId).queryKey,
+        (current) => current?.filter((candidate) => candidate.id !== deletedId),
+      )
+    },
+  })
+  const actionsPending = retry.isPending || reset.isPending
 
   return (
     <div
@@ -991,15 +1009,34 @@ function WorkItemLifecycleStatus({
       {message !== null && message !== undefined && (
         <p className="mt-1.5 mb-0 text-xs text-red-700">{message}</p>
       )}
-      {canRetry && (
-        <button
-          type="button"
-          className="mt-2 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-wait disabled:opacity-60"
-          disabled={retry.isPending}
-          onClick={() => retry.mutate()}
-        >
-          {retry.isPending ? "Retrying..." : "Retry"}
-        </button>
+      {(canReset || canRetry) && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {canReset && (
+            <button
+              type="button"
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-red-300 hover:text-red-700 disabled:cursor-wait disabled:opacity-60"
+              disabled={actionsPending}
+              onClick={() => reset.mutate()}
+            >
+              {reset.isPending ? "Resetting..." : "Reset"}
+            </button>
+          )}
+          {canRetry && (
+            <button
+              type="button"
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-wait disabled:opacity-60"
+              disabled={actionsPending}
+              onClick={() => retry.mutate()}
+            >
+              {retry.isPending ? "Retrying..." : "Retry"}
+            </button>
+          )}
+        </div>
+      )}
+      {reset.isError && (
+        <p className="mt-1.5 mb-0 text-xs text-red-700" role="alert">
+          Could not reset this job.
+        </p>
       )}
       {retry.isError && (
         <p className="mt-1.5 mb-0 text-xs text-red-700" role="alert">
