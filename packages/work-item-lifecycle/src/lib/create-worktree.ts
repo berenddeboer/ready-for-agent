@@ -76,9 +76,7 @@ const resolveStartPoint = (repository: GitRepository) =>
     return yield* new GitCommandError({
       message: "Unable to resolve a start point for the worktree",
       command: "git",
-      args: repository.isBare
-        ? ["--git-dir", repository.localPath, "rev-parse", "--verify", "HEAD"]
-        : ["-C", repository.localPath, "rev-parse", "--verify", "HEAD"],
+      args: ["-C", repository.localPath, "rev-parse", "--verify", "HEAD"],
       exitCode: 1,
       stderr: "No origin default branch and no local HEAD",
     })
@@ -160,7 +158,19 @@ export const createWorktree = (
   Effect.gen(function* () {
     const pathService = yield* Path.Path
     const repository = yield* resolveRepository(context.repositoryId)
-    const gitRepository = asGitRepository(repository)
+    const configuredGitRepository = asGitRepository(repository)
+    const gitRepository = repository.isBare
+      ? {
+          ...configuredGitRepository,
+          localPath: (yield* runGit(configuredGitRepository, [
+            "rev-parse",
+            "--absolute-git-dir",
+          ])).trim(),
+        }
+      : configuredGitRepository
+    const worktreeLocalPath = repository.isBare
+      ? gitRepository.localPath
+      : repository.localPath
 
     const branchName = workItemBranchName({
       githubOwner: repository.githubOwner,
@@ -170,7 +180,7 @@ export const createWorktree = (
     })
 
     const plannedPath = workItemWorktreePath({
-      localPath: repository.localPath,
+      localPath: worktreeLocalPath,
       isBare: repository.isBare,
       githubOwner: repository.githubOwner,
       githubRepo: repository.githubRepo,
@@ -182,7 +192,7 @@ export const createWorktree = (
     const worktreePath = pathService.resolve(plannedPath)
     const parentPath = pathService.resolve(
       worktreeParentPath({
-        localPath: repository.localPath,
+        localPath: worktreeLocalPath,
         isBare: repository.isBare,
         githubOwner: repository.githubOwner,
         githubRepo: repository.githubRepo,

@@ -19,6 +19,7 @@ import {
   WorkItemLifecycle,
   type WorkItemLifecycleShape,
   WorkItemNotFoundError,
+  type WorkItemRecord,
   makeWorkItemId,
 } from "@ready-for-agent/work-item-lifecycle"
 import { createGraphqlApi } from "../src/index.js"
@@ -60,6 +61,39 @@ const issue = {
     },
   ],
 }
+
+const workItem = {
+  id: "wi-01J00000000000000000000000",
+  repositoryId: repository.id,
+  githubIssueNumber: issue.githubIssueNumber,
+  model: config.defaultModel,
+  variant: config.defaultVariant,
+  state: "create_worktree",
+  stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
+  worktreePath: null,
+  sessionId: null,
+  failureCode: null,
+  failureMessage: null,
+  createdAt: new Date("2026-07-14T08:00:00.000Z"),
+  updatedAt: new Date("2026-07-14T08:00:01.000Z"),
+  stateResidenceMs: 1_000,
+  stepRuns: [
+    {
+      id: "srun-01J00000000000000000000000",
+      workItemId: "wi-01J00000000000000000000000",
+      step: "create_worktree",
+      status: "running",
+      queueJobId: "qjob-01J00000000000000000000000",
+      queuedAt: new Date("2026-07-14T08:00:00.000Z"),
+      startedAt: new Date("2026-07-14T08:00:01.000Z"),
+      finishedAt: null,
+      reasonCode: null,
+      reasonMessage: null,
+      queueWaitMs: 1_000,
+      executionDurationMs: 250,
+    },
+  ],
+} as WorkItemRecord
 
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
@@ -130,6 +164,7 @@ const makeRuntime = (
     reset: unused,
     getWorkItem: unused,
     listWorkItemsForIssue: unused,
+    listWorkItemsForRepository: unused,
     ...lifecycleOverrides,
   }
   return ManagedRuntime.make(
@@ -691,6 +726,183 @@ describe("GraphQL API", () => {
         },
       },
     ])
+  })
+
+  test("lists Work Items with serialized lifecycle progress", async () => {
+    let receivedArgs: readonly [string, number] | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: (repositoryId, githubIssueNumber) => {
+          receivedArgs = [repositoryId, githubIssueNumber]
+          return Effect.succeed([workItem])
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id state stateReadyAt createdAt updatedAt
+            stepRuns { id step status queuedAt startedAt finishedAt }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: workItem.id,
+            state: "CREATE_WORKTREE",
+            stateReadyAt: "2026-07-14T08:00:00.000Z",
+            createdAt: "2026-07-14T08:00:00.000Z",
+            updatedAt: "2026-07-14T08:00:01.000Z",
+            stepRuns: [
+              {
+                id: workItem.stepRuns[0]?.id,
+                step: "CREATE_WORKTREE",
+                status: "RUNNING",
+                queuedAt: "2026-07-14T08:00:00.000Z",
+                startedAt: "2026-07-14T08:00:01.000Z",
+                finishedAt: null,
+              },
+            ],
+          },
+        ],
+      },
+    })
+    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("lists all Work Items for a repository", async () => {
+    let receivedRepositoryId: string | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: (repositoryId) => {
+          receivedRepositoryId = repositoryId
+          return Effect.succeed([workItem])
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!) {
+          workItems(repositoryId: $repositoryId) {
+            id githubIssueNumber state
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: workItem.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            state: "CREATE_WORKTREE",
+          },
+        ],
+      },
+    })
+    expect(receivedRepositoryId).toBe(repository.id)
+  })
+
+  test("starts a Work Item for Implement Now", async () => {
+    let receivedArgs: readonly [string, number] | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        implementNow: (repositoryId, githubIssueNumber) => {
+          receivedArgs = [repositoryId, githubIssueNumber]
+          return Effect.succeed(workItem)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id state
+            stepRuns { step status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        implementNow: {
+          id: workItem.id,
+          state: "CREATE_WORKTREE",
+          stepRuns: [{ step: "CREATE_WORKTREE", status: "RUNNING" }],
+        },
+      },
+    })
+    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("retries a failed Work Item", async () => {
+    let receivedWorkItemId: string | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        retry: (workItemId) => {
+          receivedWorkItemId = workItemId
+          return Effect.succeed(workItem)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RetryWorkItem($workItemId: ID!) {
+          retryWorkItem(workItemId: $workItemId) { id state }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        retryWorkItem: {
+          id: workItem.id,
+          state: "CREATE_WORKTREE",
+        },
+      },
+    })
+    expect(receivedWorkItemId).toBe(workItem.id)
   })
 
   test("accepts a Refresh Job for a Paused Repository without reconciling", async () => {

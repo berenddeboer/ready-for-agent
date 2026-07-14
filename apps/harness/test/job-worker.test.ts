@@ -144,6 +144,7 @@ const queueLayer = (
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
+      listWorkItemsForRepository: unused,
     }),
   )
 

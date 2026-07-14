@@ -361,6 +361,9 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     githubIssueNumber: number,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
+  readonly listWorkItemsForRepository: (
+    repositoryId: string,
+  ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
 }
 
 export class WorkItemLifecycle extends Context.Service<
@@ -414,7 +417,7 @@ export const makeWorkItemLifecycleLive = (
              WHERE repository_id = ?
                AND github_issue_number = ?
                AND state NOT IN ('complete', 'failed', 'abandoned')
-             ORDER BY created_at ASC, id ASC
+             ORDER BY created_at ASC, rowid ASC
              LIMIT 1`,
               [repositoryId, githubIssueNumber],
             )
@@ -520,8 +523,33 @@ export const makeWorkItemLifecycleLive = (
                   failure_message, created_at, updated_at
            FROM work_item
            WHERE repository_id = ? AND github_issue_number = ?
-           ORDER BY created_at ASC, id ASC`,
+           ORDER BY created_at ASC, rowid ASC`,
             [repositoryId, githubIssueNumber],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
+
+        const stepRunsByWorkItem = yield* loadStepRuns(
+          rows.map((row) => row.id),
+          nowMs,
+        )
+        return rows.map((row) =>
+          toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
+        )
+      })
+
+      const listWorkItemsForRepository = Effect.fn(
+        "WorkItemLifecycle.listWorkItemsForRepository",
+      )(function* (repositoryId: string) {
+        const nowMs = yield* Clock.currentTimeMillis
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT id, repository_id, github_issue_number, model, variant, state,
+                  state_ready_at, worktree_path, session_id, failure_code,
+                  failure_message, created_at, updated_at
+           FROM work_item
+           WHERE repository_id = ?
+           ORDER BY created_at ASC, rowid ASC`,
+            [repositoryId],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
 
@@ -1780,6 +1808,7 @@ export const makeWorkItemLifecycleLive = (
         reset,
         getWorkItem,
         listWorkItemsForIssue,
+        listWorkItemsForRepository,
       })
     }),
   )

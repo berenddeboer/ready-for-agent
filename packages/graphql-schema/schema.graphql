@@ -5,6 +5,7 @@ type Query {
   config: Config!
   models: [String!]!
   issues(repositoryId: ID!): [Issue!]!
+  workItems(repositoryId: ID!, githubIssueNumber: Int): [WorkItem!]!
 }
 
 type Config {
@@ -58,6 +59,56 @@ type RefreshJob {
   repositoryId: ID!
 }
 
+enum WorkItemState {
+  CREATE_WORKTREE
+  INSTALL_DEPENDENCIES
+  IMPLEMENT
+  REVIEW
+  COMPLETE
+  FAILED
+  ABANDONED
+}
+
+enum StepRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  INTERRUPTED
+  CANCELLED
+}
+
+type StepRun {
+  id: ID!
+  step: WorkItemState!
+  status: StepRunStatus!
+  queuedAt: String!
+  startedAt: String
+  finishedAt: String
+  reasonCode: String
+  reasonMessage: String
+  queueWaitMs: Float!
+  executionDurationMs: Float
+}
+
+type WorkItem {
+  id: ID!
+  repositoryId: ID!
+  githubIssueNumber: Int!
+  model: String!
+  variant: String!
+  state: WorkItemState!
+  stateReadyAt: String!
+  worktreePath: String
+  sessionId: String
+  failureCode: String
+  failureMessage: String
+  createdAt: String!
+  updatedAt: String!
+  stateResidenceMs: Float!
+  stepRuns: [StepRun!]!
+}
+
 input AddRepositoryInput {
   githubOwner: String!
   githubRepo: String!
@@ -75,6 +126,8 @@ type Mutation {
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
+  implementNow(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
+  retryWorkItem(workItemId: ID!): WorkItem!
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
 }

@@ -7,10 +7,10 @@ export type GitRepository = {
   readonly isBare: boolean
 }
 
-const repositoryPrefix = (repository: GitRepository): readonly string[] =>
-  repository.isBare
-    ? ["--git-dir", repository.localPath]
-    : ["-C", repository.localPath]
+const repositoryPrefix = (repository: GitRepository): readonly string[] => [
+  "-C",
+  repository.localPath,
+]
 
 export const runGit = (
   repository: GitRepository,
@@ -47,7 +47,7 @@ export const runGit = (
         message: `git ${args.join(" ")} failed with exit ${result.exitCode}`,
         command: "git",
         args: fullArgs,
-        cwd: repository.isBare ? undefined : repository.localPath,
+        cwd: repository.localPath,
         exitCode: result.exitCode,
         stderr: result.stderr.trim(),
       })

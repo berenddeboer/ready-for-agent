@@ -82,6 +82,13 @@ const initDotBareRepository = async (root: string) => {
   return bare
 }
 
+const initDotBareWrapper = async (root: string) => {
+  const bare = await initDotBareRepository(root)
+  const project = join(root, "monorepo")
+  await writeFile(join(project, ".git"), "gitdir: ./.bare\n")
+  return { bare, project }
+}
+
 const initNonBareRepository = async (root: string) => {
   const repo = join(root, "widgets")
   await mkdir(repo, { recursive: true })
@@ -189,6 +196,49 @@ describe("createWorktree", () => {
       )
       expect(path.startsWith(join(root, "monorepo"))).toBe(true)
       expect(path.includes("/.bare/")).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("resolves a dot-bare Git directory from its project wrapper", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-wt-dotbare-wrapper-"))
+    try {
+      const { bare, project } = await initDotBareWrapper(root)
+      const workItemId = makeWorkItemId()
+
+      const path = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "processfocus",
+            githubRepo: "monorepo",
+            localPath: project,
+            isBare: true,
+          })
+
+          return yield* createWorktree({
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 2039,
+            model: "opencode/test",
+            variant: "low",
+            worktreePath: null,
+            sessionId: null,
+          })
+        }),
+      )
+
+      expect(path).toBe(
+        workItemWorktreePath({
+          localPath: bare,
+          isBare: true,
+          githubOwner: "processfocus",
+          githubRepo: "monorepo",
+          githubIssueNumber: 2039,
+          workItemId,
+        }),
+      )
     } finally {
       await rm(root, { recursive: true, force: true })
     }
