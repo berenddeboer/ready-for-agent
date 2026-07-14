@@ -3,6 +3,7 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import { DbService } from "@ready-for-agent/db-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { createWorktree } from "./create-worktree.js"
+import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
 import { removeWorktree } from "./remove-worktree.js"
@@ -11,8 +12,8 @@ const notImplemented = (step: string) =>
   Effect.die(new Error(`Lifecycle Step ${step} is not implemented yet`))
 
 /**
- * Production LifecycleSteps: Create Worktree and Install Dependencies;
- * Implement and Review arrive in later tickets.
+ * Production LifecycleSteps: Create Worktree, Install Dependencies, and
+ * Implement; Review arrives in a later ticket.
  * Captures platform, database, and OpenCode services so handlers remain
  * `Effect<A>` with no requirements.
  */
@@ -48,7 +49,7 @@ export const LifecycleStepsLive = Layer.effect(
       createWorktree: (context) => withServices(createWorktree(context)),
       installDependencies: (context) =>
         withServices(installDependencies(context)),
-      implement: () => notImplemented("implement"),
+      implement: (context) => withServices(implement(context)),
       review: () => notImplemented("review"),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })

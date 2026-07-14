@@ -1,4 +1,4 @@
-import { Context, type Effect } from "effect"
+import { Context, type Duration, type Effect } from "effect"
 import type { WorkItemId } from "./types.js"
 
 /**
@@ -13,6 +13,7 @@ export interface LifecycleStepContext {
   readonly variant: string
   readonly worktreePath: string | null
   readonly sessionId: string | null
+  readonly maxDuration?: Duration.Duration
 }
 
 /**
