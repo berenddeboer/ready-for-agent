@@ -1,4 +1,4 @@
-import { Cause, Effect, Layer, Option, Result } from "effect"
+import { Cause, Duration, Effect, Layer, Option, Result } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
@@ -10,6 +10,7 @@ import {
 } from "@ready-for-agent/queue-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  ActiveStepRunExistsError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -18,11 +19,15 @@ import {
   type LifecycleStepsShape,
   NonTransactionalQueueError,
   ParentIssueError,
+  RetryNotEligibleError,
+  STEP_RUN_REASON,
   UnfinishedWorkItemExistsError,
   WORK_ITEM_LIFECYCLE_QUEUE,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   WorkItemNotFoundError,
+  WorkItemTerminalError,
+  makeWorkItemLifecycleLive,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -424,8 +429,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          // Terminalize via SQL so a second Implement Now is allowed; abandon/retry
-          // are later tickets and are not part of this package's public surface yet.
+          // Terminalize via SQL so a second Implement Now is allowed; abandon is a later ticket.
           yield* sql.unsafe(
             `UPDATE work_item SET state = 'abandoned', updated_at = ? WHERE id = ?`,
             [Date.now(), first.id],
@@ -991,6 +995,492 @@ describe("WorkItemLifecycle", () => {
           expect(after.stepRuns[0]!.status).not.toBe("succeeded")
           expect(after.stepRuns[0]!.finishedAt).toBeNull()
         }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("records typed handler failure as Failed Step Run and leaves the pending step", () => {
+      const failingSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.fail(new Error("worktree path busy")),
+      }
+
+      return runWithSteps(
+        failingSteps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const result = yield* claimAndRunPending
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("create_worktree")
+            expect(result.workItem.stepRuns).toHaveLength(1)
+            const run = result.workItem.stepRuns[0]!
+            expect(run.status).toBe("failed")
+            expect(run.reasonCode).toBe(STEP_RUN_REASON.handlerFailed)
+            expect(run.reasonMessage).toContain("worktree path busy")
+            expect(run.queuedAt).toBeInstanceOf(Date)
+            expect(run.startedAt).toBeInstanceOf(Date)
+            expect(run.finishedAt).toBeInstanceOf(Date)
+            expect(run.finishedAt!.getTime()).toBeGreaterThanOrEqual(
+              run.startedAt!.getTime(),
+            )
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("create_worktree")
+          expect(final.stepRuns).toHaveLength(1)
+          expect(final.stepRuns[0]!.status).toBe("failed")
+        }),
+      )
+    })
+
+    it("records handler defects as Failed with a stable defect reason", () => {
+      const defectSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.die("unexpected boom"),
+      }
+
+      return runWithSteps(
+        defectSteps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          const result = yield* claimAndRunPending
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("create_worktree")
+            const run = result.workItem.stepRuns[0]!
+            expect(run.status).toBe("failed")
+            expect(run.reasonCode).toBe(STEP_RUN_REASON.handlerDefect)
+            expect(run.reasonMessage).toContain("unexpected boom")
+            expect(run.finishedAt).toBeInstanceOf(Date)
+          }
+        }),
+      )
+    })
+
+    it("records a synchronous handler throw as a Failed defect", () => {
+      const throwingSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => {
+          throw new Error("handler construction exploded")
+        },
+      }
+
+      return runWithSteps(
+        throwingSteps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const result = yield* claimAndRunPending
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            const run = result.workItem.stepRuns[0]!
+            expect(result.workItem.state).toBe("create_worktree")
+            expect(run.status).toBe("failed")
+            expect(run.reasonCode).toBe(STEP_RUN_REASON.handlerDefect)
+            expect(run.reasonMessage).toContain("handler construction exploded")
+            expect(run.finishedAt).toBeInstanceOf(Date)
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+          expect(
+            (yield* lifecycle.getWorkItem(created.id)).stepRuns[0]!.status,
+          ).toBe("failed")
+        }),
+      )
+    })
+
+    it("interrupts a slow handler and records Failed with a timeout reason", () => {
+      const slowSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Effect.gen(function* () {
+            yield* Effect.sleep("200 millis")
+            return "/tmp/worktrees/too-slow"
+          }),
+      }
+
+      const layer = makeWorkItemLifecycleLive({
+        maxDurations: {
+          create_worktree: Duration.millis(20),
+          install_dependencies: Duration.minutes(15),
+          implement: Duration.hours(2),
+          review: Duration.hours(1),
+        },
+      }).pipe(
+        Layer.provideMerge(
+          Layer.succeed(LifecycleSteps, LifecycleSteps.of(slowSteps)),
+        ),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(SqliteQueueServiceLive),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          expect(
+            Duration.toMillis(lifecycle.maxDurations.create_worktree),
+          ).toBe(20)
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const claimed = yield* queue.rawClaim(
+            WORK_ITEM_LIFECYCLE_QUEUE,
+            lifecycle.maxDurations.create_worktree,
+          )
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isNone(claimed)) {
+            return yield* Effect.die("expected lifecycle job")
+          }
+
+          const result = yield* lifecycle.runStep(
+            (claimed.value.payload as { stepRunId: string }).stepRunId,
+          )
+
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("create_worktree")
+            const run = result.workItem.stepRuns[0]!
+            expect(run.status).toBe("failed")
+            expect(run.reasonCode).toBe(STEP_RUN_REASON.timeout)
+            expect(run.reasonMessage.toLowerCase()).toContain("maximum")
+            expect(run.finishedAt).toBeInstanceOf(Date)
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("create_worktree")
+          expect(final.stepRuns[0]!.reasonCode).toBe(STEP_RUN_REASON.timeout)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+  })
+
+  describe("retry", () => {
+    const claimAndRunPending = Effect.gen(function* () {
+      const lifecycle = yield* WorkItemLifecycle
+      const queue = yield* QueueService
+      const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+      expect(Option.isSome(claimed)).toBe(true)
+      if (Option.isNone(claimed)) {
+        return yield* Effect.die("expected a queued lifecycle job")
+      }
+      const payload = claimed.value.payload as { stepRunId: string }
+      return yield* lifecycle.runStep(payload.stepRunId)
+    })
+
+    it("creates a new Queued Step Run for a Failed pending step without changing state", () => {
+      let attempts = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => {
+          attempts += 1
+          if (attempts === 1) {
+            return Effect.fail(new Error("first attempt failed"))
+          }
+          return Effect.succeed("/tmp/worktrees/retry-success")
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const failed = yield* claimAndRunPending
+          expect(failed._tag).toBe("processed")
+          if (failed._tag === "processed") {
+            expect(failed.workItem.stepRuns[0]!.status).toBe("failed")
+          }
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("create_worktree")
+          expect(retried.stepRuns).toHaveLength(2)
+          expect(retried.stepRuns[0]!.status).toBe("failed")
+          expect(retried.stepRuns[0]!.reasonCode).toBe(
+            STEP_RUN_REASON.handlerFailed,
+          )
+          expect(retried.stepRuns[1]!.status).toBe("queued")
+          expect(retried.stepRuns[1]!.step).toBe("create_worktree")
+          expect(retried.stepRuns[1]!.id).not.toBe(retried.stepRuns[0]!.id)
+          expect(retried.stepRuns[1]!.queueJobId).toMatch(
+            /^qjob-[0-9A-HJKMNP-TV-Z]{26}$/,
+          )
+
+          const afterRetry = yield* claimAndRunPending
+          expect(afterRetry._tag).toBe("processed")
+          if (afterRetry._tag === "processed") {
+            expect(afterRetry.workItem.state).toBe("install_dependencies")
+            expect(afterRetry.workItem.worktreePath).toBe(
+              "/tmp/worktrees/retry-success",
+            )
+            expect(
+              afterRetry.workItem.stepRuns.map((run) => [run.step, run.status]),
+            ).toEqual([
+              ["create_worktree", "failed"],
+              ["create_worktree", "succeeded"],
+              ["install_dependencies", "queued"],
+            ])
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(remaining)).toBe(true)
+        }),
+      )
+    })
+
+    it("retains every prior Step Run across multiple retries", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.fail(new Error("still failing")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+          yield* lifecycle.retry(created.id)
+          yield* claimAndRunPending
+          const afterSecondFail = yield* lifecycle.retry(created.id)
+
+          expect(afterSecondFail.state).toBe("create_worktree")
+          expect(afterSecondFail.stepRuns).toHaveLength(3)
+          expect(afterSecondFail.stepRuns.map((run) => run.status)).toEqual([
+            "failed",
+            "failed",
+            "queued",
+          ])
+          expect(afterSecondFail.stepRuns[0]!.reasonMessage).toContain(
+            "still failing",
+          )
+          expect(afterSecondFail.stepRuns[1]!.reasonMessage).toContain(
+            "still failing",
+          )
+          expect(afterSecondFail.stepRuns[0]!.finishedAt).not.toBeNull()
+          expect(afterSecondFail.stepRuns[1]!.finishedAt).not.toBeNull()
+        }),
+      )
+    })
+
+    it("accepts retry after an Interrupted latest attempt for the pending step", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          const now = Date.now()
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'interrupted',
+                 started_at = ?,
+                 finished_at = ?,
+                 reason_code = 'interrupted',
+                 reason_message = 'worker lost',
+                 updated_at = ?
+             WHERE id = ?`,
+            [now, now, now, stepRunId],
+          )
+          yield* Effect.sleep("2 millis")
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("create_worktree")
+          expect(retried.stepRuns).toHaveLength(2)
+          expect(retried.stepRuns[0]!.status).toBe("interrupted")
+          expect(retried.stepRuns[1]!.status).toBe("queued")
+        }),
+      ))
+
+    it("rejects retry for Queued, Running, terminal, and never-failed Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          const queuedError = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(queuedError).toBeInstanceOf(ActiveStepRunExistsError)
+          if (queuedError instanceof ActiveStepRunExistsError) {
+            expect(queuedError.status).toBe("queued")
+            expect(queuedError.workItemId).toBe(created.id)
+          }
+
+          const started = yield* lifecycle.runStep(created.stepRuns[0]!.id)
+          expect(started._tag).toBe("processed")
+
+          const neverFailed = yield* lifecycle.getWorkItem(created.id)
+          expect(neverFailed.state).toBe("install_dependencies")
+          const neverFailedError = yield* Effect.flip(
+            lifecycle.retry(neverFailed.id),
+          )
+          expect(neverFailedError).toBeInstanceOf(ActiveStepRunExistsError)
+
+          // Clear the next queued run and leave only a Succeeded prior run for create_worktree
+          // so retry on install_dependencies has no failed latest attempt.
+          const installQueued = neverFailed.stepRuns.find(
+            (run) =>
+              run.step === "install_dependencies" && run.status === "queued",
+          )!
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'cancelled', finished_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [Date.now(), Date.now(), installQueued.id],
+          )
+
+          const notEligible = yield* Effect.flip(
+            lifecycle.retry(neverFailed.id),
+          )
+          expect(notEligible).toBeInstanceOf(RetryNotEligibleError)
+
+          // Running rejection
+          const { repository: repo2, issue: issue2 } = yield* Effect.gen(
+            function* () {
+              const db = yield* DbService
+              const repository = yield* db.addRepository({
+                ...sampleRepository,
+                githubRepo: "widgets-running",
+                localPath: "/repos/acme/widgets-running.git",
+              })
+              const issue = yield* db.storeIssue({
+                repositoryId: repository.id,
+                githubIssueNumber: 43,
+                ...sampleIssueFields,
+                url: "https://github.com/acme/widgets/issues/43",
+              })
+              return { repository, issue }
+            },
+          )
+          const runningItem = yield* lifecycle.implementNow(
+            repo2.id,
+            issue2.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [Date.now(), Date.now(), runningItem.stepRuns[0]!.id],
+          )
+          const runningError = yield* Effect.flip(
+            lifecycle.retry(runningItem.id),
+          )
+          expect(runningError).toBeInstanceOf(ActiveStepRunExistsError)
+          if (runningError instanceof ActiveStepRunExistsError) {
+            expect(runningError.status).toBe("running")
+          }
+
+          // Terminal rejection
+          yield* sql.unsafe(
+            `UPDATE work_item SET state = 'complete', updated_at = ? WHERE id = ?`,
+            [Date.now(), created.id],
+          )
+          const terminalError = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(terminalError).toBeInstanceOf(WorkItemTerminalError)
+          if (terminalError instanceof WorkItemTerminalError) {
+            expect(terminalError.state).toBe("complete")
+          }
+        }),
+      ))
+
+    it("cannot create more than one active Step Run under concurrent Retry", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Effect.fail(new Error("fail for concurrent retry")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+
+          const results = yield* Effect.all(
+            [
+              lifecycle.retry(created.id).pipe(Effect.result),
+              lifecycle.retry(created.id).pipe(Effect.result),
+            ],
+            { concurrency: "unbounded" },
+          )
+
+          const successes = results.filter((result) => Result.isSuccess(result))
+          const failures = results.filter((result) => Result.isFailure(result))
+          expect(successes).toHaveLength(1)
+          expect(failures).toHaveLength(1)
+          if (Result.isFailure(failures[0]!)) {
+            expect(failures[0].failure).toBeInstanceOf(ActiveStepRunExistsError)
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("create_worktree")
+          const active = final.stepRuns.filter(
+            (run) => run.status === "queued" || run.status === "running",
+          )
+          expect(active).toHaveLength(1)
+          expect(
+            final.stepRuns.filter((run) => run.status === "failed"),
+          ).toHaveLength(1)
+        }),
       )
     })
   })

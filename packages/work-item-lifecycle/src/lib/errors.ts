@@ -54,3 +54,25 @@ export class WorkItemLifecycleDatabaseError extends Data.TaggedError(
   readonly message: string
   readonly cause?: unknown
 }> {}
+
+export class WorkItemTerminalError extends Data.TaggedError(
+  "WorkItemTerminalError",
+)<{
+  readonly workItemId: string
+  readonly state: string
+}> {}
+
+export class ActiveStepRunExistsError extends Data.TaggedError(
+  "ActiveStepRunExistsError",
+)<{
+  readonly workItemId: string
+  readonly stepRunId: string
+  readonly status: string
+}> {}
+
+export class RetryNotEligibleError extends Data.TaggedError(
+  "RetryNotEligibleError",
+)<{
+  readonly workItemId: string
+  readonly reason: string
+}> {}
