@@ -23,6 +23,9 @@
       "path": "../github-service/tsconfig.lib.json"
     },
     {
+      "path": "../keymaxxer-service/tsconfig.lib.json"
+    },
+    {
       "path": "../db-service/tsconfig.lib.json"
     }
   ]

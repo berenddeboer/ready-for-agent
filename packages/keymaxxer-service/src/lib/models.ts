@@ -23,6 +23,11 @@ export const FindSecretInput = Schema.Struct({
 })
 export type FindSecretInput = typeof FindSecretInput.Type
 
+export const FindSecretsInput = Schema.Struct({
+  secrets: Schema.Array(FindSecretInput),
+})
+export type FindSecretsInput = typeof FindSecretsInput.Type
+
 export const RunWithSecretsInput = Schema.Struct({
   command: Schema.String,
   cwd: Schema.String,
@@ -40,7 +45,7 @@ export type RunWithSecretsResult = typeof RunWithSecretsResult.Type
 
 export const HealthResponse = Schema.Struct({
   status: Schema.Literal("ok"),
-  protocolVersion: Schema.Literal(2),
+  protocolVersion: Schema.Literal(3),
 })
 
 export const InitializeResponse = Schema.Struct({
@@ -50,9 +55,12 @@ export const HasSecretResponse = Schema.Struct({ hasSecret: Schema.Boolean })
 export const FindSecretResponse = Schema.Struct({
   name: Schema.NullOr(SecretName),
 })
+export const FindSecretsResponse = Schema.Struct({
+  names: Schema.Array(Schema.NullOr(SecretName)),
+})
 export const AddSecretResponse = Schema.Struct({ added: Schema.Boolean })
 
-export const protocolVersion = 2 as const
+export const protocolVersion = 3 as const
 
 export class KeymaxxerError extends Schema.TaggedErrorClass<KeymaxxerError>()(
   "KeymaxxerError",

@@ -4,6 +4,10 @@ import {
   IssueReconciler,
   type IssueReconcilerShape,
 } from "@ready-for-agent/issue-reconciler"
+import {
+  KeymaxxerService,
+  type KeymaxxerServiceShape,
+} from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { createGraphqlApi } from "../src/index.js"
 import { afterEach, describe, expect, test } from "bun:test"
@@ -39,6 +43,7 @@ const issue = {
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   reconcilerOverrides: Partial<IssueReconcilerShape> = {},
+  keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
 ) => {
   const opencode = {
     start: () => Effect.die("not used"),
@@ -65,10 +70,20 @@ const makeRuntime = (
     reconcile: () => Effect.die("not used"),
     ...reconcilerOverrides,
   }
+  const keymaxxer: KeymaxxerServiceShape = {
+    initialize: Effect.void,
+    findSecret: () => Effect.succeed(null),
+    findSecrets: (inputs) => Effect.succeed(inputs.map(() => null)),
+    hasSecret: () => Effect.succeed(false),
+    addSecret: () => Effect.succeed(true),
+    runWithSecrets: () => Effect.die("not used"),
+    ...keymaxxerOverrides,
+  }
   return ManagedRuntime.make(
     Layer.mergeAll(
       Layer.succeed(DbService, db),
       Layer.succeed(IssueReconciler, reconciler),
+      Layer.succeed(KeymaxxerService, keymaxxer),
       Layer.succeed(Opencode, opencode),
     ),
   )
@@ -160,6 +175,144 @@ describe("GraphQL API", () => {
           },
         ],
       },
+    })
+  })
+
+  test("reports repository GitHub credential status", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecrets: (inputs) =>
+          Effect.succeed(
+            inputs.map(({ account, provider }) =>
+              provider === "github" && account === "acme/widgets"
+                ? "MY_GITHUB_TOKEN"
+                : null,
+            ),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials {
+            repositoryId configured githubTokenSecretName githubTokenCreationUrl
+          }
+        }`,
+      }),
+    )
+    const body = (await response.json()) as {
+      data: { repositoryCredentials: Array<Record<string, unknown>> }
+    }
+
+    expect(body.data.repositoryCredentials).toEqual([
+      {
+        repositoryId: repository.id,
+        configured: true,
+        githubTokenSecretName: "MY_GITHUB_TOKEN",
+        githubTokenCreationUrl: expect.stringContaining(
+          "github.com/settings/personal-access-tokens/new",
+        ),
+      },
+    ])
+  })
+
+  test("opens Keymaxxer setup for a missing repository token", async () => {
+    let tokenName: string | null = null
+    let addCalls = 0
+    let addedInput: Parameters<KeymaxxerServiceShape["addSecret"]>[0] | null =
+      null
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed(tokenName),
+        addSecret: (input) =>
+          Effect.sleep("10 millis").pipe(
+            Effect.map(() => {
+              addCalls += 1
+              addedInput = input
+              tokenName = "RENAMED_GITHUB_TOKEN"
+              return true
+            }),
+          ),
+      },
+    )
+
+    const api = createGraphqlApi(runtime)
+    const request = () =>
+      api.fetch(
+        graphqlRequest({
+          query: `mutation AddToken($repositoryId: ID!) {
+          addRepositoryGitHubToken(repositoryId: $repositoryId) {
+            repositoryId configured githubTokenSecretName
+          }
+        }`,
+          variables: { repositoryId: repository.id },
+        }),
+      )
+    const [response, concurrentResponse] = await Promise.all([
+      request(),
+      request(),
+    ])
+
+    const expectedResponse = {
+      data: {
+        addRepositoryGitHubToken: {
+          repositoryId: repository.id,
+          configured: true,
+          githubTokenSecretName: "RENAMED_GITHUB_TOKEN",
+        },
+      },
+    }
+    expect(await response.json()).toEqual(expectedResponse)
+    expect(await concurrentResponse.json()).toEqual(expectedResponse)
+    expect(addCalls).toBe(1)
+    expect(addedInput).toEqual({
+      name: "GITHUB_TOKEN_ACME_WIDGETS",
+      provider: "github",
+      account: "acme/widgets",
+      environment: "prod",
+      access: "read-only",
+      description:
+        "Fine-grained GitHub token for Ready for Agent on acme/widgets",
+      tags: "ready-for-agent,harness,github",
+    })
+  })
+
+  test("rejects a saved token whose metadata no longer matches", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed(null),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          addRepositoryGitHubToken(repositoryId: "${repository.id}") {
+            configured
+          }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message:
+            "The saved Keymaxxer secret does not match this GitHub repository",
+          extensions: { code: "REPOSITORY_CREDENTIAL_ERROR" },
+        }),
+      ],
     })
   })
 

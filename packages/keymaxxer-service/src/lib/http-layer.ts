@@ -2,6 +2,7 @@ import { Effect, Layer, Schema } from "effect"
 import {
   AddSecretResponse,
   FindSecretResponse,
+  FindSecretsResponse,
   HasSecretResponse,
   HealthResponse,
   InitializeResponse,
@@ -177,6 +178,10 @@ const makeSidecarService = (
         ["name"],
         input,
       ).pipe(Effect.map((result) => result.name)),
+    findSecrets: (inputs) =>
+      request("findSecrets", "/find-secrets", FindSecretsResponse, ["names"], {
+        secrets: inputs,
+      }).pipe(Effect.map((result) => result.names)),
     addSecret: (input) =>
       validateSecretName(input.name)
         ? request(

@@ -16,6 +16,9 @@ export interface KeymaxxerServiceShape {
   readonly findSecret: (
     input: FindSecretInput,
   ) => Effect.Effect<SecretName | null, KeymaxxerError>
+  readonly findSecrets: (
+    inputs: readonly FindSecretInput[],
+  ) => Effect.Effect<readonly (SecretName | null)[], KeymaxxerError>
   readonly addSecret: (
     input: AddSecretInput,
   ) => Effect.Effect<boolean, KeymaxxerError>
@@ -39,6 +42,7 @@ export const testKeymaxxerLayer = (
       initialize: Effect.void,
       hasSecret: (name: SecretName) => Effect.succeed(secrets.has(name)),
       findSecret: () => Effect.succeed(null),
+      findSecrets: (inputs) => Effect.succeed(inputs.map(() => null)),
       addSecret: (input: AddSecretInput) =>
         Effect.sync(() => {
           secrets.add(input.name)

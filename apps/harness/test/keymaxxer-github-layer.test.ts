@@ -8,18 +8,14 @@ import { keymaxxerGitHubLayer } from "../src/server/keymaxxer-github-layer.js"
 import { describe, expect, test } from "bun:test"
 
 describe("Keymaxxer-backed GitHub layer", () => {
-  test("does not guess when the suggested token name is occupied", async () => {
-    const checkedNames: string[] = []
+  test("does not prompt Keymaxxer when a repository token is missing", async () => {
     let addCalled = false
     const runs: RunWithSecretsInput[] = []
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
       initialize: Effect.void,
       findSecret: () => Effect.succeed(null),
-      hasSecret: (name) =>
-        Effect.sync(() => {
-          checkedNames.push(name)
-          return true
-        }),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
       addSecret: () =>
         Effect.sync(() => {
           addCalled = true
@@ -44,7 +40,6 @@ describe("Keymaxxer-backed GitHub layer", () => {
     )
 
     expect(exit._tag).toBe("Failure")
-    expect(checkedNames).toEqual(["GITHUB_TOKEN_FOO_BAR_BAZ"])
     expect(addCalled).toBe(false)
     expect(runs).toHaveLength(0)
   })
@@ -58,6 +53,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
       initialize: Effect.void,
       findSecret: ({ account }) => Effect.succeed(tokens.get(account) ?? null),
+      findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
@@ -83,32 +79,17 @@ describe("Keymaxxer-backed GitHub layer", () => {
     ])
   })
 
-  test("obtains the repository GitHub token through Keymaxxer", async () => {
+  test("obtains the configured repository GitHub token through Keymaxxer", async () => {
     const runs: RunWithSecretsInput[] = []
-    const tokenChecks: string[] = []
-    let tokenPresent = false
-    let tokenAccount: string | null = null
-    let tokenName: string | null = null
-    const tokenAdds: string[] = []
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
       initialize: Effect.void,
       findSecret: ({ account }) =>
-        Effect.succeed(account === tokenAccount ? tokenName : null),
-      hasSecret: (name) =>
-        Effect.sync(() => {
-          tokenChecks.push(name)
-          return tokenPresent
-        }),
-      addSecret: ({ account, name }) =>
-        Effect.sleep("10 millis").pipe(
-          Effect.map(() => {
-            tokenAdds.push(name)
-            tokenPresent = true
-            tokenAccount = account ?? null
-            tokenName = name
-            return true
-          }),
+        Effect.succeed(
+          account === "acme/widgets" ? "GITHUB_TOKEN_ACME_WIDGETS" : null,
         ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({
@@ -173,8 +154,6 @@ describe("Keymaxxer-backed GitHub layer", () => {
       isReadyLabeled: true,
     })
     expect(runs).toHaveLength(2)
-    expect(tokenChecks).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
-    expect(tokenAdds).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
     expect(runs.map(({ secrets }) => secrets)).toEqual([
       ["GITHUB_TOKEN_ACME_WIDGETS"],
       ["GITHUB_TOKEN_ACME_WIDGETS"],

@@ -1,6 +1,7 @@
 type Query {
   health: Boolean!
   repositories: [Repository!]!
+  repositoryCredentials: [RepositoryCredential!]!
   config: Config!
   models: [String!]!
   issues(repositoryId: ID!): [Issue!]!
@@ -19,6 +20,13 @@ type Repository {
   isBare: Boolean!
   paused: Boolean!
   issuesReconciledAt: String
+}
+
+type RepositoryCredential {
+  repositoryId: ID!
+  configured: Boolean!
+  githubTokenSecretName: String!
+  githubTokenCreationUrl: String!
 }
 
 enum IssueState {
@@ -59,6 +67,7 @@ input UpdateConfigInput {
 
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
+  addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RepositoryRefresh!
   updateConfig(input: UpdateConfigInput!): Config!
