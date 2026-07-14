@@ -31,6 +31,12 @@ import {
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { EnqueueError, QueueService } from "@ready-for-agent/queue-service"
+import {
+  ResetCleanupError,
+  WorkItemLifecycle,
+  WorkItemLifecycleDatabaseError,
+  WorkItemNotFoundError,
+} from "@ready-for-agent/work-item-lifecycle"
 
 type AddRepositoryArgs = {
   input: {
@@ -62,6 +68,10 @@ type UpdateConfigArgs = {
 
 type IssuesArgs = {
   repositoryId: string
+}
+
+type ResetWorkItemArgs = {
+  workItemId: string
 }
 
 const childIssueCategory = (issue: IssueRecord): number => {
@@ -98,7 +108,12 @@ const workIssueProjection = (
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
-  DbService | IssueReconciler | KeymaxxerService | Opencode | QueueService,
+  | DbService
+  | IssueReconciler
+  | KeymaxxerService
+  | Opencode
+  | QueueService
+  | WorkItemLifecycle,
   unknown
 >
 
@@ -211,6 +226,21 @@ const toGraphQLError = (error: unknown): GraphQLError => {
   if (error instanceof EnqueueError) {
     return new GraphQLError(error.message, {
       extensions: { code: "ENQUEUE_ERROR" },
+    })
+  }
+  if (error instanceof WorkItemNotFoundError) {
+    return new GraphQLError(`Work Item not found: ${error.workItemId}`, {
+      extensions: { code: "WORK_ITEM_NOT_FOUND" },
+    })
+  }
+  if (error instanceof WorkItemLifecycleDatabaseError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "DATABASE_ERROR" },
+    })
+  }
+  if (error instanceof ResetCleanupError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "RESET_CLEANUP_FAILED" },
     })
   }
   if (error instanceof GraphQLError) {
@@ -495,6 +525,20 @@ export const createGraphqlApi = (
                   const db = yield* DbService
                   yield* db.removeRepository(args.repositoryId)
                   return args.repositoryId
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          resetWorkItem: async (_parent: unknown, args: ResetWorkItemArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.reset(args.workItemId)
                 }),
               ),
             )

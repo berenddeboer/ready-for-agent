@@ -97,6 +97,7 @@ export const STEP_RUN_REASON = {
   timeout: "timeout",
   interrupted: "interrupted",
   abandoned: "abandoned",
+  reset: "reset",
 } as const
 
 export type StepRunReasonCode =

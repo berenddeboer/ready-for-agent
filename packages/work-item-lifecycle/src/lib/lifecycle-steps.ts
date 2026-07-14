@@ -32,6 +32,9 @@ export interface LifecycleStepsShape {
   readonly review: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
+  readonly removeWorktree: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
 }
 
 export class LifecycleSteps extends Context.Service<
