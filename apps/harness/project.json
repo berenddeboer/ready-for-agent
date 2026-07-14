@@ -50,6 +50,19 @@
       "inputs": ["default", "^production"],
       "cache": true,
       "dependsOn": ["^build"]
+    },
+    "e2e": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "playwright test"
+      },
+      "dependsOn": [
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ]
     }
   }
 }

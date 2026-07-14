@@ -832,6 +832,32 @@ describe("GraphQL API", () => {
     expect(body.match(/"data":\{"issuesChanged":true\}/g)?.length).toBe(1)
   })
 
+  test("streams aggregate issue invalidations with Repository IDs", async () => {
+    const otherRepositoryId = "repo-01J11111111111111111111111"
+    await runtime.dispose()
+    runtime = makeRuntime({
+      issueChanges: Stream.make(repository.id, otherRepositoryId),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      new Request("http://127.0.0.1:4200/graphql", {
+        method: "POST",
+        headers: {
+          accept: "text/event-stream",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          query: "subscription { repositoryIssuesChanged }",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain(
+      `"data":{"repositoryIssuesChanged":"${otherRepositoryId}"}`,
+    )
+  })
+
   test("accepts same-origin browser requests", async () => {
     const response = await createGraphqlApi(runtime).fetch(
       addRepositoryRequest("http://127.0.0.1:4200"),
