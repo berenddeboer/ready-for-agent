@@ -62,6 +62,17 @@ type IssuesArgs = {
   repositoryId: string
 }
 
+const childIssueCategory = (issue: IssueRecord): number => {
+  if (issue.state === "CLOSED") return 2
+  return issue.blockedBy.length === 0 ? 0 : 1
+}
+
+const compareChildIssues = (left: IssueRecord, right: IssueRecord): number =>
+  childIssueCategory(left) - childIssueCategory(right) ||
+  (left.parentPosition ?? Number.MAX_SAFE_INTEGER) -
+    (right.parentPosition ?? Number.MAX_SAFE_INTEGER) ||
+  left.githubIssueNumber - right.githubIssueNumber
+
 const workIssueProjection = (
   issues: readonly IssueRecord[],
 ): readonly IssueRecord[] => {
@@ -80,12 +91,7 @@ const workIssueProjection = (
       if (!issue.hasChildren) return [issue]
       const children = childrenByParent.get(issue.githubIssueNumber) ?? []
       if (children.length === 0) return []
-      return [
-        issue,
-        ...children.sort(
-          (left, right) => left.githubIssueNumber - right.githubIssueNumber,
-        ),
-      ]
+      return [issue, ...children.sort(compareChildIssues)]
     })
 }
 

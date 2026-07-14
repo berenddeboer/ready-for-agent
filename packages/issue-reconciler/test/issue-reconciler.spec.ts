@@ -42,6 +42,7 @@ const remoteIssue = (
   ),
   state: "OPEN",
   parent: null,
+  parentPosition: null,
   hasChildren: false,
   hierarchySupported: true,
   blockedBy: [],
@@ -62,6 +63,7 @@ const localIssue = (
     url: remote.url,
     githubCreatedAt: remote.createdAt,
     state: remote.state,
+    parentPosition: remote.parentPosition,
     hasChildren: remote.hasChildren,
     parent:
       remote.parent === null
@@ -317,6 +319,7 @@ describe("IssueReconciler", () => {
     const github = makeGitHubLayer(
       [
         remoteIssue(1, {
+          parentPosition: 4,
           parent: {
             number: 9,
             url: "https://github.com/acme/widgets/issues/9",
@@ -338,6 +341,7 @@ describe("IssueReconciler", () => {
           githubIssueNumber: 9,
           githubIssueUrl: "https://github.com/acme/widgets/issues/9",
         })
+        expect(db.stored[0]?.parentPosition).toBe(4)
       }),
       db.layer,
       github,

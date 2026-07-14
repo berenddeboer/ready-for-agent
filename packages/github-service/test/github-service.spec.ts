@@ -25,6 +25,7 @@ const issue = (
   createdAt: new Date(`2026-07-${String(number).padStart(2, "0")}T12:00:00Z`),
   state,
   parent: null,
+  parentPosition: null,
   hasChildren: false,
   hierarchySupported: true,
   blockedBy: [],
@@ -127,6 +128,7 @@ describe("GitHubService live implementation", () => {
       createdAt: new Date("2026-07-02T12:00:00Z"),
       state: "CLOSED",
       parent: null,
+      parentPosition: null,
       hasChildren: false,
       hierarchySupported: true,
       blockedBy: [],
@@ -326,8 +328,8 @@ describe("GitHubService live implementation", () => {
                 subIssues: {
                   nodes: [
                     {
-                      number: 3,
-                      url: "https://github.com/acme/widgets/issues/3",
+                      number: 2,
+                      url: "https://github.com/acme/widgets/issues/2",
                       repository: { nameWithOwner: "acme/widgets" },
                       subIssuesSummary: { total: 1 },
                     },
@@ -357,6 +359,7 @@ describe("GitHubService live implementation", () => {
     ])
     expect(result.map(({ hasChildren }) => hasChildren)).toEqual([true, false])
     expect(result[1]?.parent?.isReadyLabeled).toBe(true)
+    expect(result[1]?.parentPosition).toBe(0)
   })
 
   it("checks every sub-issue page for cross-Repository relationships", async () => {
@@ -508,6 +511,61 @@ describe("GitHubService live implementation", () => {
     if (Result.isFailure(result)) {
       expect(result.failure).toBeInstanceOf(GitHubRequestError)
       expect(result.failure.message).toContain("invalid Issue data")
+    }
+  })
+
+  it("wraps malformed sub-issue positions as request errors", async () => {
+    const client = {
+      query: async () => ({
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Root",
+                body: "Body",
+                url: "https://github.com/acme/widgets/issues/1",
+                createdAt: "2026-07-01T12:00:00Z",
+                state: "OPEN",
+                parent: null,
+                subIssuesSummary: { total: 2 },
+                subIssues: {
+                  nodes: [
+                    {
+                      number: 2,
+                      url: "https://github.com/acme/other/issues/2",
+                      repository: { nameWithOwner: "acme/other" },
+                      subIssuesSummary: { total: 0 },
+                    },
+                    {
+                      number: "invalid",
+                      url: "https://github.com/acme/widgets/issues/3",
+                      repository: { nameWithOwner: "acme/widgets" },
+                      subIssuesSummary: { total: 0 },
+                    },
+                  ],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      }),
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository).pipe(Effect.result),
+    )
+
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+      expect(result.failure.message).toContain("invalid sub-issue data")
     }
   })
 

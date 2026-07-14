@@ -37,6 +37,7 @@ const issue = {
   state: "OPEN" as const,
   githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
   parent: null,
+  parentPosition: null,
   hasChildren: false,
   blockedBy: [
     {
@@ -465,7 +466,7 @@ describe("GraphQL API", () => {
     expect(requestedRepositoryId).toBe(repository.id)
   })
 
-  test("returns standalone and grouped child work in root order", async () => {
+  test("groups child work by actionability and preserves GitHub order", async () => {
     const makeIssue = (
       githubIssueNumber: number,
       overrides: Partial<typeof issue> = {},
@@ -488,10 +489,20 @@ describe("GraphQL API", () => {
       listIssues: () =>
         Effect.succeed([
           makeIssue(20, { hasChildren: true }),
-          makeIssue(12, { parent: parentReference, state: "CLOSED" }),
+          makeIssue(12, {
+            parent: parentReference,
+            parentPosition: 0,
+            state: "CLOSED",
+          }),
           makeIssue(3),
           parent,
-          makeIssue(11, { parent: parentReference }),
+          makeIssue(11, { parent: parentReference, parentPosition: 3 }),
+          makeIssue(13, {
+            parent: parentReference,
+            parentPosition: 1,
+            blockedBy: issue.blockedBy,
+          }),
+          makeIssue(14, { parent: parentReference, parentPosition: 2 }),
         ]),
     })
 
@@ -513,7 +524,17 @@ describe("GraphQL API", () => {
           { githubIssueNumber: 3, hasChildren: false, parent: null },
           { githubIssueNumber: 10, hasChildren: true, parent: null },
           {
+            githubIssueNumber: 14,
+            hasChildren: false,
+            parent: { githubIssueNumber: 10 },
+          },
+          {
             githubIssueNumber: 11,
+            hasChildren: false,
+            parent: { githubIssueNumber: 10 },
+          },
+          {
+            githubIssueNumber: 13,
             hasChildren: false,
             parent: { githubIssueNumber: 10 },
           },

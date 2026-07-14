@@ -17,6 +17,7 @@ const SerializedIssue = Schema.Struct({
   state: Schema.Literals(["OPEN", "CLOSED"]),
   hierarchySupported: Schema.Boolean,
   hasChildren: Schema.Boolean,
+  parentPosition: Schema.NullOr(Schema.Finite),
   parent: Schema.NullOr(
     Schema.Struct({
       number: Schema.Finite,
@@ -79,6 +80,13 @@ const parseIssues = (
                 throw new Error("Invalid parent Issue number")
               }
               new URL(issue.parent.url)
+            }
+            if (
+              issue.parentPosition !== null &&
+              (!Number.isSafeInteger(issue.parentPosition) ||
+                issue.parentPosition < 0)
+            ) {
+              throw new Error("Invalid parent position")
             }
             for (const dependency of issue.blockedBy) {
               if (

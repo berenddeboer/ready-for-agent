@@ -1,0 +1,1 @@
+ALTER TABLE `issue` ADD `parent_position` integer;

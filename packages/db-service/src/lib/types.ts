@@ -34,6 +34,7 @@ export interface StoreIssueInput {
   readonly state: IssueState
   readonly githubCreatedAt: Date
   readonly parent: IssueReference | null
+  readonly parentPosition: number | null
   readonly hasChildren: boolean
   readonly blockedBy: readonly IssueDependency[]
 }
@@ -50,6 +51,7 @@ export interface IssueRecord {
   readonly state: IssueState
   readonly githubCreatedAt: Date
   readonly parent: IssueReference | null
+  readonly parentPosition: number | null
   readonly hasChildren: boolean
   readonly blockedBy: readonly IssueDependency[]
 }
