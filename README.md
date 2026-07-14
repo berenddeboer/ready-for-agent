@@ -4,7 +4,9 @@ Opinionated agentic software engineering harness to massively increase landed PR
 
 ## Assumes
 1. You are using GitHub.
-2. Ideally you have set up AI code reviews via GitHub Actions.
+2. You have your local environment setup for development for all repos
+   you want to use with this tool.
+3. Ideally you have set up AI code reviews via GitHub Actions.
 
 ## Requirements
 1. git
