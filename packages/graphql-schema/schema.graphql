@@ -75,6 +75,7 @@ type Mutation {
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
+  resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
 }
 

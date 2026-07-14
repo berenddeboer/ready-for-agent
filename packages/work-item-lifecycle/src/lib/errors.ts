@@ -86,3 +86,9 @@ export class WorkItemHasRunningStepError extends Data.TaggedError(
   readonly workItemId: string
   readonly stepRunId: string
 }> {}
+
+export class ResetCleanupError extends Data.TaggedError("ResetCleanupError")<{
+  readonly workItemId: string
+  readonly message: string
+  readonly cause: unknown
+}> {}
