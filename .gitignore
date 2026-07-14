@@ -32,6 +32,8 @@ node_modules
 /.sass-cache
 /connect.lock
 /coverage
+/apps/harness/playwright-report/
+/apps/harness/test-results/
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log

@@ -377,6 +377,16 @@ export const createGraphqlApi = (
               ),
             resolve: () => true,
           },
+          repositoryIssuesChanged: {
+            subscribe: async () =>
+              runtime.runPromise(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* Stream.toAsyncIterableEffect(db.issueChanges)
+                }),
+              ),
+            resolve: (repositoryId: string) => repositoryId,
+          },
         },
         Mutation: {
           updateConfig: async (_parent: unknown, args: UpdateConfigArgs) => {

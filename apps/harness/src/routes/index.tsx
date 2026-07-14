@@ -6,6 +6,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { Suspense, useEffect, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -132,6 +133,7 @@ function RepositoryCards() {
   const queryClient = useQueryClient()
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
+  const repositoryIdsKey = repositories.map(({ id }) => id).join("\0")
 
   useEffect(() => {
     let cancelled = false
@@ -193,6 +195,22 @@ function RepositoryCards() {
     }
   }, [queryClient])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    const repositoryIds =
+      repositoryIdsKey === "" ? [] : repositoryIdsKey.split("\0")
+    void followRepositoryIssuesLive({
+      repositoryIds,
+      queryClient,
+      queries: {
+        repositories: repositoriesQuery,
+        issues: issuesQuery,
+      },
+      signal: controller.signal,
+    })
+    return () => controller.abort()
+  }, [queryClient, repositoryIdsKey])
+
   const warning = liveUpdatesUnavailable ? (
     <p
       className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
@@ -237,6 +255,7 @@ function RepositoryCards() {
 function RepositoryCard({ repository }: { repository: Repository }) {
   const queryClient = useQueryClient()
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
+
   const removeRepository = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -268,14 +287,16 @@ function RepositoryCard({ repository }: { repository: Repository }) {
   }
 
   const refreshIssues = useMutation({
-    mutationFn: () =>
-      graphql.mutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
         refreshRepository: {
           __args: { repositoryId: repository.id },
           id: true,
           repositoryId: true,
         },
-      }),
+      })
+      return result.refreshRepository
+    },
   })
 
   const addGitHubToken = useMutation({
