@@ -37,7 +37,12 @@ const issue = {
   state: "OPEN" as const,
   githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
   parent: null,
-  blockedBy: [],
+  blockedBy: [
+    {
+      githubIssueNumber: 17,
+      githubIssueUrl: "https://github.com/acme/widgets/issues/17",
+    },
+  ],
 }
 
 const makeRuntime = (
@@ -402,6 +407,7 @@ describe("GraphQL API", () => {
         query: `query ListIssues($repositoryId: ID!) {
           issues(repositoryId: $repositoryId) {
             id repositoryId githubIssueNumber title body url state githubCreatedAt
+            blockedBy { githubIssueNumber githubIssueUrl }
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -421,6 +427,7 @@ describe("GraphQL API", () => {
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.githubCreatedAt.toISOString(),
+            blockedBy: issue.blockedBy,
           },
         ],
       },

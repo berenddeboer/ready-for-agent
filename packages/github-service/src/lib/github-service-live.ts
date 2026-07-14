@@ -30,7 +30,7 @@ interface GitHubApiIssue {
 }
 
 interface GitHubApiIssueConnection {
-  readonly nodes: readonly (GitHubApiIssueReference | null)[] | null
+  readonly nodes: readonly (GitHubApiIssueDependency | null)[] | null
   readonly pageInfo: {
     readonly endCursor: string | null
     readonly hasNextPage: boolean
@@ -40,6 +40,10 @@ interface GitHubApiIssueConnection {
 interface GitHubApiIssueReference {
   readonly number: unknown
   readonly url: unknown
+}
+
+interface GitHubApiIssueDependency extends GitHubApiIssueReference {
+  readonly state: unknown
 }
 
 interface GitHubApiRepositoryReference {
@@ -106,6 +110,7 @@ const mapBlockedByPage = (
 ): readonly GitHubIssueReference[] =>
   (connection.nodes ?? [])
     .filter((issue) => issue !== null)
+    .filter((issue) => toIssueState(issue.state) === "OPEN")
     .map(toIssueReference)
 
 const toRepositoryName = (repository: GitHubApiRepositoryReference): string => {
@@ -267,7 +272,7 @@ export const makeGitHubService = (
                     },
                     blockedBy: {
                       __args: { first: PAGE_SIZE },
-                      nodes: { number: true, url: true },
+                      nodes: { number: true, url: true, state: true },
                       pageInfo: { endCursor: true, hasNextPage: true },
                     },
                   },
@@ -326,7 +331,7 @@ export const makeGitHubService = (
                           first: PAGE_SIZE,
                           after: blockedByPage.endCursor,
                         },
-                        nodes: { number: true, url: true },
+                        nodes: { number: true, url: true, state: true },
                         pageInfo: { endCursor: true, hasNextPage: true },
                       },
                     },

@@ -43,6 +43,12 @@ type Issue {
   url: String!
   state: IssueState!
   githubCreatedAt: String!
+  blockedBy: [IssueReference!]!
+}
+
+type IssueReference {
+  githubIssueNumber: Int!
+  githubIssueUrl: String!
 }
 
 type RepositoryRefresh {
