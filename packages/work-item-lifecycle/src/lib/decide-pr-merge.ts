@@ -120,7 +120,10 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
         Effect.mapError(
           (cause) =>
             new DecidePrMergeOpenCodeError({
-              message: "OpenCode failed while deciding PR merge risk",
+              message:
+                cause instanceof Error && cause.message.trim() !== ""
+                  ? `OpenCode failed while deciding PR merge risk: ${cause.message}`
+                  : "OpenCode failed while deciding PR merge risk",
               cause,
             }),
         ),

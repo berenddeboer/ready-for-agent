@@ -60,7 +60,8 @@ describe("WorkItemLifecycle", () => {
     commit: () => Effect.void,
     createPr: () => Effect.void,
     watchPrStatusChecks: () => Effect.succeed("succeeded"),
-    investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
+    investigatePrStatusChecks: () =>
+      Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
     markPrReadyForReview: () => Effect.void,
     decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
     removeWorktree: () => Effect.void,
@@ -1032,16 +1033,17 @@ describe("WorkItemLifecycle", () => {
     })
 
     it("rechecks pending PR checks after 30 seconds and hands failed checks to a human when requested", () => {
-      const statuses = ["pending", "failed"] as const
+      const statuses = ["pending", "handoff_needed"] as const
       let statusIndex = 0
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.succeed(statuses[statusIndex++] ?? "failed"),
+          Effect.succeed(statuses[statusIndex++] ?? "handoff_needed"),
         investigatePrStatusChecks: () =>
           Effect.succeed({
             _tag: "needs_human",
             reason: "A repository owner must approve the workflow",
+            handledCheckIds: [],
           }),
       }
 
@@ -1100,6 +1102,195 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
           expect(nextAttempt.id).not.toBe(created.id)
+        }),
+      )
+    })
+
+    it("leaves handed-off checks unhandled when the lifecycle transition rolls back", () => {
+      const checkId = "psc-transition-rollback"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "A repository owner must approve the workflow",
+            handledCheckIds: [checkId],
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES (?, ?, 'checkrun:rollback', 'deploy', 'red', NULL, ?, ?, ?)`,
+            [checkId, created.id, now, now, now],
+          )
+          yield* sql.unsafe(
+            `CREATE TRIGGER fail_investigate_transition
+             BEFORE UPDATE ON work_item
+             WHEN OLD.state = 'investigate_pr_status_checks'
+             BEGIN
+               SELECT RAISE(ABORT, 'injected transition failure');
+             END`,
+          )
+
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isNone(claimed)) {
+            return yield* Effect.die("expected an investigation job")
+          }
+          const payload = claimed.value.payload as { stepRunId: string }
+          const result = yield* Effect.result(
+            lifecycle.runStep(payload.stepRunId),
+          )
+          expect(Result.isFailure(result)).toBe(true)
+
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+            [checkId],
+          )) as readonly { readonly handled_at: number | null }[]
+          expect(checks[0]?.handled_at).toBeNull()
+        }),
+      )
+    })
+
+    it("batches unhandled green results while aggregate is pending and waits for handoff before Mark PR Ready", () => {
+      const watchStatuses = [
+        "handoff_needed",
+        "pending",
+        "handoff_needed",
+        "succeeded",
+      ] as const
+      let watchIndex = 0
+      let investigations = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchStatuses[watchIndex++] ?? "succeeded"),
+        investigatePrStatusChecks: () => {
+          investigations += 1
+          return Effect.succeed({
+            _tag: "processed" as const,
+            handledCheckIds: [],
+          })
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+
+          for (let index = 0; index < 7; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const firstHandoff = yield* claimAndRunPending
+          expect(firstHandoff._tag).toBe("processed")
+          if (firstHandoff._tag === "processed") {
+            expect(firstHandoff.workItem.state).toBe(
+              "investigate_pr_status_checks",
+            )
+          }
+
+          const afterFirstInvestigate = yield* claimAndRunPending
+          expect(afterFirstInvestigate._tag).toBe("processed")
+          if (afterFirstInvestigate._tag === "processed") {
+            expect(afterFirstInvestigate.workItem.state).toBe(
+              "watch_pr_status_checks",
+            )
+          }
+          expect(investigations).toBe(1)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const stillPending = yield* claimAndRunPending
+          expect(stillPending._tag).toBe("processed")
+          if (stillPending._tag === "processed") {
+            expect(stillPending.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const secondHandoff = yield* claimAndRunPending
+          expect(secondHandoff._tag).toBe("processed")
+          if (secondHandoff._tag === "processed") {
+            expect(secondHandoff.workItem.state).toBe(
+              "investigate_pr_status_checks",
+            )
+          }
+
+          const afterSecondInvestigate = yield* claimAndRunPending
+          expect(afterSecondInvestigate._tag).toBe("processed")
+          if (afterSecondInvestigate._tag === "processed") {
+            expect(afterSecondInvestigate.workItem.state).toBe(
+              "watch_pr_status_checks",
+            )
+          }
+          expect(investigations).toBe(2)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const ready = yield* claimAndRunPending
+          expect(ready._tag).toBe("processed")
+          if (ready._tag === "processed") {
+            expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+          }
+        }),
+      )
+    })
+
+    it("keeps polling when aggregate is failed but all observed terminal checks are already handled", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("failed"),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+
+          for (let index = 0; index < 7; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const afterFailed = yield* claimAndRunPending
+          expect(afterFailed._tag).toBe("processed")
+          if (afterFailed._tag === "processed") {
+            expect(afterFailed.workItem.state).toBe("watch_pr_status_checks")
+            expect(afterFailed.workItem.stepRuns.at(-1)?.status).toBe("queued")
+          }
+
+          const delayed = (yield* sql.unsafe(
+            `SELECT available_at, created_at FROM job_queue`,
+          )) as readonly {
+            readonly available_at: number
+            readonly created_at: number
+          }[]
+          expect(delayed).toHaveLength(1)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
         }),
       )
     })
@@ -1167,7 +1358,8 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.succeed("succeeded")
         },
-        investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: (context) => {
           seen.push(context)
           return Effect.void

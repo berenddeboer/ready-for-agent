@@ -1,5 +1,6 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import { SqlClient } from "effect/unstable/sql"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -37,6 +38,7 @@ export const LifecycleStepsLive = Layer.effect(
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const opencode = yield* Opencode
     const github = yield* GitHubService
+    const sql = yield* SqlClient.SqlClient
 
     const withServices = <A, E>(
       effect: Effect.Effect<
@@ -49,6 +51,7 @@ export const LifecycleStepsLive = Layer.effect(
         | ChildProcessSpawner.ChildProcessSpawner
         | Opencode
         | GitHubService
+        | SqlClient.SqlClient
       >,
     ) =>
       effect.pipe(
@@ -59,6 +62,7 @@ export const LifecycleStepsLive = Layer.effect(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(Opencode, opencode),
         Effect.provideService(GitHubService, github),
+        Effect.provideService(SqlClient.SqlClient, sql),
       )
 
     return LifecycleSteps.of({

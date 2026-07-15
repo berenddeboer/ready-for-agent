@@ -3,11 +3,31 @@ export interface GitHubRepository {
   readonly name: string
 }
 
+export type TerminalPrStatusCheckOutcome = "green" | "red"
+
+/**
+ * One green or red PR Status Check execution observed on a pull request head.
+ */
+export interface TerminalPrStatusCheck {
+  readonly externalId: string
+  readonly name: string
+  readonly outcome: TerminalPrStatusCheckOutcome
+}
+
 export type PullRequestCheckStatus =
-  | { readonly _tag: "pending" }
+  | {
+      readonly _tag: "pending"
+      readonly terminalChecks: readonly TerminalPrStatusCheck[]
+    }
   | { readonly _tag: "no_checks" }
-  | { readonly _tag: "succeeded" }
-  | { readonly _tag: "failed" }
+  | {
+      readonly _tag: "succeeded"
+      readonly terminalChecks: readonly TerminalPrStatusCheck[]
+    }
+  | {
+      readonly _tag: "failed"
+      readonly terminalChecks: readonly TerminalPrStatusCheck[]
+    }
   | { readonly _tag: "closed" }
 
 export type GitHubIssueState = "OPEN" | "CLOSED"

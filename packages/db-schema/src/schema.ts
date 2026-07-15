@@ -282,3 +282,40 @@ export const stepRun = snakeCase.table(
     index("step_run_work_item_id_queued_at_idx").on(t.workItemId, t.queuedAt),
   ],
 )
+
+/**
+ * Observed green or red PR Status Check execution for a Work Item.
+ * See xplain: type pr status check "psc"
+ */
+export const prStatusCheck = snakeCase.table(
+  "pr_status_check",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `psc-${ulid()}`),
+    workItemId: text()
+      .notNull()
+      .references(() => workItem.id, { onDelete: "cascade" }),
+    externalId: text().notNull(),
+    name: text().notNull(),
+    outcome: text({ enum: ["green", "red"] }).notNull(),
+    handledAt: integer({ mode: "number" }),
+    observedAt: integer({ mode: "number" }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    uniqueIndex("pr_status_check_work_item_external_uidx").on(
+      t.workItemId,
+      t.externalId,
+    ),
+    index("pr_status_check_work_item_handled_idx").on(
+      t.workItemId,
+      t.handledAt,
+    ),
+  ],
+)

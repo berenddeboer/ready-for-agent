@@ -35,16 +35,36 @@ const SerializedIssue = Schema.Struct({
 })
 
 const SerializedIssues = Schema.Array(SerializedIssue)
+const SerializedTerminalPrStatusCheck = Schema.Struct({
+  externalId: Schema.String,
+  name: Schema.String,
+  outcome: Schema.Literals(["green", "red"]),
+})
+
 const SerializedPullRequestCheckStatus = Schema.Union([
-  Schema.TaggedStruct("pending", {}),
-  Schema.TaggedStruct("succeeded", {}),
-  Schema.TaggedStruct("failed", {}),
+  Schema.TaggedStruct("pending", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+  }),
+  Schema.TaggedStruct("no_checks", {}),
+  Schema.TaggedStruct("succeeded", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+  }),
+  Schema.TaggedStruct("failed", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+  }),
   Schema.TaggedStruct("closed", {}),
 ])
 
-const requestError = (repository: { owner: string; name: string }) =>
+const requestError = (
+  repository: { owner: string; name: string },
+  operation: string,
+  detail?: string,
+) =>
   new GitHubRequestError({
-    message: `Failed to list Ready-labeled Issues for ${repository.owner}/${repository.name}`,
+    message:
+      detail === undefined || detail.trim() === ""
+        ? `Failed to ${operation} for ${repository.owner}/${repository.name}`
+        : `Failed to ${operation} for ${repository.owner}/${repository.name}: ${detail.trim().slice(0, 300)}`,
   })
 
 const encodeArgument = (value: string) =>
@@ -56,11 +76,13 @@ const parseIssues = (
 ): Effect.Effect<readonly ReadyLabeledIssue[], GitHubRequestError> =>
   Effect.try({
     try: () => JSON.parse(stdout) as unknown,
-    catch: () => requestError(repository),
+    catch: () => requestError(repository, "list Ready-labeled Issues"),
   }).pipe(
     Effect.flatMap((value) =>
       Schema.decodeUnknownEffect(SerializedIssues)(value).pipe(
-        Effect.mapError(() => requestError(repository)),
+        Effect.mapError(() =>
+          requestError(repository, "list Ready-labeled Issues"),
+        ),
       ),
     ),
     Effect.flatMap((issues) =>
@@ -105,7 +127,7 @@ const parseIssues = (
             }
             return { ...issue, createdAt }
           }),
-        catch: () => requestError(repository),
+        catch: () => requestError(repository, "list Ready-labeled Issues"),
       }),
     ),
   )
@@ -128,7 +150,10 @@ export const keymaxxerGitHubLayer = (options: {
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)
             if (tokenName === null) {
-              return yield* requestError(repository)
+              return yield* requestError(
+                repository,
+                "get pull request check status",
+              )
             }
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
@@ -143,23 +168,38 @@ export const keymaxxerGitHubLayer = (options: {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
             if (result.exitCode !== 0) {
-              return yield* requestError(repository)
+              return yield* requestError(
+                repository,
+                "get pull request check status",
+                result.stderr || result.stdout,
+              )
             }
             return yield* Schema.decodeUnknownEffect(
               Schema.fromJsonString(SerializedPullRequestCheckStatus),
             )(result.stdout).pipe(
-              Effect.mapError(() => requestError(repository)),
+              Effect.mapError(() =>
+                requestError(
+                  repository,
+                  "decode pull request check status",
+                  result.stdout,
+                ),
+              ),
             )
           }).pipe(
             Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(requestError(repository)),
+              Effect.fail(
+                requestError(repository, "get pull request check status"),
+              ),
             ),
           ),
         markPullRequestReadyForReview: (repository, headRefName) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)
             if (tokenName === null) {
-              return yield* requestError(repository)
+              return yield* requestError(
+                repository,
+                "mark pull request ready for review",
+              )
             }
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
@@ -174,18 +214,27 @@ export const keymaxxerGitHubLayer = (options: {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
             if (result.exitCode !== 0) {
-              return yield* requestError(repository)
+              return yield* requestError(
+                repository,
+                "mark pull request ready for review",
+                result.stderr || result.stdout,
+              )
             }
           }).pipe(
             Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(requestError(repository)),
+              Effect.fail(
+                requestError(repository, "mark pull request ready for review"),
+              ),
             ),
           ),
         listReadyIssues: (repository) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)
             if (tokenName === null) {
-              return yield* requestError(repository)
+              return yield* requestError(
+                repository,
+                "list Ready-labeled Issues",
+              )
             }
 
             const owner = encodeArgument(repository.owner)
@@ -201,12 +250,18 @@ export const keymaxxerGitHubLayer = (options: {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
             if (result.exitCode !== 0) {
-              return yield* requestError(repository)
+              return yield* requestError(
+                repository,
+                "list Ready-labeled Issues",
+                result.stderr || result.stdout,
+              )
             }
             return yield* parseIssues(result.stdout, repository)
           }).pipe(
             Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(requestError(repository)),
+              Effect.fail(
+                requestError(repository, "list Ready-labeled Issues"),
+              ),
             ),
           ),
       }

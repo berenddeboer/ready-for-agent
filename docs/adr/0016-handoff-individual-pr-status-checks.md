@@ -4,9 +4,9 @@ status: accepted
 
 # Hand Off Individual PR Status Checks
 
-Extend Watch PR Status Checks to poll the individual GitHub Check Runs and commit status contexts behind the aggregate rollup. Persist each execution that reaches an explicit green result (`SUCCESS`) or red result (`FAILURE`, `ERROR`, `TIMED_OUT`, `ACTION_REQUIRED`, or `STARTUP_FAILURE`) and whether it has been handed to OpenCode; neutral, skipped, cancelled, stale, and pending results do not trigger a handoff.
+Extend Watch PR Status Checks to poll the individual GitHub Actions jobs and classic commit statuses behind the aggregate rollup (via REST; fine-grained PATs cannot read GraphQL CheckRun nodes). Persist each execution that reaches an explicit green result (`SUCCESS`) or red result (`FAILURE`, `ERROR`, `TIMED_OUT`, `ACTION_REQUIRED`, or `STARTUP_FAILURE`) and whether it has been handed to OpenCode; neutral, skipped, cancelled, stale, and pending results do not trigger a handoff.
 
-Batch every currently unhandled result into one run of the existing Investigate PR Status Checks Lifecycle Step, continuing the Work Item's Implement Session with its GitHub credential. The prompt identifies red checks to diagnose and fix; when the batch contains any green check, it also says that automated reviews may have completed and asks OpenCode to inspect the latest pull-request comments, disregard reviews visibly still in progress, and address worthwhile completed feedback. OpenCode returns `READY_FOR_AGENT_RESULT: PROCESSED` or `READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <reason>`.
+Batch every currently unhandled result into one run of the existing Investigate PR Status Checks Lifecycle Step, continuing the Work Item's Implement Session with its GitHub credential. Investigation is two OpenCode turns on that Session: (1) address red checks / worthwhile completed review feedback, commit and push, without a result marker; (2) a short follow-up that only asks for `READY_FOR_AGENT_RESULT: PROCESSED` or `READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <reason>`. When the batch contains any green check, turn (1) also says that automated reviews may have completed and asks OpenCode to inspect the latest pull-request comments, disregard reviews visibly still in progress, and address worthwhile completed feedback.
 
 ## Consequences
 

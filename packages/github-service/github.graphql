@@ -49,11 +49,37 @@ type PullRequest {
   state: PullRequestState!
   merged: Boolean!
   isDraft: Boolean!
+  headRefOid: String!
   statusCheckRollup: StatusCheckRollup
 }
 
 type StatusCheckRollup {
   state: StatusState!
+  contexts(first: Int, after: String): StatusCheckRollupContextConnection!
+}
+
+type StatusCheckRollupContextConnection {
+  nodes: [StatusCheckRollupContext]
+  pageInfo: PageInfo!
+}
+
+union StatusCheckRollupContext = CheckRun | StatusContext
+
+type CheckRun {
+  id: ID!
+  databaseId: Int
+  name: String!
+  status: CheckStatusState!
+  conclusion: CheckConclusionState
+  startedAt: DateTime
+  completedAt: DateTime
+}
+
+type StatusContext {
+  id: ID!
+  context: String!
+  state: StatusState!
+  createdAt: DateTime!
 }
 
 enum PullRequestState {
@@ -68,6 +94,27 @@ enum StatusState {
   FAILURE
   PENDING
   SUCCESS
+}
+
+enum CheckStatusState {
+  QUEUED
+  IN_PROGRESS
+  COMPLETED
+  WAITING
+  PENDING
+  REQUESTED
+}
+
+enum CheckConclusionState {
+  ACTION_REQUIRED
+  CANCELLED
+  FAILURE
+  NEUTRAL
+  SUCCESS
+  SKIPPED
+  STALE
+  TIMED_OUT
+  STARTUP_FAILURE
 }
 
 type IssueConnection {

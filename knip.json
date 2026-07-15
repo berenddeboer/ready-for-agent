@@ -6,7 +6,6 @@
   "workspaces": {
     "apps/harness": {
       "entry": [
-        "server.ts",
         "src/router.tsx",
         "src/server.ts",
         "src/styles.css",
@@ -15,26 +14,35 @@
       "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
     },
     "apps/keymaxxer-sidecar": {
-      "entry": ["src/main.ts", "test/**/*.test.ts"],
+      "entry": ["test/**/*.test.ts"],
       "project": ["src/**/*.ts", "test/**/*.ts"]
     },
     "apps/cli": {
-      "entry": ["src/main.ts", "src/**/*.test.ts"],
+      "entry": ["src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
     },
-    "packages/graphql-client": {
-      "entry": ["src/index.ts"]
-    },
     "packages/github-service": {
-      "entry": ["src/bin/list-ready-issues.ts", "test/**/*.{test,spec}.ts"],
+      "entry": [
+        "src/bin/get-pr-check-status.ts",
+        "src/bin/list-ready-issues.ts",
+        "src/bin/mark-pr-ready-for-review.ts",
+        "test/**/*.{test,spec}.ts"
+      ],
       "project": ["src/**/*.ts", "test/**/*.ts"]
     },
+    "packages/db-schema": {
+      "entry": [],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/graphql-schema": {
+      "entry": [],
+      "project": ["src/**/*.ts"]
+    },
     "packages/db": {
-      "entry": ["src/bin/migrate.ts"],
       "project": ["src/**/*.{ts,tsx}"]
     },
     "packages/*": {
-      "entry": ["src/index.ts", "test/**/*.{test,spec}.ts"],
+      "entry": ["test/**/*.{test,spec}.ts"],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
     }
   }
