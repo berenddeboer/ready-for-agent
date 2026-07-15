@@ -1,6 +1,11 @@
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry"
 import type { Application } from "./server/application.server.js"
+import { ignoreClosedStreamErrors } from "./server/ignore-closed-stream-errors.js"
 import type { ApplicationRequestContext } from "./server-context.js"
+
+if (import.meta.env.DEV && typeof Bun === "undefined") {
+  ignoreClosedStreamErrors()
+}
 
 let applicationPromise: Promise<Application> | undefined
 

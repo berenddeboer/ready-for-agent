@@ -83,6 +83,16 @@ describe("single application server topology", () => {
     expect(applicationServer).not.toContain('from "@effect/platform-bun"')
   })
 
+  test("installs the undici stream guard only in Node development", async () => {
+    const serverEntry = await readFile(
+      new URL("../src/server.ts", import.meta.url),
+      "utf8",
+    )
+
+    expect(serverEntry).toContain("import.meta.env.DEV")
+    expect(serverEntry).toContain('typeof Bun === "undefined"')
+  })
+
   test("does not start the long-lived worker during preflight", async () => {
     const preflight = await readFile(
       new URL("../src/server/preflight.ts", import.meta.url),
