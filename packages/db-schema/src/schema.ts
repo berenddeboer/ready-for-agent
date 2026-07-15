@@ -188,9 +188,12 @@ export const workItem = snakeCase.table(
         "review",
         "commit",
         "create_pr",
+        "watch_pr_status_checks",
+        "investigate_pr_status_checks",
         "complete",
         "failed",
         "abandoned",
+        "needs_human",
       ],
     }).notNull(),
     stateReadyAt: integer({ mode: "number" }).notNull(),
@@ -206,9 +209,11 @@ export const workItem = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
-    uniqueIndex("work_item_one_unfinished_uidx")
+    uniqueIndex("work_item_one_unfinished_v2_uidx")
       .on(t.repositoryId, t.githubIssueNumber)
-      .where(sql`${t.state} NOT IN ('complete', 'failed', 'abandoned')`),
+      .where(
+        sql`${t.state} NOT IN ('complete', 'failed', 'abandoned', 'needs_human')`,
+      ),
     index("work_item_repository_issue_created_idx").on(
       t.repositoryId,
       t.githubIssueNumber,
@@ -239,6 +244,8 @@ export const stepRun = snakeCase.table(
         "review",
         "commit",
         "create_pr",
+        "watch_pr_status_checks",
+        "investigate_pr_status_checks",
       ],
     }).notNull(),
     status: text({

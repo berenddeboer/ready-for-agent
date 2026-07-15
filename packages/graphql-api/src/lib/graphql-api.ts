@@ -165,6 +165,7 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("issues", "read")
   url.searchParams.set("contents", "write")
   url.searchParams.set("pull_requests", "write")
+  url.searchParams.set("actions", "read")
   return url.toString()
 }
 

@@ -59,6 +59,8 @@ describe("WorkItemLifecycle", () => {
     review: () => Effect.void,
     commit: () => Effect.void,
     createPr: () => Effect.void,
+    watchPrStatusChecks: () => Effect.succeed("succeeded"),
+    investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
     removeWorktree: () => Effect.void,
   }
 
@@ -517,7 +519,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 7; i++) {
+          for (let i = 0; i < 8; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -578,7 +580,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 7; i++) {
+          for (let i = 0; i < 8; i++) {
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -901,16 +903,22 @@ describe("WorkItemLifecycle", () => {
           const afterCreatePr = yield* claimAndRunPending
           expect(afterCreatePr._tag).toBe("processed")
           if (afterCreatePr._tag === "processed") {
-            expect(afterCreatePr.workItem.state).toBe("complete")
-            expect(afterCreatePr.workItem.worktreePath).toBe(
+            expect(afterCreatePr.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          const afterChecks = yield* claimAndRunPending
+          expect(afterChecks._tag).toBe("processed")
+          if (afterChecks._tag === "processed") {
+            expect(afterChecks.workItem.state).toBe("complete")
+            expect(afterChecks.workItem.worktreePath).toBe(
               "/tmp/worktrees/acme-widgets-42",
             )
-            expect(afterCreatePr.workItem.sessionId).toBe(
+            expect(afterChecks.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterCreatePr.workItem.failureCode).toBeNull()
+            expect(afterChecks.workItem.failureCode).toBeNull()
             expect(
-              afterCreatePr.workItem.stepRuns.map((run) => [
+              afterChecks.workItem.stepRuns.map((run) => [
                 run.step,
                 run.status,
               ]),
@@ -922,6 +930,7 @@ describe("WorkItemLifecycle", () => {
               ["review", "succeeded"],
               ["commit", "succeeded"],
               ["create_pr", "succeeded"],
+              ["watch_pr_status_checks", "succeeded"],
             ])
           }
 
@@ -931,9 +940,110 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(7)
+          expect(final.stepRuns).toHaveLength(8)
         }),
       ))
+
+    it("rechecks pending PR checks after 30 seconds and hands failed checks to a human when requested", () => {
+      const statuses = ["pending", "failed"] as const
+      let statusIndex = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed(statuses[statusIndex++] ?? "failed"),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "A repository owner must approve the workflow",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 7; index += 1) {
+            yield* claimAndRunPending
+          }
+          const pending = yield* claimAndRunPending
+          expect(pending._tag).toBe("processed")
+          if (pending._tag === "processed") {
+            expect(pending.workItem.state).toBe("watch_pr_status_checks")
+            expect(pending.workItem.stepRuns.at(-2)?.status).toBe("succeeded")
+            expect(pending.workItem.stepRuns.at(-1)?.status).toBe("queued")
+          }
+
+          const delayed = (yield* sql.unsafe(
+            `SELECT available_at, created_at FROM job_queue`,
+          )) as readonly {
+            readonly available_at: number
+            readonly created_at: number
+          }[]
+          expect(delayed).toHaveLength(1)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const failed = yield* claimAndRunPending
+          expect(failed._tag).toBe("processed")
+          if (failed._tag === "processed") {
+            expect(failed.workItem.state).toBe("investigate_pr_status_checks")
+          }
+
+          const investigated = yield* claimAndRunPending
+          expect(investigated._tag).toBe("processed")
+          if (investigated._tag === "processed") {
+            expect(investigated.workItem.state).toBe("needs_human")
+            expect(investigated.workItem.failureCode).toBe("needs_human")
+            expect(investigated.workItem.failureMessage).toBe(
+              "A repository owner must approve the workflow",
+            )
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          const nextAttempt = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(nextAttempt.id).not.toBe(created.id)
+        }),
+      )
+    })
+
+    it("stops polling when the PR is closed without merging", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("closed"),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          expect(final.failureMessage).toBe(
+            "The pull request was closed before its status checks succeeded",
+          )
+        }),
+      )
+    })
 
     it("supplies worktree path, session, model, and variant to later handlers", () => {
       const seen: LifecycleStepContext[] = []
@@ -966,6 +1076,11 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.void
         },
+        watchPrStatusChecks: (context) => {
+          seen.push(context)
+          return Effect.succeed("succeeded")
+        },
+        investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
         removeWorktree: () => Effect.void,
       }
 
@@ -989,8 +1104,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
 
-          expect(seen).toHaveLength(7)
+          expect(seen).toHaveLength(8)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -1023,6 +1139,8 @@ describe("WorkItemLifecycle", () => {
           expect(seen[6]!.sessionId).toBe("ses_recorded")
           expect(seen[6]!.model).toBe("anthropic/claude-sonnet-4-5")
           expect(seen[6]!.variant).toBe("high")
+          expect(seen[7]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[7]!.sessionId).toBe("ses_recorded")
         }),
       )
     })
@@ -1602,6 +1720,8 @@ describe("WorkItemLifecycle", () => {
           review: Duration.hours(1),
           commit: Duration.minutes(5),
           create_pr: Duration.minutes(10),
+          watch_pr_status_checks: Duration.minutes(5),
+          investigate_pr_status_checks: Duration.hours(2),
         },
       }).pipe(
         Layer.provideMerge(

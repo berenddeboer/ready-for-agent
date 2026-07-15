@@ -8,6 +8,7 @@ import { GitHubService, type GitHubServiceShape } from "./github-service.js"
 import type {
   GitHubIssueReference,
   GitHubIssueState,
+  PullRequestCheckStatus,
   ReadyLabeledIssue,
 } from "./types.js"
 
@@ -16,6 +17,45 @@ const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
 
 export type GitHubGraphqlClient = Pick<Client, "query">
+
+interface GitHubApiPullRequest {
+  readonly state: unknown
+  readonly merged: unknown
+  readonly statusCheckRollup: { readonly state: unknown } | null
+}
+
+const toPullRequestCheckStatus = (
+  pullRequest: GitHubApiPullRequest | null | undefined,
+): PullRequestCheckStatus => {
+  if (pullRequest === null || pullRequest === undefined) {
+    return { _tag: "pending" }
+  }
+  if (pullRequest.merged === true) {
+    return { _tag: "succeeded" }
+  }
+  if (pullRequest.merged !== false) {
+    throw new Error(
+      `Invalid GitHub pull request merged value: ${pullRequest.merged}`,
+    )
+  }
+  if (pullRequest.state === "CLOSED") {
+    return { _tag: "closed" }
+  }
+  if (pullRequest.state !== "OPEN") {
+    throw new Error(`Invalid GitHub pull request state: ${pullRequest.state}`)
+  }
+  const state = pullRequest.statusCheckRollup?.state
+  if (state === undefined || state === "SUCCESS") {
+    return { _tag: "succeeded" }
+  }
+  if (state === "FAILURE" || state === "ERROR") {
+    return { _tag: "failed" }
+  }
+  if (state === "EXPECTED" || state === "PENDING") {
+    return { _tag: "pending" }
+  }
+  throw new Error(`Invalid GitHub status check state: ${state}`)
+}
 
 interface GitHubApiIssue {
   readonly number: unknown
@@ -248,6 +288,48 @@ const sortDependencies = (
 export const makeGitHubService = (
   client: GitHubGraphqlClient,
 ): GitHubServiceShape => ({
+  getPullRequestCheckStatus: (repository, headRefName) =>
+    Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          client.query({
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  headRefName,
+                },
+                nodes: {
+                  state: true,
+                  merged: true,
+                  statusCheckRollup: { state: true },
+                },
+              },
+            },
+          }),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to get pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+      if (result.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      return yield* Effect.try({
+        try: () =>
+          toPullRequestCheckStatus(
+            (result.repository.pullRequests.nodes?.[0] ??
+              null) as GitHubApiPullRequest | null,
+          ),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `GitHub returned invalid pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+    }),
   listReadyIssues: (repository) =>
     Effect.gen(function* () {
       const issues: InternalReadyLabeledIssue[] = []
