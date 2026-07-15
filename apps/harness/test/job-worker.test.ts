@@ -16,6 +16,10 @@ import {
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import {
+  makeRepositoryRecord,
+  stubDbServiceLayer,
+} from "@ready-for-agent/db-service/test"
+import {
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
@@ -48,18 +52,10 @@ import {
 } from "../src/server/job-worker.js"
 import { describe, expect, test } from "bun:test"
 
-const repository: RepositoryRecord = {
+const repository = makeRepositoryRecord({
   id: "repo-01J00000000000000000000000",
-  githubOwner: "acme",
-  githubRepo: "widgets",
-  localPath: "/repos/acme/widgets",
-  isBare: true,
   paused: true,
-  defaultModel: null,
-  defaultVariant: null,
-  autoMerge: false,
-  issuesReconciledAt: null,
-}
+})
 
 const refreshPayload = {
   _tag: "refresh-repository" as const,
@@ -86,20 +82,9 @@ const dbLayer = (
   notifyIssuesChanged: (repositoryId: string) => Effect.Effect<void> = () =>
     Effect.void,
 ) =>
-  Layer.succeed(DbService, {
-    repositoryChanges: Effect.die("not used") as never,
-    issueChanges: Effect.die("not used") as never,
+  stubDbServiceLayer({
     notifyIssuesChanged,
-    getConfig: unused(),
-    updateConfig: unused,
-    addRepository: unused,
-    updateRepositorySettings: unused,
     listRepositories: Effect.succeed(repositories),
-    removeRepository: unused,
-    storeIssue: unused,
-    listIssues: unused,
-    deleteIssue: unused,
-    markIssuesReconciled: unused,
   })
 
 const queueLayer = (

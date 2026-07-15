@@ -1,11 +1,13 @@
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer } from "effect"
 import {
   DatabaseError,
   DbService,
-  type DbServiceShape,
   type IssueRecord,
-  type RepositoryRecord,
 } from "@ready-for-agent/db-service"
+import {
+  makeRepositoryRecord,
+  stubDbService,
+} from "@ready-for-agent/db-service/test"
 import {
   GitHubRequestError,
   GitHubService,
@@ -19,18 +21,7 @@ import {
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
-const repository: RepositoryRecord = {
-  id: "repo-1",
-  githubOwner: "acme",
-  githubRepo: "widgets",
-  localPath: "/repos/acme/widgets",
-  isBare: true,
-  paused: false,
-  defaultModel: null,
-  defaultVariant: null,
-  autoMerge: false,
-  issuesReconciledAt: null,
-}
+const repository = makeRepositoryRecord({ id: "repo-1" })
 
 const remoteIssue = (
   number: number,
@@ -95,16 +86,7 @@ const makeDbFixture = (options: DbFixtureOptions) => {
   const stored: IssueRecord[] = [...options.issues]
   let reconciledAt: Date | undefined
 
-  const service: DbServiceShape = {
-    repositoryChanges: Stream.never,
-    issueChanges: Stream.never,
-    notifyIssuesChanged: () => Effect.void,
-    getConfig: Effect.die("not used"),
-    updateConfig: () => Effect.die("not used"),
-    addRepository: () => Effect.die("not used"),
-    updateRepositorySettings: () => Effect.die("not used"),
-    removeRepository: () => Effect.die("not used"),
-    listRepositories: Effect.die("not used"),
+  const service = stubDbService({
     listIssues: () => {
       actions.push("list")
       return options.listError
@@ -146,7 +128,7 @@ const makeDbFixture = (options: DbFixtureOptions) => {
             reconciledAt = value
           })
     },
-  }
+  })
 
   return {
     actions,

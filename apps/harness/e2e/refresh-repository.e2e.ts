@@ -1,17 +1,13 @@
 import { type Route, expect, test } from "@playwright/test"
+import { makeRepositoryRecord } from "@ready-for-agent/db-service/test"
 
 const repositoryId = "repo-01JSELECTED000000000000000"
 
 const repository = (issuesReconciledAt: string | null) => ({
-  id: repositoryId,
-  githubOwner: "acme",
-  githubRepo: "widgets",
-  localPath: "/repos/acme/widgets",
-  isBare: true,
-  paused: true,
-  defaultModel: null,
-  defaultVariant: null,
-  autoMerge: false,
+  ...makeRepositoryRecord({
+    id: repositoryId,
+    paused: true,
+  }),
   issuesReconciledAt,
 })
 

@@ -1,5 +1,8 @@
 import { Effect, Layer } from "effect"
-import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
+import {
+  makeRepositoryRecord,
+  stubDbServiceLayer,
+} from "@ready-for-agent/db-service/test"
 import {
   GitHubService,
   type GitHubServiceShape,
@@ -11,18 +14,7 @@ import {
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
-const repository = {
-  id: "repo-test",
-  githubOwner: "acme",
-  githubRepo: "widgets",
-  localPath: "/repos/widgets",
-  isBare: true,
-  paused: false,
-  defaultModel: null,
-  defaultVariant: null,
-  autoMerge: false,
-  issuesReconciledAt: null,
-}
+const repository = makeRepositoryRecord({ localPath: "/repos/widgets" })
 
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
@@ -34,9 +26,9 @@ const context: LifecycleStepContext = {
   sessionId: "ses_implement",
 }
 
-const db = Layer.succeed(DbService, {
+const db = stubDbServiceLayer({
   listRepositories: Effect.succeed([repository]),
-} as DbServiceShape)
+})
 
 describe("markPrReadyForReview", () => {
   it("marks the deterministic Work Item branch PR ready for review", async () => {

@@ -1,6 +1,10 @@
 import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import {
+  makeRepositoryRecord,
+  stubDbService,
+} from "@ready-for-agent/db-service/test"
+import {
   IssueReconciler,
   type IssueReconcilerShape,
 } from "@ready-for-agent/issue-reconciler"
@@ -27,18 +31,11 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 const unused = () => Effect.die("not used")
 
-const repository = {
+const repository = makeRepositoryRecord({
   id: "repo-01J00000000000000000000000",
-  githubOwner: "acme",
-  githubRepo: "widgets",
   localPath: "/repos/acme/widgets.git",
-  isBare: true,
   paused: true,
-  defaultModel: null,
-  defaultVariant: null,
-  autoMerge: false,
-  issuesReconciledAt: null,
-}
+})
 
 const config = {
   defaultModel: "opencode/deepseek-v4-flash-free",
@@ -114,10 +111,7 @@ const makeRuntime = (
         "anthropic/claude-sonnet-4-5",
       ]),
   }
-  const db: DbServiceShape = {
-    repositoryChanges: Stream.never,
-    issueChanges: Stream.never,
-    notifyIssuesChanged: () => Effect.void,
+  const db = stubDbService({
     getConfig: Effect.succeed(config),
     updateConfig: (input) => Effect.succeed(input),
     addRepository: () => Effect.succeed(repository),
@@ -130,13 +124,8 @@ const makeRuntime = (
         autoMerge: input.autoMerge,
       }),
     listRepositories: Effect.succeed([repository]),
-    removeRepository: () => Effect.die("not used"),
-    storeIssue: () => Effect.die("not used"),
-    listIssues: () => Effect.die("not used"),
-    deleteIssue: () => Effect.die("not used"),
-    markIssuesReconciled: () => Effect.die("not used"),
     ...dbOverrides,
-  }
+  })
   const reconciler: IssueReconcilerShape = {
     reconcile: () => Effect.die("not used"),
     ...reconcilerOverrides,
