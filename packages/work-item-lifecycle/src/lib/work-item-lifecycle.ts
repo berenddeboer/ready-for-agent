@@ -275,6 +275,9 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
+const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
+const PR_STATUS_CHECKS_MIN_GREEN_WAIT = Duration.seconds(60)
+
 const nextOperationalStep = (
   step: OperationalLifecycleStep,
 ): OperationalLifecycleStep | "complete" => {
@@ -693,6 +696,7 @@ export const makeWorkItemLifecycleLive = (
       const runHandler = (
         step: OperationalLifecycleStep,
         context: LifecycleStepContext,
+        workItem: WorkItemRow,
       ): Effect.Effect<
         {
           readonly worktreePath?: string
@@ -729,23 +733,55 @@ export const makeWorkItemLifecycleLive = (
             return steps.createPr(context).pipe(Effect.as({}))
           case "watch_pr_status_checks":
             return steps.watchPrStatusChecks(context).pipe(
-              Effect.map((status) => ({
-                transition:
-                  status === "succeeded"
-                    ? { nextState: "mark_pr_ready_for_review" as const }
-                    : status === "failed"
-                      ? { nextState: "investigate_pr_status_checks" as const }
-                      : status === "closed"
-                        ? {
-                            nextState: "needs_human" as const,
-                            reason:
-                              "The pull request was closed before its status checks succeeded",
-                          }
-                        : {
-                            nextState: "watch_pr_status_checks" as const,
-                            delay: Duration.seconds(30),
-                          },
-              })),
+              Effect.flatMap((status) =>
+                Effect.gen(function* () {
+                  if (status === "failed") {
+                    return {
+                      transition: {
+                        nextState: "investigate_pr_status_checks" as const,
+                      },
+                    }
+                  }
+                  if (status === "closed") {
+                    return {
+                      transition: {
+                        nextState: "needs_human" as const,
+                        reason:
+                          "The pull request was closed before its status checks succeeded",
+                      },
+                    }
+                  }
+                  if (status === "pending") {
+                    return {
+                      transition: {
+                        nextState: "watch_pr_status_checks" as const,
+                        delay: PR_STATUS_CHECKS_POLL_DELAY,
+                      },
+                    }
+                  }
+                  // succeeded, or no_checks after the grace (checks never registered)
+                  if (status === "no_checks") {
+                    const now = yield* Clock.currentTimeMillis
+                    const watchedMs = Math.max(0, now - workItem.state_ready_at)
+                    if (
+                      watchedMs <
+                      Duration.toMillis(PR_STATUS_CHECKS_MIN_GREEN_WAIT)
+                    ) {
+                      return {
+                        transition: {
+                          nextState: "watch_pr_status_checks" as const,
+                          delay: PR_STATUS_CHECKS_POLL_DELAY,
+                        },
+                      }
+                    }
+                  }
+                  return {
+                    transition: {
+                      nextState: "mark_pr_ready_for_review" as const,
+                    },
+                  }
+                }),
+              ),
             )
           case "investigate_pr_status_checks":
             return steps.investigatePrStatusChecks(context).pipe(
@@ -754,7 +790,7 @@ export const makeWorkItemLifecycleLive = (
                   result._tag === "fixed"
                     ? {
                         nextState: "watch_pr_status_checks" as const,
-                        delay: Duration.seconds(30),
+                        delay: PR_STATUS_CHECKS_POLL_DELAY,
                       }
                     : {
                         nextState: "needs_human" as const,
@@ -901,6 +937,8 @@ export const makeWorkItemLifecycleLive = (
                   )
                 } else {
                   const nextStepRunId = makeStepRunId()
+                  const stateReadyAt =
+                    nextStep === workItem.state ? workItem.state_ready_at : now
 
                   yield* sql.unsafe(
                     `UPDATE work_item
@@ -910,7 +948,14 @@ export const makeWorkItemLifecycleLive = (
                        session_id = ?,
                        updated_at = ?
                    WHERE id = ?`,
-                    [nextStep, now, worktreePath, sessionId, now, workItem.id],
+                    [
+                      nextStep,
+                      stateReadyAt,
+                      worktreePath,
+                      sessionId,
+                      now,
+                      workItem.id,
+                    ],
                   )
 
                   yield* sql.unsafe(
@@ -1199,7 +1244,7 @@ export const makeWorkItemLifecycleLive = (
                     restore(
                       Effect.raceFirst(
                         Effect.suspend(() =>
-                          runHandler(stepRun.step, context),
+                          runHandler(stepRun.step, context, workItem),
                         ).pipe(Effect.timeout(maxDuration)),
                         Deferred.await(cancel).pipe(
                           Effect.andThen(Effect.interrupt),

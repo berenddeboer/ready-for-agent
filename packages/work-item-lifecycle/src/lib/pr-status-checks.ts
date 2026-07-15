@@ -18,7 +18,12 @@ export class PrStatusChecksOpenCodeError extends Data.TaggedError(
   "PrStatusChecksOpenCodeError",
 )<{ readonly message: string; readonly cause?: unknown }> {}
 
-export type PrStatusCheckResult = "pending" | "succeeded" | "failed" | "closed"
+export type PrStatusCheckResult =
+  | "pending"
+  | "no_checks"
+  | "succeeded"
+  | "failed"
+  | "closed"
 
 export type PrStatusCheckInvestigationResult =
   | { readonly _tag: "fixed" }

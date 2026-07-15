@@ -45,8 +45,11 @@ const toPullRequestCheckStatus = (
   if (pullRequest.state !== "OPEN") {
     throw new Error(`Invalid GitHub pull request state: ${pullRequest.state}`)
   }
-  const state = pullRequest.statusCheckRollup?.state
-  if (state === undefined || state === "SUCCESS") {
+  if (pullRequest.statusCheckRollup === null) {
+    return { _tag: "no_checks" }
+  }
+  const state = pullRequest.statusCheckRollup.state
+  if (state === "SUCCESS") {
     return { _tag: "succeeded" }
   }
   if (state === "FAILURE" || state === "ERROR") {

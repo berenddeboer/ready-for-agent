@@ -5,6 +5,7 @@ export interface GitHubRepository {
 
 export type PullRequestCheckStatus =
   | { readonly _tag: "pending" }
+  | { readonly _tag: "no_checks" }
   | { readonly _tag: "succeeded" }
   | { readonly _tag: "failed" }
   | { readonly _tag: "closed" }

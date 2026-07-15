@@ -68,7 +68,7 @@ describe("GitHubService live implementation", () => {
     })
   }
 
-  it("treats a not-yet-visible PR as pending and a PR without checks as succeeded", async () => {
+  it("treats a not-yet-visible PR as pending and a PR without checks as no_checks", async () => {
     const responses = [
       { repository: { pullRequests: { nodes: [] } } },
       {
@@ -92,7 +92,7 @@ describe("GitHubService live implementation", () => {
       await Effect.runPromise(
         service.getPullRequestCheckStatus(repository, "branch"),
       ),
-    ).toEqual({ _tag: "succeeded" })
+    ).toEqual({ _tag: "no_checks" })
   })
 
   it("distinguishes closed and merged PRs from a not-yet-visible PR", async () => {

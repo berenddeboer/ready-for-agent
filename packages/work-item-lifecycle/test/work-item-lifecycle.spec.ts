@@ -824,6 +824,18 @@ describe("WorkItemLifecycle", () => {
       return result
     })
 
+    const allowPrChecksToAppear = (workItemId: string) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE work_item
+           SET state_ready_at = state_ready_at - 60000
+           WHERE id = ? AND state = 'watch_pr_status_checks'`,
+          [workItemId],
+        )
+        yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+      })
+
     it("drives the complete happy path to Complete with typed outputs", () =>
       runTest(
         Effect.gen(function* () {
@@ -948,6 +960,65 @@ describe("WorkItemLifecycle", () => {
           expect(final.stepRuns).toHaveLength(9)
         }),
       ))
+
+    it("keeps no_checks pending for 60 seconds before treating as green", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("no_checks"),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 7; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const earlyEmpty = yield* claimAndRunPending
+          expect(earlyEmpty._tag).toBe("processed")
+          if (earlyEmpty._tag === "processed") {
+            expect(earlyEmpty.workItem.state).toBe("watch_pr_status_checks")
+            expect(earlyEmpty.workItem.stepRuns.at(-2)?.status).toBe(
+              "succeeded",
+            )
+            expect(earlyEmpty.workItem.stepRuns.at(-1)?.status).toBe("queued")
+          }
+
+          const delayed = (yield* sql.unsafe(
+            `SELECT available_at, created_at FROM job_queue`,
+          )) as readonly {
+            readonly available_at: number
+            readonly created_at: number
+          }[]
+          expect(delayed).toHaveLength(1)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+
+          const readyAt = (yield* sql.unsafe(
+            `SELECT state_ready_at FROM work_item WHERE id = ?`,
+            [created.id],
+          )) as readonly { readonly state_ready_at: number }[]
+          const watchStartedAt = readyAt[0]!.state_ready_at
+
+          yield* allowPrChecksToAppear(created.id)
+          const afterGrace = yield* claimAndRunPending
+          expect(afterGrace._tag).toBe("processed")
+          if (afterGrace._tag === "processed") {
+            expect(afterGrace.workItem.state).toBe("mark_pr_ready_for_review")
+            expect(afterGrace.workItem.stateReadyAt.getTime()).toBeGreaterThan(
+              watchStartedAt,
+            )
+          }
+        }),
+      )
+    })
 
     it("rechecks pending PR checks after 30 seconds and hands failed checks to a human when requested", () => {
       const statuses = ["pending", "failed"] as const
