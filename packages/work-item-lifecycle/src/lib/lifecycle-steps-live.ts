@@ -10,6 +10,7 @@ import { createWorktree } from "./create-worktree.js"
 import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
+import { markPrReadyForReview } from "./mark-pr-ready-for-review.js"
 import {
   investigatePrStatusChecks,
   watchPrStatusChecks,
@@ -72,6 +73,8 @@ export const LifecycleStepsLive = Layer.effect(
         withServices(watchPrStatusChecks(context)),
       investigatePrStatusChecks: (context) =>
         withServices(investigatePrStatusChecks(context)),
+      markPrReadyForReview: (context) =>
+        withServices(markPrReadyForReview(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

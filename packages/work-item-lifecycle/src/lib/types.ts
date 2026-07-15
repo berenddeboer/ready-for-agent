@@ -27,6 +27,7 @@ export type OperationalLifecycleStep =
   | "create_pr"
   | "watch_pr_status_checks"
   | "investigate_pr_status_checks"
+  | "mark_pr_ready_for_review"
 
 export type WorkItemState =
   | OperationalLifecycleStep
@@ -125,6 +126,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   create_pr: Duration.minutes(10),
   watch_pr_status_checks: Duration.minutes(5),
   investigate_pr_status_checks: Duration.hours(2),
+  mark_pr_ready_for_review: Duration.minutes(5),
 }
 
 export type WorkItemLifecycleConfig = {

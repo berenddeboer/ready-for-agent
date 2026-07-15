@@ -1,12 +1,30 @@
 schema {
   query: Query
+  mutation: Mutation
 }
 
 scalar DateTime
 scalar URI
+scalar ID
 
 type Query {
   repository(owner: String!, name: String!): Repository
+}
+
+type Mutation {
+  markPullRequestReadyForReview(
+    input: MarkPullRequestReadyForReviewInput!
+  ): MarkPullRequestReadyForReviewPayload
+}
+
+input MarkPullRequestReadyForReviewInput {
+  pullRequestId: ID!
+  clientMutationId: String
+}
+
+type MarkPullRequestReadyForReviewPayload {
+  clientMutationId: String
+  pullRequest: PullRequest
 }
 
 type Repository {
@@ -25,10 +43,12 @@ type PullRequestConnection {
 }
 
 type PullRequest {
+  id: ID!
   number: Int!
   url: URI!
   state: PullRequestState!
   merged: Boolean!
+  isDraft: Boolean!
   statusCheckRollup: StatusCheckRollup
 }
 

@@ -202,4 +202,39 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(runs[0]?.command).toContain("get-pr-check-status.ts")
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
   })
+
+  test("marks a PR ready for review through the configured repository token", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({ _tag: "ready" }),
+          stderr: "",
+        })
+      },
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        yield* github.markPullRequestReadyForReview(
+          { owner: "acme", name: "widgets" },
+          "rfa/acme-widgets/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(runs[0]?.command).toContain("mark-pr-ready-for-review.ts")
+    expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+  })
 })

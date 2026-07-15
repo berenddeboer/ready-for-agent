@@ -16,7 +16,8 @@ const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
 
-export type GitHubGraphqlClient = Pick<Client, "query">
+export type GitHubGraphqlClient = Pick<Client, "query"> &
+  Partial<Pick<Client, "mutation">>
 
 interface GitHubApiPullRequest {
   readonly state: unknown
@@ -329,6 +330,106 @@ export const makeGitHubService = (
             cause,
           }),
       })
+    }),
+  markPullRequestReadyForReview: (repository, headRefName) =>
+    Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          client.query({
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  headRefName,
+                },
+                nodes: {
+                  id: true,
+                  isDraft: true,
+                  state: true,
+                },
+              },
+            },
+          }),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+      if (result.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      const pullRequest = result.repository.pullRequests.nodes?.[0]
+      if (pullRequest === null || pullRequest === undefined) {
+        return yield* new GitHubRequestError({
+          message: `No pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (typeof pullRequest.id !== "string" || pullRequest.id.trim() === "") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request id for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (pullRequest.isDraft !== true && pullRequest.isDraft !== false) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid draft flag for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (pullRequest.state === "CLOSED") {
+        return yield* new GitHubRequestError({
+          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is closed`,
+        })
+      }
+      if (pullRequest.state !== "OPEN" && pullRequest.state !== "MERGED") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request state for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (pullRequest.isDraft === false) {
+        return
+      }
+      if (pullRequest.state === "MERGED") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned a merged draft pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (client.mutation === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      const mutate = client.mutation
+      const mutation = yield* Effect.tryPromise({
+        try: () =>
+          mutate({
+            markPullRequestReadyForReview: {
+              __args: {
+                input: { pullRequestId: pullRequest.id },
+              },
+              pullRequest: {
+                isDraft: true,
+              },
+            },
+          }),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to mark pull request ready for review for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+      const readyPullRequest =
+        mutation.markPullRequestReadyForReview?.pullRequest
+      if (readyPullRequest === null || readyPullRequest === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub did not return a pull request after marking ready for review for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (readyPullRequest.isDraft !== false) {
+        return yield* new GitHubRequestError({
+          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is still a draft`,
+        })
+      }
     }),
   listReadyIssues: (repository) =>
     Effect.gen(function* () {

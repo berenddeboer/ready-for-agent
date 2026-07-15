@@ -117,6 +117,7 @@ type WorkItemState =
   | "CREATE_PR"
   | "WATCH_PR_STATUS_CHECKS"
   | "INVESTIGATE_PR_STATUS_CHECKS"
+  | "MARK_PR_READY_FOR_REVIEW"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"
@@ -185,6 +186,9 @@ const terminalWorkItemStates: readonly WorkItemState[] = [
 const formatLifecycleLabel = (value: string) => {
   if (value.toLowerCase() === "watch_pr_status_checks") {
     return "GitHub status checks"
+  }
+  if (value.toLowerCase() === "mark_pr_ready_for_review") {
+    return "Mark PR ready for review"
   }
   return value
     .toLowerCase()

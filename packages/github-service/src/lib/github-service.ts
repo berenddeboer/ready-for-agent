@@ -23,6 +23,13 @@ export interface GitHubServiceShape {
     PullRequestCheckStatus,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
+  readonly markPullRequestReadyForReview: (
+    repository: GitHubRepository,
+    headRefName: string,
+  ) => Effect.Effect<
+    void,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
 }
 
 export class GitHubService extends Context.Service<

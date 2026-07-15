@@ -84,7 +84,7 @@ An Implementable Issue with no unfinished Work Item. Only an Actionable Issue ma
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A pending status watch schedules another Watch PR Status Checks Step Run after 30 seconds.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A pending status watch schedules another Watch PR Status Checks Step Run after 30 seconds. Green checks advance to Mark PR Ready for Review.
 _Avoid_: Last completed step, phase
 
 **Step Run**:
@@ -112,7 +112,7 @@ A terminal Work Item whose failed PR status checks were investigated by OpenCode
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item for which Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, and Watch PR Status Checks all executed successfully, with GitHub reporting no failing or pending status checks. Complete does not mean GitHub closed the Issue or the PR was merged.
+A terminal Work Item for which Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, and Mark PR Ready for Review all executed successfully, with GitHub reporting no failing or pending status checks and the PR marked ready for review. Complete does not mean GitHub closed the Issue or the PR was merged.
 _Avoid_: Approved, merged, done Issue
 
 **Relevant Issue**:

@@ -61,6 +61,7 @@ describe("WorkItemLifecycle", () => {
     createPr: () => Effect.void,
     watchPrStatusChecks: () => Effect.succeed("succeeded"),
     investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
+    markPrReadyForReview: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
 
@@ -519,7 +520,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 8; i++) {
+          for (let i = 0; i < 9; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -580,7 +581,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 8; i++) {
+          for (let i = 0; i < 9; i++) {
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -909,19 +910,22 @@ describe("WorkItemLifecycle", () => {
           const afterChecks = yield* claimAndRunPending
           expect(afterChecks._tag).toBe("processed")
           if (afterChecks._tag === "processed") {
-            expect(afterChecks.workItem.state).toBe("complete")
-            expect(afterChecks.workItem.worktreePath).toBe(
+            expect(afterChecks.workItem.state).toBe("mark_pr_ready_for_review")
+          }
+
+          const afterReady = yield* claimAndRunPending
+          expect(afterReady._tag).toBe("processed")
+          if (afterReady._tag === "processed") {
+            expect(afterReady.workItem.state).toBe("complete")
+            expect(afterReady.workItem.worktreePath).toBe(
               "/tmp/worktrees/acme-widgets-42",
             )
-            expect(afterChecks.workItem.sessionId).toBe(
+            expect(afterReady.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterChecks.workItem.failureCode).toBeNull()
+            expect(afterReady.workItem.failureCode).toBeNull()
             expect(
-              afterChecks.workItem.stepRuns.map((run) => [
-                run.step,
-                run.status,
-              ]),
+              afterReady.workItem.stepRuns.map((run) => [run.step, run.status]),
             ).toEqual([
               ["create_worktree", "succeeded"],
               ["install_dependencies", "succeeded"],
@@ -931,6 +935,7 @@ describe("WorkItemLifecycle", () => {
               ["commit", "succeeded"],
               ["create_pr", "succeeded"],
               ["watch_pr_status_checks", "succeeded"],
+              ["mark_pr_ready_for_review", "succeeded"],
             ])
           }
 
@@ -940,7 +945,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(8)
+          expect(final.stepRuns).toHaveLength(9)
         }),
       ))
 
@@ -1081,6 +1086,10 @@ describe("WorkItemLifecycle", () => {
           return Effect.succeed("succeeded")
         },
         investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
+        markPrReadyForReview: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
         removeWorktree: () => Effect.void,
       }
 
@@ -1105,8 +1114,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
 
-          expect(seen).toHaveLength(8)
+          expect(seen).toHaveLength(9)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -1141,6 +1151,8 @@ describe("WorkItemLifecycle", () => {
           expect(seen[6]!.variant).toBe("high")
           expect(seen[7]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[7]!.sessionId).toBe("ses_recorded")
+          expect(seen[8]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[8]!.sessionId).toBe("ses_recorded")
         }),
       )
     })
@@ -1722,6 +1734,7 @@ describe("WorkItemLifecycle", () => {
           create_pr: Duration.minutes(10),
           watch_pr_status_checks: Duration.minutes(5),
           investigate_pr_status_checks: Duration.hours(2),
+          mark_pr_ready_for_review: Duration.minutes(5),
         },
       }).pipe(
         Layer.provideMerge(

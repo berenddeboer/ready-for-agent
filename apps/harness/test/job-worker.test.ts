@@ -141,6 +141,7 @@ const queueLayer = (
         create_pr: Duration.minutes(10),
         watch_pr_status_checks: Duration.minutes(5),
         investigate_pr_status_checks: Duration.hours(2),
+        mark_pr_ready_for_review: Duration.minutes(5),
       },
       implementNow: unused,
       runStep,
@@ -246,6 +247,7 @@ describe("Job worker", () => {
     const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
     const github = Layer.succeed(GitHubService, {
       getPullRequestCheckStatus: () => Effect.succeed({ _tag: "succeeded" }),
+      markPullRequestReadyForReview: () => Effect.void,
       listReadyIssues: () =>
         Effect.succeed([
           {
