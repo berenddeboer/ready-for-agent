@@ -49,6 +49,7 @@ describe("PR status check steps", () => {
         requestedBranch = branch
         return Effect.succeed({ _tag: "pending" })
       },
+      markPullRequestReadyForReview: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const status = await Effect.runPromise(

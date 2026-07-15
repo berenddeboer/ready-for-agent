@@ -38,6 +38,7 @@ export const makeGitHubServiceTest = (
 
   return Layer.succeed(GitHubService, {
     getPullRequestCheckStatus: () => Effect.succeed({ _tag: "succeeded" }),
+    markPullRequestReadyForReview: () => Effect.void,
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))
       if (fixture === undefined) {

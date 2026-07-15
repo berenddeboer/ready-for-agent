@@ -297,6 +297,8 @@ const nextOperationalStep = (
       return "watch_pr_status_checks"
     case "investigate_pr_status_checks":
       return "watch_pr_status_checks"
+    case "mark_pr_ready_for_review":
+      return "complete"
   }
 }
 
@@ -730,7 +732,7 @@ export const makeWorkItemLifecycleLive = (
               Effect.map((status) => ({
                 transition:
                   status === "succeeded"
-                    ? { nextState: "complete" as const }
+                    ? { nextState: "mark_pr_ready_for_review" as const }
                     : status === "failed"
                       ? { nextState: "investigate_pr_status_checks" as const }
                       : status === "closed"
@@ -760,6 +762,8 @@ export const makeWorkItemLifecycleLive = (
                       },
               })),
             )
+          case "mark_pr_ready_for_review":
+            return steps.markPrReadyForReview(context).pipe(Effect.as({}))
         }
       }
 

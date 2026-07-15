@@ -186,6 +186,9 @@ const formatLifecycleLabel = (value: string) => {
   if (value.toLowerCase() === "watch_pr_status_checks") {
     return "GitHub status checks"
   }
+  if (value.toLowerCase() === "mark_pr_ready_for_review") {
+    return "Mark PR ready for review"
+  }
   return value
     .toLowerCase()
     .replaceAll("_", " ")

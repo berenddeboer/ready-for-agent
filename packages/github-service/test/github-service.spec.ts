@@ -130,6 +130,111 @@ describe("GitHubService live implementation", () => {
     ).toEqual({ _tag: "succeeded" })
   })
 
+  it("marks a draft PR ready for review and no-ops when already ready", async () => {
+    const mutations: unknown[] = []
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDODraft",
+                  isDraft: true,
+                  state: "OPEN",
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          markPullRequestReadyForReview: {
+            pullRequest: { isDraft: false },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.markPullRequestReadyForReview(repository, "branch"),
+    )
+    expect(mutations).toHaveLength(1)
+
+    const alreadyReady = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOReady",
+                  isDraft: false,
+                  state: "OPEN",
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () => {
+        throw new Error("mutation should not run for a non-draft PR")
+      },
+    })
+
+    await Effect.runPromise(
+      alreadyReady.markPullRequestReadyForReview(repository, "branch"),
+    )
+  })
+
+  it("fails when the PR for the branch is missing", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: { pullRequests: { nodes: [] } },
+        }) as never,
+    })
+
+    const exit = await Effect.runPromise(
+      Effect.result(
+        service.markPullRequestReadyForReview(repository, "branch"),
+      ),
+    )
+    expect(Result.isFailure(exit)).toBe(true)
+    if (Result.isFailure(exit)) {
+      expect(exit.failure).toBeInstanceOf(GitHubRequestError)
+    }
+  })
+
+  it("fails when the PR was closed after its checks passed", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOClosed",
+                  isDraft: false,
+                  state: "CLOSED",
+                },
+              ],
+            },
+          },
+        }) as never,
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(
+        service.markPullRequestReadyForReview(repository, "branch"),
+      ),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+    }
+  })
+
   it("fetches every ready-for-agent page and returns mapped issues by number", async () => {
     const requests: unknown[] = []
     const responses = [

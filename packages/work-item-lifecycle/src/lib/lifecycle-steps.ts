@@ -52,6 +52,9 @@ export interface LifecycleStepsShape {
   readonly investigatePrStatusChecks: (
     context: LifecycleStepContext,
   ) => Effect.Effect<PrStatusCheckInvestigationResult, unknown>
+  readonly markPrReadyForReview: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
   readonly removeWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>

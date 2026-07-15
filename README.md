@@ -44,7 +44,7 @@ review it.
 - Assume user uses something like the Matt Pocock grill me (with
   docs), create PRD and split PRD into issues skills to create the
   issues.
-- Creates a draft PR, and watches for all checks to become green.
+- Creates a draft PR, watches for all checks to become green, then marks the PR ready for review.
 - Assumes target repo has an AI reviewer (different model ideally) commenting.
 - Addresses the PR review comments until AI is satisfied there's no
   purpose addressing more reviewer comments.
