@@ -84,7 +84,7 @@ An Implementable Issue with no unfinished Work Item. Only an Actionable Issue ma
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while checks remain pending, and advances to Mark PR Ready for Review once the aggregate is green and every observed terminal check is handled.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while checks remain pending, and advances to Mark PR Ready for Review once the aggregate is green and every observed terminal check is handled. After the PR is ready for review, Decide PR Merge asks the Implement OpenCode Session whether risk is low enough for a clanker to merge (Complete) or a human must merge (Needs Human); the step does not merge.
 _Avoid_: Last completed step, phase
 
 **PR Status Check**:
@@ -116,11 +116,11 @@ A terminal Work Item that cannot advance because a lifecycle precondition, such 
 _Avoid_: Failed Step Run, Abandoned
 
 **Needs Human Work Item**:
-A terminal Work Item whose Status Check Handoff cannot be processed autonomously or requires a human decision. The Work Item records OpenCode's concise intervention reason.
+A terminal Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, or Decide PR Merge judged the PR too risky for a clanker to merge. The Work Item records OpenCode's concise intervention reason.
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item for which implementation, pull-request creation, status checking, all observed Status Check Handoffs, and Mark PR Ready for Review executed successfully, with GitHub reporting no failing or pending status checks and the PR marked ready for review. Complete does not mean GitHub closed the Issue or the PR was merged.
+A terminal Work Item for which implementation, pull-request creation, status checking, all observed Status Check Handoffs, Mark PR Ready for Review, and Decide PR Merge executed successfully, with GitHub reporting no failing or pending status checks, the PR marked ready for review, and OpenCode assessing merge risk as low enough for a clanker. Complete does not mean GitHub closed the Issue or the PR was merged.
 _Avoid_: Approved, merged, done Issue
 
 **Relevant Issue**:

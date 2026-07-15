@@ -7,6 +7,7 @@ import { Opencode } from "@ready-for-agent/opencode"
 import { commit } from "./commit.js"
 import { createPr } from "./create-pr.js"
 import { createWorktree } from "./create-worktree.js"
+import { decidePrMerge } from "./decide-pr-merge.js"
 import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
@@ -75,6 +76,7 @@ export const LifecycleStepsLive = Layer.effect(
         withServices(investigatePrStatusChecks(context)),
       markPrReadyForReview: (context) =>
         withServices(markPrReadyForReview(context)),
+      decidePrMerge: (context) => withServices(decidePrMerge(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

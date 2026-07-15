@@ -142,6 +142,7 @@ const queueLayer = (
         watch_pr_status_checks: Duration.minutes(5),
         investigate_pr_status_checks: Duration.hours(2),
         mark_pr_ready_for_review: Duration.minutes(5),
+        decide_pr_merge: Duration.minutes(15),
       },
       implementNow: unused,
       runStep,

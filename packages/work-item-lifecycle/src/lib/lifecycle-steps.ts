@@ -1,4 +1,5 @@
 import { Context, type Duration, type Effect } from "effect"
+import type { DecidePrMergeResult } from "./decide-pr-merge.js"
 import type {
   PrStatusCheckInvestigationResult,
   PrStatusCheckResult,
@@ -55,6 +56,9 @@ export interface LifecycleStepsShape {
   readonly markPrReadyForReview: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
+  readonly decidePrMerge: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<DecidePrMergeResult, unknown>
   readonly removeWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>

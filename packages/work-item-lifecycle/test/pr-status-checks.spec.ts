@@ -76,7 +76,10 @@ describe("PR status check steps", () => {
           exitCode: 0,
           stdout: `${JSON.stringify({
             type: "text",
-            text: "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: A maintainer must approve deployment",
+            part: {
+              type: "text",
+              text: "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: A maintainer must approve deployment",
+            },
           })}\n`,
           stderr: "",
         })
