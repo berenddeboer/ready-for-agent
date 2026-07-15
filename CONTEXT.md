@@ -84,8 +84,16 @@ An Implementable Issue with no unfinished Work Item. Only an Actionable Issue ma
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A pending status watch schedules another Watch PR Status Checks Step Run after 30 seconds. Green checks advance to Mark PR Ready for Review.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while checks remain pending, and advances to Mark PR Ready for Review once the aggregate is green and every observed terminal check is handled.
 _Avoid_: Last completed step, phase
+
+**PR Status Check**:
+An individual GitHub check run or commit status context associated with a pull request. An execution is green on explicit success and red on explicit failure, error, timeout, action-required, or startup-failure; neutral, skipped, cancelled, stale, and pending results do not trigger a handoff.
+_Avoid_: Aggregate status-check rollup, workflow run
+
+**Status Check Handoff**:
+A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks. The prompt names red checks to diagnose and fix; when any check is green, it also asks OpenCode to inspect the latest pull-request review comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback.
+_Avoid_: Check classification, one prompt per check
 
 **Step Run**:
 A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately.
@@ -108,11 +116,11 @@ A terminal Work Item that cannot advance because a lifecycle precondition, such 
 _Avoid_: Failed Step Run, Abandoned
 
 **Needs Human Work Item**:
-A terminal Work Item whose failed PR status checks were investigated by OpenCode, but cannot be fixed autonomously or require a human decision. The Work Item records OpenCode's concise intervention reason.
+A terminal Work Item whose Status Check Handoff cannot be processed autonomously or requires a human decision. The Work Item records OpenCode's concise intervention reason.
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item for which Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, and Mark PR Ready for Review all executed successfully, with GitHub reporting no failing or pending status checks and the PR marked ready for review. Complete does not mean GitHub closed the Issue or the PR was merged.
+A terminal Work Item for which implementation, pull-request creation, status checking, all observed Status Check Handoffs, and Mark PR Ready for Review executed successfully, with GitHub reporting no failing or pending status checks and the PR marked ready for review. Complete does not mean GitHub closed the Issue or the PR was merged.
 _Avoid_: Approved, merged, done Issue
 
 **Relevant Issue**:
