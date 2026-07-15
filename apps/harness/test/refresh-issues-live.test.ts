@@ -13,6 +13,8 @@ describe("Repository Issue live-query coordination", () => {
     let repositoriesFetches = 0
     let selectedIssuesFetches = 0
     let otherIssuesFetches = 0
+    let selectedWorkItemsFetches = 0
+    let otherWorkItemsFetches = 0
     let issuesReconciledAt: string | null = null
     let selectedIssues = [
       {
@@ -42,6 +44,17 @@ describe("Repository Issue live-query coordination", () => {
             return selectedIssues
           }
           otherIssuesFetches += 1
+          return []
+        },
+      }),
+      workItems: (id: string) => ({
+        queryKey: ["work-items", id] as const,
+        queryFn: async () => {
+          if (id === repositoryId) {
+            selectedWorkItemsFetches += 1
+            return []
+          }
+          otherWorkItemsFetches += 1
           return []
         },
       }),
@@ -93,6 +106,7 @@ describe("Repository Issue live-query coordination", () => {
     const fetchesBeforeInvalidation = {
       repositories: repositoriesFetches,
       selectedIssues: selectedIssuesFetches,
+      selectedWorkItems: selectedWorkItemsFetches,
     }
     releaseInvalidation?.()
 
@@ -121,15 +135,27 @@ describe("Repository Issue live-query coordination", () => {
     expect(selectedIssuesFetches).toBeGreaterThan(
       fetchesBeforeInvalidation.selectedIssues,
     )
+    expect(selectedWorkItemsFetches).toBeGreaterThan(
+      fetchesBeforeInvalidation.selectedWorkItems,
+    )
     // Initial connection refetches both displayed Repositories, but the
     // selected invalidation does not refetch the other Repository again.
     expect(otherIssuesFetches).toBe(1)
+    expect(otherWorkItemsFetches).toBe(1)
     const selectedFetchesBeforeOtherInvalidation = selectedIssuesFetches
+    const selectedWorkItemsBeforeOtherInvalidation = selectedWorkItemsFetches
     const otherFetchesBeforeOtherInvalidation = otherIssuesFetches
+    const otherWorkItemsBeforeOtherInvalidation = otherWorkItemsFetches
     await onChange?.(otherRepositoryId)
     expect(selectedIssuesFetches).toBe(selectedFetchesBeforeOtherInvalidation)
+    expect(selectedWorkItemsFetches).toBe(
+      selectedWorkItemsBeforeOtherInvalidation,
+    )
     expect(otherIssuesFetches).toBeGreaterThan(
       otherFetchesBeforeOtherInvalidation,
+    )
+    expect(otherWorkItemsFetches).toBeGreaterThan(
+      otherWorkItemsBeforeOtherInvalidation,
     )
     expect(onChange).toBeDefined()
 
@@ -176,6 +202,10 @@ describe("Repository Issue live-query coordination", () => {
           queryFn: async () => [{ id: repositoryId }],
         },
         issues: () => issuesQuery,
+        workItems: (id) => ({
+          queryKey: ["work-items", id],
+          queryFn: async () => [],
+        }),
       },
       signal: controller.signal,
       stream: async ({ onChange: handleChange, signal }) => {
@@ -250,6 +280,10 @@ describe("Repository Issue live-query coordination", () => {
             if (id === repositoryId) issuesFetches += 1
             return []
           },
+        }),
+        workItems: (id: string) => ({
+          queryKey: ["work-items", id],
+          queryFn: async () => [],
         }),
       },
       signal: controller.signal,

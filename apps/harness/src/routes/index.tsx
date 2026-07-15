@@ -340,6 +340,7 @@ function RepositoryCards() {
       queries: {
         repositories: repositoriesQuery,
         issues: issuesQuery,
+        workItems: workItemsQuery,
       },
       signal: controller.signal,
     })

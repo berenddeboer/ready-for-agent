@@ -931,7 +931,9 @@ describe("GraphQL API", () => {
     let receivedRepositoryId: string | undefined
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
       {},
       {},
       {},
@@ -966,6 +968,71 @@ describe("GraphQL API", () => {
       },
     })
     expect(receivedRepositoryId).toBe(repository.id)
+  })
+
+  test("hides terminal Work Items whose Issue is no longer Relevant", async () => {
+    const terminalOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 120,
+      state: "needs_human" as const,
+      stepRuns: [],
+    }
+    const unfinishedOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 121,
+      state: "implement" as const,
+      stepRuns: [],
+    }
+    const terminalRelevant = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: issue.githubIssueNumber,
+      state: "complete" as const,
+      stepRuns: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([terminalOrphan, unfinishedOrphan, terminalRelevant]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!) {
+          workItems(repositoryId: $repositoryId) {
+            id githubIssueNumber state
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: unfinishedOrphan.id,
+            githubIssueNumber: 121,
+            state: "IMPLEMENT",
+          },
+          {
+            id: terminalRelevant.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            state: "COMPLETE",
+          },
+        ],
+      },
+    })
   })
 
   test("starts a Work Item for Implement Now", async () => {
