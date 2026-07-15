@@ -88,7 +88,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   return (
-    <div className="mx-auto min-h-screen max-w-6xl p-4 sm:p-6">
+    <div className="mx-auto min-h-screen max-w-7xl p-4 sm:p-6">
       <nav className="mb-6 flex items-center gap-4 border-b border-slate-200 pb-4">
         <Link
           to="/"

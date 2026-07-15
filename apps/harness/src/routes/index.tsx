@@ -376,7 +376,7 @@ function RepositoryCards() {
     <>
       {warning}
       <section
-        className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-4"
+        className="grid grid-cols-1 gap-4 md:grid-cols-2"
         aria-label="Configured repositories"
       >
         {repositories.map((repository) => (
@@ -1443,11 +1443,11 @@ function RepositoryIssuesSkeleton() {
 function RepositoryCardsSkeleton() {
   return (
     <section
-      className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,19rem),1fr))] gap-4"
+      className="grid grid-cols-1 gap-4 md:grid-cols-2"
       aria-label="Loading repositories"
       aria-busy="true"
     >
-      {[0, 1, 2].map((item) => (
+      {[0, 1].map((item) => (
         <div
           className="grid min-w-0 gap-4 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]"
           key={item}
