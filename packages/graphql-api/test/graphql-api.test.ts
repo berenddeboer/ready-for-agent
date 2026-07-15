@@ -345,6 +345,9 @@ describe("GraphQL API", () => {
     expect(creationUrl.searchParams.get("issues")).toBe("read")
     expect(creationUrl.searchParams.get("contents")).toBe("write")
     expect(creationUrl.searchParams.get("pull_requests")).toBe("write")
+    expect(creationUrl.searchParams.get("actions")).toBe("read")
+    expect(creationUrl.searchParams.get("statuses")).toBe("read")
+    expect(creationUrl.searchParams.get("checks")).toBeNull()
   })
 
   test("opens Keymaxxer setup for a missing repository token", async () => {

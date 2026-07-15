@@ -703,6 +703,7 @@ export const makeWorkItemLifecycleLive = (
         {
           readonly worktreePath?: string
           readonly sessionId?: string
+          readonly handledCheckIds?: readonly string[]
           readonly transition?: {
             readonly nextState:
               | OperationalLifecycleStep
@@ -737,7 +738,7 @@ export const makeWorkItemLifecycleLive = (
             return steps.watchPrStatusChecks(context).pipe(
               Effect.flatMap((status) =>
                 Effect.gen(function* () {
-                  if (status === "failed") {
+                  if (status === "handoff_needed") {
                     return {
                       transition: {
                         nextState: "investigate_pr_status_checks" as const,
@@ -753,7 +754,9 @@ export const makeWorkItemLifecycleLive = (
                       },
                     }
                   }
-                  if (status === "pending") {
+                  // Aggregate still pending, or red results already handed off —
+                  // keep polling for new executions rather than re-investigating.
+                  if (status === "pending" || status === "failed") {
                     return {
                       transition: {
                         nextState: "watch_pr_status_checks" as const,
@@ -788,8 +791,9 @@ export const makeWorkItemLifecycleLive = (
           case "investigate_pr_status_checks":
             return steps.investigatePrStatusChecks(context).pipe(
               Effect.map((result) => ({
+                handledCheckIds: result.handledCheckIds,
                 transition:
-                  result._tag === "fixed"
+                  result._tag === "processed"
                     ? {
                         nextState: "watch_pr_status_checks" as const,
                         delay: PR_STATUS_CHECKS_POLL_DELAY,
@@ -862,6 +866,7 @@ export const makeWorkItemLifecycleLive = (
         readonly output: {
           readonly worktreePath?: string
           readonly sessionId?: string
+          readonly handledCheckIds?: readonly string[]
           readonly transition?: {
             readonly nextState:
               | OperationalLifecycleStep
@@ -897,6 +902,15 @@ export const makeWorkItemLifecycleLive = (
                  WHERE id = ? AND status = 'running'`,
                   [now, now, stepRun.id],
                 )
+
+                for (const checkId of output.handledCheckIds ?? []) {
+                  yield* sql.unsafe(
+                    `UPDATE pr_status_check
+                     SET handled_at = ?, updated_at = ?
+                     WHERE id = ? AND work_item_id = ? AND handled_at IS NULL`,
+                    [now, now, checkId, workItem.id],
+                  )
+                }
 
                 if (!revalidation.ok) {
                   yield* sql.unsafe(

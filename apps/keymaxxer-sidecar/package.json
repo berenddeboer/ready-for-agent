@@ -7,10 +7,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@ready-for-agent/keymaxxer-service": "workspace:*",
-    "effect": "^4.0.0-beta.97",
-    "zod": "^4.4.3"
+    "@ready-for-agent/keymaxxer-service": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.0"

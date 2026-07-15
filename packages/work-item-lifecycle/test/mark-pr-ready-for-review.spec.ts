@@ -40,7 +40,8 @@ describe("markPrReadyForReview", () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
-      getPullRequestCheckStatus: () => Effect.succeed({ _tag: "succeeded" }),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
       markPullRequestReadyForReview: (_repository, branch) => {
         requestedBranch = branch
         return Effect.void
@@ -59,7 +60,8 @@ describe("markPrReadyForReview", () => {
   it("requires a worktree path", async () => {
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
-      getPullRequestCheckStatus: () => Effect.succeed({ _tag: "succeeded" }),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
       markPullRequestReadyForReview: () => Effect.void,
     } satisfies GitHubServiceShape)
 

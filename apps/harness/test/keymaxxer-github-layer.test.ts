@@ -179,7 +179,16 @@ describe("Keymaxxer-backed GitHub layer", () => {
         runs.push(input)
         return Effect.succeed({
           exitCode: 0,
-          stdout: JSON.stringify({ _tag: "failed" }),
+          stdout: JSON.stringify({
+            _tag: "failed",
+            terminalChecks: [
+              {
+                externalId: "checkrun:1",
+                name: "lint",
+                outcome: "red",
+              },
+            ],
+          }),
           stderr: "",
         })
       },
@@ -198,9 +207,81 @@ describe("Keymaxxer-backed GitHub layer", () => {
       }).pipe(Effect.provide(layer)),
     )
 
-    expect(status).toEqual({ _tag: "failed" })
+    expect(status).toEqual({
+      _tag: "failed",
+      terminalChecks: [
+        {
+          externalId: "checkrun:1",
+          name: "lint",
+          outcome: "red",
+        },
+      ],
+    })
     expect(runs[0]?.command).toContain("get-pr-check-status.ts")
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+  })
+
+  test("decodes no_checks and pending terminalChecks from the bin", async () => {
+    const responses = [
+      JSON.stringify({ _tag: "no_checks" }),
+      JSON.stringify({
+        _tag: "pending",
+        terminalChecks: [
+          {
+            externalId: "status:SC_ci",
+            name: "ci",
+            outcome: "green",
+          },
+        ],
+      }),
+    ]
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: responses.shift()!,
+          stderr: "",
+        }),
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    const noChecks = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.getPullRequestCheckStatus(
+          { owner: "acme", name: "widgets" },
+          "branch",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+    expect(noChecks).toEqual({ _tag: "no_checks" })
+
+    const pending = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.getPullRequestCheckStatus(
+          { owner: "acme", name: "widgets" },
+          "branch",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+    expect(pending).toEqual({
+      _tag: "pending",
+      terminalChecks: [
+        {
+          externalId: "status:SC_ci",
+          name: "ci",
+          outcome: "green",
+        },
+      ],
+    })
   })
 
   test("marks a PR ready for review through the configured repository token", async () => {

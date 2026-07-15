@@ -7,7 +7,7 @@ Investigate PR Status Checks continues the Implement OpenCode Session with the R
 ## Consequences
 
 - Every poll and investigation is a separate Step Run, preserving durable execution history and at-least-once queue behavior.
-- New Repository credentials request Actions read permission so OpenCode can inspect GitHub Actions check logs.
+- New Repository credentials request Actions read and Commit statuses read. Individual PR Status Checks are loaded via the Actions and commit-status REST APIs (fine-grained PATs cannot call the Checks API / GraphQL CheckRun nodes). Actions read also lets OpenCode inspect workflow logs.
 - A newly created PR that is not yet visible through GitHub is treated as pending; a visible PR with a null rollup is `no_checks` (not green) until the 60-second grace elapses.
 - Same-state watch requeues preserve `state_ready_at` so residence time (and the `no_checks` grace) accumulate across polls.
 - A merged PR is treated as green and advances to Mark PR Ready for Review (a no-op if already non-draft); a closed, unmerged PR enters Needs Human instead of polling forever.
