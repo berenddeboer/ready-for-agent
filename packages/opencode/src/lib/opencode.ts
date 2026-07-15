@@ -2,6 +2,7 @@ import { Context, Duration, Effect, Layer, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { buildRunArgs } from "./build-args.js"
+import { makeOpencodeEnvironment } from "./environment.js"
 import {
   OpencodeExitError,
   OpencodeTimeoutError,
@@ -47,6 +48,7 @@ export class Opencode extends Context.Service<
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
+        const environment = makeOpencodeEnvironment()
 
         const listModels = (
           input: ListModelsInput,
@@ -56,6 +58,8 @@ export class Opencode extends Context.Service<
             const timeoutMs = Duration.toMillis(timeout)
             const command = ChildProcess.make(binary, ["models"], {
               cwd: input.cwd,
+              env: environment,
+              extendEnv: true,
               stdin: "ignore",
               stderr: "ignore",
             })
@@ -124,6 +128,8 @@ export class Opencode extends Context.Service<
 
             const command = ChildProcess.make(binary, args, {
               cwd: input.cwd,
+              env: environment,
+              extendEnv: true,
               stdin: "ignore",
               stderr: "ignore",
             })
