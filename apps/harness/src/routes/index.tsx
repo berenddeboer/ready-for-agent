@@ -118,6 +118,7 @@ type WorkItemState =
   | "WATCH_PR_STATUS_CHECKS"
   | "INVESTIGATE_PR_STATUS_CHECKS"
   | "MARK_PR_READY_FOR_REVIEW"
+  | "DECIDE_PR_MERGE"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"
@@ -190,10 +191,25 @@ const formatLifecycleLabel = (value: string) => {
   if (value.toLowerCase() === "mark_pr_ready_for_review") {
     return "Mark PR ready for review"
   }
+  if (value.toLowerCase() === "decide_pr_merge") {
+    return "Decide PR merge"
+  }
   return value
     .toLowerCase()
     .replaceAll("_", " ")
     .replace(/^./, (first) => first.toUpperCase())
+}
+
+const formatStepRunOutcome = (
+  stepRun: WorkItem["stepRuns"][number],
+  workItemState: WorkItemState,
+) => {
+  if (stepRun.step === "DECIDE_PR_MERGE" && stepRun.status === "SUCCEEDED") {
+    return workItemState === "COMPLETE"
+      ? "Automated merge"
+      : "Human review before merge"
+  }
+  return formatLifecycleLabel(stepRun.status)
 }
 
 export const Route = createFileRoute("/")({
@@ -1010,7 +1026,7 @@ function WorkItemLifecycleStatus({
               key={stepRun.id}
             >
               {formatLifecycleLabel(stepRun.step)}:{" "}
-              {formatLifecycleLabel(stepRun.status)}
+              {formatStepRunOutcome(stepRun, workItem.state)}
             </li>
           ))}
         </ol>

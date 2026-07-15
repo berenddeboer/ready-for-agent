@@ -1,6 +1,5 @@
 import { Data, Duration, Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
-import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   buildRunArgs,
@@ -9,37 +8,29 @@ import {
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { extractOpencodeAssistantText } from "./opencode-output.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
-import { workItemBranchName } from "./worktree-names.js"
 
-export class PrStatusChecksContextError extends Data.TaggedError(
-  "PrStatusChecksContextError",
+export class DecidePrMergeContextError extends Data.TaggedError(
+  "DecidePrMergeContextError",
 )<{ readonly message: string }> {}
 
-export class PrStatusChecksOpenCodeError extends Data.TaggedError(
-  "PrStatusChecksOpenCodeError",
+export class DecidePrMergeOpenCodeError extends Data.TaggedError(
+  "DecidePrMergeOpenCodeError",
 )<{ readonly message: string; readonly cause?: unknown }> {}
 
-export type PrStatusCheckResult =
-  | "pending"
-  | "no_checks"
-  | "succeeded"
-  | "failed"
-  | "closed"
-
-export type PrStatusCheckInvestigationResult =
-  | { readonly _tag: "fixed" }
+export type DecidePrMergeResult =
+  | { readonly _tag: "clanker_merge" }
   | { readonly _tag: "needs_human"; readonly reason: string }
 
 const resolveContext = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     if (context.worktreePath === null || context.worktreePath.trim() === "") {
-      return yield* new PrStatusChecksContextError({
-        message: "PR status checks require a persisted worktree path",
+      return yield* new DecidePrMergeContextError({
+        message: "Decide PR merge requires a persisted worktree path",
       })
     }
     if (context.sessionId === null || context.sessionId.trim() === "") {
-      return yield* new PrStatusChecksContextError({
-        message: "PR status checks require the Implement OpenCode Session",
+      return yield* new DecidePrMergeContextError({
+        message: "Decide PR merge requires the Implement OpenCode Session",
       })
     }
     const db = yield* DbService
@@ -48,45 +39,41 @@ const resolveContext = (context: LifecycleStepContext) =>
       ({ id }) => id === context.repositoryId,
     )
     if (repository === undefined) {
-      return yield* new PrStatusChecksContextError({
+      return yield* new DecidePrMergeContextError({
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
-    const branch = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
-      workItemId: context.workItemId,
-    })
     return {
       repository,
-      branch,
       worktreePath: context.worktreePath,
       sessionId: context.sessionId,
     }
   })
 
-export const watchPrStatusChecks = (context: LifecycleStepContext) =>
-  Effect.gen(function* () {
-    const { repository, branch } = yield* resolveContext(context)
-    const github = yield* GitHubService
-    const status = yield* github.getPullRequestCheckStatus(
-      { owner: repository.githubOwner, name: repository.githubRepo },
-      branch,
-    )
-    return status._tag satisfies PrStatusCheckResult
-  })
-
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
 
-const parseInvestigationResult = (
+export const parseDecidePrMergeResult = (
   output: string,
-): PrStatusCheckInvestigationResult | null => {
-  if (/READY_FOR_AGENT_RESULT:\s*FIXED\b/i.test(output)) {
-    return { _tag: "fixed" }
+): DecidePrMergeResult | null => {
+  const lines = output.split("\n").map((line) => line.trim())
+  const nonEmptyLines = lines.filter((line) => line !== "")
+  const resultLines = lines.filter((line) =>
+    /^READY_FOR_AGENT_RESULT:/i.test(line),
+  )
+  const finalLine = nonEmptyLines.at(-1)
+
+  if (
+    resultLines.length !== 1 ||
+    finalLine === undefined ||
+    finalLine !== resultLines[0]
+  ) {
+    return null
   }
-  const needsHuman = output.match(
-    /READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*([^\n]+)/i,
+  if (/^READY_FOR_AGENT_RESULT:\s*CLANKER_MERGE$/i.test(finalLine)) {
+    return { _tag: "clanker_merge" }
+  }
+  const needsHuman = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*(.+)$/i,
   )
   if (needsHuman?.[1] !== undefined && needsHuman[1].trim() !== "") {
     return { _tag: "needs_human", reason: needsHuman[1].trim().slice(0, 500) }
@@ -94,7 +81,12 @@ const parseInvestigationResult = (
   return null
 }
 
-export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
+/**
+ * Production Decide PR Merge Lifecycle Step.
+ * Continues the Implement OpenCode Session and asks for a risk-based decision:
+ * whether a clanker may merge the PR or a human must. Does not merge.
+ */
+export const decidePrMerge = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, worktreePath, sessionId } =
       yield* resolveContext(context)
@@ -104,17 +96,17 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       account: `${repository.githubOwner}/${repository.githubRepo}`,
     })
     if (tokenName === null) {
-      return yield* new PrStatusChecksContextError({
+      return yield* new DecidePrMergeContextError({
         message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
       })
     }
     const prompt = [
-      "Investigate the failing status checks on the pull request for this worktree.",
-      "Use GitHub to inspect the failing checks and their logs. Fix the underlying problem when possible, verify the fix, commit it, and push it to the existing PR branch.",
-      "Do not create or merge another pull request.",
+      "Assess whether this pull request is low enough risk for an automated agent (clanker) to merge, or whether a human must merge it.",
+      "Base the decision on risk: blast radius, security or auth changes, data migrations, irreversible operations, ambiguous requirements, incomplete verification, or anything that needs human judgment.",
+      "Inspect the PR and its checks if needed. Do not merge the pull request.",
       "End your final response with exactly one machine-readable result line:",
-      "READY_FOR_AGENT_RESULT: FIXED",
-      "or, only when the failure cannot be fixed autonomously or requires a human decision:",
+      "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+      "or, only when a human must merge:",
       "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
     ].join("\n")
     const args = buildRunArgs({
@@ -139,30 +131,30 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         secrets: [tokenName],
         timeoutMs: Duration.toMillis(
           context.maxDuration ??
-            DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
+            DEFAULT_LIFECYCLE_MAX_DURATIONS.decide_pr_merge,
         ),
       })
       .pipe(
         Effect.mapError(
           (cause) =>
-            new PrStatusChecksOpenCodeError({
-              message: "OpenCode failed while investigating PR status checks",
+            new DecidePrMergeOpenCodeError({
+              message: "OpenCode failed while deciding PR merge risk",
               cause,
             }),
         ),
       )
     if (result.exitCode !== 0) {
-      return yield* new PrStatusChecksOpenCodeError({
-        message: "OpenCode failed while investigating PR status checks",
+      return yield* new DecidePrMergeOpenCodeError({
+        message: "OpenCode failed while deciding PR merge risk",
       })
     }
-    const investigation = parseInvestigationResult(
+    const decision = parseDecidePrMergeResult(
       extractOpencodeAssistantText(result.stdout),
     )
-    if (investigation === null) {
-      return yield* new PrStatusChecksOpenCodeError({
-        message: "OpenCode did not report FIXED or NEEDS_HUMAN",
+    if (decision === null) {
+      return yield* new DecidePrMergeOpenCodeError({
+        message: "OpenCode did not report CLANKER_MERGE or NEEDS_HUMAN",
       })
     }
-    return investigation
+    return decision
   })

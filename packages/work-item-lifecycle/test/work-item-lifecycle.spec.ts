@@ -62,6 +62,7 @@ describe("WorkItemLifecycle", () => {
     watchPrStatusChecks: () => Effect.succeed("succeeded"),
     investigatePrStatusChecks: () => Effect.succeed({ _tag: "fixed" }),
     markPrReadyForReview: () => Effect.void,
+    decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
     removeWorktree: () => Effect.void,
   }
 
@@ -520,7 +521,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 9; i++) {
+          for (let i = 0; i < 10; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -581,7 +582,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 9; i++) {
+          for (let i = 0; i < 10; i++) {
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -928,16 +929,25 @@ describe("WorkItemLifecycle", () => {
           const afterReady = yield* claimAndRunPending
           expect(afterReady._tag).toBe("processed")
           if (afterReady._tag === "processed") {
-            expect(afterReady.workItem.state).toBe("complete")
-            expect(afterReady.workItem.worktreePath).toBe(
+            expect(afterReady.workItem.state).toBe("decide_pr_merge")
+          }
+
+          const afterDecide = yield* claimAndRunPending
+          expect(afterDecide._tag).toBe("processed")
+          if (afterDecide._tag === "processed") {
+            expect(afterDecide.workItem.state).toBe("complete")
+            expect(afterDecide.workItem.worktreePath).toBe(
               "/tmp/worktrees/acme-widgets-42",
             )
-            expect(afterReady.workItem.sessionId).toBe(
+            expect(afterDecide.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterReady.workItem.failureCode).toBeNull()
+            expect(afterDecide.workItem.failureCode).toBeNull()
             expect(
-              afterReady.workItem.stepRuns.map((run) => [run.step, run.status]),
+              afterDecide.workItem.stepRuns.map((run) => [
+                run.step,
+                run.status,
+              ]),
             ).toEqual([
               ["create_worktree", "succeeded"],
               ["install_dependencies", "succeeded"],
@@ -948,6 +958,7 @@ describe("WorkItemLifecycle", () => {
               ["create_pr", "succeeded"],
               ["watch_pr_status_checks", "succeeded"],
               ["mark_pr_ready_for_review", "succeeded"],
+              ["decide_pr_merge", "succeeded"],
             ])
           }
 
@@ -957,7 +968,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(9)
+          expect(final.stepRuns).toHaveLength(10)
         }),
       ))
 
@@ -1161,6 +1172,10 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.void
         },
+        decidePrMerge: (context) => {
+          seen.push(context)
+          return Effect.succeed({ _tag: "clanker_merge" })
+        },
         removeWorktree: () => Effect.void,
       }
 
@@ -1186,8 +1201,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
 
-          expect(seen).toHaveLength(9)
+          expect(seen).toHaveLength(10)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -1224,6 +1240,39 @@ describe("WorkItemLifecycle", () => {
           expect(seen[7]!.sessionId).toBe("ses_recorded")
           expect(seen[8]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[8]!.sessionId).toBe("ses_recorded")
+          expect(seen[9]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[9]!.sessionId).toBe("ses_recorded")
+        }),
+      )
+    })
+
+    it("hands high-risk merge decisions to a human", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        decidePrMerge: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "Touches authentication secrets",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 10; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          expect(final.failureCode).toBe("needs_human")
+          expect(final.failureMessage).toBe("Touches authentication secrets")
         }),
       )
     })
@@ -1806,6 +1855,7 @@ describe("WorkItemLifecycle", () => {
           watch_pr_status_checks: Duration.minutes(5),
           investigate_pr_status_checks: Duration.hours(2),
           mark_pr_ready_for_review: Duration.minutes(5),
+          decide_pr_merge: Duration.minutes(15),
         },
       }).pipe(
         Layer.provideMerge(

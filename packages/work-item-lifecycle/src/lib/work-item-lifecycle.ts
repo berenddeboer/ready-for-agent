@@ -301,6 +301,8 @@ const nextOperationalStep = (
     case "investigate_pr_status_checks":
       return "watch_pr_status_checks"
     case "mark_pr_ready_for_review":
+      return "decide_pr_merge"
+    case "decide_pr_merge":
       return "complete"
   }
 }
@@ -800,6 +802,20 @@ export const makeWorkItemLifecycleLive = (
             )
           case "mark_pr_ready_for_review":
             return steps.markPrReadyForReview(context).pipe(Effect.as({}))
+          case "decide_pr_merge":
+            return steps.decidePrMerge(context).pipe(
+              Effect.map((result) => ({
+                transition:
+                  result._tag === "clanker_merge"
+                    ? {
+                        nextState: "complete" as const,
+                      }
+                    : {
+                        nextState: "needs_human" as const,
+                        reason: result.reason,
+                      },
+              })),
+            )
         }
       }
 
