@@ -156,6 +156,61 @@ describe("createWorktree", () => {
     }
   })
 
+  it("starts from origin's default branch tip when that branch is not main", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-wt-trunk-"))
+    try {
+      const source = join(root, "source")
+      const bare = join(root, "widgets.git")
+      await mkdir(source, { recursive: true })
+      await git(source, ["init", "-b", "trunk"])
+      await git(source, ["config", "user.email", "test@example.com"])
+      await git(source, ["config", "user.name", "Test"])
+      await writeFile(join(source, "README.md"), "# stale-local\n")
+      await git(source, ["add", "README.md"])
+      await git(source, ["commit", "-m", "initial on trunk"])
+      await git(root, ["clone", "--bare", source, bare])
+
+      await writeFile(join(source, "README.md"), "# trunk-default\n")
+      await git(source, ["add", "README.md"])
+      await git(source, ["commit", "-m", "remote tip on trunk"])
+
+      const workItemId = makeWorkItemId()
+      const path = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+
+          return yield* createWorktree({
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 99,
+            model: "opencode/test",
+            variant: "low",
+            worktreePath: null,
+            sessionId: null,
+          })
+        }),
+      )
+
+      expect(await Bun.file(join(path, "README.md")).text()).toContain(
+        "trunk-default",
+      )
+      const tip = await git(path, ["rev-parse", "HEAD"])
+      const originTrunk = await git(bare, [
+        "rev-parse",
+        "refs/remotes/origin/trunk",
+      ])
+      expect(tip).toBe(originTrunk)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("places dot-bare worktrees in the project root", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-wt-dotbare-"))
     try {
