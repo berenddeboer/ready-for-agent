@@ -24,9 +24,10 @@ import { review } from "./review.js"
 /**
  * Production LifecycleSteps: Create Worktree, Install Dependencies, Implement,
  * Pre-Commit, Review, Commit, and Create PR (OpenCode continues the Implement
- * Session for Review, Commit, and Create PR; Pre-Commit remains harness git
- * validation). Captures platform, database, Keymaxxer, and OpenCode services so
- * handlers remain `Effect<A>` with no requirements.
+ * Session for Pre-Commit fix loops, Review, Commit, and Create PR; Pre-Commit
+ * still runs harness git validation first). Captures platform, database,
+ * Keymaxxer, and OpenCode services so handlers remain `Effect<A>` with no
+ * requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,

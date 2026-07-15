@@ -33,8 +33,26 @@ export class PreCommitHookFailedError extends Data.TaggedError(
   readonly output: string
 }> {}
 
+export class PreCommitSessionContextMissingError extends Data.TaggedError(
+  "PreCommitSessionContextMissingError",
+)<{
+  readonly workItemId: string
+  readonly message: string
+}> {}
+
+export class PreCommitOpenCodeError extends Data.TaggedError(
+  "PreCommitOpenCodeError",
+)<{
+  readonly message: string
+  readonly worktreePath: string
+  readonly sessionId: string
+  readonly cause?: unknown
+}> {}
+
 export type PreCommitError =
   | PreCommitWorktreeContextMissingError
   | PreCommitInvalidWorktreeContextError
   | PreCommitStageError
   | PreCommitHookFailedError
+  | PreCommitSessionContextMissingError
+  | PreCommitOpenCodeError
