@@ -13,6 +13,41 @@ type Repository {
   nameWithOwner: String!
   issues(first: Int, after: String, labels: [String!]): IssueConnection!
   issue(number: Int!): Issue
+  pullRequests(
+    first: Int
+    states: [PullRequestState!]
+    headRefName: String
+  ): PullRequestConnection!
+}
+
+type PullRequestConnection {
+  nodes: [PullRequest]
+}
+
+type PullRequest {
+  number: Int!
+  url: URI!
+  state: PullRequestState!
+  merged: Boolean!
+  statusCheckRollup: StatusCheckRollup
+}
+
+type StatusCheckRollup {
+  state: StatusState!
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+}
+
+enum StatusState {
+  EXPECTED
+  ERROR
+  FAILURE
+  PENDING
+  SUCCESS
 }
 
 type IssueConnection {

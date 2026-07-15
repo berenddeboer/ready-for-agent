@@ -499,7 +499,7 @@ export const DbServiceLive = Layer.effect(
                      state_ready_at = ?,
                      updated_at = ?
                  WHERE repository_id = ?
-                   AND state NOT IN ('complete', 'failed', 'abandoned')`,
+                   AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')`,
                 [now, now, repositoryId],
               )
 

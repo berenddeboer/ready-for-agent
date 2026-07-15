@@ -159,6 +159,8 @@ const makeRuntime = (
       review: Duration.hours(1),
       commit: Duration.minutes(5),
       create_pr: Duration.minutes(10),
+      watch_pr_status_checks: Duration.minutes(5),
+      investigate_pr_status_checks: Duration.hours(2),
     },
     implementNow: unused,
     runStep: unused,

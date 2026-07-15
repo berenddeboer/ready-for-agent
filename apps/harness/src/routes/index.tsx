@@ -115,9 +115,12 @@ type WorkItemState =
   | "REVIEW"
   | "COMMIT"
   | "CREATE_PR"
+  | "WATCH_PR_STATUS_CHECKS"
+  | "INVESTIGATE_PR_STATUS_CHECKS"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"
+  | "NEEDS_HUMAN"
 
 type StepRunStatus =
   | "QUEUED"
@@ -176,6 +179,7 @@ const terminalWorkItemStates: readonly WorkItemState[] = [
   "COMPLETE",
   "FAILED",
   "ABANDONED",
+  "NEEDS_HUMAN",
 ]
 
 const formatLifecycleLabel = (value: string) =>
@@ -979,7 +983,9 @@ function WorkItemLifecycleStatus({
                 ? "bg-green-100 text-green-700"
                 : status === "ABANDONED" || status === "CANCELLED"
                   ? "bg-slate-200 text-slate-600"
-                  : "bg-blue-100 text-blue-700"
+                  : status === "NEEDS_HUMAN"
+                    ? "bg-amber-100 text-amber-800"
+                    : "bg-blue-100 text-blue-700"
           }`}
         >
           {formatLifecycleLabel(status)}

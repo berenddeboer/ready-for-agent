@@ -32,6 +32,104 @@ const issue = (
 })
 
 describe("GitHubService live implementation", () => {
+  for (const [state, expected] of [
+    ["PENDING", "pending"],
+    ["EXPECTED", "pending"],
+    ["SUCCESS", "succeeded"],
+    ["FAILURE", "failed"],
+    ["ERROR", "failed"],
+  ] as const) {
+    it(`maps aggregate PR check state ${state} to ${expected}`, async () => {
+      const service = makeGitHubService({
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    state: "OPEN",
+                    merged: false,
+                    statusCheckRollup: { state },
+                  },
+                ],
+              },
+            },
+          }) as never,
+      })
+
+      const status = await Effect.runPromise(
+        service.getPullRequestCheckStatus(
+          repository,
+          "rfa/acme-widgets/42/wi-1",
+        ),
+      )
+
+      expect(status).toEqual({ _tag: expected })
+    })
+  }
+
+  it("treats a not-yet-visible PR as pending and a PR without checks as succeeded", async () => {
+    const responses = [
+      { repository: { pullRequests: { nodes: [] } } },
+      {
+        repository: {
+          pullRequests: {
+            nodes: [{ state: "OPEN", merged: false, statusCheckRollup: null }],
+          },
+        },
+      },
+    ]
+    const service = makeGitHubService({
+      query: () => Promise.resolve(responses.shift()!) as never,
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "pending" })
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "succeeded" })
+  })
+
+  it("distinguishes closed and merged PRs from a not-yet-visible PR", async () => {
+    const responses = [
+      {
+        repository: {
+          pullRequests: {
+            nodes: [
+              { state: "CLOSED", merged: false, statusCheckRollup: null },
+            ],
+          },
+        },
+      },
+      {
+        repository: {
+          pullRequests: {
+            nodes: [{ state: "CLOSED", merged: true, statusCheckRollup: null }],
+          },
+        },
+      },
+    ]
+    const service = makeGitHubService({
+      query: () => Promise.resolve(responses.shift()!) as never,
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "closed" })
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "succeeded" })
+  })
+
   it("fetches every ready-for-agent page and returns mapped issues by number", async () => {
     const requests: unknown[] = []
     const responses = [

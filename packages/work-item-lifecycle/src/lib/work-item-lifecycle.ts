@@ -292,7 +292,11 @@ const nextOperationalStep = (
     case "commit":
       return "create_pr"
     case "create_pr":
-      return "complete"
+      return "watch_pr_status_checks"
+    case "watch_pr_status_checks":
+      return "watch_pr_status_checks"
+    case "investigate_pr_status_checks":
+      return "watch_pr_status_checks"
   }
 }
 
@@ -436,7 +440,7 @@ export const makeWorkItemLifecycleLive = (
               `SELECT id FROM work_item
              WHERE repository_id = ?
                AND github_issue_number = ?
-               AND state NOT IN ('complete', 'failed', 'abandoned')
+               AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
              ORDER BY created_at ASC, rowid ASC
              LIMIT 1`,
               [repositoryId, githubIssueNumber],
@@ -691,6 +695,14 @@ export const makeWorkItemLifecycleLive = (
         {
           readonly worktreePath?: string
           readonly sessionId?: string
+          readonly transition?: {
+            readonly nextState:
+              | OperationalLifecycleStep
+              | "complete"
+              | "needs_human"
+            readonly delay?: Duration.Duration
+            readonly reason?: string
+          }
         },
         unknown
       > => {
@@ -713,6 +725,41 @@ export const makeWorkItemLifecycleLive = (
             return steps.commit(context).pipe(Effect.as({}))
           case "create_pr":
             return steps.createPr(context).pipe(Effect.as({}))
+          case "watch_pr_status_checks":
+            return steps.watchPrStatusChecks(context).pipe(
+              Effect.map((status) => ({
+                transition:
+                  status === "succeeded"
+                    ? { nextState: "complete" as const }
+                    : status === "failed"
+                      ? { nextState: "investigate_pr_status_checks" as const }
+                      : status === "closed"
+                        ? {
+                            nextState: "needs_human" as const,
+                            reason:
+                              "The pull request was closed before its status checks succeeded",
+                          }
+                        : {
+                            nextState: "watch_pr_status_checks" as const,
+                            delay: Duration.seconds(30),
+                          },
+              })),
+            )
+          case "investigate_pr_status_checks":
+            return steps.investigatePrStatusChecks(context).pipe(
+              Effect.map((result) => ({
+                transition:
+                  result._tag === "fixed"
+                    ? {
+                        nextState: "watch_pr_status_checks" as const,
+                        delay: Duration.seconds(30),
+                      }
+                    : {
+                        nextState: "needs_human" as const,
+                        reason: result.reason,
+                      },
+              })),
+            )
         }
       }
 
@@ -759,6 +806,14 @@ export const makeWorkItemLifecycleLive = (
         readonly output: {
           readonly worktreePath?: string
           readonly sessionId?: string
+          readonly transition?: {
+            readonly nextState:
+              | OperationalLifecycleStep
+              | "complete"
+              | "needs_human"
+            readonly delay?: Duration.Duration
+            readonly reason?: string
+          }
         }
         readonly revalidation:
           | { readonly ok: true }
@@ -771,7 +826,9 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
           const { stepRun, workItem, output, revalidation } = input
-          const nextStep = nextOperationalStep(stepRun.step)
+          const transition = output.transition
+          const nextStep =
+            transition?.nextState ?? nextOperationalStep(stepRun.step)
           const worktreePath = output.worktreePath ?? workItem.worktree_path
           const sessionId = output.sessionId ?? workItem.session_id
 
@@ -817,6 +874,27 @@ export const makeWorkItemLifecycleLive = (
                    WHERE id = ?`,
                     [now, worktreePath, sessionId, now, workItem.id],
                   )
+                } else if (nextStep === "needs_human") {
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                   SET state = 'needs_human',
+                       state_ready_at = ?,
+                       failure_code = 'needs_human',
+                       failure_message = ?,
+                       worktree_path = ?,
+                       session_id = ?,
+                       updated_at = ?
+                   WHERE id = ?`,
+                    [
+                      now,
+                      transition?.reason ??
+                        "OpenCode requested human intervention",
+                      worktreePath,
+                      sessionId,
+                      now,
+                      workItem.id,
+                    ],
+                  )
                 } else {
                   const nextStepRunId = makeStepRunId()
 
@@ -841,11 +919,18 @@ export const makeWorkItemLifecycleLive = (
                   )
 
                   const payload = yield* encodeStepJob(nextStepRunId)
-                  const jobId = yield* queue.enqueue(
-                    WORK_ITEM_LIFECYCLE_QUEUE,
-                    payload,
-                    { retryLimit: 1 },
-                  )
+                  const enqueue =
+                    transition?.delay === undefined
+                      ? queue.enqueue(WORK_ITEM_LIFECYCLE_QUEUE, payload, {
+                          retryLimit: 1,
+                        })
+                      : queue.enqueueWithDelay(
+                          WORK_ITEM_LIFECYCLE_QUEUE,
+                          payload,
+                          transition.delay,
+                          { retryLimit: 1 },
+                        )
+                  const jobId = yield* enqueue
 
                   yield* sql.unsafe(
                     `UPDATE step_run
@@ -1045,7 +1130,7 @@ export const makeWorkItemLifecycleLive = (
                 SELECT 1 FROM work_item
                 WHERE work_item.id = step_run.work_item_id
                   AND work_item.state = step_run.step
-                  AND work_item.state NOT IN ('complete', 'failed', 'abandoned')
+                  AND work_item.state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
               )
               AND NOT EXISTS (
                 SELECT 1 FROM step_run AS other
@@ -1216,7 +1301,7 @@ export const makeWorkItemLifecycleLive = (
                       state_ready_at = ?,
                       updated_at = ?
                   WHERE id = ?
-                    AND state NOT IN ('complete', 'failed', 'abandoned')
+                    AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
                     AND NOT EXISTS (
                       SELECT 1 FROM step_run
                       WHERE step_run.work_item_id = work_item.id
@@ -1712,7 +1797,8 @@ export const makeWorkItemLifecycleLive = (
             (item) =>
               item.state !== "complete" &&
               item.state !== "failed" &&
-              item.state !== "abandoned",
+              item.state !== "abandoned" &&
+              item.state !== "needs_human",
           )
           if (unfinished) {
             return yield* unfinishedWorkItemExistsError(

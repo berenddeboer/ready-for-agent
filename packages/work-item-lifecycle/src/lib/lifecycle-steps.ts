@@ -1,4 +1,8 @@
 import { Context, type Duration, type Effect } from "effect"
+import type {
+  PrStatusCheckInvestigationResult,
+  PrStatusCheckResult,
+} from "./pr-status-checks.js"
 import type { WorkItemId } from "./types.js"
 
 /**
@@ -42,6 +46,12 @@ export interface LifecycleStepsShape {
   readonly createPr: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
+  readonly watchPrStatusChecks: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<PrStatusCheckResult, unknown>
+  readonly investigatePrStatusChecks: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<PrStatusCheckInvestigationResult, unknown>
   readonly removeWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>

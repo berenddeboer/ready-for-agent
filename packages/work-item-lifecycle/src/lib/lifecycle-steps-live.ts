@@ -1,6 +1,7 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { DbService } from "@ready-for-agent/db-service"
+import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { commit } from "./commit.js"
@@ -9,6 +10,10 @@ import { createWorktree } from "./create-worktree.js"
 import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
+import {
+  investigatePrStatusChecks,
+  watchPrStatusChecks,
+} from "./pr-status-checks.js"
 import { preCommit } from "./pre-commit.js"
 import { removeWorktree } from "./remove-worktree.js"
 import { review } from "./review.js"
@@ -29,6 +34,7 @@ export const LifecycleStepsLive = Layer.effect(
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const opencode = yield* Opencode
+    const github = yield* GitHubService
 
     const withServices = <A, E>(
       effect: Effect.Effect<
@@ -40,6 +46,7 @@ export const LifecycleStepsLive = Layer.effect(
         | Path.Path
         | ChildProcessSpawner.ChildProcessSpawner
         | Opencode
+        | GitHubService
       >,
     ) =>
       effect.pipe(
@@ -49,6 +56,7 @@ export const LifecycleStepsLive = Layer.effect(
         Effect.provideService(Path.Path, path),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(Opencode, opencode),
+        Effect.provideService(GitHubService, github),
       )
 
     return LifecycleSteps.of({
@@ -60,6 +68,10 @@ export const LifecycleStepsLive = Layer.effect(
       review: (context) => withServices(review(context)),
       commit: (context) => withServices(commit(context)),
       createPr: (context) => withServices(createPr(context)),
+      watchPrStatusChecks: (context) =>
+        withServices(watchPrStatusChecks(context)),
+      investigatePrStatusChecks: (context) =>
+        withServices(investigatePrStatusChecks(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

@@ -3,6 +3,12 @@ export interface GitHubRepository {
   readonly name: string
 }
 
+export type PullRequestCheckStatus =
+  | { readonly _tag: "pending" }
+  | { readonly _tag: "succeeded" }
+  | { readonly _tag: "failed" }
+  | { readonly _tag: "closed" }
+
 export type GitHubIssueState = "OPEN" | "CLOSED"
 
 export interface GitHubIssueReference {

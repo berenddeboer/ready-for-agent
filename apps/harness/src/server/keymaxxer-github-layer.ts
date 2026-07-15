@@ -35,6 +35,12 @@ const SerializedIssue = Schema.Struct({
 })
 
 const SerializedIssues = Schema.Array(SerializedIssue)
+const SerializedPullRequestCheckStatus = Schema.Union([
+  Schema.TaggedStruct("pending", {}),
+  Schema.TaggedStruct("succeeded", {}),
+  Schema.TaggedStruct("failed", {}),
+  Schema.TaggedStruct("closed", {}),
+])
 
 const requestError = (repository: { owner: string; name: string }) =>
   new GitHubRequestError({
@@ -118,6 +124,37 @@ export const keymaxxerGitHubLayer = (options: {
         })
 
       const service: GitHubServiceShape = {
+        getPullRequestCheckStatus: (repository, headRefName) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(repository)
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const head = encodeArgument(headRefName)
+            const result = yield* keymaxxer.runWithSecrets({
+              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-check-status.ts ${owner} ${name} ${head}`,
+              cwd: options.workspaceRoot,
+              secrets: [tokenName],
+              timeoutMs: 60_000,
+            })
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(repository)
+            }
+            return yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(SerializedPullRequestCheckStatus),
+            )(result.stdout).pipe(
+              Effect.mapError(() => requestError(repository)),
+            )
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(requestError(repository)),
+            ),
+          ),
         listReadyIssues: (repository) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)
