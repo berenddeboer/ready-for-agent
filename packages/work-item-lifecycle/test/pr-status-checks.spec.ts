@@ -27,6 +27,9 @@ const repository = {
   localPath: "/repos/widgets",
   isBare: true,
   paused: false,
+  defaultModel: null,
+  defaultVariant: null,
+  autoMerge: false,
   issuesReconciledAt: null,
 }
 

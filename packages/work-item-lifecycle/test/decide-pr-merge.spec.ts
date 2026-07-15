@@ -20,6 +20,9 @@ const repository = {
   localPath: "/repos/widgets",
   isBare: true,
   paused: false,
+  defaultModel: null,
+  defaultVariant: null,
+  autoMerge: true,
   issuesReconciledAt: null,
 }
 
@@ -137,6 +140,36 @@ describe("decidePrMerge", () => {
     expect(result).toEqual({
       _tag: "needs_human",
       reason: "Migrates production data",
+    })
+  })
+
+  it("skips OpenCode when auto-merge is disabled", async () => {
+    const pausedRepoDb = Layer.succeed(DbService, {
+      listRepositories: Effect.succeed([{ ...repository, autoMerge: false }]),
+    } as DbServiceShape)
+    let continued = false
+    const opencode = Layer.succeed(
+      Opencode,
+      Opencode.of({
+        start: () => Effect.die("unused"),
+        continue: () => {
+          continued = true
+          return Effect.die("should not run")
+        },
+        listModels: () => Effect.succeed([]),
+      }),
+    )
+
+    const result = await Effect.runPromise(
+      decidePrMerge(context).pipe(
+        Effect.provide(Layer.mergeAll(pausedRepoDb, keymaxxer, opencode)),
+      ),
+    )
+
+    expect(continued).toBe(false)
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: "Auto-merge is disabled for this repository",
     })
   })
 })

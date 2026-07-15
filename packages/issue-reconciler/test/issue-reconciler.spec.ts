@@ -26,6 +26,9 @@ const repository: RepositoryRecord = {
   localPath: "/repos/acme/widgets",
   isBare: true,
   paused: false,
+  defaultModel: null,
+  defaultVariant: null,
+  autoMerge: false,
   issuesReconciledAt: null,
 }
 
@@ -96,7 +99,11 @@ const makeDbFixture = (options: DbFixtureOptions) => {
     repositoryChanges: Stream.never,
     issueChanges: Stream.never,
     notifyIssuesChanged: () => Effect.void,
+    getConfig: Effect.die("not used"),
+    updateConfig: () => Effect.die("not used"),
     addRepository: () => Effect.die("not used"),
+    updateRepositorySettings: () => Effect.die("not used"),
+    removeRepository: () => Effect.die("not used"),
     listRepositories: Effect.die("not used"),
     listIssues: () => {
       actions.push("list")

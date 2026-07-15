@@ -20,7 +20,18 @@ export interface RepositoryRecord {
   readonly localPath: string
   readonly isBare: boolean
   readonly paused: boolean
+  readonly defaultModel: string | null
+  readonly defaultVariant: string | null
+  readonly autoMerge: boolean
   readonly issuesReconciledAt: Date | null
+}
+
+export interface UpdateRepositorySettingsInput {
+  readonly repositoryId: string
+  readonly paused: boolean
+  readonly defaultModel: string | null
+  readonly defaultVariant: string | null
+  readonly autoMerge: boolean
 }
 
 export interface ConfigRecord {

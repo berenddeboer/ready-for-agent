@@ -34,6 +34,9 @@ const repository = {
   localPath: "/repos/acme/widgets.git",
   isBare: true,
   paused: true,
+  defaultModel: null,
+  defaultVariant: null,
+  autoMerge: false,
   issuesReconciledAt: null,
 }
 
@@ -118,6 +121,14 @@ const makeRuntime = (
     getConfig: Effect.succeed(config),
     updateConfig: (input) => Effect.succeed(input),
     addRepository: () => Effect.succeed(repository),
+    updateRepositorySettings: (input) =>
+      Effect.succeed({
+        ...repository,
+        paused: input.paused,
+        defaultModel: input.defaultModel,
+        defaultVariant: input.defaultVariant,
+        autoMerge: input.autoMerge,
+      }),
     listRepositories: Effect.succeed([repository]),
     removeRepository: () => Effect.die("not used"),
     storeIssue: () => Effect.die("not used"),
@@ -276,6 +287,9 @@ describe("GraphQL API", () => {
             localPath
             isBare
             paused
+            defaultModel
+            defaultVariant
+            autoMerge
             issuesReconciledAt
           }
         }`,
@@ -293,6 +307,9 @@ describe("GraphQL API", () => {
             localPath: repository.localPath,
             isBare: repository.isBare,
             paused: repository.paused,
+            defaultModel: null,
+            defaultVariant: null,
+            autoMerge: false,
             issuesReconciledAt: null,
           },
         ],
@@ -644,6 +661,42 @@ describe("GraphQL API", () => {
         updateConfig: {
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultVariant: "high",
+        },
+      },
+    })
+  })
+
+  test("updates repository settings", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            id
+            paused
+            defaultModel
+            defaultVariant
+            autoMerge
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            autoMerge: true,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          id: repository.id,
+          paused: false,
+          defaultModel: "anthropic/claude-sonnet-4-5",
+          defaultVariant: "high",
+          autoMerge: true,
         },
       },
     })

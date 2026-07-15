@@ -55,6 +55,9 @@ const repository: RepositoryRecord = {
   localPath: "/repos/acme/widgets",
   isBare: true,
   paused: true,
+  defaultModel: null,
+  defaultVariant: null,
+  autoMerge: false,
   issuesReconciledAt: null,
 }
 
@@ -90,6 +93,7 @@ const dbLayer = (
     getConfig: unused(),
     updateConfig: unused,
     addRepository: unused,
+    updateRepositorySettings: unused,
     listRepositories: Effect.succeed(repositories),
     removeRepository: unused,
     storeIssue: unused,

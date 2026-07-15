@@ -5,12 +5,33 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { Suspense, useEffect, useState } from "react"
+import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
+
+const configQuery = {
+  queryKey: ["config"],
+  queryFn: async () => {
+    const result = await graphql.query({
+      config: {
+        defaultModel: true,
+        defaultVariant: true,
+      },
+    })
+    return result.config
+  },
+}
+
+const modelsQuery = {
+  queryKey: ["models"],
+  queryFn: async () => {
+    const result = await graphql.query({ models: true })
+    return result.models
+  },
+}
 
 const repositoriesQuery = {
   queryKey: ["repositories"],
@@ -23,6 +44,9 @@ const repositoriesQuery = {
         localPath: true,
         isBare: true,
         paused: true,
+        defaultModel: true,
+        defaultVariant: true,
+        autoMerge: true,
         issuesReconciledAt: true,
       },
       repositoryCredentials: {
@@ -78,6 +102,9 @@ type Repository = {
   localPath: string
   isBare: boolean
   paused: boolean
+  defaultModel: string | null
+  defaultVariant: string | null
+  autoMerge: boolean
   issuesReconciledAt: string | null
   credential: RepositoryCredential
 }
@@ -363,9 +390,89 @@ function RepositoryCards() {
 function RepositoryCard({ repository }: { repository: Repository }) {
   const queryClient = useQueryClient()
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
+  const settingsDialogRef = useRef<HTMLDialogElement>(null)
+  const config = useQuery(configQuery)
+  const models = useQuery(modelsQuery)
+  const [paused, setPaused] = useState(repository.paused)
+  const [defaultModel, setDefaultModel] = useState(
+    repository.defaultModel ?? "",
+  )
+  const [defaultVariant, setDefaultVariant] = useState(
+    repository.defaultVariant ?? "",
+  )
+  const [autoMerge, setAutoMerge] = useState(repository.autoMerge)
   const jobsQuery = workItemsQuery(repository.id)
   const { data: workItems = [], isLoading: workItemsLoading } =
     useQuery(jobsQuery)
+
+  const updateSettings = useMutation({
+    mutationFn: async (input: {
+      repositoryId: string
+      paused: boolean
+      defaultModel: string | null
+      defaultVariant: string | null
+      autoMerge: boolean
+    }) => {
+      const result = await graphql.mutation({
+        updateRepositorySettings: {
+          __args: { input },
+          id: true,
+          githubOwner: true,
+          githubRepo: true,
+          localPath: true,
+          isBare: true,
+          paused: true,
+          defaultModel: true,
+          defaultVariant: true,
+          autoMerge: true,
+          issuesReconciledAt: true,
+        },
+      })
+      return result.updateRepositorySettings
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<readonly Repository[]>(
+        repositoriesQuery.queryKey,
+        (repositories) =>
+          repositories?.map((candidate) =>
+            candidate.id === updated.id
+              ? { ...candidate, ...updated }
+              : candidate,
+          ),
+      )
+      settingsDialogRef.current?.close()
+    },
+  })
+
+  const openSettings = () => {
+    setPaused(repository.paused)
+    setDefaultModel(repository.defaultModel ?? "")
+    setDefaultVariant(repository.defaultVariant ?? "")
+    setAutoMerge(repository.autoMerge)
+    updateSettings.reset()
+    if (config.isError) void config.refetch()
+    if (models.isError) void models.refetch()
+    settingsDialogRef.current?.showModal()
+  }
+
+  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    updateSettings.mutate({
+      repositoryId: repository.id,
+      paused,
+      defaultModel: defaultModel.trim() === "" ? null : defaultModel,
+      defaultVariant: defaultVariant.trim() === "" ? null : defaultVariant,
+      autoMerge,
+    })
+  }
+
+  const standardVariants = ["low", "medium", "high", "max"]
+  const harnessDefaultModel = config.data?.defaultModel ?? "harness default"
+  const harnessDefaultVariant = config.data?.defaultVariant ?? "harness default"
+  const hasUnavailableModel =
+    defaultModel.length > 0 && !models.data?.includes(defaultModel)
+  const hasCustomVariant =
+    defaultVariant.length > 0 && !standardVariants.includes(defaultVariant)
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -472,11 +579,20 @@ function RepositoryCard({ repository }: { repository: Repository }) {
             {repository.githubOwner}/{repository.githubRepo}
           </a>
         </h2>
-        <span
-          className={`shrink-0 rounded-full px-[0.55rem] py-[0.2rem] text-[0.7rem] font-[750] tracking-[0.04em] uppercase ${repository.paused ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}
-        >
-          {repository.paused ? "Paused" : "Active"}
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={`rounded-full px-[0.55rem] py-[0.2rem] text-[0.7rem] font-[750] tracking-[0.04em] uppercase ${repository.paused ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}
+          >
+            {repository.paused ? "Paused" : "Active"}
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+            onClick={openSettings}
+          >
+            Settings
+          </button>
+        </div>
       </div>
       <dl className="m-0 grid gap-[0.8rem]">
         <div className="min-w-0">
@@ -498,7 +614,150 @@ function RepositoryCard({ repository }: { repository: Repository }) {
             {repository.isBare ? "Bare repository" : "Working tree"}
           </dd>
         </div>
+        <div className="min-w-0">
+          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+            Model
+          </dt>
+          <dd className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700">
+            {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
+            {" · "}
+            {repository.defaultVariant ?? `Default (${harnessDefaultVariant})`}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+            Auto-merge
+          </dt>
+          <dd className="mt-[0.15rem] text-[0.82rem] text-slate-700">
+            {repository.autoMerge ? "Enabled" : "Disabled"}
+          </dd>
+        </div>
       </dl>
+      <dialog
+        ref={settingsDialogRef}
+        className="m-auto w-[min(92vw,31rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
+        aria-labelledby={`repo-settings-title-${repository.id}`}
+        onCancel={(event) => {
+          if (updateSettings.isPending) event.preventDefault()
+        }}
+      >
+        <form onSubmit={saveSettings}>
+          <div className="border-b border-slate-200 px-6 py-5">
+            <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
+              Repository settings
+            </p>
+            <h2
+              id={`repo-settings-title-${repository.id}`}
+              className="mt-1 text-2xl font-bold"
+            >
+              {repository.githubOwner}/{repository.githubRepo}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Overrides apply to new Work Items. Empty model fields use harness
+              defaults.
+            </p>
+          </div>
+          <div className="grid gap-5 px-6 py-5">
+            <label className="flex items-center gap-3 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="size-4 rounded border-slate-300"
+                checked={paused}
+                onChange={(event) => setPaused(event.target.checked)}
+              />
+              Paused
+              <span className="font-normal text-slate-500">
+                Skip autonomous work selection
+              </span>
+            </label>
+            <label className="flex items-center gap-3 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="size-4 rounded border-slate-300"
+                checked={autoMerge}
+                onChange={(event) => setAutoMerge(event.target.checked)}
+              />
+              Auto-merge
+              <span className="font-normal text-slate-500">
+                Allow clanker merge when risk is low
+              </span>
+            </label>
+            {models.isPending ? (
+              <p className="text-sm text-slate-500">Loading models...</p>
+            ) : models.isError ? (
+              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                Models could not be loaded.
+              </p>
+            ) : (
+              <>
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Default model
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={defaultModel}
+                    onChange={(event) => setDefaultModel(event.target.value)}
+                  >
+                    <option value="">
+                      Harness default ({harnessDefaultModel})
+                    </option>
+                    {hasUnavailableModel && (
+                      <option value={defaultModel}>{defaultModel}</option>
+                    )}
+                    {models.data.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Thinking level
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={defaultVariant}
+                    onChange={(event) => setDefaultVariant(event.target.value)}
+                  >
+                    <option value="">
+                      Harness default ({harnessDefaultVariant})
+                    </option>
+                    {hasCustomVariant && (
+                      <option value={defaultVariant}>{defaultVariant}</option>
+                    )}
+                    {standardVariants.map((variant) => (
+                      <option key={variant} value={variant}>
+                        {variant[0]?.toUpperCase()}
+                        {variant.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
+            {updateSettings.isError && (
+              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                Settings could not be saved. Try again.
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+            <button
+              type="button"
+              className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200"
+              onClick={() => settingsDialogRef.current?.close()}
+              disabled={updateSettings.isPending}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+              disabled={updateSettings.isPending}
+            >
+              {updateSettings.isPending ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </dialog>
       {!repository.credential.configured && (
         <div className="mt-5 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-950">
           <strong>GitHub token required</strong>

@@ -84,6 +84,12 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, worktreePath, sessionId } =
       yield* resolveContext(context)
+    if (!repository.autoMerge) {
+      return {
+        _tag: "needs_human" as const,
+        reason: "Auto-merge is disabled for this repository",
+      }
+    }
     const keymaxxer = yield* KeymaxxerService
     const tokenName = yield* keymaxxer.findSecret({
       provider: "github",

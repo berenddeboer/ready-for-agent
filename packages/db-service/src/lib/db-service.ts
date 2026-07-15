@@ -7,6 +7,7 @@ import {
   InvalidConfigInputError,
   InvalidIssueInputError,
   InvalidRepositoryInputError,
+  type InvalidRepositorySettingsError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
   RepositoryHasRunningStepError,
@@ -20,6 +21,7 @@ import type {
   RepositoryRecord,
   StoreIssueInput,
   UpdateConfigInput,
+  UpdateRepositorySettingsInput,
 } from "./types.js"
 
 const formatSqlError = (error: SqlError): string => {
@@ -79,6 +81,9 @@ const toRecord = (row: {
   localPath: string
   isBare: boolean | number
   paused: boolean | number
+  defaultModel: string | null
+  defaultVariant: string | null
+  autoMerge: boolean | number
   issuesReconciledAt: number | null
 }): RepositoryRecord => ({
   id: row.id,
@@ -87,9 +92,55 @@ const toRecord = (row: {
   localPath: row.localPath,
   isBare: Boolean(row.isBare),
   paused: Boolean(row.paused),
+  defaultModel: row.defaultModel,
+  defaultVariant: row.defaultVariant,
+  autoMerge: Boolean(row.autoMerge),
   issuesReconciledAt:
     row.issuesReconciledAt === null ? null : new Date(row.issuesReconciledAt),
 })
+
+type RepositoryRow = {
+  id: string
+  github_owner: string
+  github_repo: string
+  local_path: string
+  is_bare: boolean | number
+  paused: boolean | number
+  default_model: string | null
+  default_variant: string | null
+  auto_merge: boolean | number
+  issues_reconciled_at: number | null
+}
+
+const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
+             default_model, default_variant, auto_merge, issues_reconciled_at`
+
+const toRecordFromRow = (row: RepositoryRow): RepositoryRecord =>
+  toRecord({
+    id: row.id,
+    githubOwner: row.github_owner,
+    githubRepo: row.github_repo,
+    localPath: row.local_path,
+    isBare: row.is_bare,
+    paused: row.paused,
+    defaultModel: row.default_model,
+    defaultVariant: row.default_variant,
+    autoMerge: row.auto_merge,
+    issuesReconciledAt: row.issues_reconciled_at,
+  })
+
+const normalizeOptionalSetting = (
+  value: string | null,
+): Effect.Effect<string | null, InvalidRepositorySettingsError> => {
+  if (value === null) {
+    return Effect.succeed(null)
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return Effect.succeed(null)
+  }
+  return Effect.succeed(trimmed)
+}
 
 const toIssueRecord = (row: {
   id: string
@@ -148,6 +199,12 @@ export interface DbServiceShape {
     | RepositoryAlreadyExistsError
     | LocalPathInUseError
     | DatabaseError
+  >
+  readonly updateRepositorySettings: (
+    input: UpdateRepositorySettingsInput,
+  ) => Effect.Effect<
+    RepositoryRecord,
+    InvalidRepositorySettingsError | RepositoryNotFoundError | DatabaseError
   >
   readonly listRepositories: Effect.Effect<
     readonly RepositoryRecord[],
@@ -320,9 +377,10 @@ export const DbServiceLive = Layer.effect(
         const result = yield* sql
           .unsafe(
             `INSERT INTO repository (
-               id, github_owner, github_repo, local_path, is_bare, paused, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-             RETURNING id, github_owner, github_repo, local_path, is_bare, paused, issues_reconciled_at`,
+               id, github_owner, github_repo, local_path, is_bare, paused,
+               default_model, default_variant, auto_merge, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+             RETURNING ${repositorySelectColumns}`,
             [
               id,
               githubOwner,
@@ -330,6 +388,7 @@ export const DbServiceLive = Layer.effect(
               localPath,
               input.isBare,
               true,
+              false,
               now,
               now,
             ],
@@ -353,32 +412,59 @@ export const DbServiceLive = Layer.effect(
             }),
           )
 
-        const row = result[0] as
-          | {
-              id: string
-              github_owner: string
-              github_repo: string
-              local_path: string
-              is_bare: boolean | number
-              paused: boolean | number
-              issues_reconciled_at: number | null
-            }
-          | undefined
+        const row = result[0] as RepositoryRow | undefined
         if (!row) {
           return yield* new DatabaseError({
             message: "No repository returned from insert",
           })
         }
 
-        const repository = toRecord({
-          id: row.id,
-          githubOwner: row.github_owner,
-          githubRepo: row.github_repo,
-          localPath: row.local_path,
-          isBare: row.is_bare,
-          paused: row.paused,
-          issuesReconciledAt: row.issues_reconciled_at,
-        })
+        const repository = toRecordFromRow(row)
+        yield* PubSub.publish(repositoryChanges, undefined)
+        return repository
+      })
+
+    const updateRepositorySettings = (
+      input: UpdateRepositorySettingsInput,
+    ): Effect.Effect<
+      RepositoryRecord,
+      InvalidRepositorySettingsError | RepositoryNotFoundError | DatabaseError
+    > =>
+      Effect.gen(function* () {
+        const defaultModel = yield* normalizeOptionalSetting(input.defaultModel)
+        const defaultVariant = yield* normalizeOptionalSetting(
+          input.defaultVariant,
+        )
+        const now = Date.now()
+        const result = yield* sql
+          .unsafe(
+            `UPDATE repository
+             SET paused = ?,
+                 default_model = ?,
+                 default_variant = ?,
+                 auto_merge = ?,
+                 updated_at = ?
+             WHERE id = ?
+             RETURNING ${repositorySelectColumns}`,
+            [
+              input.paused,
+              defaultModel,
+              defaultVariant,
+              input.autoMerge,
+              now,
+              input.repositoryId,
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+
+        const row = result[0] as RepositoryRow | undefined
+        if (!row) {
+          return yield* new RepositoryNotFoundError({
+            repositoryId: input.repositoryId,
+          })
+        }
+
+        const repository = toRecordFromRow(row)
         yield* PubSub.publish(repositoryChanges, undefined)
         return repository
       })
@@ -389,34 +475,13 @@ export const DbServiceLive = Layer.effect(
     > = Effect.gen(function* () {
       const repositories = yield* sql
         .unsafe(
-          `SELECT id, github_owner, github_repo, local_path, is_bare, paused,
-             issues_reconciled_at
+          `SELECT ${repositorySelectColumns}
            FROM repository
            ORDER BY lower(github_owner) ASC, lower(github_repo) ASC`,
         )
         .pipe(Effect.mapError(toDatabaseError))
 
-      return (
-        repositories as ReadonlyArray<{
-          id: string
-          github_owner: string
-          github_repo: string
-          local_path: string
-          is_bare: boolean | number
-          paused: boolean | number
-          issues_reconciled_at: number | null
-        }>
-      ).map((row) =>
-        toRecord({
-          id: row.id,
-          githubOwner: row.github_owner,
-          githubRepo: row.github_repo,
-          localPath: row.local_path,
-          isBare: row.is_bare,
-          paused: row.paused,
-          issuesReconciledAt: row.issues_reconciled_at,
-        }),
-      )
+      return (repositories as ReadonlyArray<RepositoryRow>).map(toRecordFromRow)
     })
 
     const ensureRepositoryExists = (
@@ -890,6 +955,7 @@ export const DbServiceLive = Layer.effect(
       getConfig,
       updateConfig,
       addRepository,
+      updateRepositorySettings,
       listRepositories,
       removeRepository,
       storeIssue,
