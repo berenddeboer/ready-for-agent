@@ -1,9 +1,6 @@
-import { Effect } from "effect"
 import {
   KeymaxxerError,
-  KeymaxxerService,
-  createKeymaxxerSidecarFetch,
-  mcpKeymaxxerLayer,
+  startKeymaxxerFacade,
 } from "@ready-for-agent/keymaxxer-service"
 
 export const defaultKeymaxxerSidecarPort = 5032
@@ -22,45 +19,43 @@ export const keymaxxerSidecarPortFromEnvironment = (
   return port
 }
 
-const program = Effect.scoped(
-  Effect.gen(function* () {
-    const keymaxxer = yield* KeymaxxerService
-    const port = keymaxxerSidecarPortFromEnvironment(process.env)
-    const server = yield* Effect.acquireRelease(
-      Effect.try({
-        try: () =>
-          Bun.serve({
-            fetch: createKeymaxxerSidecarFetch(keymaxxer),
-            hostname: keymaxxerSidecarHost,
-            port,
-          }),
-        catch: () =>
-          new KeymaxxerError({
-            operation: "sidecar",
-            message: `Keymaxxer Sidecar failed to listen on ${keymaxxerSidecarHost}:${port}. Set KEYMAXXER_SIDECAR_PORT to an unused port.`,
-          }),
-      }),
-      (runningServer) => Effect.promise(() => runningServer.stop(true)),
-    )
+const start = async () => {
+  const port = keymaxxerSidecarPortFromEnvironment(process.env)
+  try {
+    const facade = await startKeymaxxerFacade({
+      host: keymaxxerSidecarHost,
+      port,
+      environment: process.env,
+    })
 
-    yield* Effect.log(
-      `Keymaxxer Sidecar listening on http://${server.hostname}:${server.port}`,
+    const stop = async () => {
+      await facade.stop()
+      process.exit(0)
+    }
+    process.once("SIGINT", () => {
+      void stop()
+    })
+    process.once("SIGTERM", () => {
+      void stop()
+    })
+    await new Promise(() => {})
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : `Keymaxxer Sidecar failed to listen on ${keymaxxerSidecarHost}:${port}. Set KEYMAXXER_SIDECAR_PORT to an unused port.`
+    console.error(
+      message.startsWith("Keymaxxer Sidecar failed")
+        ? message
+        : `Keymaxxer Sidecar failed to listen on ${keymaxxerSidecarHost}:${port}. Set KEYMAXXER_SIDECAR_PORT to an unused port.`,
     )
-    return yield* Effect.never
-  }).pipe(Effect.provide(mcpKeymaxxerLayer())),
-)
+    if (!(error instanceof KeymaxxerError)) {
+      // keep stderr single-line for topology test
+    }
+    process.exitCode = 1
+  }
+}
 
 if (import.meta.main) {
-  const abortController = new AbortController()
-  process.once("SIGINT", () => abortController.abort())
-  process.once("SIGTERM", () => abortController.abort())
-
-  Effect.runPromise(program, { signal: abortController.signal }).catch(
-    (error) => {
-      if (!abortController.signal.aborted) {
-        console.error("Keymaxxer Sidecar startup failed", error)
-        process.exitCode = 1
-      }
-    },
-  )
+  void start()
 }

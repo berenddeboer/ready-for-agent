@@ -9,12 +9,12 @@ export default defineConfig({
   webServer: [
     {
       command: "bun e2e/keymaxxer-stub.ts",
-      url: "http://127.0.0.1:59999/health",
+      url: "http://127.0.0.1:59999/",
       reuseExistingServer: !process.env.CI,
     },
     {
       command:
-        "SQLITE_DATABASE_PATH=/tmp/ready-for-agent-harness-e2e.db bun --conditions @ready-for-agent/source ../../packages/db/src/bin/migrate.ts && SQLITE_DATABASE_PATH=/tmp/ready-for-agent-harness-e2e.db KEYMAXXER_SIDECAR_URL=http://127.0.0.1:59999 bun run dev --host 127.0.0.1 --port 4174",
+        "SQLITE_DATABASE_PATH=/tmp/ready-for-agent-harness-e2e.db bun --conditions @ready-for-agent/source ../../packages/db/src/bin/migrate.ts && SQLITE_DATABASE_PATH=/tmp/ready-for-agent-harness-e2e.db KEYMAXXER_SIDECAR_URL=http://127.0.0.1:59999/e2e-test-capability/mcp bun run dev --host 127.0.0.1 --port 4174",
       url: "http://127.0.0.1:4174",
       reuseExistingServer: !process.env.CI,
     },

@@ -1,10 +1,7 @@
-import { Duration, Effect, FileSystem } from "effect"
+import { Effect, FileSystem } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import {
-  buildRunArgs,
-  makeOpencodeEnvironment,
-} from "@ready-for-agent/opencode"
+import { Opencode } from "@ready-for-agent/opencode"
 import {
   CreatePrCredentialError,
   CreatePrInvalidWorktreeContextError,
@@ -62,7 +59,7 @@ const resolveSessionId = (context: LifecycleStepContext) => {
   return Effect.succeed(sessionId)
 }
 
-const buildCreatePrPrompt = (githubIssueNumber: number) =>
+const buildCreatePrPrompt = (githubIssueNumber: number, tokenName: string) =>
   [
     "Create a pull request for the committed implementation changes in this worktree.",
     "Push the branch if needed, then open a PR against the repository default base branch.",
@@ -71,27 +68,8 @@ const buildCreatePrPrompt = (githubIssueNumber: number) =>
     "Follow this repository's PR title and body conventions.",
     "If a suitable open PR for this branch already exists, succeed without creating a duplicate.",
     "Do not merge the pull request.",
+    `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
   ].join("\n")
-
-const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
-const buildCredentialedOpenCodeCommand = (input: {
-  readonly tokenName: string
-  readonly prompt: string
-  readonly cwd: string
-  readonly model: string
-  readonly variant: string
-  readonly sessionId: string
-}) => {
-  const args = buildRunArgs(input)
-  const environment = makeOpencodeEnvironment()
-  return `${[
-    `GH_TOKEN="$${input.tokenName}"`,
-    `GITHUB_TOKEN="$${input.tokenName}"`,
-    `OPENCODE_CONFIG_CONTENT=${shellQuote(environment.OPENCODE_CONFIG_CONTENT)}`,
-    shellQuote("opencode"),
-    ...args.map(shellQuote),
-  ].join(" ")} </dev/null`
-}
 
 /**
  * Production Create PR Lifecycle Step.
@@ -104,7 +82,6 @@ export const createPr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const sessionId = yield* resolveSessionId(context)
-    const prompt = buildCreatePrPrompt(context.githubIssueNumber)
 
     const db = yield* DbService
     const repositories = yield* db.listRepositories.pipe(
@@ -152,19 +129,15 @@ export const createPr = (context: LifecycleStepContext) =>
 
     const timeout =
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.create_pr
-    const result = yield* keymaxxer
-      .runWithSecrets({
-        command: buildCredentialedOpenCodeCommand({
-          tokenName,
-          prompt,
-          cwd: worktreePath,
-          model: context.model,
-          variant: context.variant,
-          sessionId,
-        }),
+    const opencode = yield* Opencode
+    yield* opencode
+      .continue({
+        sessionId,
+        prompt: buildCreatePrPrompt(context.githubIssueNumber, tokenName),
         cwd: worktreePath,
-        secrets: [tokenName],
-        timeoutMs: Duration.toMillis(timeout),
+        model: context.model,
+        variant: context.variant,
+        timeout,
       })
       .pipe(
         Effect.mapError(
@@ -177,11 +150,4 @@ export const createPr = (context: LifecycleStepContext) =>
             }),
         ),
       )
-    if (result.exitCode !== 0) {
-      return yield* new CreatePrOpenCodeError({
-        message: "OpenCode failed to create a pull request",
-        worktreePath,
-        sessionId,
-      })
-    }
   })

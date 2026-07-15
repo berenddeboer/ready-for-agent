@@ -1,16 +1,29 @@
+const capability = "e2e-test-capability"
+const port = 59999
+
 const server = Bun.serve({
   hostname: "127.0.0.1",
-  port: 59999,
+  port,
   fetch(request) {
+    if (request.headers.get("origin")) {
+      return new Response("browser requests are forbidden", { status: 403 })
+    }
     const path = new URL(request.url).pathname
-    if (path === "/health") {
-      return Response.json({ status: "ok", protocolVersion: 3 })
+    if (path === `/${capability}/mcp`) {
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "e2e stub does not serve MCP tools" },
+          id: null,
+        }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      )
     }
-    if (path === "/initialize") {
-      return Response.json({ initialized: true })
-    }
-    return new Response("Not found", { status: 404 })
+    return new Response("not found", { status: 404 })
   },
 })
 
-console.log(`Keymaxxer test stub listening on ${server.url}`)
+console.log(
+  `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:${server.port}/${capability}/mcp`,
+)
+console.log(`Keymaxxer e2e stub listening on 127.0.0.1:${server.port}`)

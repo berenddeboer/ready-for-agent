@@ -8,6 +8,7 @@ import {
   OpencodeTimeoutError,
   SessionIdNotFoundError,
 } from "./errors.js"
+import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import type {
   ContinueInput,
@@ -41,14 +42,16 @@ export class Opencode extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<string>, OpencodeError>
   }
 >()("@ready-for-agent/opencode/Opencode") {
-  static layer = (options: OpencodeLayerOptions = {}) =>
+  static layer = (options: OpencodeLayerOptions) =>
     Layer.effect(
       Opencode,
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
-        const environment = makeOpencodeEnvironment()
+        const environment = makeOpencodeEnvironment({
+          keymaxxerMcpUrl: options.keymaxxerMcpUrl,
+        })
 
         const listModels = (
           input: ListModelsInput,
@@ -59,7 +62,7 @@ export class Opencode extends Context.Service<
             const command = ChildProcess.make(binary, ["models"], {
               cwd: input.cwd,
               env: environment,
-              extendEnv: true,
+              extendEnv: false,
               stdin: "ignore",
               stderr: "ignore",
             })
@@ -129,7 +132,7 @@ export class Opencode extends Context.Service<
             const command = ChildProcess.make(binary, args, {
               cwd: input.cwd,
               env: environment,
-              extendEnv: true,
+              extendEnv: false,
               stdin: "ignore",
               stderr: "ignore",
             })
@@ -138,29 +141,40 @@ export class Opencode extends Context.Service<
               Effect.gen(function* () {
                 const handle = yield* spawner.spawn(command)
 
-                const collectSessionId = Stream.decodeText(handle.stdout).pipe(
+                const collectOutput = Stream.decodeText(handle.stdout).pipe(
                   Stream.splitLines,
                   Stream.runFold(
-                    (): string | undefined => undefined,
+                    (): { sessionId?: string; assistantText: string } => ({
+                      assistantText: "",
+                    }),
                     (acc, line) => {
-                      const parsed = parseSessionIdFromLine(line)
-                      if (parsed !== undefined) {
-                        seenSessionId = parsed
-                        return parsed
+                      const sessionId = parseSessionIdFromLine(line)
+                      if (sessionId !== undefined) {
+                        seenSessionId = sessionId
                       }
-                      return acc
+                      const text = parseAssistantTextFromLine(line)
+                      return {
+                        sessionId: sessionId ?? acc.sessionId,
+                        assistantText:
+                          text === undefined
+                            ? acc.assistantText
+                            : acc.assistantText.length === 0
+                              ? text
+                              : `${acc.assistantText}\n${text}`,
+                      }
                     },
                   ),
                 )
 
-                const [exitCode, sessionId] = yield* Effect.all(
-                  [handle.exitCode, collectSessionId],
+                const [exitCode, output] = yield* Effect.all(
+                  [handle.exitCode, collectOutput],
                   { concurrency: 2 },
                 )
 
                 return {
                   exitCode: Number(exitCode),
-                  sessionId,
+                  sessionId: output.sessionId,
+                  assistantText: output.assistantText,
                 }
               }),
             ).pipe(
@@ -192,7 +206,10 @@ export class Opencode extends Context.Service<
               return yield* new SessionIdNotFoundError({ cwd: input.cwd })
             }
 
-            return { sessionId }
+            return {
+              sessionId,
+              assistantText: result.assistantText,
+            }
           })
 
         return {
@@ -202,6 +219,9 @@ export class Opencode extends Context.Service<
         }
       }),
     )
-}
 
-export const OpencodeLive = Opencode.layer()
+  /** Test/integration helper; production must pass keymaxxerMcpUrl explicitly. */
+  static layerForTests = (
+    keymaxxerMcpUrl = "http://127.0.0.1:5032/test-cap/mcp",
+  ) => Opencode.layer({ keymaxxerMcpUrl })
+}

@@ -11,18 +11,12 @@ result; transport, protocol, and execution failures use `KeymaxxerError`.
 
 ## Layers
 
-- `mcpKeymaxxerLayer()` owns a lazy, scoped stdio MCP client. It is used by
-  production processes and by the development sidecar.
-- `sidecarKeymaxxerLayer(url)` is the strict loopback HTTP client used by the
-  watched API. It accepts only `http://127.0.0.1:<port>`.
-- `testKeymaxxerLayer(secretNames)` is an in-memory implementation for tests.
-
-The HTTP protocol uses shared Effect schemas, rejects unknown fields and raw
-secret-shaped response fields, blocks browser-originated and non-JSON operation
-requests, and versions its non-initializing `/health` response. Sidecar
-connection refusal is retried for at most five seconds during startup; hanging
-health requests share that deadline, and HTTP and protocol failures are not
-retried.
+- `startKeymaxxerFacade()` — Streamable HTTP MCP facade used by
+  `apps/keymaxxer-sidecar` (one stdio keyholder; path capability auth).
+- `sidecarKeymaxxerLayer(url)` — Harness MCP client for a capability URL
+  `http://127.0.0.1:<port>/<capability>/mcp`.
+- `mcpKeymaxxerLayer()` — lazy stdio MCP client (tests / direct keyholder).
+- `testKeymaxxerLayer(secretNames)` — in-memory implementation for tests.
 
 ## Commands
 

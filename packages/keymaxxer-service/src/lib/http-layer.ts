@@ -1,14 +1,8 @@
-import { Effect, Layer, Schema } from "effect"
+import { Client } from "@modelcontextprotocol/sdk/client/index.js"
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
+import { Effect, Layer } from "effect"
 import {
-  AddSecretResponse,
-  FindSecretResponse,
-  FindSecretsResponse,
-  HasSecretResponse,
-  HealthResponse,
-  InitializeResponse,
   KeymaxxerError,
-  RunWithSecretsResult,
-  containsRawSecretValue,
   validateRunInput,
   validateSecretName,
 } from "./models.js"
@@ -18,6 +12,55 @@ export type SidecarLayerOptions = {
   readonly fetch?: typeof globalThis.fetch
   readonly retryDelayMs?: number
   readonly startupTimeoutMs?: number
+  readonly createClient?: () => Promise<SidecarMcpClient>
+}
+
+export type SidecarMcpClient = {
+  readonly callTool: (input: {
+    readonly name: string
+    readonly arguments: Record<string, unknown>
+  }) => Promise<{
+    content?: unknown
+    isError?: boolean
+    structuredContent?: unknown
+  }>
+  readonly close: () => Promise<void>
+}
+
+export type ParsedSidecarUrl = {
+  readonly origin: string
+  readonly hostname: string
+  readonly port: number
+  readonly url: string
+}
+
+export const parseSidecarUrl = (value: string): ParsedSidecarUrl => {
+  const url = new URL(value)
+  if (
+    url.protocol !== "http:" ||
+    url.hostname !== "127.0.0.1" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    url.port === ""
+  ) {
+    throw new Error(
+      "Sidecar URL must be an HTTP IPv4 loopback MCP capability URL",
+    )
+  }
+  const parts = url.pathname.split("/").filter(Boolean)
+  if (parts.length !== 2 || parts[1] !== "mcp" || parts[0] === undefined) {
+    throw new Error(
+      "Sidecar URL must be http://127.0.0.1:<port>/<capability>/mcp",
+    )
+  }
+  return {
+    origin: url.origin,
+    hostname: url.hostname,
+    port: Number(url.port),
+    url: url.toString().replace(/\/$/, ""),
+  }
 }
 
 export const sidecarKeymaxxerLayer = (
@@ -32,80 +75,98 @@ export const sidecarKeymaxxerLayer = (
     }),
   )
 
-export const parseSidecarUrl = (value: string) => {
-  const url = new URL(value)
-  if (
-    url.protocol !== "http:" ||
-    url.hostname !== "127.0.0.1" ||
-    url.username !== "" ||
-    url.password !== "" ||
-    url.pathname !== "/" ||
-    url.search !== "" ||
-    url.hash !== "" ||
-    url.port === ""
-  ) {
-    throw new Error("Sidecar URL must be an HTTP IPv4 loopback origin")
-  }
-  return url
-}
-
 const makeSidecarService = (
-  baseUrl: URL,
+  parsed: ParsedSidecarUrl,
   options: SidecarLayerOptions,
 ): KeymaxxerServiceShape => {
-  const fetchImplementation = options.fetch ?? globalThis.fetch
   const retryDelayMs = options.retryDelayMs ?? 100
   const startupTimeoutMs = options.startupTimeoutMs ?? 5_000
+  let clientPromise: Promise<SidecarMcpClient> | null = null
+  let secretsPromise: Promise<readonly SecretMetadata[]> | null = null
 
-  const request = <S extends Schema.ConstraintDecoder<unknown>>(
+  const getClient = () => {
+    clientPromise ??= (
+      options.createClient ?? (() => createStreamableHttpClient(parsed.url))
+    )()
+    return clientPromise
+  }
+
+  const callTool = async (
     operation: string,
-    path: string,
-    schema: S,
-    responseKeys: readonly string[],
-    body?: unknown,
-  ) =>
-    Effect.tryPromise({
-      try: async () => {
-        const response = await fetchImplementation(new URL(path, baseUrl), {
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          headers:
-            body === undefined
-              ? undefined
-              : { "content-type": "application/json" },
-          method: body === undefined ? "GET" : "POST",
-        })
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-        return (await response.json()) as unknown
-      },
-      catch: () => safeError(operation, "Keymaxxer sidecar request failed"),
-    }).pipe(
-      Effect.flatMap((json) =>
-        containsRawSecretValue(json) || !hasExactKeys(json, responseKeys)
-          ? Effect.fail(
-              safeError(operation, "Keymaxxer sidecar request failed"),
-            )
-          : Schema.decodeUnknownEffect(schema)(json).pipe(
-              Effect.mapError(() =>
-                safeError(operation, "Keymaxxer sidecar request failed"),
-              ),
-            ),
-      ),
-    )
+    name: string,
+    args: Record<string, unknown>,
+  ) => {
+    try {
+      const result = await (await getClient()).callTool({
+        name,
+        arguments: args,
+      })
+      return {
+        isError: result.isError === true,
+        structuredContent: result.structuredContent,
+        text: toolResultText(result),
+      }
+    } catch {
+      const failed = clientPromise
+      clientPromise = null
+      secretsPromise = null
+      await failed?.then((client) => client.close()).catch(() => undefined)
+      throw safeError(operation, "Keymaxxer sidecar request failed")
+    }
+  }
 
-  const waitForHealth = (): Effect.Effect<void, KeymaxxerError> => {
+  const listSecrets = async (refresh = false) => {
+    if (!refresh && secretsPromise !== null) return secretsPromise
+    secretsPromise = callTool("listSecrets", "keymaxxer_list", {}).then(
+      (result) => {
+        if (result.isError)
+          throw safeError("listSecrets", "Keymaxxer list failed")
+        return parseSecrets(result.text)
+      },
+    )
+    secretsPromise.catch(() => {
+      secretsPromise = null
+    })
+    return secretsPromise
+  }
+
+  const findSecretNames = async (
+    inputs: readonly { readonly provider: string; readonly account: string }[],
+  ) => {
+    const secrets = await listSecrets(true)
+    return inputs.map((input) => {
+      const matches = secrets.filter(
+        (secret) =>
+          secret.provider?.toLowerCase() === input.provider.toLowerCase() &&
+          secret.account?.toLowerCase() === input.account.toLowerCase(),
+      )
+      if (matches.length > 1) {
+        throw safeError(
+          "findSecrets",
+          "Multiple Keymaxxer secrets match provider and account",
+        )
+      }
+      return matches[0]?.name ?? null
+    })
+  }
+
+  const waitForTcp = (): Effect.Effect<void, KeymaxxerError> => {
+    const fetchImplementation = options.fetch ?? globalThis.fetch
     const startedAt = Date.now()
-    const connect = (): Effect.Effect<Response, KeymaxxerError> =>
+    const attempt = (): Effect.Effect<void, KeymaxxerError> =>
       Effect.tryPromise({
-        try: () => {
+        try: async () => {
           const remainingMs = Math.max(
             1,
             startupTimeoutMs - (Date.now() - startedAt),
           )
-          return fetchImplementation(new URL("/health", baseUrl), {
-            signal: AbortSignal.timeout(remainingMs),
-          })
+          // Any HTTP response proves TCP listen; wrong path is intentionally 404.
+          await fetchImplementation(
+            `http://${parsed.hostname}:${parsed.port}/`,
+            {
+              signal: AbortSignal.timeout(remainingMs),
+            },
+          )
         },
         catch: () =>
           safeError("initialize", "Keymaxxer sidecar request failed"),
@@ -116,101 +177,196 @@ const makeSidecarService = (
             Date.now() - startedAt >= startupTimeoutMs
               ? Effect.fail(error)
               : Effect.sleep(`${retryDelayMs} millis`).pipe(
-                  Effect.flatMap(connect),
+                  Effect.flatMap(attempt),
                 ),
         ),
       )
-
-    return connect().pipe(
-      Effect.flatMap((response) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (!response.ok) throw new Error("Health request failed")
-            return (await response.json()) as unknown
-          },
-          catch: () =>
-            safeError("initialize", "Keymaxxer sidecar request failed"),
-        }),
-      ),
-      Effect.flatMap((json) =>
-        !hasExactKeys(json, ["status", "protocolVersion"])
-          ? Effect.fail(
-              safeError("initialize", "Keymaxxer sidecar request failed"),
-            )
-          : Schema.decodeUnknownEffect(HealthResponse)(json).pipe(
-              Effect.mapError(() =>
-                safeError("initialize", "Keymaxxer sidecar request failed"),
-              ),
-            ),
-      ),
-      Effect.asVoid,
-    )
+    return attempt()
   }
 
   return {
-    initialize: waitForHealth().pipe(
-      Effect.flatMap(() =>
-        request(
-          "initialize",
-          "/initialize",
-          InitializeResponse,
-          ["initialized"],
-          {},
-        ),
-      ),
-      Effect.asVoid,
-    ),
+    initialize: waitForTcp(),
     hasSecret: (name) =>
       validateSecretName(name)
-        ? request(
-            "hasSecret",
-            "/has-secret",
-            HasSecretResponse,
-            ["hasSecret"],
-            { name },
-          ).pipe(Effect.map((result) => result.hasSecret))
+        ? Effect.tryPromise({
+            try: async () => {
+              const hasName = (secrets: readonly SecretMetadata[]) =>
+                secrets.some((secret) => secret.name === name)
+              return (
+                hasName(await listSecrets()) || hasName(await listSecrets(true))
+              )
+            },
+            catch: () => safeError("hasSecret", "Keymaxxer list failed"),
+          })
         : Effect.fail(safeError("hasSecret", "Invalid secret name")),
     findSecret: (input) =>
-      request(
-        "findSecret",
-        "/find-secret",
-        FindSecretResponse,
-        ["name"],
-        input,
-      ).pipe(Effect.map((result) => result.name)),
+      Effect.tryPromise({
+        try: () => findSecretNames([input]).then(([found]) => found ?? null),
+        catch: (error) =>
+          error instanceof KeymaxxerError
+            ? error
+            : safeError("findSecret", "Keymaxxer list failed"),
+      }),
     findSecrets: (inputs) =>
-      request("findSecrets", "/find-secrets", FindSecretsResponse, ["names"], {
-        secrets: inputs,
-      }).pipe(Effect.map((result) => result.names)),
+      Effect.tryPromise({
+        try: () => findSecretNames(inputs),
+        catch: (error) =>
+          error instanceof KeymaxxerError
+            ? error
+            : safeError("findSecrets", "Keymaxxer list failed"),
+      }),
     addSecret: (input) =>
       validateSecretName(input.name)
-        ? request(
-            "addSecret",
-            "/add-secret",
-            AddSecretResponse,
-            ["added"],
-            input,
-          ).pipe(Effect.map((result) => result.added))
+        ? Effect.tryPromise({
+            try: async () => {
+              const result = await callTool("addSecret", "keymaxxer_add", input)
+              if (result.text.toLowerCase().includes("cancelled")) return false
+              if (result.isError) {
+                throw safeError("addSecret", "Keymaxxer add failed")
+              }
+              await listSecrets(true)
+              return true
+            },
+            catch: () => safeError("addSecret", "Keymaxxer add failed"),
+          })
         : Effect.fail(safeError("addSecret", "Invalid secret name")),
     runWithSecrets: (input) =>
       validateRunInput(input)
-        ? request(
-            "runWithSecrets",
-            "/run-with-secrets",
-            RunWithSecretsResult,
-            ["exitCode", "stdout", "stderr"],
-            input,
-          )
+        ? Effect.tryPromise({
+            try: async () => {
+              const result = await callTool(
+                "runWithSecrets",
+                "keymaxxer_run",
+                input,
+              )
+              const parsedResult =
+                parseStructuredRunResult(result.structuredContent) ??
+                parseRunResult(result.text)
+              if (parsedResult === null) {
+                throw safeError(
+                  "runWithSecrets",
+                  "Keymaxxer returned an invalid command result",
+                )
+              }
+              return parsedResult
+            },
+            catch: () =>
+              safeError("runWithSecrets", "Keymaxxer command failed"),
+          })
         : Effect.fail(safeError("runWithSecrets", "Invalid command input")),
+  }
+}
+
+const createStreamableHttpClient = async (
+  url: string,
+): Promise<SidecarMcpClient> => {
+  const client = new Client({
+    name: "ready-for-agent-harness",
+    version: "0.0.0",
+  })
+  const transport = new StreamableHTTPClientTransport(new URL(url))
+  await client.connect(transport)
+  return {
+    callTool: (input) =>
+      client.callTool(input).then(
+        (result) =>
+          result as {
+            content?: unknown
+            isError?: boolean
+            structuredContent?: unknown
+          },
+      ),
+    close: () => transport.close(),
+  }
+}
+
+type SecretMetadata = {
+  readonly name: string
+  readonly provider: string | null
+  readonly account: string | null
+}
+
+const toolResultText = (result: { readonly content?: unknown }) =>
+  Array.isArray(result.content)
+    ? result.content
+        .map((item: unknown) =>
+          typeof item === "object" &&
+          item !== null &&
+          "type" in item &&
+          item.type === "text" &&
+          "text" in item &&
+          typeof item.text === "string"
+            ? item.text
+            : "",
+        )
+        .join("\n")
+    : ""
+
+const parseSecrets = (text: string): readonly SecretMetadata[] => {
+  const parsed = JSON.parse(text) as unknown
+  if (!Array.isArray(parsed)) throw new Error("Invalid secret list")
+
+  return parsed.map((item) => {
+    if (
+      typeof item !== "object" ||
+      item === null ||
+      !("name" in item) ||
+      typeof item.name !== "string"
+    ) {
+      throw new Error("Invalid secret list")
+    }
+    const provider = "provider" in item ? item.provider : null
+    const account = "account" in item ? item.account : null
+    if (
+      (provider !== null && typeof provider !== "string") ||
+      (account !== null && typeof account !== "string")
+    ) {
+      throw new Error("Invalid secret list")
+    }
+    return { name: item.name, provider, account }
+  })
+}
+
+const parseRunResult = (text: string) => {
+  const exitCode = text.match(/^exit_code: (-?\d+)$/m)
+  const stdoutMarker = "--- stdout ---\n"
+  const stderrMarker = "\n--- stderr ---\n"
+  const stdoutStart = text.indexOf(stdoutMarker)
+  const stderrStart = text.indexOf(
+    stderrMarker,
+    stdoutStart + stdoutMarker.length,
+  )
+  const repeatedMarker = text.indexOf(stderrMarker, stderrStart + 1)
+  if (!exitCode || stdoutStart < 0 || stderrStart < stdoutStart) return null
+  if (repeatedMarker >= 0) return null
+
+  return {
+    exitCode: Number.parseInt(exitCode[1] ?? "", 10),
+    stdout: text.slice(stdoutStart + stdoutMarker.length, stderrStart),
+    stderr: text.slice(stderrStart + stderrMarker.length),
+  }
+}
+
+const parseStructuredRunResult = (value: unknown) => {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("exitCode" in value) ||
+    typeof value.exitCode !== "number" ||
+    !("stdout" in value) ||
+    typeof value.stdout !== "string" ||
+    !("stderr" in value) ||
+    typeof value.stderr !== "string"
+  ) {
+    return null
+  }
+
+  return {
+    exitCode: value.exitCode,
+    stdout: value.stdout,
+    stderr: value.stderr,
   }
 }
 
 const safeError = (operation: string, message: string) =>
   new KeymaxxerError({ operation, message })
-
-const hasExactKeys = (value: unknown, keys: readonly string[]) =>
-  typeof value === "object" &&
-  value !== null &&
-  !Array.isArray(value) &&
-  Object.keys(value).length === keys.length &&
-  Object.keys(value).every((key) => keys.includes(key))

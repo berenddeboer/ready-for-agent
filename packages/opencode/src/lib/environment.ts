@@ -1,9 +1,27 @@
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
+const DEFAULT_MCP_TIMEOUT_MS = 300_000
+
+const isGitHubTokenEnvName = (name: string) =>
+  name === "GH_TOKEN" ||
+  name === "GITHUB_TOKEN" ||
+  name.startsWith("GITHUB_TOKEN_")
+
+export type MakeOpencodeEnvironmentOptions = {
+  readonly keymaxxerMcpUrl: string
+  readonly environment?: Readonly<Record<string, string | undefined>>
+}
+
 export const makeOpencodeEnvironment = (
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-) => {
+  options: MakeOpencodeEnvironmentOptions,
+): Record<string, string> => {
+  const keymaxxerMcpUrl = options.keymaxxerMcpUrl.trim()
+  if (keymaxxerMcpUrl === "") {
+    throw new TypeError("keymaxxerMcpUrl is required to spawn OpenCode")
+  }
+
+  const environment = options.environment ?? process.env
   const existingConfigContent = environment.OPENCODE_CONFIG_CONTENT
   const config: Record<string, unknown> =
     existingConfigContent === undefined
@@ -18,15 +36,26 @@ export const makeOpencodeEnvironment = (
           return parsed
         })()
   const mcp = isObject(config.mcp) ? config.mcp : {}
-  const keymaxxer = isObject(mcp.keymaxxer) ? mcp.keymaxxer : {}
 
   return {
+    ...Object.fromEntries(
+      Object.entries(environment).filter(
+        (entry): entry is [string, string] =>
+          entry[1] !== undefined && !isGitHubTokenEnvName(entry[0]),
+      ),
+    ),
     OPENCODE_CONFIG_CONTENT: JSON.stringify({
       ...config,
       mcp: {
         ...mcp,
-        keymaxxer: { ...keymaxxer, enabled: false },
+        keymaxxer: {
+          type: "remote",
+          url: keymaxxerMcpUrl,
+          enabled: true,
+          oauth: false,
+          timeout: DEFAULT_MCP_TIMEOUT_MS,
+        },
       },
     }),
-  } as const
+  }
 }

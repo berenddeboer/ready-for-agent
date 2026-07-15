@@ -14,7 +14,7 @@ const readJson = async <A>(relativePath: string): Promise<A> =>
   ) as A
 
 describe("single application server topology", () => {
-  test("attaches the development-only sidecar to harness:dev", async () => {
+  test("boots the shared Keymaxxer Sidecar via bootstrap capture for harness:dev and start", async () => {
     const harness = await readJson<{ targets: Record<string, Target> }>(
       "../project.json",
     )
@@ -23,22 +23,18 @@ describe("single application server topology", () => {
     )
 
     expect(sidecar.targets.serve?.continuous).toBe(true)
-    expect(harness.targets.dev?.dependsOn).toContainEqual({
+    expect(harness.targets.dev?.dependsOn).not.toContainEqual({
       projects: ["keymaxxer-sidecar"],
       target: "serve",
     })
     expect(harness.targets.dev?.options?.command).toContain(
-      "export KEYMAXXER_SIDECAR_URL",
+      "run-with-keymaxxer-sidecar",
     )
     expect(harness.targets.dev?.options?.command).toContain(
       "export SQLITE_DATABASE_PATH",
     )
-    expect(harness.targets.start?.dependsOn).not.toContainEqual({
-      projects: ["keymaxxer-sidecar"],
-      target: "serve",
-    })
-    expect(harness.targets.start?.options?.command).not.toContain(
-      "KEYMAXXER_SIDECAR_URL",
+    expect(harness.targets.start?.options?.command).toContain(
+      "run-with-keymaxxer-sidecar",
     )
   })
 

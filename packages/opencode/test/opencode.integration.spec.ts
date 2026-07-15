@@ -3,10 +3,13 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
-import { Opencode, OpencodeLive } from "../src/index.js"
+import { Opencode } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
-const TestLayer = OpencodeLive.pipe(Layer.provide(BunServices.layer))
+const TestLayer = Opencode.layerForTests(
+  process.env.KEYMAXXER_SIDECAR_URL ??
+    "http://127.0.0.1:5032/integration-test/mcp",
+).pipe(Layer.provide(BunServices.layer))
 
 describe("Opencode integration", () => {
   it("lists models from OpenCode's active providers", async () => {

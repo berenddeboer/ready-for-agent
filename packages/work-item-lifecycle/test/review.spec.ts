@@ -58,10 +58,13 @@ const stubOpencode = (impl: {
     Opencode.of({
       start: (input) =>
         impl.start?.(input) ??
-        Effect.succeed({ sessionId: "ses_start_should_not_run" }),
+        Effect.succeed({
+          sessionId: "ses_start_should_not_run",
+          assistantText: "",
+        }),
       continue: (input) =>
         impl.continue?.(input) ??
-        Effect.succeed({ sessionId: "ses_review_default" }),
+        Effect.succeed({ sessionId: "ses_review_default", assistantText: "" }),
       listModels: () => Effect.succeed([]),
     }),
   )
@@ -106,7 +109,9 @@ describe("review", () => {
   it("rejects blank Session context", () =>
     withTemp(async (root) => {
       const error = await run(
-        review(baseContext(root, { sessionId: "   " })).pipe(Effect.flip),
+        review(baseContext(root, { sessionId: "   ", assistantText: "" })).pipe(
+          Effect.flip,
+        ),
       )
       expect(error).toBeInstanceOf(ReviewSessionContextMissingError)
     }))
@@ -135,11 +140,14 @@ describe("review", () => {
         stubOpencode({
           start: () => {
             started = true
-            return Effect.succeed({ sessionId: "ses_wrong" })
+            return Effect.succeed({ sessionId: "ses_wrong", assistantText: "" })
           },
           continue: (input) => {
             continued = input
-            return Effect.succeed({ sessionId: "ses_from_implement" })
+            return Effect.succeed({
+              sessionId: "ses_from_implement",
+              assistantText: "",
+            })
           },
         }),
       )
@@ -163,7 +171,10 @@ describe("review", () => {
         stubOpencode({
           continue: () =>
             // OpenCode exit success alone is enough; findings are not a gate.
-            Effect.succeed({ sessionId: "ses_implement_session" }),
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            }),
         }),
       )
     }))
@@ -175,7 +186,8 @@ describe("review", () => {
         Layer.succeed(
           Opencode,
           Opencode.of({
-            start: () => Effect.succeed({ sessionId: "unused" }),
+            start: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continue: () =>
               Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
             listModels: () => Effect.succeed([]),
@@ -193,7 +205,8 @@ describe("review", () => {
         Layer.succeed(
           Opencode,
           Opencode.of({
-            start: () => Effect.succeed({ sessionId: "unused" }),
+            start: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continue: () =>
               Effect.fail(
                 new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
@@ -212,7 +225,8 @@ describe("review", () => {
         Layer.succeed(
           Opencode,
           Opencode.of({
-            start: () => Effect.succeed({ sessionId: "unused" }),
+            start: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continue: () =>
               Effect.fail(new SessionIdNotFoundError({ cwd: root })),
             listModels: () => Effect.succeed([]),
