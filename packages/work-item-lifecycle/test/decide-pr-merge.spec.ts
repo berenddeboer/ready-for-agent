@@ -1,5 +1,8 @@
 import { Effect, Layer } from "effect"
-import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
+import {
+  makeRepositoryRecord,
+  stubDbServiceLayer,
+} from "@ready-for-agent/db-service/test"
 import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
@@ -13,18 +16,10 @@ import {
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
-const repository = {
-  id: "repo-test",
-  githubOwner: "acme",
-  githubRepo: "widgets",
+const repository = makeRepositoryRecord({
   localPath: "/repos/widgets",
-  isBare: true,
-  paused: false,
-  defaultModel: null,
-  defaultVariant: null,
   autoMerge: true,
-  issuesReconciledAt: null,
-}
+})
 
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
@@ -36,9 +31,9 @@ const context: LifecycleStepContext = {
   sessionId: "ses_implement",
 }
 
-const db = Layer.succeed(DbService, {
+const db = stubDbServiceLayer({
   listRepositories: Effect.succeed([repository]),
-} as DbServiceShape)
+})
 
 const keymaxxer = Layer.succeed(KeymaxxerService, {
   initialize: Effect.void,
@@ -144,9 +139,9 @@ describe("decidePrMerge", () => {
   })
 
   it("skips OpenCode when auto-merge is disabled", async () => {
-    const pausedRepoDb = Layer.succeed(DbService, {
+    const pausedRepoDb = stubDbServiceLayer({
       listRepositories: Effect.succeed([{ ...repository, autoMerge: false }]),
-    } as DbServiceShape)
+    })
     let continued = false
     const opencode = Layer.succeed(
       Opencode,

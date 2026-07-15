@@ -1,21 +1,7 @@
+import { Route } from "../src/routes/graphql.ts"
 import { expect, test } from "bun:test"
 
 test("routes /graphql through the injected GraphQL handler", async () => {
-  const serverEntryPath = "../dist/server/server.js"
-  const serverEntry = (await import(serverEntryPath)) as {
-    default: {
-      fetch: (
-        request: Request,
-        options: {
-          context: {
-            graphqlApi: {
-              fetch: (request: Request) => Response | Promise<Response>
-            }
-          }
-        },
-      ) => Response | Promise<Response>
-    }
-  }
   let delegatedUrl: string | undefined
   const foreignResponse = {
     body: JSON.stringify({ data: { health: true } }),
@@ -24,23 +10,23 @@ test("routes /graphql through the injected GraphQL handler", async () => {
     statusText: "OK",
   } as unknown as Response
 
-  const response = await serverEntry.default.fetch(
-    new Request("http://127.0.0.1:4200/graphql", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: "{ health }" }),
-    }),
-    {
-      context: {
-        graphqlApi: {
-          fetch: (request) => {
-            delegatedUrl = request.url
-            return foreignResponse
-          },
-        },
+  const request = new Request("http://127.0.0.1:4200/graphql", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ query: "{ health }" }),
+  })
+  const context = {
+    graphqlApi: {
+      fetch: (incoming: Request) => {
+        delegatedUrl = incoming.url
+        return foreignResponse
       },
     },
-  )
+  }
+
+  const post = Route.options.server?.handlers?.POST
+  expect(post).toBeTypeOf("function")
+  const response = await post!({ request, context } as never)
 
   expect(response.status).toBe(200)
   expect(delegatedUrl).toBe("http://127.0.0.1:4200/graphql")

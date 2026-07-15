@@ -3,7 +3,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
-import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
+import type { DbService } from "@ready-for-agent/db-service"
+import {
+  makeRepositoryRecord,
+  stubDbServiceLayer,
+} from "@ready-for-agent/db-service/test"
 import {
   KeymaxxerError,
   KeymaxxerService,
@@ -38,22 +42,11 @@ const baseContext = (
   ...overrides,
 })
 
-const stubDb = Layer.succeed(DbService, {
+const stubDb = stubDbServiceLayer({
   listRepositories: Effect.succeed([
-    {
-      id: "repo-test",
-      githubOwner: "acme",
-      githubRepo: "widgets",
-      localPath: "/repos/acme-widgets",
-      isBare: true,
-      paused: false,
-      defaultModel: null,
-      defaultVariant: null,
-      autoMerge: false,
-      issuesReconciledAt: null,
-    },
+    makeRepositoryRecord({ localPath: "/repos/acme-widgets" }),
   ]),
-} as DbServiceShape)
+})
 
 const stubKeymaxxer = (
   overrides: Partial<KeymaxxerServiceShape> = {},
