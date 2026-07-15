@@ -93,6 +93,10 @@ describe("PR status check steps", () => {
       reason: "A maintainer must approve deployment",
     })
     expect(command).toContain('GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
+    expect(command).toContain(
+      `OPENCODE_CONFIG_CONTENT='{"mcp":{"keymaxxer":{"enabled":false}}}'`,
+    )
     expect(command).toContain("'--session' 'ses_implement'")
+    expect(command).toEndWith(" </dev/null")
   })
 })

@@ -2,7 +2,10 @@ import { Data, Duration, Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { buildRunArgs } from "@ready-for-agent/opencode"
+import {
+  buildRunArgs,
+  makeOpencodeEnvironment,
+} from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemBranchName } from "./worktree-names.js"
@@ -138,12 +141,14 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       variant: context.variant,
       sessionId,
     })
-    const command = [
+    const environment = makeOpencodeEnvironment()
+    const command = `${[
       `GH_TOKEN="$${tokenName}"`,
       `GITHUB_TOKEN="$${tokenName}"`,
+      `OPENCODE_CONFIG_CONTENT=${shellQuote(environment.OPENCODE_CONFIG_CONTENT)}`,
       shellQuote("opencode"),
       ...args.map(shellQuote),
-    ].join(" ")
+    ].join(" ")} </dev/null`
     const result = yield* keymaxxer
       .runWithSecrets({
         command,

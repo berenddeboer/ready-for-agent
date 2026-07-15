@@ -1,7 +1,10 @@
 import { Duration, Effect, FileSystem } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { buildRunArgs } from "@ready-for-agent/opencode"
+import {
+  buildRunArgs,
+  makeOpencodeEnvironment,
+} from "@ready-for-agent/opencode"
 import {
   CreatePrCredentialError,
   CreatePrInvalidWorktreeContextError,
@@ -63,6 +66,7 @@ const buildCreatePrPrompt = (githubIssueNumber: number) =>
   [
     "Create a pull request for the committed implementation changes in this worktree.",
     "Push the branch if needed, then open a PR against the repository default base branch.",
+    "Create the pull request as a draft.",
     `The PR must reference GitHub issue #${githubIssueNumber} (for example Closes #${githubIssueNumber}).`,
     "Follow this repository's PR title and body conventions.",
     "If a suitable open PR for this branch already exists, succeed without creating a duplicate.",
@@ -70,7 +74,6 @@ const buildCreatePrPrompt = (githubIssueNumber: number) =>
   ].join("\n")
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
-
 const buildCredentialedOpenCodeCommand = (input: {
   readonly tokenName: string
   readonly prompt: string
@@ -80,12 +83,14 @@ const buildCredentialedOpenCodeCommand = (input: {
   readonly sessionId: string
 }) => {
   const args = buildRunArgs(input)
-  return [
+  const environment = makeOpencodeEnvironment()
+  return `${[
     `GH_TOKEN="$${input.tokenName}"`,
     `GITHUB_TOKEN="$${input.tokenName}"`,
+    `OPENCODE_CONFIG_CONTENT=${shellQuote(environment.OPENCODE_CONFIG_CONTENT)}`,
     shellQuote("opencode"),
     ...args.map(shellQuote),
-  ].join(" ")
+  ].join(" ")} </dev/null`
 }
 
 /**

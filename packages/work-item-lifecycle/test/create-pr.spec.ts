@@ -149,11 +149,16 @@ describe("createPr", () => {
       expect(runInput!.command).toStartWith(
         'GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS" GITHUB_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"',
       )
+      expect(runInput!.command).toContain(
+        `OPENCODE_CONFIG_CONTENT='{"mcp":{"keymaxxer":{"enabled":false}}}'`,
+      )
       expect(runInput!.command).toContain("'opencode' 'run' '--auto'")
       expect(runInput!.command).toContain("'--session' 'ses_from_implement'")
       expect(runInput!.command).toContain("GitHub issue #2039")
       expect(runInput!.command).toContain("Closes #2039")
+      expect(runInput!.command).toContain("Create the pull request as a draft")
       expect(runInput!.command).toContain("Do not merge the pull request")
+      expect(runInput!.command).toEndWith(" </dev/null")
     }))
 
   it("rejects a missing repository credential", () =>

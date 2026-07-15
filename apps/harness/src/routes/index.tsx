@@ -182,11 +182,15 @@ const terminalWorkItemStates: readonly WorkItemState[] = [
   "NEEDS_HUMAN",
 ]
 
-const formatLifecycleLabel = (value: string) =>
-  value
+const formatLifecycleLabel = (value: string) => {
+  if (value.toLowerCase() === "watch_pr_status_checks") {
+    return "GitHub status checks"
+  }
+  return value
     .toLowerCase()
     .replaceAll("_", " ")
     .replace(/^./, (first) => first.toUpperCase())
+}
 
 export const Route = createFileRoute("/")({
   component: HomePage,
