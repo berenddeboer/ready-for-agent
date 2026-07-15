@@ -10,6 +10,10 @@ export type RepositoryIssuesLiveQueries = {
     queryKey: readonly unknown[]
     queryFn: () => Promise<unknown>
   }
+  workItems: (repositoryId: string) => {
+    queryKey: readonly unknown[]
+    queryFn: () => Promise<unknown>
+  }
 }
 
 /**
@@ -49,6 +53,7 @@ export const followRepositoryIssuesLive = async ({
     await Promise.all([
       fetchFresh(queries.repositories),
       fetchFresh(queries.issues(repositoryId)),
+      fetchFresh(queries.workItems(repositoryId)),
     ])
   }
 
@@ -57,6 +62,9 @@ export const followRepositoryIssuesLive = async ({
       fetchFresh(queries.repositories),
       ...repositoryIds.map((repositoryId) =>
         fetchFresh(queries.issues(repositoryId)),
+      ),
+      ...repositoryIds.map((repositoryId) =>
+        fetchFresh(queries.workItems(repositoryId)),
       ),
     ])
   }

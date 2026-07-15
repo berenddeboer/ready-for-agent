@@ -45,6 +45,7 @@ import {
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
   WorkItemTerminalError,
+  isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 
 type AddRepositoryArgs = {
@@ -479,14 +480,25 @@ export const createGraphqlApi = (
               Effect.result(
                 Effect.gen(function* () {
                   const lifecycle = yield* WorkItemLifecycle
-                  return args.githubIssueNumber === undefined
-                    ? yield* lifecycle.listWorkItemsForRepository(
-                        args.repositoryId,
-                      )
-                    : yield* lifecycle.listWorkItemsForIssue(
-                        args.repositoryId,
-                        args.githubIssueNumber,
-                      )
+                  if (args.githubIssueNumber !== undefined) {
+                    return yield* lifecycle.listWorkItemsForIssue(
+                      args.repositoryId,
+                      args.githubIssueNumber,
+                    )
+                  }
+                  const db = yield* DbService
+                  const [workItems, issues] = yield* Effect.all([
+                    lifecycle.listWorkItemsForRepository(args.repositoryId),
+                    db.listIssues(args.repositoryId),
+                  ])
+                  const relevantIssueNumbers = new Set(
+                    issues.map((issue) => issue.githubIssueNumber),
+                  )
+                  return workItems.filter(
+                    (workItem) =>
+                      !isTerminalWorkItemState(workItem.state) ||
+                      relevantIssueNumbers.has(workItem.githubIssueNumber),
+                  )
                 }),
               ),
             )
