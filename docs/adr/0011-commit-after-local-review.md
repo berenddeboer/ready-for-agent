@@ -5,5 +5,5 @@ After Review succeeds and before Create PR, the Commit Lifecycle Step continues 
 ## Consequences
 
 - Commit remains a first-class Lifecycle Step between Review and Create PR.
-- Pre-Commit is still harness-run git validation; Commit's work is OpenCode Session continue.
+- Pre-Commit remains harness-run git validation with an OpenCode fix loop on hook failure; Commit's primary work is OpenCode Session continue to create the commit.
 - OpenCode owns staging, message wording (including conventional commits when the repo requires them), and whether a no-op is appropriate when nothing remains to commit.

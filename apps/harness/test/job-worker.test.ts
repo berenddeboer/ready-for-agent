@@ -124,7 +124,7 @@ const queueLayer = (
         create_worktree: Duration.minutes(5),
         install_dependencies: Duration.minutes(15),
         implement: Duration.hours(2),
-        pre_commit: Duration.minutes(15),
+        pre_commit: Duration.hours(2),
         review: Duration.hours(1),
         commit: Duration.minutes(5),
         create_pr: Duration.minutes(10),
