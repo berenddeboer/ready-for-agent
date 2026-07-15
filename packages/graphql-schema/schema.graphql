@@ -11,6 +11,8 @@ type Query {
 type Config {
   defaultModel: String!
   defaultVariant: String!
+  reviewModel: String
+  reviewVariant: String
 }
 
 type Repository {
@@ -22,6 +24,8 @@ type Repository {
   paused: Boolean!
   defaultModel: String
   defaultVariant: String
+  reviewModel: String
+  reviewVariant: String
   autoMerge: Boolean!
   issuesReconciledAt: String
 }
@@ -130,6 +134,8 @@ input AddRepositoryInput {
 input UpdateConfigInput {
   defaultModel: String!
   defaultVariant: String!
+  reviewModel: String
+  reviewVariant: String
 }
 
 input UpdateRepositorySettingsInput {
@@ -137,6 +143,8 @@ input UpdateRepositorySettingsInput {
   paused: Boolean!
   defaultModel: String
   defaultVariant: String
+  reviewModel: String
+  reviewVariant: String
   autoMerge: Boolean!
 }
 

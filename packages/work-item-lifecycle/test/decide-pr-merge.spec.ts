@@ -27,6 +27,8 @@ const context: LifecycleStepContext = {
   githubIssueNumber: 42,
   model: "opencode/test-model",
   variant: "high",
+  reviewModel: "opencode/test-model",
+  reviewVariant: "high",
   worktreePath: "/tmp/worktree",
   sessionId: "ses_implement",
 }

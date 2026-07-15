@@ -31,6 +31,8 @@ const baseContext = (
   githubIssueNumber: 91,
   model: "opencode/test-model",
   variant: "high",
+  reviewModel: "opencode/test-model",
+  reviewVariant: "high",
   worktreePath,
   sessionId: "ses_implement_session",
   ...overrides,
@@ -116,7 +118,7 @@ describe("review", () => {
       expect(error).toBeInstanceOf(ReviewSessionContextMissingError)
     }))
 
-  it("continues the Implement Session with /review and captured context", () =>
+  it("continues the Implement Session with /review and review model", () =>
     withTemp(async (root) => {
       let continued: {
         sessionId: string
@@ -132,8 +134,10 @@ describe("review", () => {
         review(
           baseContext(root, {
             sessionId: "ses_from_implement",
-            model: "opencode/review-model",
-            variant: "max",
+            model: "opencode/build-model",
+            variant: "high",
+            reviewModel: "opencode/review-model",
+            reviewVariant: "max",
             maxDuration: Duration.minutes(45),
           }),
         ),

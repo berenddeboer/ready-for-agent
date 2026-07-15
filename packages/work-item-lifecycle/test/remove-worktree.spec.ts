@@ -114,6 +114,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           } as const
@@ -166,6 +168,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           })
@@ -208,6 +212,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           } as const
@@ -256,6 +262,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           } as const
@@ -318,6 +326,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           })
@@ -374,6 +384,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           }).pipe(Effect.flip)
@@ -412,6 +424,8 @@ describe("removeWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           }).pipe(Effect.flip)

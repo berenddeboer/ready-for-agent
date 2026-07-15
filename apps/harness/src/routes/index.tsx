@@ -19,6 +19,8 @@ const configQuery = {
       config: {
         defaultModel: true,
         defaultVariant: true,
+        reviewModel: true,
+        reviewVariant: true,
       },
     })
     return result.config
@@ -27,6 +29,8 @@ const configQuery = {
 
 const modelsQuery = {
   queryKey: ["models"],
+  staleTime: Number.POSITIVE_INFINITY,
+  gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({ models: true })
     return result.models
@@ -46,6 +50,8 @@ const repositoriesQuery = {
         paused: true,
         defaultModel: true,
         defaultVariant: true,
+        reviewModel: true,
+        reviewVariant: true,
         autoMerge: true,
         issuesReconciledAt: true,
       },
@@ -104,6 +110,8 @@ type Repository = {
   paused: boolean
   defaultModel: string | null
   defaultVariant: string | null
+  reviewModel: string | null
+  reviewVariant: string | null
   autoMerge: boolean
   issuesReconciledAt: string | null
   credential: RepositoryCredential
@@ -393,14 +401,19 @@ function RepositoryCard({ repository }: { repository: Repository }) {
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const settingsDialogRef = useRef<HTMLDialogElement>(null)
-  const config = useQuery(configQuery)
-  const models = useQuery(modelsQuery)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const config = useQuery({ ...configQuery, enabled: settingsOpen })
+  const models = useQuery({ ...modelsQuery, enabled: settingsOpen })
   const [paused, setPaused] = useState(repository.paused)
   const [defaultModel, setDefaultModel] = useState(
     repository.defaultModel ?? "",
   )
   const [defaultVariant, setDefaultVariant] = useState(
     repository.defaultVariant ?? "",
+  )
+  const [reviewModel, setReviewModel] = useState(repository.reviewModel ?? "")
+  const [reviewVariant, setReviewVariant] = useState(
+    repository.reviewVariant ?? "",
   )
   const [autoMerge, setAutoMerge] = useState(repository.autoMerge)
   const jobsQuery = workItemsQuery(repository.id)
@@ -413,6 +426,8 @@ function RepositoryCard({ repository }: { repository: Repository }) {
       paused: boolean
       defaultModel: string | null
       defaultVariant: string | null
+      reviewModel: string | null
+      reviewVariant: string | null
       autoMerge: boolean
     }) => {
       const result = await graphql.mutation({
@@ -426,6 +441,8 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           paused: true,
           defaultModel: true,
           defaultVariant: true,
+          reviewModel: true,
+          reviewVariant: true,
           autoMerge: true,
           issuesReconciledAt: true,
         },
@@ -443,13 +460,17 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           ),
       )
       settingsDialogRef.current?.close()
+      setSettingsOpen(false)
     },
   })
 
   const openSettings = () => {
+    setSettingsOpen(true)
     setPaused(repository.paused)
     setDefaultModel(repository.defaultModel ?? "")
     setDefaultVariant(repository.defaultVariant ?? "")
+    setReviewModel(repository.reviewModel ?? "")
+    setReviewVariant(repository.reviewVariant ?? "")
     setAutoMerge(repository.autoMerge)
     updateSettings.reset()
     if (config.isError) void config.refetch()
@@ -464,6 +485,8 @@ function RepositoryCard({ repository }: { repository: Repository }) {
       paused,
       defaultModel: defaultModel.trim() === "" ? null : defaultModel,
       defaultVariant: defaultVariant.trim() === "" ? null : defaultVariant,
+      reviewModel: reviewModel.trim() === "" ? null : reviewModel,
+      reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
       autoMerge,
     })
   }
@@ -471,10 +494,21 @@ function RepositoryCard({ repository }: { repository: Repository }) {
   const standardVariants = ["low", "medium", "high", "max"]
   const harnessDefaultModel = config.data?.defaultModel ?? "harness default"
   const harnessDefaultVariant = config.data?.defaultVariant ?? "harness default"
-  const hasUnavailableModel =
+  const resolvedBuildModel = repository.defaultModel ?? harnessDefaultModel
+  const resolvedBuildVariant =
+    repository.defaultVariant ?? harnessDefaultVariant
+  const harnessReviewModel =
+    config.data?.reviewModel ?? `Build (${resolvedBuildModel})`
+  const harnessReviewVariant =
+    config.data?.reviewVariant ?? `Build (${resolvedBuildVariant})`
+  const hasUnavailableBuildModel =
     defaultModel.length > 0 && !models.data?.includes(defaultModel)
-  const hasCustomVariant =
+  const hasUnavailableReviewModel =
+    reviewModel.length > 0 && !models.data?.includes(reviewModel)
+  const hasCustomBuildVariant =
     defaultVariant.length > 0 && !standardVariants.includes(defaultVariant)
+  const hasCustomReviewVariant =
+    reviewVariant.length > 0 && !standardVariants.includes(reviewVariant)
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -670,12 +704,22 @@ function RepositoryCard({ repository }: { repository: Repository }) {
         </div>
         <div className="min-w-0">
           <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Model
+            Build model
           </dt>
           <dd className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700">
             {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
             {" · "}
             {repository.defaultVariant ?? `Default (${harnessDefaultVariant})`}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+            Review model
+          </dt>
+          <dd className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700">
+            {repository.reviewModel ?? `Default (${harnessReviewModel})`}
+            {" · "}
+            {repository.reviewVariant ?? `Default (${harnessReviewVariant})`}
           </dd>
         </div>
         <div className="min-w-0">
@@ -694,6 +738,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
         onCancel={(event) => {
           if (updateSettings.isPending) event.preventDefault()
         }}
+        onClose={() => setSettingsOpen(false)}
       >
         <form onSubmit={saveSettings}>
           <div className="border-b border-slate-200 px-6 py-5">
@@ -745,7 +790,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
             ) : (
               <>
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Default model
+                  Build model
                   <select
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     value={defaultModel}
@@ -754,7 +799,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
                     <option value="">
                       Harness default ({harnessDefaultModel})
                     </option>
-                    {hasUnavailableModel && (
+                    {hasUnavailableBuildModel && (
                       <option value={defaultModel}>{defaultModel}</option>
                     )}
                     {models.data.map((model) => (
@@ -765,7 +810,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
                   </select>
                 </label>
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Thinking level
+                  Build thinking level
                   <select
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     value={defaultVariant}
@@ -774,11 +819,52 @@ function RepositoryCard({ repository }: { repository: Repository }) {
                     <option value="">
                       Harness default ({harnessDefaultVariant})
                     </option>
-                    {hasCustomVariant && (
+                    {hasCustomBuildVariant && (
                       <option value={defaultVariant}>{defaultVariant}</option>
                     )}
                     {standardVariants.map((variant) => (
                       <option key={variant} value={variant}>
+                        {variant[0]?.toUpperCase()}
+                        {variant.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Review model
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={reviewModel}
+                    onChange={(event) => setReviewModel(event.target.value)}
+                  >
+                    <option value="">
+                      Harness default ({harnessReviewModel})
+                    </option>
+                    {hasUnavailableReviewModel && (
+                      <option value={reviewModel}>{reviewModel}</option>
+                    )}
+                    {models.data.map((model) => (
+                      <option key={`review-${model}`} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Review thinking level
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={reviewVariant}
+                    onChange={(event) => setReviewVariant(event.target.value)}
+                  >
+                    <option value="">
+                      Harness default ({harnessReviewVariant})
+                    </option>
+                    {hasCustomReviewVariant && (
+                      <option value={reviewVariant}>{reviewVariant}</option>
+                    )}
+                    {standardVariants.map((variant) => (
+                      <option key={`review-${variant}`} value={variant}>
                         {variant[0]?.toUpperCase()}
                         {variant.slice(1)}
                       </option>
@@ -797,7 +883,10 @@ function RepositoryCard({ repository }: { repository: Repository }) {
             <button
               type="button"
               className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200"
-              onClick={() => settingsDialogRef.current?.close()}
+              onClick={() => {
+                settingsDialogRef.current?.close()
+                setSettingsOpen(false)
+              }}
               disabled={updateSettings.isPending}
             >
               Cancel

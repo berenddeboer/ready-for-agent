@@ -199,6 +199,8 @@ type WorkItemRow = {
   readonly github_issue_number: number
   readonly model: string
   readonly variant: string
+  readonly review_model: string
+  readonly review_variant: string
   readonly state: WorkItemState
   readonly state_ready_at: number
   readonly worktree_path: string | null
@@ -263,6 +265,8 @@ const toWorkItemRecord = (
   githubIssueNumber: row.github_issue_number,
   model: row.model,
   variant: row.variant,
+  reviewModel: row.review_model,
+  reviewVariant: row.review_variant,
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
   worktreePath: row.worktree_path,
@@ -520,9 +524,9 @@ export const makeWorkItemLifecycleLive = (
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, model, variant, state,
-                  state_ready_at, worktree_path, session_id, failure_code,
-                  failure_message, created_at, updated_at
+            `SELECT id, repository_id, github_issue_number, model, variant, review_model,
+                  review_variant, state, state_ready_at, worktree_path, session_id,
+                  failure_code, failure_message, created_at, updated_at
            FROM work_item
            WHERE id = ?
            LIMIT 1`,
@@ -549,9 +553,9 @@ export const makeWorkItemLifecycleLive = (
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, model, variant, state,
-                  state_ready_at, worktree_path, session_id, failure_code,
-                  failure_message, created_at, updated_at
+            `SELECT id, repository_id, github_issue_number, model, variant, review_model,
+                  review_variant, state, state_ready_at, worktree_path, session_id,
+                  failure_code, failure_message, created_at, updated_at
            FROM work_item
            WHERE repository_id = ? AND github_issue_number = ?
            ORDER BY created_at ASC, rowid ASC`,
@@ -574,9 +578,9 @@ export const makeWorkItemLifecycleLive = (
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, model, variant, state,
-                  state_ready_at, worktree_path, session_id, failure_code,
-                  failure_message, created_at, updated_at
+            `SELECT id, repository_id, github_issue_number, model, variant, review_model,
+                  review_variant, state, state_ready_at, worktree_path, session_id,
+                  failure_code, failure_message, created_at, updated_at
            FROM work_item
            WHERE repository_id = ?
            ORDER BY created_at ASC, rowid ASC`,
@@ -616,9 +620,9 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const rows = (yield* sql
             .unsafe(
-              `SELECT id, repository_id, github_issue_number, model, variant, state,
-                    state_ready_at, worktree_path, session_id, failure_code,
-                    failure_message, created_at, updated_at
+              `SELECT id, repository_id, github_issue_number, model, variant, review_model,
+                    review_variant, state, state_ready_at, worktree_path, session_id,
+                    failure_code, failure_message, created_at, updated_at
              FROM work_item
              WHERE id = ?
              LIMIT 1`,
@@ -1263,6 +1267,8 @@ export const makeWorkItemLifecycleLive = (
                 githubIssueNumber: workItem.github_issue_number,
                 model: workItem.model,
                 variant: workItem.variant,
+                reviewModel: workItem.review_model,
+                reviewVariant: workItem.review_variant,
                 worktreePath: workItem.worktree_path,
                 sessionId: workItem.session_id,
                 maxDuration,
@@ -1530,6 +1536,8 @@ export const makeWorkItemLifecycleLive = (
             githubIssueNumber: currentWorkItem.github_issue_number,
             model: currentWorkItem.model,
             variant: currentWorkItem.variant,
+            reviewModel: currentWorkItem.review_model,
+            reviewVariant: currentWorkItem.review_variant,
             worktreePath: currentWorkItem.worktree_path,
             sessionId: currentWorkItem.session_id,
           }
@@ -1892,6 +1900,10 @@ export const makeWorkItemLifecycleLive = (
           const repository = repositories.find(({ id }) => id === repositoryId)
           const model = repository?.defaultModel ?? config.defaultModel
           const variant = repository?.defaultVariant ?? config.defaultVariant
+          const reviewModel =
+            repository?.reviewModel ?? config.reviewModel ?? model
+          const reviewVariant =
+            repository?.reviewVariant ?? config.reviewVariant ?? variant
           const workItemId = makeWorkItemId()
           const stepRunId = makeStepRunId()
           const now = yield* Clock.currentTimeMillis
@@ -1902,16 +1914,19 @@ export const makeWorkItemLifecycleLive = (
               Effect.gen(function* () {
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
-                 id, repository_id, github_issue_number, model, variant, state,
-                 state_ready_at, worktree_path, session_id, failure_code,
-                 failure_message, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                 id, repository_id, github_issue_number, model, variant,
+                 review_model, review_variant, state, state_ready_at,
+                 worktree_path, session_id, failure_code, failure_message,
+                 created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
                     githubIssueNumber,
                     model,
                     variant,
+                    reviewModel,
+                    reviewVariant,
                     step,
                     now,
                     now,

@@ -16,6 +16,8 @@ export interface LifecycleStepContext {
   readonly githubIssueNumber: number
   readonly model: string
   readonly variant: string
+  readonly reviewModel: string
+  readonly reviewVariant: string
   readonly worktreePath: string | null
   readonly sessionId: string | null
   readonly maxDuration?: Duration.Duration

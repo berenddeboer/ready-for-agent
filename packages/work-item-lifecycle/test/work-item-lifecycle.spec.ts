@@ -192,6 +192,8 @@ describe("WorkItemLifecycle", () => {
           const config = yield* db.getConfig
           expect(workItem.model).toBe(config.defaultModel)
           expect(workItem.variant).toBe(config.defaultVariant)
+          expect(workItem.reviewModel).toBe(config.defaultModel)
+          expect(workItem.reviewVariant).toBe(config.defaultVariant)
         }),
       ))
 
@@ -205,6 +207,8 @@ describe("WorkItemLifecycle", () => {
           yield* db.updateConfig({
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -214,6 +218,8 @@ describe("WorkItemLifecycle", () => {
 
           expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
           expect(workItem.variant).toBe("high")
+          expect(workItem.reviewModel).toBe("anthropic/claude-opus-4-6")
+          expect(workItem.reviewVariant).toBe("max")
         }),
       ))
 
@@ -227,12 +233,16 @@ describe("WorkItemLifecycle", () => {
           yield* db.updateConfig({
             defaultModel: "opencode/deepseek-v4-flash-free",
             defaultVariant: "low",
+            reviewModel: null,
+            reviewVariant: null,
           })
           yield* db.updateRepositorySettings({
             repositoryId: repository.id,
             paused: repository.paused,
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "max",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "high",
             autoMerge: repository.autoMerge,
           })
 
@@ -243,6 +253,32 @@ describe("WorkItemLifecycle", () => {
 
           expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
           expect(workItem.variant).toBe("max")
+          expect(workItem.reviewModel).toBe("anthropic/claude-opus-4-6")
+          expect(workItem.reviewVariant).toBe("high")
+        }),
+      ))
+
+    it("falls back review model to build model when unset", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* db.updateConfig({
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            reviewModel: null,
+            reviewVariant: null,
+          })
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.reviewVariant).toBe("high")
         }),
       ))
 
@@ -1410,6 +1446,8 @@ describe("WorkItemLifecycle", () => {
           yield* db.updateConfig({
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: null,
+            reviewVariant: null,
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
@@ -3188,6 +3226,8 @@ describe("WorkItemLifecycle", () => {
             githubIssueNumber: issue.githubIssueNumber,
             model: afterCreate.model,
             variant: afterCreate.variant,
+            reviewModel: afterCreate.reviewModel,
+            reviewVariant: afterCreate.reviewVariant,
             worktreePath: "/tmp/worktrees/reset-me",
             sessionId: null,
           })

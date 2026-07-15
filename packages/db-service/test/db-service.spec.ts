@@ -49,20 +49,28 @@ describe("DbService", () => {
           expect(yield* db.getConfig).toEqual({
             defaultModel: "opencode/deepseek-v4-flash-free",
             defaultVariant: "low",
+            reviewModel: null,
+            reviewVariant: null,
           })
 
           expect(
             yield* db.updateConfig({
               defaultModel: "  anthropic/claude-sonnet-4-5  ",
               defaultVariant: "  high  ",
+              reviewModel: "  anthropic/claude-opus-4-6  ",
+              reviewVariant: "  max  ",
             }),
           ).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
           })
           expect(yield* db.getConfig).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
           })
         }),
       ))
@@ -75,6 +83,8 @@ describe("DbService", () => {
             db.updateConfig({
               defaultModel: " ",
               defaultVariant: "high",
+              reviewModel: null,
+              reviewVariant: null,
             }),
           )
           expect(error).toBeInstanceOf(InvalidConfigInputError)
@@ -115,6 +125,8 @@ describe("DbService", () => {
           expect(repo.paused).toBe(true)
           expect(repo.defaultModel).toBeNull()
           expect(repo.defaultVariant).toBeNull()
+          expect(repo.reviewModel).toBeNull()
+          expect(repo.reviewVariant).toBeNull()
           expect(repo.autoMerge).toBe(false)
           expect(repo.issuesReconciledAt).toBeNull()
         }),
@@ -224,6 +236,8 @@ describe("DbService", () => {
             paused: false,
             defaultModel: "  anthropic/claude-sonnet-4-5  ",
             defaultVariant: "  high  ",
+            reviewModel: "  anthropic/claude-opus-4-6  ",
+            reviewVariant: "  max  ",
             autoMerge: true,
           })
 
@@ -232,6 +246,8 @@ describe("DbService", () => {
             paused: false,
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
             autoMerge: true,
           })
           expect(yield* db.listRepositories).toEqual([updated])
@@ -248,6 +264,8 @@ describe("DbService", () => {
             paused: true,
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
             autoMerge: false,
           })
 
@@ -256,11 +274,15 @@ describe("DbService", () => {
             paused: true,
             defaultModel: " ",
             defaultVariant: null,
+            reviewModel: " ",
+            reviewVariant: null,
             autoMerge: false,
           })
 
           expect(cleared.defaultModel).toBeNull()
           expect(cleared.defaultVariant).toBeNull()
+          expect(cleared.reviewModel).toBeNull()
+          expect(cleared.reviewVariant).toBeNull()
         }),
       ))
 
@@ -274,6 +296,8 @@ describe("DbService", () => {
               paused: false,
               defaultModel: null,
               defaultVariant: null,
+              reviewModel: null,
+              reviewVariant: null,
               autoMerge: false,
             }),
           )
@@ -369,10 +393,11 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant, state,
-               state_ready_at, worktree_path, session_id, failure_code,
-               failure_message, created_at, updated_at
-             ) VALUES (?, ?, 42, 'model', 'low', 'create_worktree', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+               id, repository_id, github_issue_number, model, variant,
+               review_model, review_variant, state, state_ready_at, worktree_path,
+               session_id, failure_code, failure_message, created_at, updated_at
+             ) VALUES (?, ?, 42, 'model', 'low', 'model', 'low', 'create_worktree',
+               ?, NULL, NULL, NULL, NULL, ?, ?)`,
             ["wi-running-remove-test", repository.id, now, now, now],
           )
           yield* sql.unsafe(
@@ -408,10 +433,11 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant, state,
-               state_ready_at, worktree_path, session_id, failure_code,
-               failure_message, created_at, updated_at
-             ) VALUES (?, ?, 42, 'model', 'low', 'create_worktree', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+               id, repository_id, github_issue_number, model, variant,
+               review_model, review_variant, state, state_ready_at, worktree_path,
+               session_id, failure_code, failure_message, created_at, updated_at
+             ) VALUES (?, ?, 42, 'model', 'low', 'model', 'low', 'create_worktree',
+               ?, NULL, NULL, NULL, NULL, ?, ?)`,
             ["wi-queued-remove-test", repository.id, now, now, now],
           )
           yield* sql.unsafe(

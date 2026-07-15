@@ -73,6 +73,8 @@ type UpdateConfigArgs = {
   input: {
     defaultModel: string
     defaultVariant: string
+    reviewModel?: string | null
+    reviewVariant?: string | null
   }
 }
 
@@ -82,6 +84,8 @@ type UpdateRepositorySettingsArgs = {
     paused: boolean
     defaultModel: string | null
     defaultVariant: string | null
+    reviewModel: string | null
+    reviewVariant: string | null
     autoMerge: boolean
   }
 }
@@ -385,6 +389,8 @@ export const createGraphqlApi = (
 ) => {
   const opencodeCwd = options.opencodeCwd ?? process.cwd()
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
+  let modelsCache: ReadonlyArray<string> | null = null
+  let modelsInFlight: Promise<ReadonlyArray<string>> | null = null
   const yoga = createYoga({
     schema: createSchema({
       typeDefs,
@@ -444,21 +450,37 @@ export const createGraphqlApi = (
             return result.success
           },
           models: async () => {
-            const result = await runtime.runPromise(
-              Effect.result(
-                Effect.gen(function* () {
-                  const opencode = yield* Opencode
-                  return yield* opencode.listModels({
-                    cwd: opencodeCwd,
-                    timeout: "30 seconds",
-                  })
-                }),
-              ),
-            )
-            if (Result.isFailure(result)) {
-              throw toGraphQLError(result.failure)
+            if (modelsCache !== null) {
+              return modelsCache
             }
-            return result.success
+            if (modelsInFlight !== null) {
+              return modelsInFlight
+            }
+            modelsInFlight = runtime
+              .runPromise(
+                Effect.result(
+                  Effect.gen(function* () {
+                    const opencode = yield* Opencode
+                    return yield* opencode.listModels({
+                      cwd: opencodeCwd,
+                      timeout: "30 seconds",
+                    })
+                  }),
+                ),
+              )
+              .then((result) => {
+                modelsInFlight = null
+                if (Result.isFailure(result)) {
+                  throw toGraphQLError(result.failure)
+                }
+                modelsCache = result.success
+                return result.success
+              })
+              .catch((error) => {
+                modelsInFlight = null
+                throw error
+              })
+            return modelsInFlight
           },
           issues: async (_parent: unknown, args: IssuesArgs) => {
             const result = await runtime.runPromise(
@@ -582,7 +604,12 @@ export const createGraphqlApi = (
               Effect.result(
                 Effect.gen(function* () {
                   const db = yield* DbService
-                  return yield* db.updateConfig(args.input)
+                  return yield* db.updateConfig({
+                    defaultModel: args.input.defaultModel,
+                    defaultVariant: args.input.defaultVariant,
+                    reviewModel: args.input.reviewModel ?? null,
+                    reviewVariant: args.input.reviewVariant ?? null,
+                  })
                 }),
               ),
             )
@@ -604,6 +631,8 @@ export const createGraphqlApi = (
                     paused: args.input.paused,
                     defaultModel: args.input.defaultModel ?? null,
                     defaultVariant: args.input.defaultVariant ?? null,
+                    reviewModel: args.input.reviewModel ?? null,
+                    reviewVariant: args.input.reviewVariant ?? null,
                     autoMerge: args.input.autoMerge,
                   })
                 }),

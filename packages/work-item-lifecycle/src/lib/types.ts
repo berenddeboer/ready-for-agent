@@ -68,6 +68,8 @@ export interface WorkItemRecord {
   readonly githubIssueNumber: number
   readonly model: string
   readonly variant: string
+  readonly reviewModel: string
+  readonly reviewVariant: string
   readonly state: WorkItemState
   readonly stateReadyAt: Date
   readonly worktreePath: string | null

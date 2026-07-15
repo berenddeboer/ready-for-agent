@@ -40,6 +40,8 @@ const baseContext = (
   githubIssueNumber: 90,
   model: "opencode/test-model",
   variant: "high",
+  reviewModel: "opencode/test-model",
+  reviewVariant: "high",
   worktreePath,
   sessionId: "ses_pre_commit",
   ...overrides,

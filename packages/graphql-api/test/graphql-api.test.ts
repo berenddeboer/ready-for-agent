@@ -40,6 +40,8 @@ const repository = makeRepositoryRecord({
 const config = {
   defaultModel: "opencode/deepseek-v4-flash-free",
   defaultVariant: "low",
+  reviewModel: null as string | null,
+  reviewVariant: null as string | null,
 }
 
 const issue = {
@@ -68,6 +70,8 @@ const workItem = {
   githubIssueNumber: issue.githubIssueNumber,
   model: config.defaultModel,
   variant: config.defaultVariant,
+  reviewModel: config.defaultModel,
+  reviewVariant: config.defaultVariant,
   state: "create_worktree",
   stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
   worktreePath: null,
@@ -101,6 +105,9 @@ const makeRuntime = (
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
   queueOverrides: Partial<QueueServiceShape> = {},
   lifecycleOverrides: Partial<WorkItemLifecycleShape> = {},
+  opencodeOverrides: {
+    listModels?: () => Effect.Effect<ReadonlyArray<string>, never>
+  } = {},
 ) => {
   const opencode = {
     start: () => Effect.die("not used"),
@@ -110,6 +117,7 @@ const makeRuntime = (
         "opencode/deepseek-v4-flash-free",
         "anthropic/claude-sonnet-4-5",
       ]),
+    ...opencodeOverrides,
   }
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -121,6 +129,8 @@ const makeRuntime = (
         paused: input.paused,
         defaultModel: input.defaultModel,
         defaultVariant: input.defaultVariant,
+        reviewModel: input.reviewModel,
+        reviewVariant: input.reviewVariant,
         autoMerge: input.autoMerge,
       }),
     listRepositories: Effect.succeed([repository]),
@@ -630,7 +640,7 @@ describe("GraphQL API", () => {
   test("reads and updates config", async () => {
     const queryResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query { config { defaultModel defaultVariant } }`,
+        query: `query { config { defaultModel defaultVariant reviewModel reviewVariant } }`,
       }),
     )
     expect(await queryResponse.json()).toEqual({ data: { config } })
@@ -638,12 +648,16 @@ describe("GraphQL API", () => {
     const mutationResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
-          updateConfig(input: $input) { defaultModel defaultVariant }
+          updateConfig(input: $input) {
+            defaultModel defaultVariant reviewModel reviewVariant
+          }
         }`,
         variables: {
           input: {
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
           },
         },
       }),
@@ -653,6 +667,8 @@ describe("GraphQL API", () => {
         updateConfig: {
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultVariant: "high",
+          reviewModel: "anthropic/claude-opus-4-6",
+          reviewVariant: "max",
         },
       },
     })
@@ -667,6 +683,8 @@ describe("GraphQL API", () => {
             paused
             defaultModel
             defaultVariant
+            reviewModel
+            reviewVariant
             autoMerge
           }
         }`,
@@ -676,6 +694,8 @@ describe("GraphQL API", () => {
             paused: false,
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
             autoMerge: true,
           },
         },
@@ -688,18 +708,41 @@ describe("GraphQL API", () => {
           paused: false,
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultVariant: "high",
+          reviewModel: "anthropic/claude-opus-4-6",
+          reviewVariant: "max",
           autoMerge: true,
         },
       },
     })
   })
 
-  test("lists models provided by OpenCode", async () => {
-    const response = await createGraphqlApi(runtime).fetch(
+  test("lists models provided by OpenCode and caches the result", async () => {
+    let listCount = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        listModels: () => {
+          listCount += 1
+          return Effect.succeed([
+            "opencode/deepseek-v4-flash-free",
+            "anthropic/claude-sonnet-4-5",
+          ])
+        },
+      },
+    )
+
+    const api = createGraphqlApi(runtime)
+    const first = await api.fetch(graphqlRequest({ query: `query { models }` }))
+    const second = await api.fetch(
       graphqlRequest({ query: `query { models }` }),
     )
 
-    expect(await response.json()).toEqual({
+    expect(await first.json()).toEqual({
       data: {
         models: [
           "opencode/deepseek-v4-flash-free",
@@ -707,6 +750,15 @@ describe("GraphQL API", () => {
         ],
       },
     })
+    expect(await second.json()).toEqual({
+      data: {
+        models: [
+          "opencode/deepseek-v4-flash-free",
+          "anthropic/claude-sonnet-4-5",
+        ],
+      },
+    })
+    expect(listCount).toBe(1)
   })
 
   test("lists issues for a repository", async () => {
