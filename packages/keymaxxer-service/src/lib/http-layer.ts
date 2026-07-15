@@ -230,6 +230,22 @@ const makeSidecarService = (
             catch: () => safeError("addSecret", "Keymaxxer add failed"),
           })
         : Effect.fail(safeError("addSecret", "Invalid secret name")),
+    removeSecret: (name) =>
+      validateSecretName(name)
+        ? Effect.tryPromise({
+            try: async () => {
+              const result = await callTool("removeSecret", "keymaxxer_rm", {
+                name,
+              })
+              if (result.isError) {
+                throw safeError("removeSecret", "Keymaxxer remove failed")
+              }
+              await listSecrets(true)
+              return result.text.toLowerCase().includes("removed")
+            },
+            catch: () => safeError("removeSecret", "Keymaxxer remove failed"),
+          })
+        : Effect.fail(safeError("removeSecret", "Invalid secret name")),
     runWithSecrets: (input) =>
       validateRunInput(input)
         ? Effect.tryPromise({

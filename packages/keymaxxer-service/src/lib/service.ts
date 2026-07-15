@@ -22,6 +22,9 @@ export interface KeymaxxerServiceShape {
   readonly addSecret: (
     input: AddSecretInput,
   ) => Effect.Effect<boolean, KeymaxxerError>
+  readonly removeSecret: (
+    name: SecretName,
+  ) => Effect.Effect<boolean, KeymaxxerError>
   readonly runWithSecrets: (
     input: RunWithSecretsInput,
   ) => Effect.Effect<RunWithSecretsResult, KeymaxxerError>
@@ -48,6 +51,8 @@ export const testKeymaxxerLayer = (
           secrets.add(input.name)
           return true
         }),
+      removeSecret: (name: SecretName) =>
+        Effect.sync(() => secrets.delete(name)),
       runWithSecrets: () =>
         Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
     }

@@ -21,6 +21,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           addCalled = true
           return true
         }),
+      removeSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
@@ -56,6 +57,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
@@ -90,6 +92,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({
@@ -175,6 +178,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({
@@ -292,6 +296,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
       runWithSecrets: (input) => {
         runs.push(input)
         return Effect.succeed({

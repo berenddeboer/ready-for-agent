@@ -41,7 +41,33 @@ bun run harness-cli add ~/src/pf/monorepo/
 #   paused: true
 ```
 
+Remove a repository GitHub token by local path, GitHub `owner/repository`, or
+repository id:
+
+```bash
+bun run harness-cli remove-github-token /path/to/local/repo
+bun run harness-cli remove-github-token processfocus/monorepo
+bun run harness-cli remove-github-token repo-01H...
+```
+
+Example:
+
+```bash
+bun run harness-cli remove-github-token ~/src/pf/monorepo/
+# Removed GitHub token for processfocus/monorepo
+#   secret: GITHUB_TOKEN_PROCESSFOCUS_MONOREPO
+
+bun run harness-cli remove-github-token processfocus/monorepo
+# Removed GitHub token for processfocus/monorepo
+#   secret: GITHUB_TOKEN_PROCESSFOCUS_MONOREPO
+
+bun run harness-cli remove-github-token repo-01H...
+# Removed GitHub token for processfocus/monorepo
+#   secret: GITHUB_TOKEN_PROCESSFOCUS_MONOREPO
+```
+
 ```bash
 bun run harness-cli --help
 bun run harness-cli add --help
+bun run harness-cli remove-github-token --help
 ```
