@@ -36,6 +36,8 @@ const configQuery = {
       config: {
         defaultModel: true,
         defaultVariant: true,
+        reviewModel: true,
+        reviewVariant: true,
       },
     })
     return result.config
@@ -44,6 +46,8 @@ const configQuery = {
 
 const modelsQuery = {
   queryKey: ["models"],
+  staleTime: Number.POSITIVE_INFINITY,
+  gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({ models: true })
     return result.models
@@ -110,32 +114,46 @@ function RootComponent() {
 function SettingsButton() {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const queryClient = useQueryClient()
-  const config = useQuery(configQuery)
-  const models = useQuery(modelsQuery)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const config = useQuery({ ...configQuery, enabled: dialogOpen })
+  const models = useQuery({ ...modelsQuery, enabled: dialogOpen })
   const [defaultModel, setDefaultModel] = useState("")
   const [defaultVariant, setDefaultVariant] = useState("low")
+  const [reviewModel, setReviewModel] = useState("")
+  const [reviewVariant, setReviewVariant] = useState("")
   useEffect(() => {
-    if (dialogRef.current?.open && config.data) {
+    if (dialogOpen && config.data) {
       setDefaultModel(config.data.defaultModel)
       setDefaultVariant(config.data.defaultVariant)
+      setReviewModel(config.data.reviewModel ?? "")
+      setReviewVariant(config.data.reviewVariant ?? "")
     }
-  }, [config.data])
+  }, [config.data, dialogOpen])
   const updateConfig = useMutation({
-    mutationFn: (input: { defaultModel: string; defaultVariant: string }) =>
+    mutationFn: (input: {
+      defaultModel: string
+      defaultVariant: string
+      reviewModel: string | null
+      reviewVariant: string | null
+    }) =>
       graphql.mutation({
         updateConfig: {
           __args: { input },
           defaultModel: true,
           defaultVariant: true,
+          reviewModel: true,
+          reviewVariant: true,
         },
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
       queryClient.setQueryData(configQuery.queryKey, updatedConfig)
       dialogRef.current?.close()
+      setDialogOpen(false)
     },
   })
 
   const openSettings = () => {
+    setDialogOpen(true)
     if (config.isError) {
       void config.refetch()
     }
@@ -145,6 +163,8 @@ function SettingsButton() {
     if (config.data) {
       setDefaultModel(config.data.defaultModel)
       setDefaultVariant(config.data.defaultVariant)
+      setReviewModel(config.data.reviewModel ?? "")
+      setReviewVariant(config.data.reviewVariant ?? "")
     }
     updateConfig.reset()
     dialogRef.current?.showModal()
@@ -152,13 +172,22 @@ function SettingsButton() {
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    updateConfig.mutate({ defaultModel, defaultVariant })
+    updateConfig.mutate({
+      defaultModel,
+      defaultVariant,
+      reviewModel: reviewModel.trim() === "" ? null : reviewModel,
+      reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
+    })
   }
 
   const standardVariants = ["low", "medium", "high", "max"]
-  const hasUnavailableModel =
+  const hasUnavailableBuildModel =
     defaultModel.length > 0 && !models.data?.includes(defaultModel)
-  const hasCustomVariant = !standardVariants.includes(defaultVariant)
+  const hasUnavailableReviewModel =
+    reviewModel.length > 0 && !models.data?.includes(reviewModel)
+  const hasCustomBuildVariant = !standardVariants.includes(defaultVariant)
+  const hasCustomReviewVariant =
+    reviewVariant.length > 0 && !standardVariants.includes(reviewVariant)
 
   return (
     <>
@@ -189,6 +218,7 @@ function SettingsButton() {
         onCancel={(event) => {
           if (updateConfig.isPending) event.preventDefault()
         }}
+        onClose={() => setDialogOpen(false)}
       >
         <form onSubmit={saveSettings}>
           <div className="border-b border-slate-200 px-6 py-5">
@@ -213,7 +243,7 @@ function SettingsButton() {
             ) : (
               <>
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Default model
+                  Build model
                   <select
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="defaultModel"
@@ -221,7 +251,7 @@ function SettingsButton() {
                     onChange={(event) => setDefaultModel(event.target.value)}
                     required
                   >
-                    {hasUnavailableModel && (
+                    {hasUnavailableBuildModel && (
                       <option value={defaultModel}>{defaultModel}</option>
                     )}
                     {models.data.map((model) => (
@@ -231,12 +261,12 @@ function SettingsButton() {
                     ))}
                   </select>
                   <span className="text-xs font-normal text-slate-500">
-                    Models available from OpenCode.
+                    Used for implement and other build steps.
                   </span>
                 </label>
 
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Thinking level
+                  Build thinking level
                   <select
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="defaultVariant"
@@ -244,7 +274,7 @@ function SettingsButton() {
                     onChange={(event) => setDefaultVariant(event.target.value)}
                     required
                   >
-                    {hasCustomVariant && (
+                    {hasCustomBuildVariant && (
                       <option value={defaultVariant}>{defaultVariant}</option>
                     )}
                     {standardVariants.map((variant) => (
@@ -257,6 +287,50 @@ function SettingsButton() {
                   <span className="text-xs font-normal text-slate-500">
                     OpenCode calls this the model variant.
                   </span>
+                </label>
+
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Review model
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    name="reviewModel"
+                    value={reviewModel}
+                    onChange={(event) => setReviewModel(event.target.value)}
+                  >
+                    <option value="">Same as build model</option>
+                    {hasUnavailableReviewModel && (
+                      <option value={reviewModel}>{reviewModel}</option>
+                    )}
+                    {models.data.map((model) => (
+                      <option key={`review-${model}`} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs font-normal text-slate-500">
+                    Used only for the review step. Empty uses the build model.
+                  </span>
+                </label>
+
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Review thinking level
+                  <select
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    name="reviewVariant"
+                    value={reviewVariant}
+                    onChange={(event) => setReviewVariant(event.target.value)}
+                  >
+                    <option value="">Same as build thinking level</option>
+                    {hasCustomReviewVariant && (
+                      <option value={reviewVariant}>{reviewVariant}</option>
+                    )}
+                    {standardVariants.map((variant) => (
+                      <option key={`review-${variant}`} value={variant}>
+                        {variant[0]?.toUpperCase()}
+                        {variant.slice(1)}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </>
             )}
@@ -272,7 +346,10 @@ function SettingsButton() {
             <button
               type="button"
               className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200"
-              onClick={() => dialogRef.current?.close()}
+              onClick={() => {
+                dialogRef.current?.close()
+                setDialogOpen(false)
+              }}
               disabled={updateConfig.isPending}
             >
               Cancel

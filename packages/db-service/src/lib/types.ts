@@ -22,6 +22,8 @@ export interface RepositoryRecord {
   readonly paused: boolean
   readonly defaultModel: string | null
   readonly defaultVariant: string | null
+  readonly reviewModel: string | null
+  readonly reviewVariant: string | null
   readonly autoMerge: boolean
   readonly issuesReconciledAt: Date | null
 }
@@ -31,17 +33,23 @@ export interface UpdateRepositorySettingsInput {
   readonly paused: boolean
   readonly defaultModel: string | null
   readonly defaultVariant: string | null
+  readonly reviewModel: string | null
+  readonly reviewVariant: string | null
   readonly autoMerge: boolean
 }
 
 export interface ConfigRecord {
   readonly defaultModel: string
   readonly defaultVariant: string
+  readonly reviewModel: string | null
+  readonly reviewVariant: string | null
 }
 
 export interface UpdateConfigInput {
   readonly defaultModel: string
   readonly defaultVariant: string
+  readonly reviewModel: string | null
+  readonly reviewVariant: string | null
 }
 
 export interface StoreIssueInput {

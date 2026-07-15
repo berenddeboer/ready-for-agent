@@ -31,6 +31,8 @@ const context: LifecycleStepContext = {
   githubIssueNumber: 42,
   model: "opencode/test-model",
   variant: "high",
+  reviewModel: "opencode/test-model",
+  reviewVariant: "high",
   worktreePath: "/tmp/worktree",
   sessionId: "ses_implement",
 }
@@ -60,11 +62,11 @@ const seedWorkItem = Effect.gen(function* () {
   )
   yield* sql.unsafe(
     `INSERT INTO work_item (
-       id, repository_id, github_issue_number, model, variant, state,
+       id, repository_id, github_issue_number, model, variant, review_model, review_variant, state,
        state_ready_at, worktree_path, session_id, failure_code, failure_message,
        created_at, updated_at
-     ) VALUES (?, ?, 42, 'opencode/test-model', 'high', 'watch_pr_status_checks',
-       ?, '/tmp/worktree', 'ses_implement', NULL, NULL, ?, ?)`,
+      ) VALUES (?, ?, 42, 'opencode/test-model', 'high', 'opencode/test-model', 'high',
+        'watch_pr_status_checks', ?, '/tmp/worktree', 'ses_implement', NULL, NULL, ?, ?)`,
     [context.workItemId, repository.id, now, now, now],
   )
 })

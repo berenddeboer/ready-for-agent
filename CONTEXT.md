@@ -13,7 +13,7 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional default model and variant (null falls back to harness defaults), and Auto-merge. Changing settings does not rewrite existing Work Items; model and variant are captured when a Work Item is created.
+Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults), optional review model and variant (null falls back to harness review settings, then the build model/variant), and Auto-merge. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created.
 _Avoid_: Project config, repo config file
 
 **Auto-merge**:
@@ -72,7 +72,7 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to work a Leaf Issue through the implementation lifecycle, using the OpenCode model and variant captured at creation. It references the current Issue by Repository and GitHub issue number without snapshotting its contents; a Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to work a Leaf Issue through the implementation lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number without snapshotting its contents; a Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement Now**:

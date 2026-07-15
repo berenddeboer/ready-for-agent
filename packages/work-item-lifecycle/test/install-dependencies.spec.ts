@@ -22,6 +22,8 @@ const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
   githubIssueNumber: 79,
   model: "opencode/test-model",
   variant: "high",
+  reviewModel: "opencode/test-model",
+  reviewVariant: "high",
   worktreePath,
   sessionId: null,
 })

@@ -21,6 +21,8 @@ export const repository = snakeCase.table(
     paused: integer({ mode: "boolean" }).notNull().default(true),
     defaultModel: text(),
     defaultVariant: text(),
+    reviewModel: text(),
+    reviewVariant: text(),
     autoMerge: integer({ mode: "boolean" }).notNull().default(false),
     issuesReconciledAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
@@ -42,6 +44,8 @@ export const config = snakeCase.table("config", {
   id: text().primaryKey().default("default"),
   defaultModel: text().notNull().default("opencode/deepseek-v4-flash-free"),
   defaultVariant: text().notNull().default("low"),
+  reviewModel: text(),
+  reviewVariant: text(),
   createdAt: integer({ mode: "number" })
     .notNull()
     .$defaultFn(() => Date.now()),
@@ -182,6 +186,8 @@ export const workItem = snakeCase.table(
     githubIssueNumber: integer().notNull(),
     model: text().notNull(),
     variant: text().notNull(),
+    reviewModel: text().notNull(),
+    reviewVariant: text().notNull(),
     state: text({
       enum: [
         "create_worktree",

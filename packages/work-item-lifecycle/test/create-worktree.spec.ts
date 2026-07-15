@@ -124,6 +124,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           })
@@ -191,6 +193,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 99,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           })
@@ -233,6 +237,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 2039,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           })
@@ -278,6 +284,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 2039,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           })
@@ -323,6 +331,8 @@ describe("createWorktree", () => {
               githubIssueNumber: 7,
               model: "opencode/test",
               variant: "low",
+              reviewModel: "opencode/test",
+              reviewVariant: "low",
               worktreePath: null,
               sessionId: null,
             },
@@ -371,6 +381,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           } as const
@@ -419,6 +431,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           }).pipe(Effect.flip)
@@ -460,6 +474,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 42,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           }).pipe(Effect.flip)
@@ -495,6 +511,8 @@ describe("createWorktree", () => {
             githubIssueNumber: 1,
             model: "opencode/test",
             variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
             worktreePath: null,
             sessionId: null,
           }).pipe(Effect.flip)

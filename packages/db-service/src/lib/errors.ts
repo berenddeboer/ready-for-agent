@@ -52,14 +52,22 @@ export class InvalidIssueInputError extends Data.TaggedError(
 export class InvalidConfigInputError extends Data.TaggedError(
   "InvalidConfigInputError",
 )<{
-  readonly field: "defaultModel" | "defaultVariant"
+  readonly field:
+    | "defaultModel"
+    | "defaultVariant"
+    | "reviewModel"
+    | "reviewVariant"
   readonly message: string
 }> {}
 
 export class InvalidRepositorySettingsError extends Data.TaggedError(
   "InvalidRepositorySettingsError",
 )<{
-  readonly field: "defaultModel" | "defaultVariant"
+  readonly field:
+    | "defaultModel"
+    | "defaultVariant"
+    | "reviewModel"
+    | "reviewVariant"
   readonly message: string
 }> {}
 

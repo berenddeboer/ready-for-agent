@@ -74,8 +74,8 @@ export const review = (context: LifecycleStepContext) =>
         sessionId,
         prompt: REVIEW_PROMPT,
         cwd: worktreePath,
-        model: context.model,
-        variant: context.variant,
+        model: context.reviewModel,
+        variant: context.reviewVariant,
         timeout: context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.review,
       })
       .pipe(

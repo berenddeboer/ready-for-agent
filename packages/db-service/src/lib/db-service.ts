@@ -83,6 +83,8 @@ const toRecord = (row: {
   paused: boolean | number
   defaultModel: string | null
   defaultVariant: string | null
+  reviewModel: string | null
+  reviewVariant: string | null
   autoMerge: boolean | number
   issuesReconciledAt: number | null
 }): RepositoryRecord => ({
@@ -94,6 +96,8 @@ const toRecord = (row: {
   paused: Boolean(row.paused),
   defaultModel: row.defaultModel,
   defaultVariant: row.defaultVariant,
+  reviewModel: row.reviewModel,
+  reviewVariant: row.reviewVariant,
   autoMerge: Boolean(row.autoMerge),
   issuesReconciledAt:
     row.issuesReconciledAt === null ? null : new Date(row.issuesReconciledAt),
@@ -108,12 +112,14 @@ type RepositoryRow = {
   paused: boolean | number
   default_model: string | null
   default_variant: string | null
+  review_model: string | null
+  review_variant: string | null
   auto_merge: boolean | number
   issues_reconciled_at: number | null
 }
 
 const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
-             default_model, default_variant, auto_merge, issues_reconciled_at`
+             default_model, default_variant, review_model, review_variant, auto_merge, issues_reconciled_at`
 
 const toRecordFromRow = (row: RepositoryRow): RepositoryRecord =>
   toRecord({
@@ -125,6 +131,8 @@ const toRecordFromRow = (row: RepositoryRow): RepositoryRecord =>
     paused: row.paused,
     defaultModel: row.default_model,
     defaultVariant: row.default_variant,
+    reviewModel: row.review_model,
+    reviewVariant: row.review_variant,
     autoMerge: row.auto_merge,
     issuesReconciledAt: row.issues_reconciled_at,
   })
@@ -132,6 +140,19 @@ const toRecordFromRow = (row: RepositoryRow): RepositoryRecord =>
 const normalizeOptionalSetting = (
   value: string | null,
 ): Effect.Effect<string | null, InvalidRepositorySettingsError> => {
+  if (value === null) {
+    return Effect.succeed(null)
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return Effect.succeed(null)
+  }
+  return Effect.succeed(trimmed)
+}
+
+const normalizeOptionalConfigSetting = (
+  value: string | null,
+): Effect.Effect<string | null, InvalidConfigInputError> => {
   if (value === null) {
     return Effect.succeed(null)
   }
@@ -255,20 +276,26 @@ export const DbServiceLive = Layer.effect(
         yield* sql
           .unsafe(
             `INSERT OR IGNORE INTO config (
-               id, default_model, default_variant, created_at, updated_at
-             ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', ?, ?)`,
+               id, default_model, default_variant, review_model, review_variant,
+               created_at, updated_at
+             ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', NULL, NULL, ?, ?)`,
             [now, now],
           )
           .pipe(Effect.mapError(toDatabaseError))
 
         const rows = yield* sql
           .unsafe(
-            `SELECT default_model, default_variant
+            `SELECT default_model, default_variant, review_model, review_variant
              FROM config WHERE id = 'default'`,
           )
           .pipe(Effect.mapError(toDatabaseError))
         const row = rows[0] as
-          | { default_model: string; default_variant: string }
+          | {
+              default_model: string
+              default_variant: string
+              review_model: string | null
+              review_variant: string | null
+            }
           | undefined
         if (!row) {
           return yield* new DatabaseError({
@@ -278,6 +305,8 @@ export const DbServiceLive = Layer.effect(
         return {
           defaultModel: row.default_model,
           defaultVariant: row.default_variant,
+          reviewModel: row.review_model,
+          reviewVariant: row.review_variant,
         }
       },
     )
@@ -300,23 +329,44 @@ export const DbServiceLive = Layer.effect(
             message: "defaultVariant cannot be empty",
           })
         }
+        const reviewModel = yield* normalizeOptionalConfigSetting(
+          input.reviewModel,
+        )
+        const reviewVariant = yield* normalizeOptionalConfigSetting(
+          input.reviewVariant,
+        )
 
         const now = Date.now()
         const rows = yield* sql
           .unsafe(
             `INSERT INTO config (
-               id, default_model, default_variant, created_at, updated_at
-             ) VALUES ('default', ?, ?, ?, ?)
+               id, default_model, default_variant, review_model, review_variant,
+               created_at, updated_at
+             ) VALUES ('default', ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET
                default_model = excluded.default_model,
                default_variant = excluded.default_variant,
+               review_model = excluded.review_model,
+               review_variant = excluded.review_variant,
                updated_at = excluded.updated_at
-             RETURNING default_model, default_variant`,
-            [defaultModel, defaultVariant, now, now],
+             RETURNING default_model, default_variant, review_model, review_variant`,
+            [
+              defaultModel,
+              defaultVariant,
+              reviewModel,
+              reviewVariant,
+              now,
+              now,
+            ],
           )
           .pipe(Effect.mapError(toDatabaseError))
         const row = rows[0] as
-          | { default_model: string; default_variant: string }
+          | {
+              default_model: string
+              default_variant: string
+              review_model: string | null
+              review_variant: string | null
+            }
           | undefined
         if (!row) {
           return yield* new DatabaseError({
@@ -326,6 +376,8 @@ export const DbServiceLive = Layer.effect(
         return {
           defaultModel: row.default_model,
           defaultVariant: row.default_variant,
+          reviewModel: row.review_model,
+          reviewVariant: row.review_variant,
         }
       })
 
@@ -378,8 +430,9 @@ export const DbServiceLive = Layer.effect(
           .unsafe(
             `INSERT INTO repository (
                id, github_owner, github_repo, local_path, is_bare, paused,
-               default_model, default_variant, auto_merge, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
+               default_model, default_variant, review_model, review_variant,
+               auto_merge, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
             [
               id,
@@ -435,6 +488,10 @@ export const DbServiceLive = Layer.effect(
         const defaultVariant = yield* normalizeOptionalSetting(
           input.defaultVariant,
         )
+        const reviewModel = yield* normalizeOptionalSetting(input.reviewModel)
+        const reviewVariant = yield* normalizeOptionalSetting(
+          input.reviewVariant,
+        )
         const now = Date.now()
         const result = yield* sql
           .unsafe(
@@ -442,6 +499,8 @@ export const DbServiceLive = Layer.effect(
              SET paused = ?,
                  default_model = ?,
                  default_variant = ?,
+                 review_model = ?,
+                 review_variant = ?,
                  auto_merge = ?,
                  updated_at = ?
              WHERE id = ?
@@ -450,6 +509,8 @@ export const DbServiceLive = Layer.effect(
               input.paused,
               defaultModel,
               defaultVariant,
+              reviewModel,
+              reviewVariant,
               input.autoMerge,
               now,
               input.repositoryId,

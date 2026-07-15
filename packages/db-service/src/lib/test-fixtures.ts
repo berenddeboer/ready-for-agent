@@ -15,6 +15,8 @@ export const makeRepositoryRecord = (
   paused: false,
   defaultModel: null,
   defaultVariant: null,
+  reviewModel: null,
+  reviewVariant: null,
   autoMerge: false,
   issuesReconciledAt: null,
   ...overrides,
