@@ -56,6 +56,13 @@ export class InvalidConfigInputError extends Data.TaggedError(
   readonly message: string
 }> {}
 
+export class InvalidRepositorySettingsError extends Data.TaggedError(
+  "InvalidRepositorySettingsError",
+)<{
+  readonly field: "defaultModel" | "defaultVariant"
+  readonly message: string
+}> {}
+
 export class DatabaseError extends Data.TaggedError("DatabaseError")<{
   readonly message: string
   readonly cause?: unknown

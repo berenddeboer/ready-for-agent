@@ -12,6 +12,14 @@ _Avoid_: Repo (in formal docs), target, project, checkout
 A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused.
 _Avoid_: Disabled, inactive, enabled=false
 
+**Repository settings**:
+Per-Repository operator preferences: Paused, optional default model and variant (null falls back to harness defaults), and Auto-merge. Changing settings does not rewrite existing Work Items; model and variant are captured when a Work Item is created.
+_Avoid_: Project config, repo config file
+
+**Auto-merge**:
+A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests.
+_Avoid_: Automerge (GitHub product), auto-approve
+
 **Issue**:
 A GitHub issue belonging to a Repository, identified within that Repository by a positive integer GitHub issue number and represented locally with its title, body, web URL, creation time, and GitHub state. The harness may retain a local representation for later use, but GitHub remains authoritative.
 _Avoid_: Ticket, task (unless referring to a broader concept)

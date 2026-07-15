@@ -19,6 +19,9 @@ export const repository = snakeCase.table(
     localPath: text().notNull().unique(),
     isBare: integer({ mode: "boolean" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(true),
+    defaultModel: text(),
+    defaultVariant: text(),
+    autoMerge: integer({ mode: "boolean" }).notNull().default(false),
     issuesReconciledAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()

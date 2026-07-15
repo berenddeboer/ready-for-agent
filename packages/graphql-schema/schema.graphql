@@ -20,6 +20,9 @@ type Repository {
   localPath: String!
   isBare: Boolean!
   paused: Boolean!
+  defaultModel: String
+  defaultVariant: String
+  autoMerge: Boolean!
   issuesReconciledAt: String
 }
 
@@ -129,6 +132,14 @@ input UpdateConfigInput {
   defaultVariant: String!
 }
 
+input UpdateRepositorySettingsInput {
+  repositoryId: ID!
+  paused: Boolean!
+  defaultModel: String
+  defaultVariant: String
+  autoMerge: Boolean!
+}
+
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
@@ -139,6 +150,7 @@ type Mutation {
   retryWorkItem(workItemId: ID!): WorkItem!
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
+  updateRepositorySettings(input: UpdateRepositorySettingsInput!): Repository!
 }
 
 type Subscription {

@@ -217,6 +217,35 @@ describe("WorkItemLifecycle", () => {
         }),
       ))
 
+    it("prefers repository model and variant overrides when set", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* db.updateConfig({
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultVariant: "low",
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: repository.paused,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "max",
+            autoMerge: repository.autoMerge,
+          })
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.variant).toBe("max")
+        }),
+      ))
+
     it("rejects a missing Issue", () =>
       runTest(
         Effect.gen(function* () {

@@ -1888,6 +1888,10 @@ export const makeWorkItemLifecycleLive = (
           }
 
           const config = yield* db.getConfig
+          const repositories = yield* db.listRepositories
+          const repository = repositories.find(({ id }) => id === repositoryId)
+          const model = repository?.defaultModel ?? config.defaultModel
+          const variant = repository?.defaultVariant ?? config.defaultVariant
           const workItemId = makeWorkItemId()
           const stepRunId = makeStepRunId()
           const now = yield* Clock.currentTimeMillis
@@ -1906,8 +1910,8 @@ export const makeWorkItemLifecycleLive = (
                     workItemId,
                     repositoryId,
                     githubIssueNumber,
-                    config.defaultModel,
-                    config.defaultVariant,
+                    model,
+                    variant,
                     step,
                     now,
                     now,

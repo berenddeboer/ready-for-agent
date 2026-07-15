@@ -113,6 +113,9 @@ describe("DbService", () => {
           expect(repo.localPath).toBe("/repos/acme/widgets.git")
           expect(repo.isBare).toBe(true)
           expect(repo.paused).toBe(true)
+          expect(repo.defaultModel).toBeNull()
+          expect(repo.defaultVariant).toBeNull()
+          expect(repo.autoMerge).toBe(false)
           expect(repo.issuesReconciledAt).toBeNull()
         }),
       ))
@@ -205,6 +208,76 @@ describe("DbService", () => {
 
           expect(repo.githubOwner).toBe("AcmeCorp")
           expect(repo.githubRepo).toBe("MyWidgets")
+        }),
+      ))
+  })
+
+  describe("updateRepositorySettings", () => {
+    it("updates pause, model override, and auto-merge", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+
+          const updated = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: false,
+            defaultModel: "  anthropic/claude-sonnet-4-5  ",
+            defaultVariant: "  high  ",
+            autoMerge: true,
+          })
+
+          expect(updated).toEqual({
+            ...repo,
+            paused: false,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            autoMerge: true,
+          })
+          expect(yield* db.listRepositories).toEqual([updated])
+        }),
+      ))
+
+    it("clears model overrides with empty values", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            autoMerge: false,
+          })
+
+          const cleared = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            defaultModel: " ",
+            defaultVariant: null,
+            autoMerge: false,
+          })
+
+          expect(cleared.defaultModel).toBeNull()
+          expect(cleared.defaultVariant).toBeNull()
+        }),
+      ))
+
+    it("rejects unknown repositories", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: "repo-01J00000000000000000000000",
+              paused: false,
+              defaultModel: null,
+              defaultVariant: null,
+              autoMerge: false,
+            }),
+          )
+          expect(error).toBeInstanceOf(RepositoryNotFoundError)
         }),
       ))
   })

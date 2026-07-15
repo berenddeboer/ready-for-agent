@@ -9,6 +9,9 @@ const repository = (issuesReconciledAt: string | null) => ({
   localPath: "/repos/acme/widgets",
   isBare: true,
   paused: true,
+  defaultModel: null,
+  defaultVariant: null,
+  autoMerge: false,
   issuesReconciledAt,
 })
 

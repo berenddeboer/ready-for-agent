@@ -13,6 +13,7 @@ import {
   DbService,
   InvalidConfigInputError,
   InvalidRepositoryInputError,
+  InvalidRepositorySettingsError,
   type IssueRecord,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
@@ -71,6 +72,16 @@ type UpdateConfigArgs = {
   input: {
     defaultModel: string
     defaultVariant: string
+  }
+}
+
+type UpdateRepositorySettingsArgs = {
+  input: {
+    repositoryId: string
+    paused: boolean
+    defaultModel: string | null
+    defaultVariant: string | null
+    autoMerge: boolean
   }
 }
 
@@ -262,6 +273,14 @@ const toGraphQLError = (error: unknown): GraphQLError => {
   if (error instanceof InvalidConfigInputError) {
     return new GraphQLError(error.message, {
       extensions: { code: "INVALID_CONFIG_INPUT", field: error.field },
+    })
+  }
+  if (error instanceof InvalidRepositorySettingsError) {
+    return new GraphQLError(error.message, {
+      extensions: {
+        code: "INVALID_REPOSITORY_SETTINGS",
+        field: error.field,
+      },
     })
   }
   if (error instanceof LocalPathInUseError) {
@@ -552,6 +571,29 @@ export const createGraphqlApi = (
                 Effect.gen(function* () {
                   const db = yield* DbService
                   return yield* db.updateConfig(args.input)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          updateRepositorySettings: async (
+            _parent: unknown,
+            args: UpdateRepositorySettingsArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.updateRepositorySettings({
+                    repositoryId: args.input.repositoryId,
+                    paused: args.input.paused,
+                    defaultModel: args.input.defaultModel ?? null,
+                    defaultVariant: args.input.defaultVariant ?? null,
+                    autoMerge: args.input.autoMerge,
+                  })
                 }),
               ),
             )
