@@ -8,8 +8,8 @@ import {
   KeymaxxerError,
   KeymaxxerService,
   type KeymaxxerServiceShape,
-  type RunWithSecretsInput,
 } from "@ready-for-agent/keymaxxer-service"
+import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CreatePrCredentialError,
@@ -66,13 +66,50 @@ const stubKeymaxxer = (
     ...overrides,
   })
 
+const stubOpencode = (
+  overrides: {
+    continue?: (input: {
+      sessionId: string
+      prompt: string
+      cwd: string
+      model: string
+      variant: string
+      timeout?: Duration.Input
+    }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
+  } = {},
+) =>
+  Layer.succeed(
+    Opencode,
+    Opencode.of({
+      start: () =>
+        Effect.succeed({ sessionId: "ses_start_unused", assistantText: "" }),
+      continue:
+        overrides.continue ??
+        (() =>
+          Effect.succeed({
+            sessionId: "ses_implement_session",
+            assistantText: "",
+          })),
+      listModels: () => Effect.succeed([]),
+    }),
+  )
+
 const run = <A, E>(
-  effect: Effect.Effect<A, E, DbService | KeymaxxerService>,
-  keymaxxerLayer: Layer.Layer<KeymaxxerService> = stubKeymaxxer(),
+  effect: Effect.Effect<A, E, DbService | KeymaxxerService | Opencode>,
+  layers: {
+    keymaxxer?: Layer.Layer<KeymaxxerService>
+    opencode?: Layer.Layer<Opencode>
+  } = {},
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provide(Layer.merge(stubDb, keymaxxerLayer)),
+      Effect.provide(
+        Layer.mergeAll(
+          stubDb,
+          layers.keymaxxer ?? stubKeymaxxer(),
+          layers.opencode ?? stubOpencode(),
+        ),
+      ),
       Effect.provide(PlatformLayer),
     ),
   )
@@ -114,10 +151,16 @@ describe("createPr", () => {
       expect(error).toBeInstanceOf(CreatePrSessionContextMissingError)
     }))
 
-  it("runs the OpenCode continuation through Keymaxxer with the repository credential", () =>
+  it("continues OpenCode directly after pre-flight credential lookup", () =>
     withTemp(async (root) => {
-      let runInput: RunWithSecretsInput | null = null
       let credentialAccount: string | null = null
+      let continueInput: {
+        sessionId: string
+        prompt: string
+        cwd: string
+        model: string
+        variant: string
+      } | null = null
 
       await run(
         createPr(
@@ -129,44 +172,48 @@ describe("createPr", () => {
             maxDuration: Duration.minutes(12),
           }),
         ),
-        stubKeymaxxer({
-          findSecret: ({ account }) => {
-            credentialAccount = account
-            return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
-          },
-          runWithSecrets: (input) => {
-            runInput = input
-            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
-          },
-        }),
+        {
+          keymaxxer: stubKeymaxxer({
+            findSecret: ({ account }) => {
+              credentialAccount = account
+              return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
+            },
+          }),
+          opencode: stubOpencode({
+            continue: (input) => {
+              continueInput = input
+              return Effect.succeed({
+                sessionId: input.sessionId,
+                assistantText: "",
+              })
+            },
+          }),
+        },
       )
 
       expect(credentialAccount).toBe("acme/widgets")
-      expect(runInput).not.toBeNull()
-      expect(runInput!.cwd).toBe(root)
-      expect(runInput!.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
-      expect(runInput!.timeoutMs).toBe(Duration.toMillis(Duration.minutes(12)))
-      expect(runInput!.command).toStartWith(
-        'GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS" GITHUB_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"',
+      expect(continueInput).not.toBeNull()
+      expect(continueInput!.cwd).toBe(root)
+      expect(continueInput!.sessionId).toBe("ses_from_implement")
+      expect(continueInput!.model).toBe("opencode/create-pr-model")
+      expect(continueInput!.variant).toBe("max")
+      expect(continueInput!.prompt).toContain("GitHub issue #2039")
+      expect(continueInput!.prompt).toContain("Closes #2039")
+      expect(continueInput!.prompt).toContain(
+        "Create the pull request as a draft",
       )
-      expect(runInput!.command).toContain(
-        `OPENCODE_CONFIG_CONTENT='{"mcp":{"keymaxxer":{"enabled":false}}}'`,
+      expect(continueInput!.prompt).toContain(
+        "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
       )
-      expect(runInput!.command).toContain("'opencode' 'run' '--auto'")
-      expect(runInput!.command).toContain("'--session' 'ses_from_implement'")
-      expect(runInput!.command).toContain("GitHub issue #2039")
-      expect(runInput!.command).toContain("Closes #2039")
-      expect(runInput!.command).toContain("Create the pull request as a draft")
-      expect(runInput!.command).toContain("Do not merge the pull request")
-      expect(runInput!.command).toEndWith(" </dev/null")
     }))
 
   it("rejects a missing repository credential", () =>
     withTemp(async (root) => {
-      const error = await run(
-        createPr(baseContext(root)).pipe(Effect.flip),
-        stubKeymaxxer({ findSecret: () => Effect.succeed(null) }),
-      )
+      const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {
+        keymaxxer: stubKeymaxxer({
+          findSecret: () => Effect.succeed(null),
+        }),
+      })
       expect(error).toBeInstanceOf(CreatePrCredentialError)
       expect((error as CreatePrCredentialError).message).toContain(
         "No GitHub credential is configured for acme/widgets",
@@ -175,9 +222,8 @@ describe("createPr", () => {
 
   it("maps Keymaxxer credential lookup failure", () =>
     withTemp(async (root) => {
-      const error = await run(
-        createPr(baseContext(root)).pipe(Effect.flip),
-        stubKeymaxxer({
+      const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {
+        keymaxxer: stubKeymaxxer({
           findSecret: () =>
             Effect.fail(
               new KeymaxxerError({
@@ -186,40 +232,27 @@ describe("createPr", () => {
               }),
             ),
         }),
-      )
+      })
       expect(error).toBeInstanceOf(CreatePrCredentialError)
     }))
 
-  it("maps Keymaxxer process failure", () =>
+  it("maps OpenCode failure", () =>
     withTemp(async (root) => {
-      const error = await run(
-        createPr(baseContext(root)).pipe(Effect.flip),
-        stubKeymaxxer({
-          runWithSecrets: () =>
-            Effect.fail(
-              new KeymaxxerError({
-                operation: "runWithSecrets",
-                message: "process failed",
-              }),
-            ),
-        }),
-      )
+      const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {
+        opencode: Layer.succeed(
+          Opencode,
+          Opencode.of({
+            start: () => Effect.die("unused"),
+            continue: () =>
+              Effect.fail({
+                _tag: "OpencodeExitError",
+                exitCode: 2,
+                cwd: root,
+              } as never),
+            listModels: () => Effect.succeed([]),
+          }),
+        ),
+      })
       expect(error).toBeInstanceOf(CreatePrOpenCodeError)
-    }))
-
-  it("maps a non-zero OpenCode exit", () =>
-    withTemp(async (root) => {
-      const error = await run(
-        createPr(baseContext(root)).pipe(Effect.flip),
-        stubKeymaxxer({
-          runWithSecrets: () =>
-            Effect.succeed({ exitCode: 2, stdout: "", stderr: "failed" }),
-        }),
-      )
-      expect(error).toBeInstanceOf(CreatePrOpenCodeError)
-      expect((error as CreatePrOpenCodeError).worktreePath).toBe(root)
-      expect((error as CreatePrOpenCodeError).sessionId).toBe(
-        "ses_implement_session",
-      )
     }))
 })

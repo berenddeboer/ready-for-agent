@@ -4,6 +4,7 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
+import { Opencode } from "@ready-for-agent/opencode"
 import {
   type LifecycleStepContext,
   decidePrMerge,
@@ -35,6 +36,15 @@ const context: LifecycleStepContext = {
 const db = Layer.succeed(DbService, {
   listRepositories: Effect.succeed([repository]),
 } as DbServiceShape)
+
+const keymaxxer = Layer.succeed(KeymaxxerService, {
+  initialize: Effect.void,
+  hasSecret: () => Effect.succeed(true),
+  findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+  findSecrets: () => Effect.succeed([]),
+  addSecret: () => Effect.succeed(true),
+  runWithSecrets: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+} satisfies KeymaxxerServiceShape)
 
 describe("parseDecidePrMergeResult", () => {
   it("parses clanker merge and needs-human lines", () => {
@@ -71,63 +81,57 @@ describe("parseDecidePrMergeResult", () => {
 
 describe("decidePrMerge", () => {
   it("continues the Implement Session and returns OpenCode's merge decision", async () => {
-    let command = ""
-    const keymaxxer = Layer.succeed(KeymaxxerService, {
-      initialize: Effect.void,
-      hasSecret: () => Effect.succeed(true),
-      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
-      findSecrets: () => Effect.succeed([]),
-      addSecret: () => Effect.succeed(true),
-      runWithSecrets: (input) => {
-        command = input.command
-        return Effect.succeed({
-          exitCode: 0,
-          stdout: `${JSON.stringify({
-            type: "text",
-            part: {
-              type: "text",
-              text: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
-            },
-          })}\n`,
-          stderr: "",
-        })
-      },
-    } satisfies KeymaxxerServiceShape)
+    let prompt = ""
+    let sessionId = ""
+    const opencode = Layer.succeed(
+      Opencode,
+      Opencode.of({
+        start: () => Effect.die("unused"),
+        continue: (input) => {
+          prompt = input.prompt
+          sessionId = input.sessionId
+          return Effect.succeed({
+            sessionId: input.sessionId,
+            assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+          })
+        },
+        listModels: () => Effect.succeed([]),
+      }),
+    )
 
     const result = await Effect.runPromise(
-      decidePrMerge(context).pipe(Effect.provide(Layer.merge(db, keymaxxer))),
+      decidePrMerge(context).pipe(
+        Effect.provide(Layer.mergeAll(db, keymaxxer, opencode)),
+      ),
     )
 
     expect(result).toEqual({ _tag: "clanker_merge" })
-    expect(command).toContain('GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
-    expect(command).toContain("'--session' 'ses_implement'")
-    expect(command).toContain("CLANKER_MERGE")
-    expect(command).toEndWith(" </dev/null")
+    expect(sessionId).toBe("ses_implement")
+    expect(prompt).toContain("CLANKER_MERGE")
+    expect(prompt).toContain(
+      "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
+    )
   })
 
   it("returns a human intervention reason when risk is high", async () => {
-    const keymaxxer = Layer.succeed(KeymaxxerService, {
-      initialize: Effect.void,
-      hasSecret: () => Effect.succeed(true),
-      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
-      findSecrets: () => Effect.succeed([]),
-      addSecret: () => Effect.succeed(true),
-      runWithSecrets: () =>
-        Effect.succeed({
-          exitCode: 0,
-          stdout: `${JSON.stringify({
-            type: "text",
-            part: {
-              type: "text",
-              text: "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: Migrates production data",
-            },
-          })}\n`,
-          stderr: "",
-        }),
-    } satisfies KeymaxxerServiceShape)
+    const opencode = Layer.succeed(
+      Opencode,
+      Opencode.of({
+        start: () => Effect.die("unused"),
+        continue: () =>
+          Effect.succeed({
+            sessionId: "ses_implement",
+            assistantText:
+              "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: Migrates production data",
+          }),
+        listModels: () => Effect.succeed([]),
+      }),
+    )
 
     const result = await Effect.runPromise(
-      decidePrMerge(context).pipe(Effect.provide(Layer.merge(db, keymaxxer))),
+      decidePrMerge(context).pipe(
+        Effect.provide(Layer.mergeAll(db, keymaxxer, opencode)),
+      ),
     )
 
     expect(result).toEqual({

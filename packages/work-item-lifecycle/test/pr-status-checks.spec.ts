@@ -8,6 +8,7 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
+import { Opencode } from "@ready-for-agent/opencode"
 import {
   type LifecycleStepContext,
   investigatePrStatusChecks,
@@ -40,6 +41,15 @@ const db = Layer.succeed(DbService, {
   listRepositories: Effect.succeed([repository]),
 } as DbServiceShape)
 
+const keymaxxer = Layer.succeed(KeymaxxerService, {
+  initialize: Effect.void,
+  hasSecret: () => Effect.succeed(true),
+  findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+  findSecrets: () => Effect.succeed([]),
+  addSecret: () => Effect.succeed(true),
+  runWithSecrets: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+} satisfies KeymaxxerServiceShape)
+
 describe("PR status check steps", () => {
   it("checks the deterministic Work Item branch", async () => {
     let requestedBranch = ""
@@ -63,32 +73,28 @@ describe("PR status check steps", () => {
   })
 
   it("returns OpenCode's structured human intervention reason", async () => {
-    let command = ""
-    const keymaxxer = Layer.succeed(KeymaxxerService, {
-      initialize: Effect.void,
-      hasSecret: () => Effect.succeed(true),
-      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
-      findSecrets: () => Effect.succeed([]),
-      addSecret: () => Effect.succeed(true),
-      runWithSecrets: (input) => {
-        command = input.command
-        return Effect.succeed({
-          exitCode: 0,
-          stdout: `${JSON.stringify({
-            type: "text",
-            part: {
-              type: "text",
-              text: "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: A maintainer must approve deployment",
-            },
-          })}\n`,
-          stderr: "",
-        })
-      },
-    } satisfies KeymaxxerServiceShape)
+    let prompt = ""
+    let sessionId = ""
+    const opencode = Layer.succeed(
+      Opencode,
+      Opencode.of({
+        start: () => Effect.die("unused"),
+        continue: (input) => {
+          prompt = input.prompt
+          sessionId = input.sessionId
+          return Effect.succeed({
+            sessionId: input.sessionId,
+            assistantText:
+              "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: A maintainer must approve deployment",
+          })
+        },
+        listModels: () => Effect.succeed([]),
+      }),
+    )
 
     const result = await Effect.runPromise(
       investigatePrStatusChecks(context).pipe(
-        Effect.provide(Layer.merge(db, keymaxxer)),
+        Effect.provide(Layer.mergeAll(db, keymaxxer, opencode)),
       ),
     )
 
@@ -96,11 +102,9 @@ describe("PR status check steps", () => {
       _tag: "needs_human",
       reason: "A maintainer must approve deployment",
     })
-    expect(command).toContain('GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
-    expect(command).toContain(
-      `OPENCODE_CONFIG_CONTENT='{"mcp":{"keymaxxer":{"enabled":false}}}'`,
+    expect(sessionId).toBe("ses_implement")
+    expect(prompt).toContain(
+      "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
     )
-    expect(command).toContain("'--session' 'ses_implement'")
-    expect(command).toEndWith(" </dev/null")
   })
 })

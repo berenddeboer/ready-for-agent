@@ -58,10 +58,13 @@ const stubOpencode = (impl: {
     Opencode.of({
       start: (input) =>
         impl.start?.(input) ??
-        Effect.succeed({ sessionId: "ses_start_should_not_run" }),
+        Effect.succeed({
+          sessionId: "ses_start_should_not_run",
+          assistantText: "",
+        }),
       continue: (input) =>
         impl.continue?.(input) ??
-        Effect.succeed({ sessionId: "ses_commit_default" }),
+        Effect.succeed({ sessionId: "ses_commit_default", assistantText: "" }),
       listModels: () => Effect.succeed([]),
     }),
   )
@@ -106,7 +109,9 @@ describe("commit", () => {
   it("rejects blank Session context", () =>
     withTemp(async (root) => {
       const error = await run(
-        commit(baseContext(root, { sessionId: "   " })).pipe(Effect.flip),
+        commit(baseContext(root, { sessionId: "   ", assistantText: "" })).pipe(
+          Effect.flip,
+        ),
       )
       expect(error).toBeInstanceOf(CommitSessionContextMissingError)
     }))
@@ -136,11 +141,14 @@ describe("commit", () => {
         stubOpencode({
           start: () => {
             started = true
-            return Effect.succeed({ sessionId: "ses_wrong" })
+            return Effect.succeed({ sessionId: "ses_wrong", assistantText: "" })
           },
           continue: (input) => {
             continued = input
-            return Effect.succeed({ sessionId: "ses_from_implement" })
+            return Effect.succeed({
+              sessionId: "ses_from_implement",
+              assistantText: "",
+            })
           },
         }),
       )
@@ -166,7 +174,8 @@ describe("commit", () => {
         Layer.succeed(
           Opencode,
           Opencode.of({
-            start: () => Effect.succeed({ sessionId: "unused" }),
+            start: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continue: () =>
               Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
             listModels: () => Effect.succeed([]),
@@ -187,7 +196,8 @@ describe("commit", () => {
         Layer.succeed(
           Opencode,
           Opencode.of({
-            start: () => Effect.succeed({ sessionId: "unused" }),
+            start: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continue: () =>
               Effect.fail(
                 new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
@@ -206,7 +216,8 @@ describe("commit", () => {
         Layer.succeed(
           Opencode,
           Opencode.of({
-            start: () => Effect.succeed({ sessionId: "unused" }),
+            start: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             continue: () =>
               Effect.fail(new SessionIdNotFoundError({ cwd: root })),
             listModels: () => Effect.succeed([]),

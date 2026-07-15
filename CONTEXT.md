@@ -32,8 +32,8 @@ The backend boundary for vault operations. It can determine whether a named secr
 _Avoid_: Secret store, credential cache
 
 **Keymaxxer Sidecar**:
-A development-only companion process that owns the Keymaxxer MCP session so watched application-server reloads do not repeat vault-unlock or secret-use approval prompts.
-_Avoid_: Credential daemon, token cache
+The long-lived loopback companion process that owns one Keymaxxer stdio keyholder and exposes the Keymaxxer MCP tools over Streamable HTTP so Harness and every OpenCode process share one vault session and Allow-session set without ambient secret values.
+_Avoid_: Credential daemon, token cache, development-only sidecar
 
 **Session**:
 An opencode conversation identified by opencode’s session id, scoped to a working directory, and continued across one or more prompt runs.

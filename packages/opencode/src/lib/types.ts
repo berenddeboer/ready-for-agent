@@ -2,6 +2,7 @@ import type { Duration } from "effect"
 
 export interface OpencodeRunResult {
   readonly sessionId: string
+  readonly assistantText: string
 }
 
 export interface ListModelsInput {
@@ -29,4 +30,5 @@ export interface ContinueInput {
 export interface OpencodeLayerOptions {
   readonly binary?: string
   readonly defaultTimeout?: Duration.Input
+  readonly keymaxxerMcpUrl: string
 }

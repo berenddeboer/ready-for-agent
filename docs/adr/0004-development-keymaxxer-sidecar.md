@@ -1,21 +1,30 @@
-# Development Keymaxxer Sidecar
+# Shared Keymaxxer Sidecar broker
 
-Ready for Agent uses a shared backend Keymaxxer Service that never exposes raw secret values. During `harness:dev`, the separate `apps/keymaxxer-sidecar` application owns the long-lived Keymaxxer MCP session so TanStack server reloads do not repeat vault-unlock or secret-use approval prompts; production creates the MCP client in-process and does not run a sidecar.
+Ready for Agent uses a shared backend Keymaxxer Service that never exposes raw secret values. A long-lived **Keymaxxer Sidecar** owns one stdio `keymaxxer serve` keyholder and exposes the four Keymaxxer MCP tools over **Streamable HTTP** on loopback so Harness and every OpenCode process share one vault session and one Allow-session set.
 
-Keymaxxer is responsible for launching GitHub query processes with named secrets injected into their environment. It is not a dependency of GitHub domain operations: the Harness adapter selects the secret whose provider is `github` and whose account is the Repository's exact `owner/name`, then maps that secret to `GITHUB_TOKEN` inside the child shell while `GitHubService` obtains `GITHUB_TOKEN` through Effect `Config`. The GraphQL credential query and mutation use Keymaxxer metadata to report whether each Repository is configured and to open the explicit add-secret prompt after the user creates a token on GitHub; they never receive a raw secret value. New secrets use a `GITHUB_TOKEN_<OWNER>_<REPOSITORY>` suggestion. If that name is already occupied but its metadata does not match the Repository, setup fails instead of guessing another name or credential. The GraphQL refresh mutation still invokes the Issue Reconciler without accepting a token argument. This keeps credential delivery at the application boundary instead of coupling GitHub requests to Keymaxxer, gives each Repository its own credential, allows the Harness to start without GitHub credentials, and leaves secret caching to Keymaxxer.
+## Topology
 
-The sidecar is a development tool attached specifically to `harness:dev` and is restricted to loopback communication. Remote sidecar URLs and remote authentication are deliberately unsupported because the service can execute commands with injected secrets and there is no remote-use requirement.
+- Development and production use the same sidecar process model (not in-process Keymaxxer in the Harness).
+- `scripts/run-with-keymaxxer-sidecar.ts` starts the sidecar, captures the stdout bootstrap line `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:<port>/<capability>/mcp`, and runs Harness with that URL in memory only.
+- There is no unauthenticated `/health` route. Readiness is TCP listen; auth is the unguessable path capability (#113).
 
-Because loopback alone does not prevent requests from malicious webpages, operation endpoints reject requests with an `Origin` header and require `application/json`. This causes browser JSON requests to require a CORS preflight, which the sidecar does not permit.
+## Security
 
-Development uses fixed loopback port `5032`, overridable with `KEYMAXXER_SIDECAR_PORT`; `harness:dev` selects it through `KEYMAXXER_SIDECAR_URL`. A port conflict fails fast and names the override instead of choosing a dynamic port that Nx cannot communicate to the application process.
+- Bind `127.0.0.1` only. MCP lives only at `/<capability>/mcp`.
+- Requests with an `Origin` header receive **403**. Wrong or missing capability path receives **404**.
+- Capability is 32-byte CSPRNG base64url, generated once per sidecar listen. Logs may show host:port only after bootstrap.
+- OpenCode receives the capability URL only via forced `OPENCODE_CONFIG_CONTENT` remote MCP config — no Bearer header, no capability files, no ambient `GH_TOKEN` / `GITHUB_TOKEN` in the OpenCode child.
 
-The same Repository credential is injected into the OpenCode Create PR continuation as `GH_TOKEN` and `GITHUB_TOKEN`. New tokens therefore request Issue read, Contents write, and Pull requests write permissions and are recorded as read-write credentials.
+## Credentials
 
-The MCP launcher preserves the known-good development precedence: `KEYMAXXER_ENTRYPOINT`, then `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present, then the installed `keymaxxer` command. The machine-specific fallback is deliberate while Ready for Agent depends on unreleased local Keymaxxer features.
+Keymaxxer remains responsible for injecting named secrets into **non-OpenCode** child commands (`keymaxxer_run`). OpenCode is always parented by the Harness and uses Keymaxxer tools through the remote MCP broker for secret-bearing work. Create PR / investigate PR status checks / decide PR merge pre-flight the repository secret **name** and put that name in the prompt; they never inject token values into OpenCode's environment.
 
-The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values. Those tokens must not cross into the credential broker process.
+The GraphQL credential query and mutation use Keymaxxer metadata only; they never receive a raw secret value. New secrets use a `GITHUB_TOKEN_<OWNER>_<REPOSITORY>` suggestion. If that name is already occupied but its metadata does not match the Repository, setup fails instead of guessing.
 
-Keymaxxer initialization gates application-server startup in development and production. The sidecar listens before lazily and idempotently initializing its MCP session on request; an unreachable or failed configured sidecar stops the application server and never falls back to an in-process client, because fallback would silently restore repeated approval prompts.
+## Keyholder
 
-The application server retries initial sidecar connection refusal for at most five seconds to tolerate Nx process-start ordering. Once the sidecar responds, initialization or protocol failures fail immediately rather than being hidden by retries.
+The MCP launcher preserves the known-good development precedence: `KEYMAXXER_ENTRYPOINT`, then `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present, then the installed `keymaxxer` command. The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values.
+
+## Startup
+
+Keymaxxer Sidecar TCP readiness gates application-server startup. An unreachable or failed configured sidecar stops the application server and never falls back to an in-process client. Initial connection refusal retries for at most five seconds to tolerate process-start ordering; protocol failures after the sidecar responds fail immediately.

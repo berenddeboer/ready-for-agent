@@ -1,202 +1,68 @@
 import { Effect } from "effect"
 import {
-  KeymaxxerError,
   KeymaxxerService,
-  type KeymaxxerServiceShape,
-  createKeymaxxerSidecarFetch,
+  type KeymaxxerUpstreamClient,
+  parseSidecarUrl,
   sidecarKeymaxxerLayer,
+  startKeymaxxerFacade,
 } from "../src/index.js"
 import { describe, expect, test } from "bun:test"
 
-const fakeService = (
-  overrides: Partial<KeymaxxerServiceShape> = {},
-): KeymaxxerServiceShape => ({
-  initialize: Effect.void,
-  hasSecret: () => Effect.succeed(false),
-  findSecret: () => Effect.succeed(null),
-  findSecrets: (inputs) => Effect.succeed(inputs.map(() => null)),
-  addSecret: () => Effect.succeed(true),
-  runWithSecrets: () =>
-    Effect.succeed({ exitCode: 0, stdout: "ok", stderr: "" }),
-  ...overrides,
+const mockUpstream = (): KeymaxxerUpstreamClient => ({
+  callTool: async ({ name, arguments: args }) => {
+    if (name === "keymaxxer_list") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify([
+              {
+                name: "PRESENT_SECRET",
+                provider: "github",
+                account: "acme/widgets",
+              },
+            ]),
+          },
+        ],
+      }
+    }
+    if (name === "keymaxxer_add") {
+      return { content: [{ type: "text", text: `added ${String(args.name)}` }] }
+    }
+    if (name === "keymaxxer_run") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: "exit_code: 0\n--- stdout ---\nok\n--- stderr ---\n",
+          },
+        ],
+      }
+    }
+    return { content: [{ type: "text", text: "ok" }] }
+  },
+  close: async () => {},
 })
 
-const post = (url: URL, body: unknown) =>
-  fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  })
-
-describe("Keymaxxer Sidecar protocol", () => {
-  test("health is versioned and does not initialize MCP", async () => {
-    let initializeCalls = 0
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: createKeymaxxerSidecarFetch(
-        fakeService({
-          initialize: Effect.sync(() => {
-            initializeCalls += 1
-          }),
-        }),
-      ),
-    })
-
-    try {
-      const response = await fetch(new URL("/health", server.url))
-      expect(await response.json()).toEqual({
-        status: "ok",
-        protocolVersion: 3,
-      })
-      expect(initializeCalls).toBe(0)
-    } finally {
-      await server.stop(true)
-    }
-  })
-
-  test("deduplicates initialization and retries after failure", async () => {
-    let initializeCalls = 0
-    const service = fakeService({
-      initialize: Effect.suspend(() => {
-        initializeCalls += 1
-        return initializeCalls === 1
-          ? Effect.fail(
-              new KeymaxxerError({
-                operation: "initialize",
-                message: "failed",
-              }),
-            )
-          : Effect.void
-      }),
-    })
-    const fetchSidecar = createKeymaxxerSidecarFetch(service)
-    const request = () =>
-      fetchSidecar(
-        new Request("http://127.0.0.1/initialize", {
-          method: "POST",
-          body: "{}",
-          headers: { "content-type": "application/json" },
-        }),
-      )
-
-    expect((await request()).status).toBe(500)
-    expect((await request()).status).toBe(200)
-    expect((await request()).status).toBe(200)
-    expect(initializeCalls).toBe(2)
-  })
-
-  test("validates all routes and rejects unknown request fields", async () => {
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch: createKeymaxxerSidecarFetch(
-        fakeService({
-          hasSecret: (name) => Effect.succeed(name === "PRESENT_SECRET"),
-        }),
-      ),
-    })
-
-    try {
-      expect(
-        await (
-          await post(new URL("/has-secret", server.url), {
-            name: "PRESENT_SECRET",
-          })
-        ).json(),
-      ).toEqual({ hasSecret: true })
-      expect(
-        (
-          await post(new URL("/has-secret", server.url), {
-            name: "PRESENT_SECRET",
-            extra: true,
-          })
-        ).status,
-      ).toBe(400)
-      expect(
-        (
-          await post(new URL("/run-with-secrets", server.url), {
-            command: "pwd",
-            cwd: "relative",
-            secrets: ["A_SECRET"],
-            timeoutMs: 100,
-          })
-        ).status,
-      ).toBe(400)
-    } finally {
-      await server.stop(true)
-    }
-  })
-
-  test("blocks browser-originated and non-JSON operation requests", async () => {
-    let runCalls = 0
-    const fetchSidecar = createKeymaxxerSidecarFetch(
-      fakeService({
-        runWithSecrets: () =>
-          Effect.sync(() => {
-            runCalls += 1
-            return { exitCode: 0, stdout: "", stderr: "" }
-          }),
-      }),
+describe("parseSidecarUrl", () => {
+  test("accepts capability MCP URLs and rejects origins without path secret", () => {
+    expect(parseSidecarUrl("http://127.0.0.1:5032/abcXYZ0123/mcp").url).toBe(
+      "http://127.0.0.1:5032/abcXYZ0123/mcp",
     )
-    const body = JSON.stringify({
-      command: "pwd",
-      cwd: "/tmp",
-      secrets: ["A_SECRET"],
-      timeoutMs: 100,
-    })
-
-    const browserResponse = await fetchSidecar(
-      new Request("http://127.0.0.1/run-with-secrets", {
-        method: "POST",
-        body,
-        headers: {
-          "content-type": "text/plain",
-          origin: "https://malicious.example",
-        },
-      }),
-    )
-    const nonJsonResponse = await fetchSidecar(
-      new Request("http://127.0.0.1/run-with-secrets", {
-        method: "POST",
-        body,
-        headers: { "content-type": "text/plain" },
-      }),
-    )
-
-    expect(browserResponse.status).toBe(403)
-    expect(nonJsonResponse.status).toBe(415)
-    expect(runCalls).toBe(0)
+    expect(() => parseSidecarUrl("http://127.0.0.1:5032")).toThrow()
+    expect(() => parseSidecarUrl("http://127.0.0.1:5032/mcp")).toThrow()
+    expect(() => parseSidecarUrl("http://localhost:5032/cap/mcp")).toThrow()
   })
 })
 
 describe("sidecar-backed Keymaxxer layer", () => {
-  test("exposes all operations over loopback HTTP", async () => {
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
+  test("initializes over TCP and runs Keymaxxer tools through Streamable HTTP", async () => {
+    const facade = await startKeymaxxerFacade({
+      host: "127.0.0.1",
       port: 0,
-      fetch: createKeymaxxerSidecarFetch(
-        fakeService({
-          hasSecret: (name) => Effect.succeed(name === "PRESENT_SECRET"),
-          findSecret: ({ account }) =>
-            Effect.succeed(
-              account === "processfocus/monorepo"
-                ? "GITHUB_TOKEN_PROCESSFOCUS_MONOREPO"
-                : null,
-            ),
-          findSecrets: (inputs) =>
-            Effect.succeed(
-              inputs.map(({ account }) =>
-                account === "processfocus/monorepo"
-                  ? "GITHUB_TOKEN_PROCESSFOCUS_MONOREPO"
-                  : null,
-              ),
-            ),
-          addSecret: (input) => Effect.succeed(input.name === "NEW_SECRET"),
-          runWithSecrets: () =>
-            Effect.succeed({ exitCode: 4, stdout: "out", stderr: "err" }),
-        }),
-      ),
+      createUpstream: async () => mockUpstream(),
+      onBootstrapUrl: () => {},
+      log: () => {},
     })
 
     try {
@@ -207,170 +73,42 @@ describe("sidecar-backed Keymaxxer layer", () => {
           const present = yield* keymaxxer.hasSecret("PRESENT_SECRET")
           const found = yield* keymaxxer.findSecret({
             provider: "github",
-            account: "processfocus/monorepo",
+            account: "acme/widgets",
           })
           const foundMany = yield* keymaxxer.findSecrets([
-            { provider: "github", account: "processfocus/monorepo" },
-            { provider: "github", account: "missing/repository" },
+            { provider: "github", account: "acme/widgets" },
           ])
           const added = yield* keymaxxer.addSecret({ name: "NEW_SECRET" })
           const run = yield* keymaxxer.runWithSecrets({
-            command: "false",
+            command: "true",
             cwd: "/tmp",
             secrets: ["PRESENT_SECRET"],
-            timeoutMs: 100,
+            timeoutMs: 5_000,
           })
           return { present, found, foundMany, added, run }
-        }).pipe(Effect.provide(sidecarKeymaxxerLayer(server.url.toString()))),
+        }).pipe(Effect.provide(sidecarKeymaxxerLayer(facade.url))),
       )
 
-      expect(result).toEqual({
-        present: true,
-        found: "GITHUB_TOKEN_PROCESSFOCUS_MONOREPO",
-        foundMany: ["GITHUB_TOKEN_PROCESSFOCUS_MONOREPO", null],
-        added: true,
-        run: { exitCode: 4, stdout: "out", stderr: "err" },
-      })
+      expect(result.present).toBe(true)
+      expect(result.found).toBe("PRESENT_SECRET")
+      expect(result.foundMany).toEqual(["PRESENT_SECRET"])
+      expect(result.added).toBe(true)
+      expect(result.run).toEqual({ exitCode: 0, stdout: "ok", stderr: "" })
     } finally {
-      await server.stop(true)
+      await facade.stop()
     }
   })
 
-  test("rejects remote and ambiguous URLs", async () => {
-    for (const url of [
-      "https://127.0.0.1:5032",
-      "http://localhost:5032",
-      "http://127.0.0.1:5032/path",
-    ]) {
-      const exit = await Effect.runPromise(
-        Effect.exit(
-          Effect.gen(function* () {
-            yield* KeymaxxerService
-          }).pipe(Effect.provide(sidecarKeymaxxerLayer(url))),
-        ),
-      )
-      expect(exit._tag).toBe("Failure")
-    }
-  })
-
-  test("retries initial connection failures before initialization", async () => {
-    let calls = 0
-    const fetchImplementation: typeof fetch = async (input) => {
-      calls += 1
-      if (calls < 3) throw new TypeError("connection refused")
-      const path = new URL(input.toString()).pathname
-      return Response.json(
-        path === "/health"
-          ? { status: "ok", protocolVersion: 3 }
-          : { initialized: true },
-      )
-    }
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const keymaxxer = yield* KeymaxxerService
-        yield* keymaxxer.initialize
-      }).pipe(
-        Effect.provide(
-          sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
-            fetch: fetchImplementation,
-            retryDelayMs: 1,
-            startupTimeoutMs: 100,
-          }),
-        ),
-      ),
-    )
-    expect(calls).toBe(4)
-  })
-
-  test("does not retry after receiving an incompatible health response", async () => {
-    let calls = 0
-    const fetchImplementation: typeof fetch = async () => {
-      calls += 1
-      return Response.json({ status: "ok", protocolVersion: 1 })
-    }
-    const exit = await Effect.runPromise(
-      Effect.exit(
+  test("fails closed on invalid capability URL", async () => {
+    await expect(
+      Effect.runPromise(
         Effect.gen(function* () {
-          const keymaxxer = yield* KeymaxxerService
-          yield* keymaxxer.initialize
-        }).pipe(
-          Effect.provide(
-            sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
-              fetch: fetchImplementation,
-              retryDelayMs: 1,
-              startupTimeoutMs: 100,
-            }),
-          ),
-        ),
+          yield* KeymaxxerService
+        }).pipe(Effect.provide(sidecarKeymaxxerLayer("http://127.0.0.1:5032"))),
       ),
-    )
-    expect(exit._tag).toBe("Failure")
-    expect(calls).toBe(1)
-  })
-
-  test("times out a health request that never responds", async () => {
-    const fetchImplementation: typeof fetch = (_input, init) =>
-      new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener("abort", () =>
-          reject(init.signal?.reason),
-        )
-      })
-    const startedAt = Date.now()
-    const exit = await Effect.runPromise(
-      Effect.exit(
-        Effect.gen(function* () {
-          const keymaxxer = yield* KeymaxxerService
-          yield* keymaxxer.initialize
-        }).pipe(
-          Effect.provide(
-            sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
-              fetch: fetchImplementation,
-              retryDelayMs: 1,
-              startupTimeoutMs: 20,
-            }),
-          ),
-        ),
-      ),
-    )
-
-    expect(exit._tag).toBe("Failure")
-    expect(Date.now() - startedAt).toBeLessThan(500)
-  })
-
-  test("rejects response fields outside the shared schema", async () => {
-    const fetchImplementation: typeof fetch = async () =>
-      Response.json({ hasSecret: true, extra: true })
-    const exit = await Effect.runPromise(
-      Effect.gen(function* () {
-        const keymaxxer = yield* KeymaxxerService
-        return yield* Effect.exit(keymaxxer.hasSecret("A_SECRET"))
-      }).pipe(
-        Effect.provide(
-          sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
-            fetch: fetchImplementation,
-          }),
-        ),
-      ),
-    )
-    expect(exit._tag).toBe("Failure")
-  })
-
-  test("rejects responses containing raw secret fields", async () => {
-    const fetchImplementation: typeof fetch = async () =>
-      Response.json({ value: "raw-secret" })
-    const exit = await Effect.runPromise(
-      Effect.gen(function* () {
-        const keymaxxer = yield* KeymaxxerService
-        return yield* Effect.exit(keymaxxer.hasSecret("A_SECRET"))
-      }).pipe(
-        Effect.provide(
-          sidecarKeymaxxerLayer("http://127.0.0.1:5032", {
-            fetch: fetchImplementation,
-          }),
-        ),
-      ),
-    )
-    expect(exit._tag).toBe("Failure")
+    ).rejects.toMatchObject({
+      _tag: "KeymaxxerError",
+      operation: "configure",
+    })
   })
 })

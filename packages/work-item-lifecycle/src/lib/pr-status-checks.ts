@@ -1,13 +1,9 @@
-import { Data, Duration, Effect } from "effect"
+import { Data, Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import {
-  buildRunArgs,
-  makeOpencodeEnvironment,
-} from "@ready-for-agent/opencode"
+import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
-import { extractOpencodeAssistantText } from "./opencode-output.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -77,8 +73,6 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
     return status._tag satisfies PrStatusCheckResult
   })
 
-const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
-
 const parseInvestigationResult = (
   output: string,
 ): PrStatusCheckInvestigationResult | null => {
@@ -112,35 +106,23 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       "Investigate the failing status checks on the pull request for this worktree.",
       "Use GitHub to inspect the failing checks and their logs. Fix the underlying problem when possible, verify the fix, commit it, and push it to the existing PR branch.",
       "Do not create or merge another pull request.",
+      `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
       "End your final response with exactly one machine-readable result line:",
       "READY_FOR_AGENT_RESULT: FIXED",
       "or, only when the failure cannot be fixed autonomously or requires a human decision:",
       "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
     ].join("\n")
-    const args = buildRunArgs({
-      prompt,
-      cwd: worktreePath,
-      model: context.model,
-      variant: context.variant,
-      sessionId,
-    })
-    const environment = makeOpencodeEnvironment()
-    const command = `${[
-      `GH_TOKEN="$${tokenName}"`,
-      `GITHUB_TOKEN="$${tokenName}"`,
-      `OPENCODE_CONFIG_CONTENT=${shellQuote(environment.OPENCODE_CONFIG_CONTENT)}`,
-      shellQuote("opencode"),
-      ...args.map(shellQuote),
-    ].join(" ")} </dev/null`
-    const result = yield* keymaxxer
-      .runWithSecrets({
-        command,
+    const opencode = yield* Opencode
+    const result = yield* opencode
+      .continue({
+        sessionId,
+        prompt,
         cwd: worktreePath,
-        secrets: [tokenName],
-        timeoutMs: Duration.toMillis(
+        model: context.model,
+        variant: context.variant,
+        timeout:
           context.maxDuration ??
-            DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
-        ),
+          DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
       })
       .pipe(
         Effect.mapError(
@@ -151,14 +133,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             }),
         ),
       )
-    if (result.exitCode !== 0) {
-      return yield* new PrStatusChecksOpenCodeError({
-        message: "OpenCode failed while investigating PR status checks",
-      })
-    }
-    const investigation = parseInvestigationResult(
-      extractOpencodeAssistantText(result.stdout),
-    )
+    const investigation = parseInvestigationResult(result.assistantText)
     if (investigation === null) {
       return yield* new PrStatusChecksOpenCodeError({
         message: "OpenCode did not report FIXED or NEEDS_HUMAN",

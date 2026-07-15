@@ -38,8 +38,10 @@ const stubOpencode = (impl: {
     Opencode,
     Opencode.of({
       start: (input) =>
-        impl.start?.(input) ?? Effect.succeed({ sessionId: "ses_fallback" }),
-      continue: () => Effect.succeed({ sessionId: "ses_continue" }),
+        impl.start?.(input) ??
+        Effect.succeed({ sessionId: "ses_fallback", assistantText: "" }),
+      continue: () =>
+        Effect.succeed({ sessionId: "ses_continue", assistantText: "" }),
       listModels: () => Effect.succeed([]),
     }),
   )
@@ -238,7 +240,10 @@ describe("installDependencies", () => {
           stubOpencode({
             start: (input) => {
               started = input
-              return Effect.succeed({ sessionId: "ses_ambiguous" })
+              return Effect.succeed({
+                sessionId: "ses_ambiguous",
+                assistantText: "",
+              })
             },
           }),
         )
@@ -266,7 +271,10 @@ describe("installDependencies", () => {
           stubOpencode({
             start: () => {
               started = true
-              return Effect.succeed({ sessionId: "ses_conflict" })
+              return Effect.succeed({
+                sessionId: "ses_conflict",
+                assistantText: "",
+              })
             },
           }),
         )
@@ -293,7 +301,10 @@ describe("installDependencies", () => {
             stubOpencode({
               start: (input) => {
                 started = { prompt: input.prompt }
-                return Effect.succeed({ sessionId: "ses_after_fail" })
+                return Effect.succeed({
+                  sessionId: "ses_after_fail",
+                  assistantText: "",
+                })
               },
             }),
           ),
@@ -324,7 +335,10 @@ describe("installDependencies", () => {
             stubOpencode({
               start: (input) => {
                 started = { prompt: input.prompt }
-                return Effect.succeed({ sessionId: "ses_missing_manager" })
+                return Effect.succeed({
+                  sessionId: "ses_missing_manager",
+                  assistantText: "",
+                })
               },
             }),
           )
@@ -361,7 +375,10 @@ describe("installDependencies", () => {
             stubOpencode({
               start: (input) => {
                 started = { prompt: input.prompt }
-                return Effect.succeed({ sessionId: "ses_bounded_stderr" })
+                return Effect.succeed({
+                  sessionId: "ses_bounded_stderr",
+                  assistantText: "",
+                })
               },
             }),
           ),
@@ -381,7 +398,11 @@ describe("installDependencies", () => {
             Effect.map(() => "void-success" as const),
           ),
           stubOpencode({
-            start: () => Effect.succeed({ sessionId: "ses_must_discard" }),
+            start: () =>
+              Effect.succeed({
+                sessionId: "ses_must_discard",
+                assistantText: "",
+              }),
           }),
         )
         // Handler returns void; Session id is never part of the success value.
@@ -406,7 +427,8 @@ describe("installDependencies fallback failure", () => {
                   Effect.fail(
                     new OpencodeExitError({ exitCode: 2, cwd: root }),
                   ),
-                continue: () => Effect.succeed({ sessionId: "unused" }),
+                continue: () =>
+                  Effect.succeed({ sessionId: "unused", assistantText: "" }),
                 listModels: () => Effect.succeed([]),
               }),
             ),

@@ -10,10 +10,9 @@ import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
   KeymaxxerService,
-  mcpKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
-import { OpencodeLive } from "@ready-for-agent/opencode"
+import { Opencode } from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleStepsLive,
@@ -25,13 +24,16 @@ import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 
 const workspaceRoot = fileURLToPath(new URL("../../../..", import.meta.url))
 
-const keymaxxerLayerFromEnvironment = (
+const keymaxxerSidecarUrlFromEnvironment = (
   environment: Partial<Record<string, string | undefined>>,
 ) => {
   const sidecarUrl = environment.KEYMAXXER_SIDECAR_URL?.trim()
-  return sidecarUrl === undefined || sidecarUrl === ""
-    ? mcpKeymaxxerLayer({ environment })
-    : sidecarKeymaxxerLayer(sidecarUrl)
+  if (sidecarUrl === undefined || sidecarUrl === "") {
+    throw new Error(
+      "KEYMAXXER_SIDECAR_URL is required (capability URL from the Keymaxxer Sidecar bootstrap line)",
+    )
+  }
+  return sidecarUrl
 }
 
 export interface Application {
@@ -47,8 +49,9 @@ export const createApplication = async (
   environment: Partial<Record<string, string | undefined>> = process.env,
   options: CreateApplicationOptions = {},
 ): Promise<Application> => {
+  const sidecarUrl = keymaxxerSidecarUrlFromEnvironment(environment)
   const databaseLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
-  const keymaxxerLayer = keymaxxerLayerFromEnvironment(environment)
+  const keymaxxerLayer = sidecarKeymaxxerLayer(sidecarUrl)
   const githubLayer = keymaxxerGitHubLayer({ workspaceRoot }).pipe(
     Layer.provide(keymaxxerLayer),
   )
@@ -62,7 +65,9 @@ export const createApplication = async (
   const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
-  const opencodeLayer = OpencodeLive.pipe(Layer.provide(opencodePlatformLayer))
+  const opencodeLayer = Opencode.layer({ keymaxxerMcpUrl: sidecarUrl }).pipe(
+    Layer.provide(opencodePlatformLayer),
+  )
   const lifecycleLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),

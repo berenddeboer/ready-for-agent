@@ -60,10 +60,16 @@ const stubOpencode = (impl: {
     Opencode.of({
       start: (input) =>
         impl.start?.(input) ??
-        Effect.succeed({ sessionId: "ses_implement_default" }),
+        Effect.succeed({
+          sessionId: "ses_implement_default",
+          assistantText: "",
+        }),
       continue: (input) =>
         impl.continue?.(input) ??
-        Effect.succeed({ sessionId: "ses_continue_should_not_run" }),
+        Effect.succeed({
+          sessionId: "ses_continue_should_not_run",
+          assistantText: "",
+        }),
       listModels: () => Effect.succeed([]),
     }),
   )
@@ -169,11 +175,14 @@ describe("implement", () => {
         stubOpencode({
           start: (input) => {
             started = input
-            return Effect.succeed({ sessionId: "ses_fresh_implement" })
+            return Effect.succeed({
+              sessionId: "ses_fresh_implement",
+              assistantText: "",
+            })
           },
           continue: () => {
             continued = true
-            return Effect.succeed({ sessionId: "ses_wrong" })
+            return Effect.succeed({ sessionId: "ses_wrong", assistantText: "" })
           },
         }),
       )
@@ -211,11 +220,17 @@ describe("implement", () => {
         stubOpencode({
           start: () => {
             calls.push("start-1")
-            return Effect.succeed({ sessionId: "ses_first_implement" })
+            return Effect.succeed({
+              sessionId: "ses_first_implement",
+              assistantText: "",
+            })
           },
           continue: () => {
             continueCalls += 1
-            return Effect.succeed({ sessionId: "ses_should_not" })
+            return Effect.succeed({
+              sessionId: "ses_should_not",
+              assistantText: "",
+            })
           },
         }),
       )
@@ -239,11 +254,17 @@ describe("implement", () => {
         stubOpencode({
           start: () => {
             calls.push("start-2")
-            return Effect.succeed({ sessionId: "ses_retry_implement" })
+            return Effect.succeed({
+              sessionId: "ses_retry_implement",
+              assistantText: "",
+            })
           },
           continue: () => {
             continueCalls += 1
-            return Effect.succeed({ sessionId: "ses_should_not" })
+            return Effect.succeed({
+              sessionId: "ses_should_not",
+              assistantText: "",
+            })
           },
         }),
       )
@@ -267,7 +288,8 @@ describe("implement", () => {
           Opencode.of({
             start: () =>
               Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
-            continue: () => Effect.succeed({ sessionId: "unused" }),
+            continue: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             listModels: () => Effect.succeed([]),
           }),
         ),
@@ -292,7 +314,8 @@ describe("implement", () => {
               Effect.fail(
                 new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
               ),
-            continue: () => Effect.succeed({ sessionId: "unused" }),
+            continue: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             listModels: () => Effect.succeed([]),
           }),
         ),
@@ -313,7 +336,8 @@ describe("implement", () => {
           Opencode,
           Opencode.of({
             start: () => Effect.fail(new SessionIdNotFoundError({ cwd: root })),
-            continue: () => Effect.succeed({ sessionId: "unused" }),
+            continue: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
             listModels: () => Effect.succeed([]),
           }),
         ),
@@ -331,7 +355,7 @@ describe("implement", () => {
           )
         }).pipe(Effect.flip),
         stubOpencode({
-          start: () => Effect.succeed({ sessionId: "   " }),
+          start: () => Effect.succeed({ sessionId: "   ", assistantText: "" }),
         }),
       )
       expect(error).toBeInstanceOf(ImplementOpenCodeError)

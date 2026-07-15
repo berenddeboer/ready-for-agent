@@ -1,12 +1,8 @@
-import { Data, Duration, Effect } from "effect"
+import { Data, Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import {
-  buildRunArgs,
-  makeOpencodeEnvironment,
-} from "@ready-for-agent/opencode"
+import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
-import { extractOpencodeAssistantText } from "./opencode-output.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
 export class DecidePrMergeContextError extends Data.TaggedError(
@@ -49,8 +45,6 @@ const resolveContext = (context: LifecycleStepContext) =>
       sessionId: context.sessionId,
     }
   })
-
-const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
 
 export const parseDecidePrMergeResult = (
   output: string,
@@ -104,35 +98,23 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
       "Assess whether this pull request is low enough risk for an automated agent (clanker) to merge, or whether a human must merge it.",
       "Base the decision on risk: blast radius, security or auth changes, data migrations, irreversible operations, ambiguous requirements, incomplete verification, or anything that needs human judgment.",
       "Inspect the PR and its checks if needed. Do not merge the pull request.",
+      `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
       "End your final response with exactly one machine-readable result line:",
       "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
       "or, only when a human must merge:",
       "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
     ].join("\n")
-    const args = buildRunArgs({
-      prompt,
-      cwd: worktreePath,
-      model: context.model,
-      variant: context.variant,
-      sessionId,
-    })
-    const environment = makeOpencodeEnvironment()
-    const command = `${[
-      `GH_TOKEN="$${tokenName}"`,
-      `GITHUB_TOKEN="$${tokenName}"`,
-      `OPENCODE_CONFIG_CONTENT=${shellQuote(environment.OPENCODE_CONFIG_CONTENT)}`,
-      shellQuote("opencode"),
-      ...args.map(shellQuote),
-    ].join(" ")} </dev/null`
-    const result = yield* keymaxxer
-      .runWithSecrets({
-        command,
+    const opencode = yield* Opencode
+    const result = yield* opencode
+      .continue({
+        sessionId,
+        prompt,
         cwd: worktreePath,
-        secrets: [tokenName],
-        timeoutMs: Duration.toMillis(
+        model: context.model,
+        variant: context.variant,
+        timeout:
           context.maxDuration ??
-            DEFAULT_LIFECYCLE_MAX_DURATIONS.decide_pr_merge,
-        ),
+          DEFAULT_LIFECYCLE_MAX_DURATIONS.decide_pr_merge,
       })
       .pipe(
         Effect.mapError(
@@ -143,14 +125,7 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
             }),
         ),
       )
-    if (result.exitCode !== 0) {
-      return yield* new DecidePrMergeOpenCodeError({
-        message: "OpenCode failed while deciding PR merge risk",
-      })
-    }
-    const decision = parseDecidePrMergeResult(
-      extractOpencodeAssistantText(result.stdout),
-    )
+    const decision = parseDecidePrMergeResult(result.assistantText)
     if (decision === null) {
       return yield* new DecidePrMergeOpenCodeError({
         message: "OpenCode did not report CLANKER_MERGE or NEEDS_HUMAN",
