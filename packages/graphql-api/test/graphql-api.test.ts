@@ -136,6 +136,7 @@ const makeRuntime = (
     findSecrets: (inputs) => Effect.succeed(inputs.map(() => null)),
     hasSecret: () => Effect.succeed(false),
     addSecret: () => Effect.succeed(true),
+    removeSecret: () => Effect.succeed(true),
     runWithSecrets: () => Effect.die("not used"),
     ...keymaxxerOverrides,
   }
@@ -444,6 +445,86 @@ describe("GraphQL API", () => {
         }),
       ],
     })
+  })
+
+  test("removes a repository GitHub token", async () => {
+    let removedName: string | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: ({ account }) =>
+          Effect.succeed(
+            account === "acme/widgets" ? "GITHUB_TOKEN_ACME_WIDGETS" : null,
+          ),
+        removeSecret: (name) =>
+          Effect.sync(() => {
+            removedName = name
+            return true
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation RemoveToken($repositoryId: ID!) {
+          removeRepositoryGitHubToken(repositoryId: $repositoryId) {
+            repositoryId configured githubTokenSecretName
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        removeRepositoryGitHubToken: {
+          repositoryId: repository.id,
+          configured: false,
+          githubTokenSecretName: "GITHUB_TOKEN_ACME_WIDGETS",
+        },
+      },
+    })
+    expect(removedName).toBe("GITHUB_TOKEN_ACME_WIDGETS")
+  })
+
+  test("remove repository GitHub token is idempotent when missing", async () => {
+    let removeCalls = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed(null),
+        removeSecret: () =>
+          Effect.sync(() => {
+            removeCalls += 1
+            return false
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          removeRepositoryGitHubToken(repositoryId: "${repository.id}") {
+            repositoryId configured githubTokenSecretName
+          }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        removeRepositoryGitHubToken: {
+          repositoryId: repository.id,
+          configured: false,
+          githubTokenSecretName: "GITHUB_TOKEN_ACME_WIDGETS",
+        },
+      },
+    })
+    expect(removeCalls).toBe(0)
   })
 
   test("removes a repository", async () => {

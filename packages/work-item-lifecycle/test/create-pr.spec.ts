@@ -61,6 +61,7 @@ const stubKeymaxxer = (
     findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
     findSecrets: () => Effect.succeed([]),
     addSecret: () => Effect.succeed(true),
+    removeSecret: () => Effect.succeed(true),
     runWithSecrets: () =>
       Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
     ...overrides,

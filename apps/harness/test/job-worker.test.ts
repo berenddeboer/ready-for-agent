@@ -415,6 +415,7 @@ describe("Job worker", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
       runWithSecrets: () => Effect.die("not used"),
     })
     const opencode = Layer.succeed(Opencode, {

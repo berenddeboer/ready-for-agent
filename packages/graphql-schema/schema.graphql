@@ -132,6 +132,7 @@ input UpdateConfigInput {
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
+  removeRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
