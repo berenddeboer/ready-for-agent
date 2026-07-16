@@ -1,5 +1,5 @@
 import "@tanstack/react-start/server-only"
-import { Duration, Effect, Layer, Option, Schema } from "effect"
+import { Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
 import {
   DbService,
   RepositoryId,
@@ -14,8 +14,32 @@ import {
 
 export const JOBS_QUEUE = "jobs"
 export const JOB_VISIBILITY_TIMEOUT = Duration.minutes(5)
-const JOB_IDLE_POLL_INTERVAL = Duration.seconds(1)
+const JOB_IDLE_POLL_INTERVAL = Duration.millis(1500)
 export const JOB_RECOVERY_RETRY_LIMIT = 1
+
+/**
+ * Process-global generation so HMR/runtime restarts retire zombie workers that
+ * would otherwise keep claiming jobs while GraphQL listens on a new runtime.
+ */
+const workerGenerationKey = Symbol.for(
+  "@ready-for-agent/harness/job-worker-generation",
+)
+
+const nextWorkerGeneration = (): number => {
+  const globalState = globalThis as typeof globalThis & {
+    [workerGenerationKey]?: number
+  }
+  const next = (globalState[workerGenerationKey] ?? 0) + 1
+  globalState[workerGenerationKey] = next
+  return next
+}
+
+const currentWorkerGeneration = (): number => {
+  const globalState = globalThis as typeof globalThis & {
+    [workerGenerationKey]?: number
+  }
+  return globalState[workerGenerationKey] ?? 0
+}
 
 const formatLogError = (error: unknown): string => {
   if (typeof error === "string" && error.trim().length > 0) {
@@ -77,10 +101,14 @@ export interface JobWorkerOptions {
 
 export const runJobWorker = (options: JobWorkerOptions = {}) =>
   Effect.gen(function* () {
+    const generation = nextWorkerGeneration()
     const queue = yield* QueueService
     const idlePollInterval = options.idlePollInterval ?? JOB_IDLE_POLL_INTERVAL
     const visibilityTimeout =
       options.visibilityTimeout ?? JOB_VISIBILITY_TIMEOUT
+    const sleepIdle = yield* Schedule.toStepWithSleep(
+      Schedule.spaced(idlePollInterval).pipe(Schedule.jittered),
+    )
 
     const claimAndRun = Effect.gen(function* () {
       const claimed = yield* QueueService.claim(
@@ -95,7 +123,7 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
         ),
       )
 
-      if (Option.isNone(claimed)) return true
+      if (Option.isNone(claimed)) return "idle" as const
 
       const job = claimed.value
       switch (job.payload._tag) {
@@ -135,21 +163,21 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
         }
       }
 
-      return false
+      return "busy" as const
     })
 
-    const poll = claimAndRun.pipe(
-      Effect.catch((error) =>
-        Effect.logError("Job queue poll failed", {
-          error: formatLogError(error),
-        }).pipe(Effect.as(true)),
-      ),
-      Effect.flatMap((idle) =>
-        idle ? Effect.sleep(idlePollInterval) : Effect.void,
-      ),
-    )
-
-    return yield* Effect.forever(poll)
+    while (generation === currentWorkerGeneration()) {
+      const state = yield* claimAndRun.pipe(
+        Effect.catch((error) =>
+          Effect.logError("Job queue poll failed", {
+            error: formatLogError(error),
+          }).pipe(Effect.as("idle" as const)),
+        ),
+      )
+      if (state === "idle") {
+        yield* sleepIdle(undefined).pipe(Effect.asVoid)
+      }
+    }
   })
 
 export const JobWorkerLive = Layer.effectDiscard(

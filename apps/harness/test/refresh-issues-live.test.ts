@@ -72,7 +72,7 @@ describe("Repository Issue live-query coordination", () => {
 
     const controller = new AbortController()
     const live = followRepositoryIssuesLive({
-      repositoryIds: [repositoryId, otherRepositoryId],
+      getRepositoryIds: () => [repositoryId, otherRepositoryId],
       queryClient,
       queries,
       signal: controller.signal,
@@ -194,7 +194,7 @@ describe("Repository Issue live-query coordination", () => {
     })
     const controller = new AbortController()
     const live = followRepositoryIssuesLive({
-      repositoryIds: [repositoryId],
+      getRepositoryIds: () => [repositoryId],
       queryClient,
       queries: {
         repositories: {
@@ -264,7 +264,7 @@ describe("Repository Issue live-query coordination", () => {
 
     const controller = new AbortController()
     const live = followRepositoryIssuesLive({
-      repositoryIds: [repositoryId],
+      getRepositoryIds: () => [repositoryId],
       queryClient,
       queries: {
         repositories: {

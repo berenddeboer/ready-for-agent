@@ -270,12 +270,54 @@ export class DbService extends Context.Service<DbService, DbServiceShape>()(
   "@ready-for-agent/db-service/DbService",
 ) {}
 
+/**
+ * Process-global PubSubs. Survive Effect Layer rebuilds and HMR so workers and
+ * GraphQL subscriptions always share the same signal channel (in-layer PubSubs
+ * leave zombie workers publishing to a bus nobody listens to).
+ */
+const repositoryChangesKey = Symbol.for(
+  "@ready-for-agent/db-service/repository-changes",
+)
+const issueChangesKey = Symbol.for("@ready-for-agent/db-service/issue-changes")
+
+type InvalidationGlobal = typeof globalThis & {
+  [repositoryChangesKey]?: PubSub.PubSub<void>
+  [issueChangesKey]?: PubSub.PubSub<string>
+}
+
+const getRepositoryChanges = (): PubSub.PubSub<void> => {
+  const globalState = globalThis as InvalidationGlobal
+  globalState[repositoryChangesKey] ??= Effect.runSync(PubSub.unbounded<void>())
+  return globalState[repositoryChangesKey]
+}
+
+const getIssueChanges = (): PubSub.PubSub<string> => {
+  const globalState = globalThis as InvalidationGlobal
+  globalState[issueChangesKey] ??= Effect.runSync(PubSub.unbounded<string>())
+  return globalState[issueChangesKey]
+}
+
+const publishRepositoryChanged = (): Effect.Effect<void> =>
+  PubSub.publish(getRepositoryChanges(), undefined).pipe(Effect.asVoid)
+
+const publishIssuesChanged = (repositoryId: string): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    yield* PubSub.publish(getIssueChanges(), repositoryId)
+    yield* PubSub.publish(getRepositoryChanges(), undefined)
+  }).pipe(Effect.asVoid)
+
+const repositoryChangesStream: Stream.Stream<void> = Stream.fromPubSub(
+  getRepositoryChanges(),
+)
+
+const issueChangesStream: Stream.Stream<string> = Stream.fromPubSub(
+  getIssueChanges(),
+)
+
 export const DbServiceLive = Layer.effect(
   DbService,
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const repositoryChanges = yield* PubSub.unbounded<void>()
-    const issueChanges = yield* PubSub.unbounded<string>()
 
     const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
       function* () {
@@ -480,7 +522,7 @@ export const DbServiceLive = Layer.effect(
         }
 
         const repository = toRecordFromRow(row)
-        yield* PubSub.publish(repositoryChanges, undefined)
+        yield* publishRepositoryChanged()
         return repository
       })
 
@@ -533,7 +575,7 @@ export const DbServiceLive = Layer.effect(
         }
 
         const repository = toRecordFromRow(row)
-        yield* PubSub.publish(repositoryChanges, undefined)
+        yield* publishRepositoryChanged()
         return repository
       })
 
@@ -677,7 +719,7 @@ export const DbServiceLive = Layer.effect(
                 : toDatabaseError(error),
             ),
           )
-        yield* PubSub.publish(repositoryChanges, undefined)
+        yield* publishRepositoryChanged()
       })
 
     const storeIssue = (
@@ -1041,11 +1083,11 @@ export const DbServiceLive = Layer.effect(
       })
 
     const notifyIssuesChanged = (repositoryId: string): Effect.Effect<void> =>
-      PubSub.publish(issueChanges, repositoryId).pipe(Effect.asVoid)
+      publishIssuesChanged(repositoryId)
 
     return DbService.of({
-      repositoryChanges: Stream.fromPubSub(repositoryChanges),
-      issueChanges: Stream.fromPubSub(issueChanges),
+      repositoryChanges: repositoryChangesStream,
+      issueChanges: issueChangesStream,
       notifyIssuesChanged,
       getConfig,
       updateConfig,

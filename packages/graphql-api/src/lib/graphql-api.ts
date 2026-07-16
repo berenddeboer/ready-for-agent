@@ -253,6 +253,31 @@ type Repository = {
   githubRepo: string
 }
 
+const enqueueRefreshRepositoryJob = (repository: Repository) =>
+  Effect.gen(function* () {
+    const queue = yield* QueueService
+    return yield* queue.enqueue(
+      JOBS_QUEUE,
+      {
+        _tag: "refresh-repository",
+        repositoryId: RepositoryId.make(repository.id),
+      },
+      { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+    )
+  })
+
+/** Enqueue a Refresh Job only when a GitHub token is already configured. */
+const enqueueRefreshIfCredentialed = (repository: Repository) =>
+  Effect.gen(function* () {
+    const keymaxxer = yield* KeymaxxerService
+    const credential = yield* keymaxxer.findSecret({
+      provider: "github",
+      account: `${repository.githubOwner}/${repository.githubRepo}`,
+    })
+    if (credential === null) return
+    yield* enqueueRefreshRepositoryJob(repository)
+  })
+
 class RepositoryCredentialError extends Data.TaggedError(
   "RepositoryCredentialError",
 )<{ readonly message: string }> {}
@@ -753,7 +778,19 @@ export const createGraphqlApi = (
               Effect.result(
                 Effect.gen(function* () {
                   const db = yield* DbService
-                  return yield* db.addRepository(args.input)
+                  const added = yield* db.addRepository(args.input)
+                  yield* enqueueRefreshIfCredentialed(added).pipe(
+                    Effect.catch((error) =>
+                      Effect.logWarning(
+                        "Automatic Repository refresh was not queued",
+                        {
+                          repositoryId: added.id,
+                          error,
+                        },
+                      ),
+                    ),
+                  )
+                  return added
                 }),
               ),
             )
@@ -929,15 +966,7 @@ export const createGraphqlApi = (
                     })
                   }
 
-                  const queue = yield* QueueService
-                  const jobId = yield* queue.enqueue(
-                    JOBS_QUEUE,
-                    {
-                      _tag: "refresh-repository",
-                      repositoryId: RepositoryId.make(repository.id),
-                    },
-                    { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-                  )
+                  const jobId = yield* enqueueRefreshRepositoryJob(repository)
                   return {
                     id: jobId,
                     repositoryId: repository.id,

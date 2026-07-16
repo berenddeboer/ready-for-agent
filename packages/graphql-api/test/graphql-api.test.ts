@@ -254,6 +254,133 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("queues a Refresh Job when adding a repository that already has a GitHub token", async () => {
+    let enqueued:
+      | {
+          queue: string
+          payload: Record<string, unknown>
+          retryLimit: number | undefined
+        }
+      | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: ({ account, provider }) =>
+          Effect.succeed(
+            provider === "github" &&
+              account === `${repository.githubOwner}/${repository.githubRepo}`
+              ? "GITHUB_TOKEN_ACME_WIDGETS"
+              : null,
+          ),
+      },
+      {
+        enqueue: (queueName, payload, options) =>
+          Effect.sync(() => {
+            enqueued = {
+              queue: queueName,
+              payload,
+              retryLimit: options?.retryLimit,
+            }
+            return makeJobId()
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      addRepositoryRequest(),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          id: repository.id,
+          githubOwner: repository.githubOwner,
+          githubRepo: repository.githubRepo,
+        },
+      },
+    })
+    expect(enqueued).toEqual({
+      queue: "jobs",
+      payload: {
+        _tag: "refresh-repository",
+        repositoryId: repository.id,
+      },
+      retryLimit: 1,
+    })
+  })
+
+  test("does not queue a Refresh Job when adding a repository without a GitHub token", async () => {
+    let enqueued = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed(null),
+      },
+      {
+        enqueue: () => {
+          enqueued = true
+          return Effect.succeed(makeJobId())
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      addRepositoryRequest(),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          id: repository.id,
+          githubOwner: repository.githubOwner,
+          githubRepo: repository.githubRepo,
+        },
+      },
+    })
+    expect(enqueued).toBe(false)
+  })
+
+  test("keeps the added repository when its automatic Refresh Job cannot be queued", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      },
+      {
+        enqueue: () =>
+          Effect.fail(
+            new EnqueueError({
+              queue: "jobs",
+              message: "queue unavailable",
+            }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      addRepositoryRequest(),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          id: repository.id,
+          githubOwner: repository.githubOwner,
+          githubRepo: repository.githubRepo,
+        },
+      },
+    })
+  })
+
   test("streams repository membership changes", async () => {
     await runtime.dispose()
     runtime = makeRuntime({ repositoryChanges: Stream.make(undefined) })
