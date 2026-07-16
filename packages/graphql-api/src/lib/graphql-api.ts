@@ -230,6 +230,7 @@ const lifecycleLabels = (workItem: WorkItemRecord) => {
       phase: phase.toUpperCase(),
       label: `${lifecyclePhaseLabel(phase)}: ${outcome}`,
       status: status.toUpperCase(),
+      durationMs: stepRun.executionDurationMs,
     }
   })
 }

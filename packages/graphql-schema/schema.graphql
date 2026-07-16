@@ -119,6 +119,10 @@ type LifecycleLabel {
   phase: LifecyclePhase!
   label: String!
   status: WorkItemStatus!
+  """
+  Execution duration in milliseconds; null when the step has not started.
+  """
+  durationMs: Float
 }
 
 type WorkItem {

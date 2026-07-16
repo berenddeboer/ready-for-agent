@@ -1074,7 +1074,7 @@ describe("GraphQL API", () => {
           workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
             id state stateLabel status statusLabel statusMessage canRetry isTerminal
             stateReadyAt createdAt updatedAt
-            lifecycleLabels { phase label status }
+            lifecycleLabels { phase label status durationMs }
           }
         }`,
         variables: {
@@ -1104,6 +1104,7 @@ describe("GraphQL API", () => {
                 phase: "CREATE_WORKTREE",
                 label: "Create worktree: Running",
                 status: "RUNNING",
+                durationMs: 250,
               },
             ],
           },
