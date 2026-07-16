@@ -429,6 +429,7 @@ describe("IssueReconciler", () => {
         localIssue(3),
         localIssue(4),
         localIssue(5),
+        localIssue(6),
       ],
       workItemPullRequests: [
         { githubIssueNumber: 2, githubPullRequestNumber: 202 },
@@ -439,19 +440,30 @@ describe("IssueReconciler", () => {
       [
         remoteIssue(1),
         remoteIssue(2, {
-          closingPullRequests: [{ number: 202, repository: "acme/widgets" }],
+          closingPullRequests: [
+            { number: 202, repository: "acme/widgets", state: "OPEN" },
+          ],
         }),
         remoteIssue(3, {
           closingPullRequests: [
-            { number: 300, repository: "acme/widgets" },
-            { number: 303, repository: "acme/widgets" },
+            { number: 300, repository: "acme/widgets", state: "OPEN" },
+            { number: 303, repository: "acme/widgets", state: "MERGED" },
           ],
         }),
         remoteIssue(4, {
-          closingPullRequests: [{ number: 404, repository: "acme/widgets" }],
+          closingPullRequests: [
+            { number: 404, repository: "acme/widgets", state: "OPEN" },
+          ],
         }),
         remoteIssue(5, {
-          closingPullRequests: [{ number: 202, repository: "other/widgets" }],
+          closingPullRequests: [
+            { number: 202, repository: "other/widgets", state: "OPEN" },
+          ],
+        }),
+        remoteIssue(6, {
+          closingPullRequests: [
+            { number: 606, repository: "acme/widgets", state: "CLOSED" },
+          ],
         }),
       ],
       db.actions,
@@ -463,14 +475,14 @@ describe("IssueReconciler", () => {
         const summary = yield* reconciler.reconcile(repository)
 
         expect(summary).toEqual({
-          fetched: 5,
+          fetched: 6,
           inserted: 0,
           updated: 0,
           deleted: 2,
-          unchanged: 3,
+          unchanged: 4,
         })
         expect(db.stored.map((issue) => issue.githubIssueNumber)).toEqual([
-          1, 2, 3,
+          1, 2, 3, 6,
         ])
       }),
       db.layer,

@@ -254,6 +254,27 @@ const formatStepRunOutcome = (
   return formatLifecycleLabel(stepRun.status)
 }
 
+const formatStepRunLabel = (
+  stepRun: WorkItem["stepRuns"][number],
+  workItemState: WorkItemState,
+) =>
+  `${formatLifecycleLabel(stepRun.step)}: ${formatStepRunOutcome(stepRun, workItemState)}`
+
+const collapseSuccessiveStepRuns = (
+  stepRuns: WorkItem["stepRuns"],
+  workItemState: WorkItemState,
+) => {
+  const collapsed: WorkItem["stepRuns"][number][] = []
+  let previousLabel: string | undefined
+  for (const stepRun of stepRuns) {
+    const label = formatStepRunLabel(stepRun, workItemState)
+    if (label === previousLabel) continue
+    collapsed.push(stepRun)
+    previousLabel = label
+  }
+  return collapsed
+}
+
 export const Route = createFileRoute("/")({
   component: HomePage,
 })
@@ -1429,15 +1450,16 @@ function WorkItemLifecycleStatus({
           className="mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
           aria-label="Lifecycle steps"
         >
-          {workItem.stepRuns.map((stepRun) => (
-            <li
-              className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
-              key={stepRun.id}
-            >
-              {formatLifecycleLabel(stepRun.step)}:{" "}
-              {formatStepRunOutcome(stepRun, workItem.state)}
-            </li>
-          ))}
+          {collapseSuccessiveStepRuns(workItem.stepRuns, workItem.state).map(
+            (stepRun) => (
+              <li
+                className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
+                key={stepRun.id}
+              >
+                {formatStepRunLabel(stepRun, workItem.state)}
+              </li>
+            ),
+          )}
         </ol>
       )}
       {message !== null && message !== undefined && (
