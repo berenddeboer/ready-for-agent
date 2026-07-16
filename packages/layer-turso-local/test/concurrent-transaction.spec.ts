@@ -49,6 +49,62 @@ describe("makeTursoLive", () => {
     }
   })
 
+  it("serializes concurrent top-level transactions on one client", async () => {
+    const dbPath = tempDbPath()
+    const TestLayer = makeTestLayer(dbPath)
+
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+
+          yield* sql(
+            sqlQuery(
+              "CREATE TABLE concurrent_tx (id INTEGER PRIMARY KEY, value TEXT NOT NULL)",
+            ),
+          )
+
+          const tx = (value: string) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                yield* sql(
+                  sqlQuery(
+                    `INSERT INTO concurrent_tx (value) VALUES ('${value}')`,
+                  ),
+                )
+                // Yield so a second fiber can race BEGIN while this tx is open.
+                yield* Effect.sleep("20 millis")
+                yield* sql(
+                  sqlQuery(
+                    `UPDATE concurrent_tx SET value = '${value}-done' WHERE value = '${value}'`,
+                  ),
+                )
+              }),
+            )
+
+          const exits = yield* Effect.all([tx("a"), tx("b"), tx("c")], {
+            concurrency: "unbounded",
+            mode: "result",
+          })
+
+          const rows = yield* sql(
+            sqlQuery("SELECT value FROM concurrent_tx ORDER BY id"),
+          )
+          return { exits, rows }
+        }).pipe(Effect.provide(TestLayer)),
+      )
+
+      expect(result.exits.every((exit) => exit._tag === "Success")).toBe(true)
+      expect(result.rows).toEqual([
+        { value: "a-done" },
+        { value: "b-done" },
+        { value: "c-done" },
+      ])
+    } finally {
+      await cleanupDb(dbPath)
+    }
+  })
+
   it("makes writes visible across long-lived clients", async () => {
     const dbPath = tempDbPath()
     const WriterLayer = makeTestLayer(dbPath)
