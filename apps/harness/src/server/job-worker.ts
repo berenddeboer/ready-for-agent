@@ -1,5 +1,13 @@
 import "@tanstack/react-start/server-only"
-import { Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
+import {
+  Clock,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+} from "effect"
 import {
   DbService,
   RepositoryId,
@@ -14,7 +22,9 @@ import {
 
 export const JOBS_QUEUE = "jobs"
 export const JOB_VISIBILITY_TIMEOUT = Duration.minutes(5)
+const LIFECYCLE_JOB_VISIBILITY_GRACE = Duration.minutes(1)
 const JOB_IDLE_POLL_INTERVAL = Duration.millis(1500)
+const ORPHAN_RECOVERY_INTERVAL = Duration.seconds(30)
 export const JOB_RECOVERY_RETRY_LIMIT = 1
 
 /**
@@ -97,20 +107,36 @@ const refreshRepository = (repositoryId: RepositoryId) =>
 export interface JobWorkerOptions {
   readonly idlePollInterval?: Duration.Duration
   readonly visibilityTimeout?: Duration.Duration
+  readonly orphanRecoveryInterval?: Duration.Duration
 }
 
 export const runJobWorker = (options: JobWorkerOptions = {}) =>
   Effect.gen(function* () {
     const generation = nextWorkerGeneration()
     const queue = yield* QueueService
+    const lifecycle = yield* WorkItemLifecycle
+    const lifecycleJobVisibilityTimeout = Duration.millis(
+      Math.max(
+        ...Object.values(lifecycle.maxDurations).map(Duration.toMillis),
+      ) + Duration.toMillis(LIFECYCLE_JOB_VISIBILITY_GRACE),
+    )
     const idlePollInterval = options.idlePollInterval ?? JOB_IDLE_POLL_INTERVAL
     const visibilityTimeout =
       options.visibilityTimeout ?? JOB_VISIBILITY_TIMEOUT
+    const orphanRecoveryInterval =
+      options.orphanRecoveryInterval ?? ORPHAN_RECOVERY_INTERVAL
+    let nextOrphanRecoveryAt = 0
     const sleepIdle = yield* Schedule.toStepWithSleep(
       Schedule.spaced(idlePollInterval).pipe(Schedule.jittered),
     )
 
     const claimAndRun = Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      if (now >= nextOrphanRecoveryAt) {
+        yield* lifecycle.recoverOrphanedStepRuns
+        nextOrphanRecoveryAt = now + Duration.toMillis(orphanRecoveryInterval)
+      }
+
       const claimed = yield* QueueService.claim(
         JOBS_QUEUE,
         JobPayload,
@@ -145,7 +171,10 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
           break
         }
         case "work-item-step": {
-          const lifecycle = yield* WorkItemLifecycle
+          yield* queue.extendVisibility(
+            job.jobId,
+            lifecycleJobVisibilityTimeout,
+          )
           const result = yield* Effect.result(
             lifecycle.runStep(job.payload.stepRunId),
           )
@@ -156,8 +185,6 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
               stepRunId: job.payload.stepRunId,
               error: formatLogError(result.failure),
             })
-          } else if (result.success._tag === "noop") {
-            yield* queue.acknowledge(job.jobId)
           }
           break
         }

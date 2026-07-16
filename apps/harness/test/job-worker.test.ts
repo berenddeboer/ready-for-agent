@@ -96,6 +96,11 @@ const queueLayer = (
     stepRunId: string,
   ) => Effect.Effect<{ readonly _tag: "noop" }> = () =>
     Effect.succeed({ _tag: "noop" as const }),
+  onExtendVisibility: (
+    jobId: string,
+    timeout: Duration.Duration,
+  ) => Effect.Effect<unknown> = () => Effect.void,
+  recoverOrphanedStepRuns: Effect.Effect<number> = Effect.succeed(0),
 ) =>
   Layer.merge(
     Layer.succeed(QueueService, {
@@ -116,7 +121,8 @@ const queueLayer = (
           expect(options?.retryable).toBe(false)
           yield* onFail(jobId)
         }),
-      extendVisibility: unused,
+      extendVisibility: (jobId, timeout) =>
+        onExtendVisibility(jobId, timeout).pipe(Effect.asVoid),
       getStats: unused,
     } satisfies QueueServiceShape),
     Layer.succeed(WorkItemLifecycle, {
@@ -138,6 +144,7 @@ const queueLayer = (
       },
       implementNow: unused,
       implementLocally: unused,
+      recoverOrphanedStepRuns,
       runStep,
       retry: unused,
       pause: unused,
@@ -199,31 +206,88 @@ describe("Job worker", () => {
     })
   })
 
-  test("dispatches a Work Item Lifecycle Job and acknowledges a stale no-op", async () => {
+  test("extends a Lifecycle Job lease and leaves a live no-op unacknowledged", async () => {
     const stepRunId = makeStepRunId()
     const payload = WorkItemStepJob.make({ stepRunId })
     const job = rawJob(payload)
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
     const dispatched = await Effect.runPromise(Deferred.make<string>())
+    const extended = await Effect.runPromise(
+      Deferred.make<{ readonly jobId: string; readonly timeoutMs: number }>(),
+    )
+    const recovered = await Effect.runPromise(Deferred.make<void>())
+    const acknowledged: string[] = []
 
     await runScoped(
       Effect.gen(function* () {
         yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
           Effect.forkScoped({ startImmediately: true }),
         )
+        yield* Deferred.await(recovered)
         expect(yield* Deferred.await(dispatched)).toBe(stepRunId)
-        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+        expect(yield* Deferred.await(extended)).toEqual({
+          jobId: job.jobId,
+          timeoutMs: Duration.toMillis(Duration.hours(2)) + 60_000,
+        })
+        yield* Effect.sleep("10 millis")
+        expect(acknowledged).toEqual([])
       }),
       Layer.merge(
         queueLayer(
           [job],
-          (jobId) => Deferred.succeed(acknowledged, jobId),
+          (jobId) =>
+            Effect.sync(() => {
+              acknowledged.push(jobId)
+            }),
           undefined,
           undefined,
           (receivedStepRunId) =>
             Deferred.succeed(dispatched, receivedStepRunId).pipe(
               Effect.as({ _tag: "noop" as const }),
             ),
+          (jobId, timeout) =>
+            Deferred.succeed(extended, {
+              jobId,
+              timeoutMs: Duration.toMillis(timeout),
+            }),
+          Deferred.succeed(recovered, undefined).pipe(Effect.as(0)),
+        ),
+        Layer.merge(
+          dbLayer(),
+          Layer.succeed(IssueReconciler, { reconcile: unused }),
+        ),
+      ),
+    )
+  })
+
+  test("rechecks orphan recovery while the worker is running", async () => {
+    let recoveryCalls = 0
+    const recoveredTwice = await Effect.runPromise(Deferred.make<void>())
+    const recover = Effect.gen(function* () {
+      recoveryCalls += 1
+      if (recoveryCalls === 2) {
+        yield* Deferred.succeed(recoveredTwice, undefined)
+      }
+      return 0
+    })
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          orphanRecoveryInterval: Duration.zero,
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        yield* Deferred.await(recoveredTwice).pipe(Effect.timeout("100 millis"))
+        expect(recoveryCalls).toBeGreaterThanOrEqual(2)
+      }),
+      Layer.merge(
+        queueLayer(
+          [],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          recover,
         ),
         Layer.merge(
           dbLayer(),
