@@ -944,8 +944,9 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
           workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            id state stateReadyAt createdAt updatedAt
-            stepRuns { id step status queuedAt startedAt finishedAt }
+            id state stateLabel status statusLabel statusMessage canRetry isTerminal
+            stateReadyAt createdAt updatedAt
+            lifecycleLabels { phase label status }
           }
         }`,
         variables: {
@@ -961,17 +962,20 @@ describe("GraphQL API", () => {
           {
             id: workItem.id,
             state: "CREATE_WORKTREE",
+            stateLabel: "Create worktree",
+            status: "RUNNING",
+            statusLabel: "Running",
+            statusMessage: null,
+            canRetry: false,
+            isTerminal: false,
             stateReadyAt: "2026-07-14T08:00:00.000Z",
             createdAt: "2026-07-14T08:00:00.000Z",
             updatedAt: "2026-07-14T08:00:01.000Z",
-            stepRuns: [
+            lifecycleLabels: [
               {
-                id: workItem.stepRuns[0]?.id,
-                step: "CREATE_WORKTREE",
+                phase: "CREATE_WORKTREE",
+                label: "Create worktree: Running",
                 status: "RUNNING",
-                queuedAt: "2026-07-14T08:00:00.000Z",
-                startedAt: "2026-07-14T08:00:01.000Z",
-                finishedAt: null,
               },
             ],
           },
@@ -979,6 +983,121 @@ describe("GraphQL API", () => {
       },
     })
     expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("projects repeated status-check runs as one lifecycle phase", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const polling = {
+      ...workItem,
+      state: "watch_pr_status_checks",
+      stepRuns: [
+        { ...baseRun, step: "implement", status: "succeeded" },
+        { ...baseRun, step: "review", status: "failed" },
+        { ...baseRun, step: "review", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "resolve_pr_merge_conflict",
+          status: "succeeded",
+        },
+        { ...baseRun, step: "watch_pr_status_checks", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "investigate_pr_status_checks",
+          status: "succeeded",
+        },
+        { ...baseRun, step: "watch_pr_status_checks", status: "queued" },
+      ],
+    } as WorkItemRecord
+    const needsHuman = {
+      ...polling,
+      id: makeWorkItemId(),
+      state: "needs_human",
+      failureMessage: "The pull request was closed",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "investigate_pr_status_checks",
+          status: "succeeded",
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([polling, needsHuman]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            stateLabel status statusLabel statusMessage canRetry isTerminal
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            stateLabel: "GitHub status checks",
+            status: "QUEUED",
+            statusLabel: "Queued",
+            statusMessage: null,
+            canRetry: false,
+            isTerminal: false,
+            lifecycleLabels: [
+              {
+                phase: "IMPLEMENT",
+                label: "Build: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "REVIEW",
+                label: "Review: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "RESOLVE_PR_MERGE_CONFLICT",
+                label: "Resolve PR merge conflict: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "GITHUB_STATUS_CHECKS",
+                label: "GitHub status checks: Queued",
+                status: "QUEUED",
+              },
+            ],
+          },
+          {
+            stateLabel: "Needs human",
+            status: "NEEDS_HUMAN",
+            statusLabel: "Needs human",
+            statusMessage: "The pull request was closed",
+            canRetry: false,
+            isTerminal: true,
+            lifecycleLabels: [
+              {
+                phase: "GITHUB_STATUS_CHECKS",
+                label: "GitHub status checks: Needs human",
+                status: "NEEDS_HUMAN",
+              },
+            ],
+          },
+        ],
+      },
+    })
   })
 
   test("lists all Work Items for a repository", async () => {
@@ -1110,7 +1229,7 @@ describe("GraphQL API", () => {
         query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
           implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
             id state
-            stepRuns { step status }
+            lifecycleLabels { phase label status }
           }
         }`,
         variables: {
@@ -1125,7 +1244,13 @@ describe("GraphQL API", () => {
         implementNow: {
           id: workItem.id,
           state: "CREATE_WORKTREE",
-          stepRuns: [{ step: "CREATE_WORKTREE", status: "RUNNING" }],
+          lifecycleLabels: [
+            {
+              phase: "CREATE_WORKTREE",
+              label: "Create worktree: Running",
+              status: "RUNNING",
+            },
+          ],
         },
       },
     })

@@ -37,13 +37,16 @@ import {
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
+  type OperationalLifecycleStep,
   ParentIssueError,
   ResetCleanupError,
   RetryNotEligibleError,
+  type StepRunRecord,
   UnfinishedWorkItemExistsError,
   WorkItemLifecycle,
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
+  type WorkItemRecord,
   WorkItemTerminalError,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -139,6 +142,96 @@ const workIssueProjection = (
       if (children.length === 0) return []
       return [issue, ...children.sort(compareChildIssues)]
     })
+}
+
+type WorkItemStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "interrupted"
+  | "cancelled"
+  | "complete"
+  | "abandoned"
+  | "needs_human"
+
+type LifecyclePhase =
+  | Exclude<
+      OperationalLifecycleStep,
+      "watch_pr_status_checks" | "investigate_pr_status_checks"
+    >
+  | "github_status_checks"
+
+const lifecyclePhase = (step: OperationalLifecycleStep): LifecyclePhase => {
+  if (
+    step === "watch_pr_status_checks" ||
+    step === "investigate_pr_status_checks"
+  ) {
+    return "github_status_checks"
+  }
+  return step
+}
+
+const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
+  switch (phase) {
+    case "implement":
+      return "Build"
+    case "resolve_pr_merge_conflict":
+      return "Resolve PR merge conflict"
+    case "github_status_checks":
+      return "GitHub status checks"
+    case "mark_pr_ready_for_review":
+      return "Mark PR ready for review"
+    case "decide_pr_merge":
+      return "Decide PR merge"
+    case "merge_pr":
+      return "Merge PR"
+    default:
+      return phase
+        .replaceAll("_", " ")
+        .replace(/^./, (first) => first.toUpperCase())
+  }
+}
+
+const statusLabel = (status: WorkItemStatus): string =>
+  status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
+
+const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
+  workItem.stepRuns.at(-1)
+
+const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
+  if (isTerminalWorkItemState(workItem.state)) return workItem.state
+  return latestStepRun(workItem)?.status ?? "queued"
+}
+
+const lifecycleLabels = (workItem: WorkItemRecord) => {
+  const latestRuns = new Map<LifecyclePhase, StepRunRecord>()
+  for (const stepRun of workItem.stepRuns) {
+    latestRuns.set(lifecyclePhase(stepRun.step), stepRun)
+  }
+  const finalStepRun = latestStepRun(workItem)
+  const finalPhase =
+    workItem.state === "needs_human" && finalStepRun !== undefined
+      ? lifecyclePhase(finalStepRun.step)
+      : null
+
+  return [...latestRuns].map(([phase, stepRun]) => {
+    const status: WorkItemStatus =
+      phase === finalPhase ? "needs_human" : stepRun.status
+    const outcome =
+      phase === "decide_pr_merge" && status === "needs_human"
+        ? "Human review before merge"
+        : phase === "decide_pr_merge" && status === "succeeded"
+          ? "Clanker may merge"
+          : phase === "merge_pr" && status === "succeeded"
+            ? "Merged"
+            : statusLabel(status)
+    return {
+      phase: phase.toUpperCase(),
+      label: `${lifecyclePhaseLabel(phase)}: ${outcome}`,
+      status: status.toUpperCase(),
+    }
+  })
 }
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
@@ -541,22 +634,34 @@ export const createGraphqlApi = (
         },
         WorkItem: {
           state: (workItem: { state: string }) => workItem.state.toUpperCase(),
+          stateLabel: (workItem: WorkItemRecord) => {
+            if (isTerminalWorkItemState(workItem.state)) {
+              return statusLabel(workItem.state)
+            }
+            return lifecyclePhaseLabel(lifecyclePhase(workItem.state))
+          },
+          status: (workItem: WorkItemRecord) =>
+            workItemStatus(workItem).toUpperCase(),
+          statusLabel: (workItem: WorkItemRecord) =>
+            statusLabel(workItemStatus(workItem)),
+          statusMessage: (workItem: WorkItemRecord) =>
+            workItem.failureMessage ?? latestStepRun(workItem)?.reasonMessage,
+          canRetry: (workItem: WorkItemRecord) => {
+            const latestStatus = latestStepRun(workItem)?.status
+            return (
+              !isTerminalWorkItemState(workItem.state) &&
+              (latestStatus === "failed" || latestStatus === "interrupted")
+            )
+          },
+          isTerminal: (workItem: WorkItemRecord) =>
+            isTerminalWorkItemState(workItem.state),
+          lifecycleLabels,
           stateReadyAt: (workItem: { stateReadyAt: Date }) =>
             workItem.stateReadyAt.toISOString(),
           createdAt: (workItem: { createdAt: Date }) =>
             workItem.createdAt.toISOString(),
           updatedAt: (workItem: { updatedAt: Date }) =>
             workItem.updatedAt.toISOString(),
-        },
-        StepRun: {
-          step: (stepRun: { step: string }) => stepRun.step.toUpperCase(),
-          status: (stepRun: { status: string }) => stepRun.status.toUpperCase(),
-          queuedAt: (stepRun: { queuedAt: Date }) =>
-            stepRun.queuedAt.toISOString(),
-          startedAt: (stepRun: { startedAt: Date | null }) =>
-            stepRun.startedAt?.toISOString() ?? null,
-          finishedAt: (stepRun: { finishedAt: Date | null }) =>
-            stepRun.finishedAt?.toISOString() ?? null,
         },
         Subscription: {
           repositoriesChanged: {
