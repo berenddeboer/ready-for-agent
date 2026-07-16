@@ -478,6 +478,7 @@ describe("WorkItemLifecycle", () => {
         extendVisibility: () => Effect.void,
         getStats: () =>
           Effect.succeed({ pending: 0, processing: 0, deadLetter: 0 }),
+        requeueByPayloadTag: () => Effect.succeed(0),
       }
 
       const layer = WorkItemLifecycleLive.pipe(
@@ -955,6 +956,7 @@ describe("WorkItemLifecycle", () => {
         extendVisibility: () => Effect.void,
         getStats: () =>
           Effect.succeed({ pending: 0, processing: 0, deadLetter: 0 }),
+        requeueByPayloadTag: () => Effect.succeed(0),
       }
 
       const NonTransactionalQueueLive = Layer.succeed(
@@ -2266,6 +2268,7 @@ describe("WorkItemLifecycle", () => {
         extendVisibility: () => Effect.void,
         getStats: () =>
           Effect.succeed({ pending: 0, processing: 0, deadLetter: 0 }),
+        requeueByPayloadTag: () => Effect.succeed(0),
       }
 
       // Real DB + fake queue so we can fail the post-success enqueue.

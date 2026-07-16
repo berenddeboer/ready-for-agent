@@ -245,7 +245,8 @@ export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
   unknown
 >
 
-const JOBS_QUEUE = "jobs"
+/** High-priority manual Issue Refresh Job queue (must match harness). */
+export const ISSUE_REFRESH_QUEUE = "issue-refresh"
 const JOB_RECOVERY_RETRY_LIMIT = 1
 
 type Repository = {
@@ -258,7 +259,7 @@ const enqueueRefreshRepositoryJob = (repository: Repository) =>
   Effect.gen(function* () {
     const queue = yield* QueueService
     return yield* queue.enqueue(
-      JOBS_QUEUE,
+      ISSUE_REFRESH_QUEUE,
       {
         _tag: "refresh-repository",
         repositoryId: RepositoryId.make(repository.id),

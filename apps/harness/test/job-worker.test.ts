@@ -38,17 +38,20 @@ import {
   type RawJob,
   makeJobId,
 } from "@ready-for-agent/queue-service"
+import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   WorkItemLifecycle,
   WorkItemStepJob,
   makeStepRunId,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
+  ISSUE_REFRESH_QUEUE,
   JOBS_QUEUE,
   JOB_RECOVERY_RETRY_LIMIT,
   JOB_VISIBILITY_TIMEOUT,
   enqueueRefreshRepositoryJob,
   runJobWorker,
+  transferPersistedRefreshJobs,
 } from "../src/server/job-worker.js"
 import { describe, expect, test } from "bun:test"
 
@@ -57,16 +60,27 @@ const repository = makeRepositoryRecord({
   paused: true,
 })
 
+const otherRepository = makeRepositoryRecord({
+  id: "repo-01J00000000000000000000001",
+  githubOwner: "acme",
+  githubRepo: "gadgets",
+  localPath: "/repos/acme/gadgets.git",
+  paused: true,
+})
+
 const refreshPayload = {
   _tag: "refresh-repository" as const,
   repositoryId: RepositoryId.make(repository.id),
 }
 
-const rawJob = (payload: unknown): RawJob => {
+const rawJob = (
+  payload: unknown,
+  queue: string = ISSUE_REFRESH_QUEUE,
+): RawJob => {
   const now = DateTime.makeUnsafe(0)
   return {
     jobId: makeJobId(),
-    queue: JOBS_QUEUE,
+    queue,
     key: null,
     payload,
     attempts: 1,
@@ -92,7 +106,7 @@ const queueLayer = (
   jobs: RawJob[],
   onAcknowledge: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
   onFail: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
-  onClaim?: () => Effect.Effect<Option.Option<RawJob>, ClaimError>,
+  onClaim?: (queue: string) => Effect.Effect<Option.Option<RawJob>, ClaimError>,
   runStep: (
     stepRunId: string,
   ) => Effect.Effect<{ readonly _tag: "noop" }> = () =>
@@ -112,13 +126,16 @@ const queueLayer = (
       listKeyed: unused,
       postponeKeyed: unused,
       removeKeyed: unused,
-      rawClaim: (_queue, visibilityTimeout) =>
+      rawClaim: (queueName, visibilityTimeout) =>
         Effect.gen(function* () {
           expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
             Duration.toMillis(JOB_VISIBILITY_TIMEOUT),
           )
-          if (onClaim !== undefined) return yield* onClaim()
-          return Option.fromNullishOr(jobs.shift())
+          if (onClaim !== undefined) return yield* onClaim(queueName)
+          const index = jobs.findIndex((job) => job.queue === queueName)
+          if (index === -1) return Option.none()
+          const [job] = jobs.splice(index, 1)
+          return Option.some(job)
         }),
       acknowledge: (jobId) => onAcknowledge(jobId).pipe(Effect.asVoid),
       fail: (jobId, options) =>
@@ -129,6 +146,7 @@ const queueLayer = (
       extendVisibility: (jobId, timeout) =>
         onExtendVisibility(jobId, timeout).pipe(Effect.asVoid),
       getStats: unused,
+      requeueByPayloadTag: () => Effect.succeed(0),
     } satisfies QueueServiceShape),
     Layer.succeed(WorkItemLifecycle, {
       maxDurations: {
@@ -171,7 +189,7 @@ const runScoped = <A, E, R>(
   )
 
 describe("Job worker", () => {
-  test("enqueues a validated Refresh Job with one recovery claim", async () => {
+  test("enqueues a validated Refresh Job on the issue-refresh queue", async () => {
     let enqueued:
       | {
           queue: string
@@ -200,6 +218,7 @@ describe("Job worker", () => {
       fail: unused,
       extendVisibility: unused,
       getStats: unused,
+      requeueByPayloadTag: () => Effect.succeed(0),
     } satisfies QueueServiceShape)
 
     await Effect.runPromise(
@@ -209,7 +228,7 @@ describe("Job worker", () => {
     )
 
     expect(enqueued).toEqual({
-      queue: JOBS_QUEUE,
+      queue: ISSUE_REFRESH_QUEUE,
       payload: refreshPayload,
       retryLimit: JOB_RECOVERY_RETRY_LIMIT,
     })
@@ -218,7 +237,7 @@ describe("Job worker", () => {
   test("extends a Lifecycle Job lease and leaves a live no-op unacknowledged", async () => {
     const stepRunId = makeStepRunId()
     const payload = WorkItemStepJob.make({ stepRunId })
-    const job = rawJob(payload)
+    const job = rawJob(payload, JOBS_QUEUE)
     const dispatched = await Effect.runPromise(Deferred.make<string>())
     const extended = await Effect.runPromise(
       Deferred.make<{ readonly jobId: string; readonly timeoutMs: number }>(),
@@ -378,11 +397,21 @@ describe("Job worker", () => {
   })
 
   test("marks malformed and unknown payloads terminal", async () => {
-    for (const payload of [
-      { _tag: "refresh-repository", repositoryId: "invalid" },
-      { _tag: "unknown-job", repositoryId: repository.id },
+    for (const { payload, queue } of [
+      {
+        payload: { _tag: "refresh-repository", repositoryId: "invalid" },
+        queue: ISSUE_REFRESH_QUEUE,
+      },
+      {
+        payload: { _tag: "unknown-job", repositoryId: repository.id },
+        queue: ISSUE_REFRESH_QUEUE,
+      },
+      {
+        payload: { _tag: "unknown-job", stepRunId: "srun-bad" },
+        queue: JOBS_QUEUE,
+      },
     ]) {
-      const job = rawJob(payload)
+      const job = rawJob(payload, queue)
       const failed = await Effect.runPromise(Deferred.make<string>())
       await runScoped(
         Effect.gen(function* () {
@@ -611,8 +640,14 @@ describe("Job worker", () => {
     )
   })
 
-  test("executes duplicate Refresh Jobs serially", async () => {
-    const jobs = [rawJob(refreshPayload), rawJob(refreshPayload)]
+  test("executes duplicate Refresh Jobs serially across repositories", async () => {
+    const jobs = [
+      rawJob(refreshPayload),
+      rawJob({
+        _tag: "refresh-repository",
+        repositoryId: RepositoryId.make(otherRepository.id),
+      }),
+    ]
     const firstStarted = await Effect.runPromise(Deferred.make<void>())
     const releaseFirst = await Effect.runPromise(Deferred.make<void>())
     const secondStarted = await Effect.runPromise(Deferred.make<void>())
@@ -653,21 +688,91 @@ describe("Job worker", () => {
         yield* Deferred.await(secondStarted)
         expect(maximumActive).toBe(1)
       }),
-      Layer.mergeAll(queueLayer(jobs), dbLayer(), reconciler),
+      Layer.mergeAll(
+        queueLayer(jobs),
+        dbLayer([repository, otherRepository]),
+        reconciler,
+      ),
+    )
+  })
+
+  test("runs Work Item lifecycle jobs while Issue refresh is active", async () => {
+    const refreshJob = rawJob(refreshPayload)
+    const stepRunId = makeStepRunId()
+    const lifecycleJob = rawJob(WorkItemStepJob.make({ stepRunId }), JOBS_QUEUE)
+    const jobs = [refreshJob, lifecycleJob]
+    const refreshStarted = await Effect.runPromise(Deferred.make<void>())
+    const releaseRefresh = await Effect.runPromise(Deferred.make<void>())
+    const lifecycleDispatched = await Effect.runPromise(Deferred.make<string>())
+    const lifecycleLeaseExtended = await Effect.runPromise(
+      Deferred.make<string>(),
+    )
+    let refreshActiveDuringLifecycle = false
+
+    const reconciler = Layer.succeed(IssueReconciler, {
+      reconcile: () =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(refreshStarted, undefined)
+          yield* Deferred.await(releaseRefresh)
+          return {
+            fetched: 0,
+            inserted: 0,
+            updated: 0,
+            deleted: 0,
+            unchanged: 0,
+          }
+        }),
+    } satisfies IssueReconcilerShape)
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        yield* Deferred.await(refreshStarted)
+        expect(yield* Deferred.await(lifecycleDispatched)).toBe(stepRunId)
+        expect(refreshActiveDuringLifecycle).toBe(true)
+        expect(yield* Deferred.await(lifecycleLeaseExtended)).toBe(
+          lifecycleJob.jobId,
+        )
+        yield* Deferred.succeed(releaseRefresh, undefined)
+      }),
+      Layer.merge(
+        queueLayer(
+          jobs,
+          undefined,
+          undefined,
+          undefined,
+          (receivedStepRunId) =>
+            Effect.gen(function* () {
+              refreshActiveDuringLifecycle = true
+              yield* Deferred.succeed(lifecycleDispatched, receivedStepRunId)
+              return { _tag: "noop" as const }
+            }),
+          (jobId) => Deferred.succeed(lifecycleLeaseExtended, jobId),
+        ),
+        Layer.merge(dbLayer(), reconciler),
+      ),
     )
   })
 
   test("recovers after a queue infrastructure error", async () => {
     const job = rawJob(refreshPayload)
     const acknowledged = await Effect.runPromise(Deferred.make<void>())
-    let claims = 0
-    const claim = () => {
-      claims += 1
-      return claims === 1
+    let refreshClaims = 0
+    const claim = (queueName: string) => {
+      if (queueName !== ISSUE_REFRESH_QUEUE) {
+        return Effect.succeed(Option.none())
+      }
+      refreshClaims += 1
+      return refreshClaims === 1
         ? Effect.fail(
-            new ClaimError({ queue: JOBS_QUEUE, message: "temporarily down" }),
+            new ClaimError({
+              queue: ISSUE_REFRESH_QUEUE,
+              message: "temporarily down",
+            }),
           )
-        : Effect.succeed(claims === 2 ? Option.some(job) : Option.none())
+        : Effect.succeed(refreshClaims === 2 ? Option.some(job) : Option.none())
     }
 
     await runScoped(
@@ -676,7 +781,7 @@ describe("Job worker", () => {
           Effect.forkScoped({ startImmediately: true }),
         )
         yield* Deferred.await(acknowledged)
-        expect(claims).toBe(2)
+        expect(refreshClaims).toBe(2)
       }),
       Layer.mergeAll(
         queueLayer(
@@ -737,6 +842,58 @@ describe("Job worker", () => {
         dbLayer(),
         reconciler,
       ),
+    )
+  })
+
+  test("transfers persisted Refresh Jobs into the issue-refresh queue once", async () => {
+    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+    const layer = Layer.mergeAll(database, queue)
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* QueueService
+        const retainedId = yield* service.enqueue(
+          JOBS_QUEUE,
+          {
+            _tag: "refresh-repository",
+            repositoryId: RepositoryId.make(repository.id),
+          },
+          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+        )
+        const lifecycleId = yield* service.enqueue(
+          JOBS_QUEUE,
+          WorkItemStepJob.make({ stepRunId: makeStepRunId() }),
+          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+        )
+
+        const moved = yield* transferPersistedRefreshJobs
+        expect(moved).toBe(1)
+        const movedAgain = yield* transferPersistedRefreshJobs
+        expect(movedAgain).toBe(0)
+
+        const fromLifecycle = yield* service.rawClaim(JOBS_QUEUE)
+        expect(Option.isSome(fromLifecycle)).toBe(true)
+        if (Option.isSome(fromLifecycle)) {
+          expect(fromLifecycle.value.jobId).toBe(lifecycleId)
+          expect(fromLifecycle.value.payload).toMatchObject({
+            _tag: "work-item-step",
+          })
+        }
+
+        const fromRefresh = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
+        expect(Option.isSome(fromRefresh)).toBe(true)
+        if (Option.isSome(fromRefresh)) {
+          expect(fromRefresh.value.jobId).toBe(retainedId)
+          expect(fromRefresh.value.payload).toEqual({
+            _tag: "refresh-repository",
+            repositoryId: repository.id,
+          })
+        }
+
+        const noDuplicate = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
+        expect(Option.isNone(noDuplicate)).toBe(true)
+      }).pipe(Effect.provide(layer), Effect.orDie),
     )
   })
 })

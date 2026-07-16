@@ -702,6 +702,51 @@ describe("SqliteQueueService", () => {
           expect(jobId).not.toBe(zeroDelayId)
         }),
       ))
+
+    it("moves jobs by payload tag between queues without duplication", () =>
+      runTest(
+        Effect.gen(function* () {
+          const queue = yield* QueueService
+          const refreshId = yield* queue.enqueue("from-queue", {
+            _tag: "refresh-repository",
+            repositoryId: "repo-1",
+          })
+          const otherId = yield* queue.enqueue("from-queue", {
+            _tag: "work-item-step",
+            stepRunId: "srun-1",
+          })
+
+          const moved = yield* queue.requeueByPayloadTag(
+            "from-queue",
+            "to-queue",
+            "refresh-repository",
+          )
+          expect(moved).toBe(1)
+          expect(
+            yield* queue.requeueByPayloadTag(
+              "from-queue",
+              "to-queue",
+              "refresh-repository",
+            ),
+          ).toBe(0)
+
+          const remaining = yield* queue.rawClaim("from-queue")
+          expect(Option.isSome(remaining)).toBe(true)
+          if (Option.isSome(remaining)) {
+            expect(remaining.value.jobId).toBe(otherId)
+          }
+
+          const transferred = yield* queue.rawClaim("to-queue")
+          expect(Option.isSome(transferred)).toBe(true)
+          if (Option.isSome(transferred)) {
+            expect(transferred.value.jobId).toBe(refreshId)
+            expect(transferred.value.payload).toEqual({
+              _tag: "refresh-repository",
+              repositoryId: "repo-1",
+            })
+          }
+        }),
+      ))
   })
 
   describe("queue name validation", () => {

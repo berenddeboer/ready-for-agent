@@ -7,13 +7,14 @@
 - Database is Turso database (sqlite)
 - Backend is Effect TS
 - Services are implemented as Effect TS
-- The application runtime hosts a scoped job worker service whose Effect fibers handle jobs; see `docs/adr/0007-host-job-worker-in-harness.md`
-- Every job implementation is an Effect; the job worker composes and runs those Effects for work claimed from the database queue
-- A tagged payload in the shared `jobs` queue selects the Job Effect; the worker owns claim, decoding, dispatch, acknowledgement, and failure handling
-- UI is responsive: anything that takes long is put in a queue and handled by the job worker
+- The application runtime hosts scoped job worker fibers; see `docs/adr/0007-host-job-worker-in-harness.md` and `docs/adr/0019-serialize-issue-polling-with-keyed-recurring-jobs.md`
+- Every job implementation is an Effect; workers compose and run those Effects for work claimed from the database queue
+- Work Item lifecycle jobs use the `jobs` queue; manual Refresh Jobs use the high-priority `issue-refresh` queue. Independent workers claim each queue; Issue Refresh Jobs execute serially on the polling lane while lifecycle work may run in parallel
+- UI is responsive: anything that takes long is put in a queue and handled by the job workers
 - Successful Issue reconciliation publishes a Repository-specific issues invalidation and a repositories invalidation so subscribed clients refetch Issues and `issuesReconciledAt`; no client-facing job history or status snapshots are maintained
-- The first worker executes one job at a time with five-minute claim visibility; job failures are terminal, while an abandoned claim may be redelivered once after interruption
-- The scoped worker polls about every 1.5s while idle (Effect `Schedule.spaced` + `Schedule.jittered`, ~0.8–1.2×) and logs and recovers from queue infrastructure errors instead of permanently terminating its fiber
+- Each worker executes one job at a time with five-minute claim visibility; Refresh Job reconciliation failures are terminal, while an abandoned claim may be redelivered once after interruption
+- Workers poll about every 1.5s while idle (Effect `Schedule.spaced` + `Schedule.jittered`, ~0.8–1.2×) and log and recover from queue infrastructure errors instead of permanently terminating their fibers
+- On startup, any persisted `refresh-repository` rows still on `jobs` are moved once into `issue-refresh` so they are not dropped, duplicated, or claimed by both workers
 - Queue methods acquire their SQL dependency when constructing the queue layer and return self-contained Effects; complete issue #13 before implementing the worker
 - Public Job IDs use the canonical `qjob-<ULID>` format
 - Prefer Bun APIs.
