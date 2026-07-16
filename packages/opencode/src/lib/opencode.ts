@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, Layer, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Ref, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { buildRunArgs } from "./build-args.js"
@@ -53,59 +53,58 @@ export class Opencode extends Context.Service<
           keymaxxerMcpUrl: options.keymaxxerMcpUrl,
         })
 
-        const listModels = (
+        const listModels = Effect.fn("Opencode.listModels")(function* (
           input: ListModelsInput,
-        ): Effect.Effect<ReadonlyArray<string>, OpencodeError> =>
-          Effect.gen(function* () {
-            const timeout = input.timeout ?? defaultTimeout
-            const timeoutMs = Duration.toMillis(timeout)
-            const command = ChildProcess.make(binary, ["models"], {
-              cwd: input.cwd,
-              env: environment,
-              extendEnv: false,
-              stdin: "ignore",
-              stderr: "ignore",
-            })
-
-            const result = yield* Effect.scoped(
-              Effect.gen(function* () {
-                const handle = yield* spawner.spawn(command)
-                const collectModels = Stream.decodeText(handle.stdout).pipe(
-                  Stream.splitLines,
-                  Stream.runFold(
-                    (): ReadonlyArray<string> => [],
-                    (models, line) => {
-                      const model = line.trim()
-                      return model.length === 0 ? models : [...models, model]
-                    },
-                  ),
-                )
-
-                const [exitCode, models] = yield* Effect.all(
-                  [handle.exitCode, collectModels],
-                  { concurrency: 2 },
-                )
-
-                return { exitCode: Number(exitCode), models }
-              }),
-            ).pipe(
-              Effect.timeout(timeout),
-              Effect.catchTag("TimeoutError", () =>
-                Effect.fail(
-                  new OpencodeTimeoutError({ cwd: input.cwd, timeoutMs }),
-                ),
-              ),
-            )
-
-            if (result.exitCode !== 0) {
-              return yield* new OpencodeExitError({
-                exitCode: result.exitCode,
-                cwd: input.cwd,
-              })
-            }
-
-            return result.models
+        ) {
+          const timeout = input.timeout ?? defaultTimeout
+          const timeoutMs = Duration.toMillis(timeout)
+          const command = ChildProcess.make(binary, ["models"], {
+            cwd: input.cwd,
+            env: environment,
+            extendEnv: false,
+            stdin: "ignore",
+            stderr: "ignore",
           })
+
+          const result = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const handle = yield* spawner.spawn(command)
+              const collectModels = Stream.decodeText(handle.stdout).pipe(
+                Stream.splitLines,
+                Stream.runFold(
+                  (): ReadonlyArray<string> => [],
+                  (models, line) => {
+                    const model = line.trim()
+                    return model.length === 0 ? models : [...models, model]
+                  },
+                ),
+              )
+
+              const [exitCode, models] = yield* Effect.all(
+                [handle.exitCode, collectModels],
+                { concurrency: 2 },
+              )
+
+              return { exitCode: Number(exitCode), models }
+            }),
+          ).pipe(
+            Effect.timeout(timeout),
+            Effect.catchTag("TimeoutError", () =>
+              Effect.fail(
+                new OpencodeTimeoutError({ cwd: input.cwd, timeoutMs }),
+              ),
+            ),
+          )
+
+          if (result.exitCode !== 0) {
+            return yield* new OpencodeExitError({
+              exitCode: result.exitCode,
+              cwd: input.cwd,
+            })
+          }
+
+          return result.models
+        })
 
         const run = (input: {
           readonly prompt: string
@@ -119,7 +118,7 @@ export class Opencode extends Context.Service<
             const timeout = input.timeout ?? defaultTimeout
             const timeoutMs = Duration.toMillis(timeout)
             const knownSessionId = input.sessionId
-            let seenSessionId: string | undefined = knownSessionId
+            const seenSessionId = yield* Ref.make(knownSessionId)
 
             const args = buildRunArgs({
               prompt: input.prompt,
@@ -143,24 +142,28 @@ export class Opencode extends Context.Service<
 
                 const collectOutput = Stream.decodeText(handle.stdout).pipe(
                   Stream.splitLines,
+                  Stream.map((line) => ({
+                    sessionId: parseSessionIdFromLine(line),
+                    text: parseAssistantTextFromLine(line),
+                  })),
+                  Stream.tap(({ sessionId }) =>
+                    sessionId === undefined
+                      ? Effect.void
+                      : Ref.set(seenSessionId, sessionId),
+                  ),
                   Stream.runFold(
                     (): { sessionId?: string; assistantText: string } => ({
                       assistantText: "",
                     }),
-                    (acc, line) => {
-                      const sessionId = parseSessionIdFromLine(line)
-                      if (sessionId !== undefined) {
-                        seenSessionId = sessionId
-                      }
-                      const text = parseAssistantTextFromLine(line)
+                    (acc, event) => {
                       return {
-                        sessionId: sessionId ?? acc.sessionId,
+                        sessionId: event.sessionId ?? acc.sessionId,
                         assistantText:
-                          text === undefined
+                          event.text === undefined
                             ? acc.assistantText
                             : acc.assistantText.length === 0
-                              ? text
-                              : `${acc.assistantText}\n${text}`,
+                              ? event.text
+                              : `${acc.assistantText}\n${event.text}`,
                       }
                     },
                   ),
@@ -180,14 +183,15 @@ export class Opencode extends Context.Service<
             ).pipe(
               Effect.timeout(timeout),
               Effect.catchTag("TimeoutError", () =>
-                Effect.fail(
-                  new OpencodeTimeoutError({
-                    cwd: input.cwd,
-                    timeoutMs,
-                    ...(seenSessionId !== undefined
-                      ? { sessionId: seenSessionId }
-                      : {}),
-                  }),
+                Ref.get(seenSessionId).pipe(
+                  Effect.flatMap(
+                    (sessionId) =>
+                      new OpencodeTimeoutError({
+                        cwd: input.cwd,
+                        timeoutMs,
+                        ...(sessionId !== undefined ? { sessionId } : {}),
+                      }),
+                  ),
                 ),
               ),
             )
@@ -213,8 +217,10 @@ export class Opencode extends Context.Service<
           })
 
         return {
-          start: (input) => run(input),
-          continue: (input) => run(input),
+          start: Effect.fn("Opencode.start")((input: StartInput) => run(input)),
+          continue: Effect.fn("Opencode.continue")((input: ContinueInput) =>
+            run(input),
+          ),
           listModels,
         }
       }),
