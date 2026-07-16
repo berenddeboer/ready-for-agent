@@ -1,4 +1,5 @@
 import { Effect, FileSystem } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { DbService } from "@ready-for-agent/db-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import {
@@ -10,6 +11,31 @@ import {
 } from "./implement-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
+
+const persistSessionIdMidRun = (
+  workItemId: string,
+  sessionId: string,
+): Effect.Effect<void, never, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `UPDATE work_item
+       SET session_id = ?, updated_at = ?
+       WHERE id = ?
+         AND (session_id IS NULL OR session_id = '' OR session_id = ?)`,
+      [sessionId, now, workItemId, sessionId],
+    )
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Failed to persist OpenCode session id mid-implement", {
+        workItemId,
+        sessionId,
+        error,
+      }),
+    ),
+    Effect.asVoid,
+  )
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -106,6 +132,7 @@ export const implement = (context: LifecycleStepContext) =>
     )
 
     const opencode = yield* Opencode
+    const sql = yield* SqlClient.SqlClient
     // Always start a fresh Session. Ignore any prior context.sessionId from
     // setup, dependency installation, or a previous failed Step Run.
     const result = yield* opencode
@@ -116,6 +143,10 @@ export const implement = (context: LifecycleStepContext) =>
         variant: context.variant,
         timeout:
           context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
+        onSessionId: (sessionId) =>
+          persistSessionIdMidRun(context.workItemId, sessionId).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          ),
       })
       .pipe(
         Effect.mapError(

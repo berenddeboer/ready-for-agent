@@ -113,12 +113,14 @@ export class Opencode extends Context.Service<
           readonly variant: string
           readonly sessionId?: string
           readonly timeout?: Duration.Input
+          readonly onSessionId?: StartInput["onSessionId"]
         }): Effect.Effect<OpencodeRunResult, OpencodeError> =>
           Effect.gen(function* () {
             const timeout = input.timeout ?? defaultTimeout
             const timeoutMs = Duration.toMillis(timeout)
             const knownSessionId = input.sessionId
             const seenSessionId = yield* Ref.make(knownSessionId)
+            const sessionIdNotified = yield* Ref.make(false)
 
             const args = buildRunArgs({
               prompt: input.prompt,
@@ -149,7 +151,28 @@ export class Opencode extends Context.Service<
                   Stream.tap(({ sessionId }) =>
                     sessionId === undefined
                       ? Effect.void
-                      : Ref.set(seenSessionId, sessionId),
+                      : Effect.gen(function* () {
+                          yield* Ref.set(seenSessionId, sessionId)
+                          const alreadyNotified = yield* Ref.getAndSet(
+                            sessionIdNotified,
+                            true,
+                          )
+                          if (
+                            alreadyNotified ||
+                            input.onSessionId === undefined
+                          ) {
+                            return
+                          }
+                          yield* input.onSessionId(sessionId).pipe(
+                            Effect.catch((error) =>
+                              Effect.logWarning(
+                                "OpenCode onSessionId observer failed",
+                                { sessionId, error },
+                              ),
+                            ),
+                            Effect.forkDetach({ startImmediately: true }),
+                          )
+                        }),
                   ),
                   Stream.runFold(
                     (): { sessionId?: string; assistantText: string } => ({
