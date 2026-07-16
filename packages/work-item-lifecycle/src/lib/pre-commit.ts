@@ -11,9 +11,6 @@ import {
 } from "./pre-commit-errors.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
-/** Max hook output chars embedded in the OpenCode CLI prompt (avoids spawn E2BIG). */
-export const HOOK_OUTPUT_PROMPT_LIMIT = 12_000
-
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = context.worktreePath
@@ -92,16 +89,6 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     )
   })
 
-const truncateHookOutputForPrompt = (output: string): string => {
-  if (output.length === 0) {
-    return "(no output)"
-  }
-  if (output.length <= HOOK_OUTPUT_PROMPT_LIMIT) {
-    return output
-  }
-  return `…${output.slice(-(HOOK_OUTPUT_PROMPT_LIMIT - 1))}`
-}
-
 const writeHookOutputLog = (workItemId: string, output: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
@@ -114,16 +101,17 @@ const writeHookOutputLog = (workItemId: string, output: string) =>
     return logPath
   })
 
-const buildFixPrompt = (exitCode: number, output: string, logPath: string) =>
+const buildFixPrompt = (exitCode: number, logPath: string) =>
   [
     "The repository pre-commit hook failed after staging the worktree changes.",
     `Exit code: ${exitCode}`,
     `Full hook output is at: ${logPath}`,
-    "Read that file if you need more context than the tail below.",
-    "Hook output (tail if truncated):",
-    truncateHookOutputForPrompt(output),
-    "Diagnose and fix the failures in this worktree so pre-commit can pass.",
-    "Run the same checks the hook runs when practical, then fix the underlying issues.",
+    "Do not read that log or re-run the pre-commit hook in this main session — hook output is noisy and must stay out of the main context.",
+    "Delegate to a sub-agent that:",
+    "1. Reads the log and/or runs `git hook run --ignore-missing pre-commit` in this worktree",
+    "2. Returns only a concise summary of what failed and what to fix (no raw hook logs)",
+    "Use that summary to diagnose and fix the failures in this worktree so pre-commit can pass.",
+    "When re-checking, use a sub-agent again for the same reason; only bring back pass/fail plus a short failure summary.",
     "Do not create a git commit or open a pull request.",
   ].join("\n")
 
@@ -141,7 +129,7 @@ const askOpencodeToFix = (
       yield* opencode
         .continue({
           sessionId,
-          prompt: buildFixPrompt(exitCode, output, logPath),
+          prompt: buildFixPrompt(exitCode, logPath),
           cwd: worktreePath,
           model: context.model,
           variant: context.variant,
@@ -167,9 +155,11 @@ const askOpencodeToFix = (
  * Production Pre-Commit Lifecycle Step.
  * Stages all worktree changes then runs the repository pre-commit hook via
  * `git hook run --ignore-missing pre-commit`. Missing hooks succeed. A failing
- * hook continues the Implement OpenCode Session with the hook output, then
- * re-stages and re-runs until the hook passes (bounded by the step max
- * duration). OpenCode or stage failures fail the Step Run.
+ * hook writes full output to a temp log, continues the Implement OpenCode
+ * Session with instructions to diagnose via a sub-agent (keeping raw hook
+ * logs out of the main context), then re-stages and re-runs until the hook
+ * passes (bounded by the step max duration). OpenCode or stage failures fail
+ * the Step Run.
  */
 export const preCommit = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
