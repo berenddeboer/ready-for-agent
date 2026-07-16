@@ -1,0 +1,5 @@
+# Serialize Issue polling with keyed recurring jobs
+
+Harness hosts one dedicated Issue polling worker for the supported single-process deployment, checking a high-priority manual queue before a scheduled queue so manual and scheduled Refresh Jobs never overlap while Work Item lifecycle jobs remain independent. Each credentialed Repository has one database-unique keyed recurring queue entry that is postponed for 120 seconds plus uniform 0-30 second jitter after every scheduled attempt, successful or failed; this avoids both successor-job crash gaps and a separate scheduling store, while accepting strict-priority starvation and no cross-process serialization.
+
+Repository credential activation also enqueues a high-priority first Refresh Job, credential removal suspends the recurring entry, and manual requests remain distinct one-shot jobs that neither retry nor alter cadence. Harness startup quickly enqueues a high-priority Polling Auto-heal Job rather than blocking readiness; that job retries with backoff until it has added missing entries and removed entries for deleted or uncredentialed Repositories.

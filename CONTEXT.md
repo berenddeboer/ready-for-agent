@@ -9,7 +9,7 @@ A GitHub repository the harness is configured to work on, identified by owner an
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **Paused**:
-A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused. Not the same as a paused Work Item (see Pause Work Item).
+A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Keeping the Issue store current through scheduled polling continues while Paused. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused. Not the same as a paused Work Item (see Pause Work Item).
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
@@ -34,6 +34,14 @@ _Avoid_: GitHub Reconciler (too broad), Issue Synchronizer (suggests bidirection
 **Refresh Job**:
 A durable request for the Issue Reconciler to reconcile one Repository. Acceptance of a Refresh Job does not mean reconciliation has completed.
 _Avoid_: Refresh (ambiguous between the request and its execution), sync job
+
+**Issue Polling**:
+The autonomous recurring initiation of Issue reconciliation for every credentialed Repository, including Paused Repositories. Adding a Repository's matching GitHub credential through the Harness activates polling; removing it suspends polling. Polling is serial: only one scheduled or manual Refresh Job executes at a time. A Repository's next scheduled attempt becomes eligible 120 to 150 seconds after its previous scheduled attempt finishes, whether that attempt succeeded or failed. Manual Refresh Jobs take precedence over scheduled attempts but neither interrupt a running attempt nor alter the Repository's polling cadence.
+_Avoid_: Issue synchronization (suggests bidirectional updates), refresh interval (ambiguous about eligibility and execution)
+
+**Polling Auto-heal Job**:
+A durable high-priority startup request that makes the active Issue Polling set exactly match the Harness's credentialed Repositories, adding missing polling schedules and removing schedules for deleted or uncredentialed Repositories. It retries with backoff until reconciliation succeeds without delaying Harness startup.
+_Avoid_: Issue reconciliation (changes the Issue store), startup migration (runs on every startup and may depend on external credentials)
 
 **Keymaxxer Service**:
 The backend boundary for vault operations. It can determine whether a named secret exists, request that a secret be added, and run a command with named secrets injected without exposing raw secret values to the Harness.
