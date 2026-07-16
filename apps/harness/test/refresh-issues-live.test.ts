@@ -15,6 +15,7 @@ describe("Repository Issue live-query coordination", () => {
     let otherIssuesFetches = 0
     let selectedWorkItemsFetches = 0
     let otherWorkItemsFetches = 0
+    const changedRepositoryIds: string[] = []
     let issuesReconciledAt: string | null = null
     let selectedIssues = [
       {
@@ -73,6 +74,9 @@ describe("Repository Issue live-query coordination", () => {
     const controller = new AbortController()
     const live = followRepositoryIssuesLive({
       getRepositoryIds: () => [repositoryId, otherRepositoryId],
+      onRepositoryChanged: (changedRepositoryId) => {
+        changedRepositoryIds.push(changedRepositoryId)
+      },
       queryClient,
       queries,
       signal: controller.signal,
@@ -138,6 +142,7 @@ describe("Repository Issue live-query coordination", () => {
     expect(selectedWorkItemsFetches).toBeGreaterThan(
       fetchesBeforeInvalidation.selectedWorkItems,
     )
+    expect(changedRepositoryIds).toEqual([repositoryId])
     // Initial connection refetches both displayed Repositories, but the
     // selected invalidation does not refetch the other Repository again.
     expect(otherIssuesFetches).toBe(1)

@@ -27,6 +27,7 @@ export type RepositoryIssuesLiveQueries = {
  */
 export const followRepositoryIssuesLive = async ({
   getRepositoryIds,
+  onRepositoryChanged,
   queryClient,
   queries,
   signal,
@@ -35,6 +36,7 @@ export const followRepositoryIssuesLive = async ({
   retryDelayMs = 1_000,
 }: {
   getRepositoryIds: () => readonly string[]
+  onRepositoryChanged?: (repositoryId: string) => void
   queryClient: QueryClient
   queries: RepositoryIssuesLiveQueries
   signal: AbortSignal
@@ -54,6 +56,7 @@ export const followRepositoryIssuesLive = async ({
   }
 
   const refresh = async (repositoryId: string) => {
+    onRepositoryChanged?.(repositoryId)
     await Promise.all([
       fetchFresh(queries.repositories),
       fetchFresh(queries.issues(repositoryId)),
