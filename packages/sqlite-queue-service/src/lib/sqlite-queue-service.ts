@@ -494,6 +494,37 @@ export const SqliteQueueServiceLive = Layer.effect(
               | undefined) ?? { pending: 0, processing: 0, deadLetter: 0 }
           )
         }),
+      requeueByPayloadTag: (
+        fromQueue: string,
+        toQueue: string,
+        payloadTag: string,
+      ) =>
+        Effect.gen(function* () {
+          yield* validateQueueName(fromQueue)
+          yield* validateQueueName(toQueue)
+          if (fromQueue === toQueue) return 0
+          const now = Date.now()
+          const rows = yield* retrySqliteBusy(
+            sql.unsafe(
+              `UPDATE job_queue
+               SET queue = ?, updated_at = ?
+               WHERE queue = ?
+                 AND json_extract(job_payload, '$._tag') = ?
+               RETURNING id`,
+              [toQueue, now, fromQueue, payloadTag],
+            ),
+          ).pipe(
+            Effect.mapError(
+              (error) =>
+                new EnqueueError({
+                  queue: toQueue,
+                  message: `Database error: ${formatSqlError(error)}`,
+                  cause: error,
+                }),
+            ),
+          )
+          return rows.length
+        }),
     })
   }),
 )

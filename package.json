@@ -7,7 +7,7 @@
     "harness-cli": "bun nx run cli:run --",
     "knip": "knip --no-config-hints",
     "lint": "biome check .",
-    "prepare": "bash scripts/install-git-hooks.sh && effect-tsgo patch"
+    "prepare": "bash scripts/install-git-hooks.sh && effect-tsgo patch && node scripts/fix-bun-typescript-for-nx.mjs"
   },
   "private": true,
   "dependencies": {},

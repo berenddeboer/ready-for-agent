@@ -243,6 +243,17 @@ export interface QueueServiceShape {
   readonly getStats: (
     queue: string,
   ) => Effect.Effect<QueueStats, InvalidQueueNameError>
+
+  /**
+   * Move all jobs whose payload `_tag` matches from one queue to another.
+   * Preserves job identity and remaining columns. Idempotent when none match.
+   * Returns the number of jobs moved.
+   */
+  readonly requeueByPayloadTag: (
+    fromQueue: string,
+    toQueue: string,
+    payloadTag: string,
+  ) => Effect.Effect<number, EnqueueError | InvalidQueueNameError>
 }
 
 export class QueueService extends Context.Service<

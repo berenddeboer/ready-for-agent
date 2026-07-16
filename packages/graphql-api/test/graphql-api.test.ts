@@ -165,6 +165,7 @@ const makeRuntime = (
     fail: () => Effect.die("not used"),
     extendVisibility: () => Effect.die("not used"),
     getStats: () => Effect.die("not used"),
+    requeueByPayloadTag: () => Effect.succeed(0),
     ...queueOverrides,
   }
   const lifecycle: WorkItemLifecycleShape = {
@@ -313,7 +314,7 @@ describe("GraphQL API", () => {
       },
     })
     expect(enqueued).toEqual({
-      queue: "jobs",
+      queue: "issue-refresh",
       payload: {
         _tag: "refresh-repository",
         repositoryId: repository.id,
@@ -368,7 +369,7 @@ describe("GraphQL API", () => {
         enqueue: () =>
           Effect.fail(
             new EnqueueError({
-              queue: "jobs",
+              queue: "issue-refresh",
               message: "queue unavailable",
             }),
           ),
@@ -1657,7 +1658,7 @@ describe("GraphQL API", () => {
     expect(repository.paused).toBe(true)
     expect(reconcilerCalled).toBe(false)
     expect(enqueued).toEqual({
-      queue: "jobs",
+      queue: "issue-refresh",
       payload: {
         _tag: "refresh-repository",
         repositoryId: repository.id,
@@ -1761,7 +1762,7 @@ describe("GraphQL API", () => {
         enqueue: () =>
           Effect.fail(
             new EnqueueError({
-              queue: "jobs",
+              queue: "issue-refresh",
               message: "queue unavailable",
             }),
           ),
