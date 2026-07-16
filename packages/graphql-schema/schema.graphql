@@ -86,26 +86,37 @@ enum WorkItemState {
   NEEDS_HUMAN
 }
 
-enum StepRunStatus {
+enum WorkItemStatus {
   QUEUED
   RUNNING
   SUCCEEDED
   FAILED
   INTERRUPTED
   CANCELLED
+  COMPLETE
+  ABANDONED
+  NEEDS_HUMAN
 }
 
-type StepRun {
-  id: ID!
-  step: WorkItemState!
-  status: StepRunStatus!
-  queuedAt: String!
-  startedAt: String
-  finishedAt: String
-  reasonCode: String
-  reasonMessage: String
-  queueWaitMs: Float!
-  executionDurationMs: Float
+enum LifecyclePhase {
+  CREATE_WORKTREE
+  INSTALL_DEPENDENCIES
+  IMPLEMENT
+  PRE_COMMIT
+  REVIEW
+  COMMIT
+  CREATE_PR
+  RESOLVE_PR_MERGE_CONFLICT
+  GITHUB_STATUS_CHECKS
+  MARK_PR_READY_FOR_REVIEW
+  DECIDE_PR_MERGE
+  MERGE_PR
+}
+
+type LifecycleLabel {
+  phase: LifecyclePhase!
+  label: String!
+  status: WorkItemStatus!
 }
 
 type WorkItem {
@@ -116,15 +127,20 @@ type WorkItem {
   model: String!
   variant: String!
   state: WorkItemState!
+  stateLabel: String!
+  status: WorkItemStatus!
+  statusLabel: String!
+  statusMessage: String
+  canRetry: Boolean!
+  isTerminal: Boolean!
   stateReadyAt: String!
   worktreePath: String
   sessionId: String
   failureCode: String
-  failureMessage: String
   createdAt: String!
   updatedAt: String!
   stateResidenceMs: Float!
-  stepRuns: [StepRun!]!
+  lifecycleLabels: [LifecycleLabel!]!
 }
 
 input AddRepositoryInput {

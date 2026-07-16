@@ -161,27 +161,34 @@ type WorkItemState =
   | "ABANDONED"
   | "NEEDS_HUMAN"
 
-type StepRunStatus =
+type WorkItemStatus =
   | "QUEUED"
   | "RUNNING"
   | "SUCCEEDED"
   | "FAILED"
   | "INTERRUPTED"
   | "CANCELLED"
+  | "COMPLETE"
+  | "ABANDONED"
+  | "NEEDS_HUMAN"
 
 type WorkItem = {
   id: string
   repositoryId: string
   githubIssueNumber: number
   state: WorkItemState
+  stateLabel: string
+  status: WorkItemStatus
+  statusLabel: string
+  statusMessage: string | null
+  canRetry: boolean
+  isTerminal: boolean
   sessionId: string | null
-  failureMessage: string | null
   createdAt: string
-  stepRuns: readonly {
-    id: string
-    step: WorkItemState
-    status: StepRunStatus
-    reasonMessage: string | null
+  lifecycleLabels: readonly {
+    phase: string
+    label: string
+    status: WorkItemStatus
   }[]
 }
 
@@ -190,14 +197,18 @@ const workItemFields = {
   repositoryId: true,
   githubIssueNumber: true,
   state: true,
+  stateLabel: true,
+  status: true,
+  statusLabel: true,
+  statusMessage: true,
+  canRetry: true,
+  isTerminal: true,
   sessionId: true,
-  failureMessage: true,
   createdAt: true,
-  stepRuns: {
-    id: true,
-    step: true,
+  lifecycleLabels: {
+    phase: true,
+    label: true,
     status: true,
-    reasonMessage: true,
   },
 } as const
 
@@ -213,71 +224,6 @@ const workItemsQuery = (repositoryId: string) => ({
     return result.workItems
   },
 })
-
-const terminalWorkItemStates: readonly WorkItemState[] = [
-  "COMPLETE",
-  "FAILED",
-  "ABANDONED",
-  "NEEDS_HUMAN",
-]
-
-const formatLifecycleLabel = (value: string) => {
-  if (value.toLowerCase() === "watch_pr_status_checks") {
-    return "GitHub status checks"
-  }
-  if (value.toLowerCase() === "resolve_pr_merge_conflict") {
-    return "Resolve PR merge conflict"
-  }
-  if (value.toLowerCase() === "mark_pr_ready_for_review") {
-    return "Mark PR ready for review"
-  }
-  if (value.toLowerCase() === "decide_pr_merge") {
-    return "Decide PR merge"
-  }
-  if (value.toLowerCase() === "merge_pr") {
-    return "Merge PR"
-  }
-  return value
-    .toLowerCase()
-    .replaceAll("_", " ")
-    .replace(/^./, (first) => first.toUpperCase())
-}
-
-const formatStepRunOutcome = (
-  stepRun: WorkItem["stepRuns"][number],
-  workItemState: WorkItemState,
-) => {
-  if (stepRun.step === "DECIDE_PR_MERGE" && stepRun.status === "SUCCEEDED") {
-    return workItemState === "NEEDS_HUMAN"
-      ? "Human review before merge"
-      : "Clanker may merge"
-  }
-  if (stepRun.step === "MERGE_PR" && stepRun.status === "SUCCEEDED") {
-    return "Merged"
-  }
-  return formatLifecycleLabel(stepRun.status)
-}
-
-const formatStepRunLabel = (
-  stepRun: WorkItem["stepRuns"][number],
-  workItemState: WorkItemState,
-) =>
-  `${formatLifecycleLabel(stepRun.step)}: ${formatStepRunOutcome(stepRun, workItemState)}`
-
-const collapseSuccessiveStepRuns = (
-  stepRuns: WorkItem["stepRuns"],
-  workItemState: WorkItemState,
-) => {
-  const collapsed: WorkItem["stepRuns"][number][] = []
-  let previousLabel: string | undefined
-  for (const stepRun of stepRuns) {
-    const label = formatStepRunLabel(stepRun, workItemState)
-    if (label === previousLabel) continue
-    collapsed.push(stepRun)
-    previousLabel = label
-  }
-  return collapsed
-}
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -1161,8 +1107,7 @@ function RepositoryIssueRow({
   )
   const latestWorkItem = issueWorkItems.at(-1)
   const hasUnfinishedWorkItem =
-    latestWorkItem !== undefined &&
-    !terminalWorkItemStates.includes(latestWorkItem.state)
+    latestWorkItem !== undefined && !latestWorkItem.isTerminal
   const canImplement =
     isActionable && !workItemsLoading && !hasUnfinishedWorkItem
   const implementNow = useMutation({
@@ -1307,10 +1252,9 @@ function RepositoryJobs({ repositoryId }: { repositoryId: string }) {
     ...workItemsQuery(repositoryId),
     refetchInterval: ({ state }) => {
       const items = state.data as readonly WorkItem[] | undefined
-      return items?.some((item) => {
-        const latestRun = item.stepRuns.at(-1)
-        return latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING"
-      })
+      return items?.some(
+        (item) => item.status === "QUEUED" || item.status === "RUNNING",
+      )
         ? 1_000
         : false
     },
@@ -1332,7 +1276,7 @@ function RepositoryJobs({ repositoryId }: { repositoryId: string }) {
               Issue #{workItem.githubIssueNumber}
             </span>
             <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
-              {formatLifecycleLabel(workItem.state)}
+              {workItem.stateLabel}
             </span>
           </div>
           {workItem.sessionId !== null && workItem.sessionId !== "" && (
@@ -1372,16 +1316,8 @@ function WorkItemLifecycleStatus({
   compact?: boolean
 }) {
   const queryClient = useQueryClient()
-  const latestRun = workItem.stepRuns.at(-1)
-  const isTerminal = terminalWorkItemStates.includes(workItem.state)
-  const status = isTerminal
-    ? workItem.state
-    : (latestRun?.status ?? workItem.state)
-  const message = workItem.failureMessage ?? latestRun?.reasonMessage
-  const canRetry =
-    compact &&
-    !isTerminal &&
-    (latestRun?.status === "FAILED" || latestRun?.status === "INTERRUPTED")
+  const status = workItem.status
+  const canRetry = compact && workItem.canRetry
   const canReset = compact
   const retry = useMutation({
     mutationFn: async () => {
@@ -1431,7 +1367,7 @@ function WorkItemLifecycleStatus({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-semibold text-slate-700">
-          {formatLifecycleLabel(workItem.state)}
+          {workItem.stateLabel}
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase ${
@@ -1446,28 +1382,28 @@ function WorkItemLifecycleStatus({
                     : "bg-blue-100 text-blue-700"
           }`}
         >
-          {formatLifecycleLabel(status)}
+          {workItem.statusLabel}
         </span>
       </div>
-      {workItem.stepRuns.length > 0 && (
+      {workItem.lifecycleLabels.length > 0 && (
         <ol
           className="mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
           aria-label="Lifecycle steps"
         >
-          {collapseSuccessiveStepRuns(workItem.stepRuns, workItem.state).map(
-            (stepRun) => (
-              <li
-                className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
-                key={stepRun.id}
-              >
-                {formatStepRunLabel(stepRun, workItem.state)}
-              </li>
-            ),
-          )}
+          {workItem.lifecycleLabels.map((lifecycleLabel) => (
+            <li
+              className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
+              key={lifecycleLabel.phase}
+            >
+              {lifecycleLabel.label}
+            </li>
+          ))}
         </ol>
       )}
-      {message !== null && message !== undefined && (
-        <p className="mt-1.5 mb-0 text-xs text-red-700">{message}</p>
+      {workItem.statusMessage !== null && (
+        <p className="mt-1.5 mb-0 text-xs text-red-700">
+          {workItem.statusMessage}
+        </p>
       )}
       {(canReset || canRetry) && (
         <div className="mt-2 flex flex-wrap gap-2">
