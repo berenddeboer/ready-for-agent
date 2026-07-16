@@ -1,5 +1,5 @@
 import { connect } from "@tursodatabase/database"
-import { Context, Effect, Layer, Semaphore, Stream } from "effect"
+import { Context, Effect, Layer, Scope, Semaphore, Stream } from "effect"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
 import type { Connection } from "effect/unstable/sql/SqlConnection"
@@ -95,8 +95,16 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
     }
     const semaphore = yield* Semaphore.make(1)
     const acquirer = semaphore.withPermits(1)(Effect.succeed(connection))
-    const transactionAcquirer = semaphore.withPermits(1)(
-      Effect.succeed(connection),
+    const transactionAcquirer = Effect.uninterruptibleMask((restore) =>
+      Effect.withFiber((fiber) => {
+        const scope = Context.getUnsafe(fiber.context, Scope.Scope)
+        return Effect.as(
+          Effect.tap(restore(semaphore.take(1)), () =>
+            Scope.addFinalizer(scope, semaphore.release(1)),
+          ),
+          connection,
+        )
+      }),
     )
 
     return yield* Client.make({
