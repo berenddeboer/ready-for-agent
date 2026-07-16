@@ -151,6 +151,7 @@ type WorkItemState =
   | "COMMIT"
   | "CREATE_PR"
   | "WATCH_PR_STATUS_CHECKS"
+  | "RESOLVE_PR_MERGE_CONFLICT"
   | "INVESTIGATE_PR_STATUS_CHECKS"
   | "MARK_PR_READY_FOR_REVIEW"
   | "DECIDE_PR_MERGE"
@@ -223,6 +224,9 @@ const terminalWorkItemStates: readonly WorkItemState[] = [
 const formatLifecycleLabel = (value: string) => {
   if (value.toLowerCase() === "watch_pr_status_checks") {
     return "GitHub status checks"
+  }
+  if (value.toLowerCase() === "resolve_pr_merge_conflict") {
+    return "Resolve PR merge conflict"
   }
   if (value.toLowerCase() === "mark_pr_ready_for_review") {
     return "Mark PR ready for review"

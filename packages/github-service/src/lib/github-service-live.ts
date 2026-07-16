@@ -36,6 +36,8 @@ interface GitHubApiPullRequest {
   readonly state: unknown
   readonly merged: unknown
   readonly headRefOid?: unknown
+  readonly baseRefName: unknown
+  readonly mergeable: unknown
   readonly statusCheckRollup: { readonly state: unknown } | null
 }
 
@@ -58,10 +60,38 @@ const toPullRequestCheckStatus = (
   terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks,
 ): PullRequestCheckStatus => {
   if (pullRequest === null || pullRequest === undefined) {
-    return { _tag: "pending", terminalChecks: emptyTerminalChecks }
+    return {
+      _tag: "pending",
+      terminalChecks: emptyTerminalChecks,
+      mergeability: "unknown",
+      baseRefName: null,
+    }
   }
+  if (
+    typeof pullRequest.baseRefName !== "string" ||
+    pullRequest.baseRefName.trim() === ""
+  ) {
+    throw new Error("Invalid GitHub pull request base ref name")
+  }
+  const mergeability =
+    pullRequest.mergeable === "MERGEABLE"
+      ? "mergeable"
+      : pullRequest.mergeable === "CONFLICTING"
+        ? "conflicting"
+        : pullRequest.mergeable === "UNKNOWN"
+          ? "unknown"
+          : null
+  if (mergeability === null) {
+    throw new Error(
+      `Invalid GitHub pull request mergeability: ${pullRequest.mergeable}`,
+    )
+  }
+  const snapshot = {
+    mergeability,
+    baseRefName: pullRequest.baseRefName,
+  } as const
   if (pullRequest.merged === true) {
-    return { _tag: "succeeded", terminalChecks }
+    return { _tag: "succeeded", terminalChecks, ...snapshot }
   }
   if (pullRequest.merged !== false) {
     throw new Error(
@@ -69,23 +99,23 @@ const toPullRequestCheckStatus = (
     )
   }
   if (pullRequest.state === "CLOSED") {
-    return { _tag: "closed" }
+    return { _tag: "closed", ...snapshot }
   }
   if (pullRequest.state !== "OPEN") {
     throw new Error(`Invalid GitHub pull request state: ${pullRequest.state}`)
   }
   if (pullRequest.statusCheckRollup === null) {
-    return { _tag: "no_checks" }
+    return { _tag: "no_checks", ...snapshot }
   }
   const state = pullRequest.statusCheckRollup.state
   if (state === "SUCCESS") {
-    return { _tag: "succeeded", terminalChecks }
+    return { _tag: "succeeded", terminalChecks, ...snapshot }
   }
   if (state === "FAILURE" || state === "ERROR") {
-    return { _tag: "failed", terminalChecks }
+    return { _tag: "failed", terminalChecks, ...snapshot }
   }
   if (state === "EXPECTED" || state === "PENDING") {
-    return { _tag: "pending", terminalChecks }
+    return { _tag: "pending", terminalChecks, ...snapshot }
   }
   throw new Error(`Invalid GitHub status check state: ${state}`)
 }
@@ -610,6 +640,8 @@ export const makeGitHubService = (
                   state: true,
                   merged: true,
                   headRefOid: true,
+                  baseRefName: true,
+                  mergeable: true,
                   // Aggregate only: individual CheckRun GraphQL nodes require
                   // the Checks API, which fine-grained PATs cannot use.
                   statusCheckRollup: {
@@ -631,7 +663,12 @@ export const makeGitHubService = (
       const pullRequest = (result.repository.pullRequests.nodes?.[0] ??
         null) as GitHubApiPullRequest | null
       if (pullRequest === null) {
-        return { _tag: "pending", terminalChecks: emptyTerminalChecks }
+        return {
+          _tag: "pending",
+          terminalChecks: emptyTerminalChecks,
+          mergeability: "unknown",
+          baseRefName: null,
+        }
       }
 
       let terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks

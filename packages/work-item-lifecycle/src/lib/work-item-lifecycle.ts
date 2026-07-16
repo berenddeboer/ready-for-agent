@@ -306,6 +306,8 @@ const nextOperationalStep = (
       return "watch_pr_status_checks"
     case "watch_pr_status_checks":
       return "watch_pr_status_checks"
+    case "resolve_pr_merge_conflict":
+      return "watch_pr_status_checks"
     case "investigate_pr_status_checks":
       return "watch_pr_status_checks"
     case "mark_pr_ready_for_review":
@@ -778,6 +780,14 @@ export const makeWorkItemLifecycleLive = (
             return steps.watchPrStatusChecks(context).pipe(
               Effect.flatMap((status) =>
                 Effect.gen(function* () {
+                  if (typeof status === "object") {
+                    return {
+                      handledCheckIds: status.retiredCheckIds,
+                      transition: {
+                        nextState: "resolve_pr_merge_conflict" as const,
+                      },
+                    }
+                  }
                   if (status === "handoff_needed") {
                     return {
                       transition: {
@@ -842,6 +852,21 @@ export const makeWorkItemLifecycleLive = (
                   }
                 }),
               ),
+            )
+          case "resolve_pr_merge_conflict":
+            return steps.resolvePrMergeConflict(context).pipe(
+              Effect.map((result) => ({
+                transition:
+                  result._tag === "processed"
+                    ? {
+                        nextState: "watch_pr_status_checks" as const,
+                        delay: PR_STATUS_CHECKS_POLL_DELAY,
+                      }
+                    : {
+                        nextState: "needs_human" as const,
+                        reason: result.reason,
+                      },
+              })),
             )
           case "investigate_pr_status_checks":
             return steps.investigatePrStatusChecks(context).pipe(

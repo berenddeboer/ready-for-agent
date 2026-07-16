@@ -77,7 +77,12 @@ const stubGitHub = (
     GitHubService.of({
       getOpenPullRequestNumber: () => Effect.succeed(321),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+        }),
       markPullRequestReadyForReview: () => Effect.void,
       listReadyIssues: () => Effect.succeed([]),
       ...overrides,
@@ -236,6 +241,10 @@ describe("createPr", () => {
       expect(continueInput!.prompt).toContain("Closes #2039")
       expect(continueInput!.prompt).toContain(
         "Create the pull request as a draft",
+      )
+      expect(continueInput!.prompt).toContain(resolvedBranch!)
+      expect(continueInput!.prompt).toContain(
+        "Do not create or switch to another branch",
       )
       expect(continueInput!.prompt).toContain(
         "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",

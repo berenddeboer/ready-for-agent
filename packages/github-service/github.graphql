@@ -42,6 +42,12 @@ enum PullRequestMergeMethod {
   REBASE
 }
 
+enum MergeableState {
+  CONFLICTING
+  MERGEABLE
+  UNKNOWN
+}
+
 type MergePullRequestPayload {
   clientMutationId: String
   pullRequest: PullRequest
@@ -71,6 +77,8 @@ type PullRequest {
   merged: Boolean!
   isDraft: Boolean!
   headRefOid: String!
+  baseRefName: String!
+  mergeable: MergeableState!
   statusCheckRollup: StatusCheckRollup
   repository: Repository!
 }

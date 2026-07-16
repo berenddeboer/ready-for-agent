@@ -26,6 +26,7 @@ export type OperationalLifecycleStep =
   | "commit"
   | "create_pr"
   | "watch_pr_status_checks"
+  | "resolve_pr_merge_conflict"
   | "investigate_pr_status_checks"
   | "mark_pr_ready_for_review"
   | "decide_pr_merge"
@@ -130,6 +131,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   commit: Duration.minutes(5),
   create_pr: Duration.minutes(10),
   watch_pr_status_checks: Duration.minutes(5),
+  resolve_pr_merge_conflict: Duration.hours(2),
   investigate_pr_status_checks: Duration.hours(2),
   mark_pr_ready_for_review: Duration.minutes(5),
   decide_pr_merge: Duration.minutes(15),

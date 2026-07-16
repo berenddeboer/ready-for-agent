@@ -51,15 +51,27 @@ const SerializedTerminalPrStatusCheck = Schema.Struct({
 const SerializedPullRequestCheckStatus = Schema.Union([
   Schema.TaggedStruct("pending", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+    baseRefName: Schema.NullOr(Schema.String),
   }),
-  Schema.TaggedStruct("no_checks", {}),
+  Schema.TaggedStruct("no_checks", {
+    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+    baseRefName: Schema.NullOr(Schema.String),
+  }),
   Schema.TaggedStruct("succeeded", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+    baseRefName: Schema.NullOr(Schema.String),
   }),
   Schema.TaggedStruct("failed", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+    baseRefName: Schema.NullOr(Schema.String),
   }),
-  Schema.TaggedStruct("closed", {}),
+  Schema.TaggedStruct("closed", {
+    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+    baseRefName: Schema.NullOr(Schema.String),
+  }),
 ])
 
 const requestError = (

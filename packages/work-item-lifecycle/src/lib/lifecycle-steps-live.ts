@@ -20,6 +20,7 @@ import {
 } from "./pr-status-checks.js"
 import { preCommit } from "./pre-commit.js"
 import { removeWorktree } from "./remove-worktree.js"
+import { resolvePrMergeConflict } from "./resolve-pr-merge-conflict.js"
 import { review } from "./review.js"
 
 /**
@@ -78,6 +79,8 @@ export const LifecycleStepsLive = Layer.effect(
       createPr: (context) => withServices(createPr(context)),
       watchPrStatusChecks: (context) =>
         withServices(watchPrStatusChecks(context)),
+      resolvePrMergeConflict: (context) =>
+        withServices(resolvePrMergeConflict(context)),
       investigatePrStatusChecks: (context) =>
         withServices(investigatePrStatusChecks(context)),
       markPrReadyForReview: (context) =>

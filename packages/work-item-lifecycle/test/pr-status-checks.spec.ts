@@ -19,11 +19,13 @@ import {
   type LifecycleStepContext,
   investigatePrStatusChecks,
   makeWorkItemId,
+  resolvePrMergeConflict,
   watchPrStatusChecks,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 const repository = makeRepositoryRecord({ localPath: "/repos/widgets" })
+const mergeable = { mergeability: "mergeable", baseRefName: "main" } as const
 
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
@@ -108,7 +110,11 @@ describe("PR status check steps", () => {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: (_repository, branch) => {
         requestedBranch = branch
-        return Effect.succeed({ _tag: "pending", terminalChecks: [] })
+        return Effect.succeed({
+          _tag: "pending",
+          terminalChecks: [],
+          ...mergeable,
+        })
       },
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
@@ -136,6 +142,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "pending",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "review", outcome: "green" },
               ],
@@ -147,6 +154,81 @@ describe("PR status check steps", () => {
     )
 
     expect(status).toBe("handoff_needed")
+  })
+
+  it("prioritizes a merge conflict and identifies every completed unhandled check for retirement", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const status = yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT id, handled_at FROM pr_status_check WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { id: string; handled_at: number | null }[]
+        return { status, rows }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              mergeability: "conflicting",
+              baseRefName: "develop",
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+                { externalId: "checkrun:2", name: "review", outcome: "green" },
+              ],
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.status).toEqual({
+      _tag: "conflict",
+      retiredCheckIds: result.rows.map((row) => row.id),
+    })
+    expect(result.rows.every((row) => row.handled_at === null)).toBe(true)
+  })
+
+  it("preserves unhandled checks while mergeability is unknown", async () => {
+    const statuses: PullRequestCheckStatus[] = [
+      {
+        _tag: "pending",
+        mergeability: "unknown",
+        baseRefName: "main",
+        terminalChecks: [
+          { externalId: "checkrun:1", name: "review", outcome: "green" },
+        ],
+      },
+      {
+        _tag: "pending",
+        ...mergeable,
+        terminalChecks: [],
+      },
+    ]
+    let index = 0
+    const github = Layer.succeed(GitHubService, {
+      listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed(statuses[index++] ?? statuses[1]!),
+      markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.void,
+    } satisfies GitHubServiceShape)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const unknown = yield* watchPrStatusChecks(context)
+        const known = yield* watchPrStatusChecks(context)
+        return { unknown, known }
+      }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
+    )
+
+    expect(result).toEqual({ unknown: "pending", known: "handoff_needed" })
   })
 
   it("does not re-hand off already handled checks and reports aggregate success", async () => {
@@ -166,6 +248,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "succeeded",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "unit", outcome: "green" },
               ],
@@ -183,12 +266,14 @@ describe("PR status check steps", () => {
     const statuses: PullRequestCheckStatus[] = [
       {
         _tag: "failed",
+        ...mergeable,
         terminalChecks: [
           { externalId: "checkrun:1", name: "lint", outcome: "red" },
         ],
       },
       {
         _tag: "failed",
+        ...mergeable,
         terminalChecks: [
           { externalId: "checkrun:1", name: "lint", outcome: "red" },
           { externalId: "checkrun:2", name: "lint", outcome: "red" },
@@ -240,6 +325,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "failed",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "lint", outcome: "red" },
                 { externalId: "checkrun:2", name: "unit", outcome: "red" },
@@ -286,6 +372,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "pending",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "review", outcome: "green" },
                 { externalId: "checkrun:2", name: "lint", outcome: "red" },
@@ -323,6 +410,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "failed",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "deploy", outcome: "red" },
               ],
@@ -342,6 +430,64 @@ describe("PR status check steps", () => {
       _tag: "needs_human",
       reason: "A maintainer must approve deployment",
       handledCheckIds: [expect.any(String)],
+    })
+  })
+
+  it("resolves a merge conflict in a work turn followed by a verdict turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      resolvePrMergeConflict(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            opencodeWith(
+              [
+                "rebased, verified, and pushed",
+                "READY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt, sessionId) => {
+                expect(sessionId).toBe("ses_implement")
+                prompts.push(prompt)
+              },
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "processed" })
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toContain("Fetch origin")
+    expect(prompts[0]).toContain("current base branch")
+    expect(prompts[0]).toContain("every current remote commit")
+    expect(prompts[0]).toContain("--force-with-lease")
+    expect(prompts[0]).toContain("exactly once")
+    expect(prompts[0]).toContain(
+      "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
+    )
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+  })
+
+  it("returns the merge-conflict resolver's human intervention reason", async () => {
+    const result = await Effect.runPromise(
+      resolvePrMergeConflict(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            opencodeWith([
+              "the second lease-protected push was rejected",
+              "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: The PR branch changed during both push attempts",
+            ]),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "needs_human",
+      reason: "The PR branch changed during both push attempts",
     })
   })
 
@@ -365,6 +511,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "failed",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "lint", outcome: "red" },
               ],
@@ -401,6 +548,7 @@ describe("PR status check steps", () => {
             db,
             githubWith({
               _tag: "failed",
+              ...mergeable,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "lint", outcome: "red" },
               ],

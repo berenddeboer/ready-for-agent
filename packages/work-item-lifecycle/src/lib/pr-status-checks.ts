@@ -27,6 +27,10 @@ export type PrStatusCheckResult =
   | "failed"
   | "closed"
   | "handoff_needed"
+  | {
+      readonly _tag: "conflict"
+      readonly retiredCheckIds: readonly string[]
+    }
 
 export type PrStatusCheckInvestigationResult =
   | { readonly _tag: "processed"; readonly handledCheckIds: readonly string[] }
@@ -149,6 +153,18 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
         : []
     yield* observeTerminalChecks(context.workItemId, terminalChecks)
     const unhandled = yield* listUnhandledChecks(context.workItemId)
+    if (status._tag === "closed") {
+      return "closed" satisfies PrStatusCheckResult
+    }
+    if (status.mergeability === "conflicting") {
+      return {
+        _tag: "conflict",
+        retiredCheckIds: unhandled.map((check) => check.id),
+      } satisfies PrStatusCheckResult
+    }
+    if (status.mergeability === "unknown") {
+      return "pending" satisfies PrStatusCheckResult
+    }
     if (unhandled.length > 0) {
       return "handoff_needed" satisfies PrStatusCheckResult
     }

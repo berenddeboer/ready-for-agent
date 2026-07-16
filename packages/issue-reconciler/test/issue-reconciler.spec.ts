@@ -153,7 +153,12 @@ const makeGitHubLayer = (
   Layer.succeed(GitHubService, {
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () =>
-      Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+      Effect.succeed({
+        _tag: "succeeded",
+        terminalChecks: [],
+        mergeability: "mergeable",
+        baseRefName: "main",
+      }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
     listReadyIssues: ({ owner, name }) => {
