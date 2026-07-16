@@ -300,9 +300,8 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("issues", "read")
   url.searchParams.set("contents", "write")
   url.searchParams.set("pull_requests", "write")
-  // Actions jobs power individual PR status-check handoffs (FG PATs cannot use Checks API).
+  // Actions + commit statuses power individual PR status-check handoffs via GraphQL rollup.
   url.searchParams.set("actions", "read")
-  // Classic commit statuses (non-Actions checks), when present.
   url.searchParams.set("statuses", "read")
   return url.toString()
 }

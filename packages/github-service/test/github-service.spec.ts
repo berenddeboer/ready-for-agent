@@ -70,7 +70,8 @@ describe("GitHubService live implementation", () => {
         .getOpenPullRequestNumber(repository, "branch")
         .pipe(Effect.result, Effect.forkChild)
       yield* Effect.yieldNow
-      yield* TestClock.adjust("30 seconds")
+      // Three attempts (initial + 2 retries), each with a 30s timeout and 500ms delay.
+      yield* TestClock.adjust("92 seconds")
       const result = yield* Fiber.join(fiber)
 
       expect(requestSignal?.aborted).toBe(true)
@@ -259,103 +260,85 @@ describe("GitHubService live implementation", () => {
     })
   })
 
-  it("loads terminal Actions jobs and commit statuses via REST", async () => {
-    const restPaths: string[] = []
-    const service = makeGitHubService(
-      {
-        query: () =>
-          Promise.resolve({
-            repository: {
-              pullRequests: {
-                nodes: [
-                  {
-                    state: "OPEN",
-                    merged: false,
-                    headRefOid: "sha-head",
-                    baseRefName: "main",
-                    mergeable: "MERGEABLE",
-                    statusCheckRollup: { state: "PENDING" },
+  it("loads terminal CheckRuns and StatusContexts via GraphQL rollup", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "sha-head",
+                  baseRefName: "main",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: {
+                    state: "PENDING",
+                    contexts: {
+                      nodes: [
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 100,
+                          name: "unit",
+                          status: "COMPLETED",
+                          conclusion: "SUCCESS",
+                        },
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 101,
+                          name: "lint",
+                          status: "COMPLETED",
+                          conclusion: "FAILURE",
+                        },
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 102,
+                          name: "e2e",
+                          status: "COMPLETED",
+                          conclusion: "TIMED_OUT",
+                        },
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 103,
+                          name: "optional",
+                          status: "COMPLETED",
+                          conclusion: "SKIPPED",
+                        },
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 104,
+                          name: "build",
+                          status: "IN_PROGRESS",
+                          conclusion: null,
+                        },
+                        {
+                          __typename: "StatusContext",
+                          id: "SC_1",
+                          context: "ci/travis",
+                          state: "SUCCESS",
+                        },
+                        {
+                          __typename: "StatusContext",
+                          id: "SC_2",
+                          context: "ci/deploy",
+                          state: "ERROR",
+                        },
+                        {
+                          __typename: "StatusContext",
+                          id: "SC_3",
+                          context: "ci/pending",
+                          state: "PENDING",
+                        },
+                      ],
+                    },
                   },
-                ],
-              },
+                },
+              ],
             },
-          }) as never,
-      },
-      {
-        getJson: async (path) => {
-          restPaths.push(path)
-          if (path.includes("/actions/runs?") && path.includes("page=1")) {
-            return {
-              workflow_runs: [{ id: 10 }, { id: 11 }],
-            }
-          }
-          if (
-            path.endsWith(
-              "/actions/runs/10/jobs?filter=all&per_page=100&page=1",
-            )
-          ) {
-            return {
-              jobs: [
-                {
-                  id: 100,
-                  name: "unit",
-                  status: "completed",
-                  conclusion: "success",
-                },
-                {
-                  id: 101,
-                  name: "lint",
-                  status: "completed",
-                  conclusion: "failure",
-                },
-                {
-                  id: 102,
-                  name: "e2e",
-                  status: "completed",
-                  conclusion: "timed_out",
-                },
-                {
-                  id: 103,
-                  name: "optional",
-                  status: "completed",
-                  conclusion: "skipped",
-                },
-                {
-                  id: 104,
-                  name: "build",
-                  status: "in_progress",
-                  conclusion: null,
-                },
-              ],
-            }
-          }
-          if (
-            path.endsWith(
-              "/actions/runs/11/jobs?filter=all&per_page=100&page=1",
-            )
-          ) {
-            return {
-              jobs: [
-                {
-                  id: 200,
-                  name: "review",
-                  status: "completed",
-                  conclusion: "success",
-                },
-              ],
-            }
-          }
-          if (path.includes("/commits/sha-head/statuses?")) {
-            return [
-              { id: 1, context: "ci/travis", state: "success" },
-              { id: 2, context: "ci/deploy", state: "error" },
-              { id: 3, context: "ci/pending", state: "pending" },
-            ]
-          }
-          throw new Error(`unexpected REST path ${path}`)
-        },
-      },
-    )
+          },
+        }) as never,
+    })
 
     const status = await Effect.runPromise(
       service.getPullRequestCheckStatus(repository, "branch"),
@@ -369,79 +352,137 @@ describe("GitHubService live implementation", () => {
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
         { externalId: "actions-job:101", name: "lint", outcome: "red" },
         { externalId: "actions-job:102", name: "e2e", outcome: "red" },
-        { externalId: "actions-job:200", name: "review", outcome: "green" },
-        { externalId: "status:1", name: "ci/travis", outcome: "green" },
-        { externalId: "status:2", name: "ci/deploy", outcome: "red" },
+        { externalId: "status:SC_1", name: "ci/travis", outcome: "green" },
+        { externalId: "status:SC_2", name: "ci/deploy", outcome: "red" },
       ],
     })
-    expect(restPaths.some((path) => path.includes("head_sha=sha-head"))).toBe(
-      true,
-    )
-    expect(
-      restPaths
-        .filter((path) => path.includes("/jobs?"))
-        .every((path) => path.includes("filter=all")),
-    ).toBe(true)
-    expect(
-      restPaths.some((path) =>
-        path.includes("/commits/sha-head/statuses?per_page=100&page=1"),
-      ),
-    ).toBe(true)
   })
 
-  it("treats Actions job reruns as distinct executions", async () => {
-    let jobsPath = ""
-    const service = makeGitHubService(
-      {
-        query: () =>
-          Promise.resolve({
-            repository: {
-              pullRequests: {
-                nodes: [
-                  {
-                    state: "OPEN",
-                    merged: false,
-                    headRefOid: "sha-head",
-                    baseRefName: "main",
-                    mergeable: "MERGEABLE",
-                    statusCheckRollup: { state: "FAILURE" },
+  it("loads every GraphQL status-check rollup page", async () => {
+    let attempts = 0
+    const service = makeGitHubService({
+      query: () => {
+        attempts += 1
+        return Promise.resolve(
+          attempts === 1
+            ? {
+                repository: {
+                  pullRequests: {
+                    nodes: [
+                      {
+                        state: "OPEN",
+                        merged: false,
+                        headRefOid: "sha-head",
+                        baseRefName: "main",
+                        mergeable: "MERGEABLE",
+                        statusCheckRollup: {
+                          state: "PENDING",
+                          contexts: {
+                            nodes: [
+                              {
+                                __typename: "CheckRun",
+                                databaseId: 100,
+                                name: "unit",
+                                status: "COMPLETED",
+                                conclusion: "SUCCESS",
+                              },
+                            ],
+                            pageInfo: {
+                              endCursor: "page-2",
+                              hasNextPage: true,
+                            },
+                          },
+                        },
+                      },
+                    ],
                   },
-                ],
-              },
-            },
-          }) as never,
-      },
-      {
-        getJson: async (path) => {
-          if (path.includes("/actions/runs?")) {
-            return { workflow_runs: [{ id: 7 }] }
-          }
-          if (path.includes("/jobs")) {
-            jobsPath = path
-            return {
-              jobs: [
-                {
-                  id: 100,
-                  name: "lint",
-                  status: "completed",
-                  conclusion: "failure",
                 },
+              }
+            : {
+                repository: {
+                  pullRequests: {
+                    nodes: [
+                      {
+                        statusCheckRollup: {
+                          state: "PENDING",
+                          contexts: {
+                            nodes: [
+                              {
+                                __typename: "CheckRun",
+                                databaseId: 101,
+                                name: "lint",
+                                status: "COMPLETED",
+                                conclusion: "FAILURE",
+                              },
+                            ],
+                            pageInfo: {
+                              endCursor: null,
+                              hasNextPage: false,
+                            },
+                          },
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+        ) as never
+      },
+    })
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "branch"),
+    )
+
+    expect(status).toMatchObject({
+      terminalChecks: [
+        { externalId: "actions-job:100", outcome: "green" },
+        { externalId: "actions-job:101", outcome: "red" },
+      ],
+    })
+    expect(attempts).toBe(2)
+  })
+
+  it("treats distinct CheckRun executions with the same name as separate", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
                 {
-                  id: 101,
-                  name: "lint",
-                  status: "completed",
-                  conclusion: "success",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "sha-head",
+                  baseRefName: "main",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: {
+                    state: "FAILURE",
+                    contexts: {
+                      nodes: [
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 100,
+                          name: "lint",
+                          status: "COMPLETED",
+                          conclusion: "FAILURE",
+                        },
+                        {
+                          __typename: "CheckRun",
+                          databaseId: 101,
+                          name: "lint",
+                          status: "COMPLETED",
+                          conclusion: "SUCCESS",
+                        },
+                      ],
+                    },
+                  },
                 },
               ],
-            }
-          }
-          if (path.includes("/statuses?")) {
-            return []
-          }
-          throw new Error(`unexpected REST path ${path}`)
-        },
-      },
-    )
+            },
+          },
+        }) as never,
+    })
 
     const status = await Effect.runPromise(
       service.getPullRequestCheckStatus(repository, "branch"),
@@ -456,68 +497,44 @@ describe("GitHubService live implementation", () => {
         { externalId: "actions-job:101", name: "lint", outcome: "green" },
       ],
     })
-    expect(jobsPath).toContain("filter=all")
   })
 
-  it("fetches every commit-status execution page", async () => {
-    const restPaths: string[] = []
-    const service = makeGitHubService(
-      {
-        query: () =>
-          Promise.resolve({
-            repository: {
-              pullRequests: {
-                nodes: [
-                  {
-                    state: "OPEN",
-                    merged: false,
-                    headRefOid: "sha-head",
-                    baseRefName: "main",
-                    mergeable: "MERGEABLE",
-                    statusCheckRollup: { state: "PENDING" },
-                  },
-                ],
-              },
+  it("retries transient GraphQL failures", async () => {
+    let attempts = 0
+    const service = makeGitHubService({
+      query: () => {
+        attempts += 1
+        if (attempts < 3) {
+          return Promise.reject(new Error("temporary outage"))
+        }
+        return Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  state: "OPEN",
+                  merged: false,
+                  baseRefName: "main",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: null,
+                },
+              ],
             },
-          }) as never,
+          },
+        }) as never
       },
-      {
-        getJson: async (path) => {
-          restPaths.push(path)
-          if (path.includes("/actions/runs?")) {
-            return { workflow_runs: [] }
-          }
-          if (path.endsWith("/statuses?per_page=100&page=1")) {
-            return Array.from({ length: 100 }, (_, index) => ({
-              id: index + 1,
-              context: `ci/status-${index + 1}`,
-              state: index === 0 ? "success" : "pending",
-            }))
-          }
-          if (path.endsWith("/statuses?per_page=100&page=2")) {
-            return [{ id: 101, context: "ci/deploy", state: "error" }]
-          }
-          throw new Error(`unexpected REST path ${path}`)
-        },
-      },
-    )
+    })
 
-    const status = await Effect.runPromise(
-      service.getPullRequestCheckStatus(repository, "branch"),
-    )
-
-    expect(status).toEqual({
-      _tag: "pending",
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "branch"),
+      ),
+    ).toEqual({
+      _tag: "no_checks",
       mergeability: "mergeable",
       baseRefName: "main",
-      terminalChecks: [
-        { externalId: "status:1", name: "ci/status-1", outcome: "green" },
-        { externalId: "status:101", name: "ci/deploy", outcome: "red" },
-      ],
     })
-    expect(restPaths).toContain(
-      "/repos/acme/widgets/commits/sha-head/statuses?per_page=100&page=2",
-    )
+    expect(attempts).toBe(3)
   })
 
   it("marks a draft PR ready for review and no-ops when already ready", async () => {
@@ -575,6 +592,37 @@ describe("GitHubService live implementation", () => {
     await Effect.runPromise(
       alreadyReady.markPullRequestReadyForReview(repository, "branch"),
     )
+  })
+
+  it("does not retry failed GraphQL mutations", async () => {
+    let mutationAttempts = 0
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDODraft",
+                  isDraft: true,
+                  state: "OPEN",
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () => {
+        mutationAttempts += 1
+        return Promise.reject(new Error("response lost"))
+      },
+    })
+
+    await expect(
+      Effect.runPromise(
+        service.markPullRequestReadyForReview(repository, "branch"),
+      ),
+    ).rejects.toBeInstanceOf(GitHubRequestError)
+    expect(mutationAttempts).toBe(1)
   })
 
   it("fails when the PR for the branch is missing", async () => {
