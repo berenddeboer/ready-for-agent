@@ -2,7 +2,8 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Duration, Effect, Layer } from "effect"
+import { Duration, Effect, Fiber, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
@@ -10,6 +11,7 @@ import {
   OpencodeExitError,
   OpencodeTimeoutError,
   SessionIdNotFoundError,
+  type StartInput,
 } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
@@ -42,20 +44,16 @@ const baseContext = (
 })
 
 const stubOpencode = (impl: {
-  readonly start?: (input: {
-    readonly prompt: string
-    readonly cwd: string
-    readonly model: string
-    readonly variant: string
-    readonly timeout?: Duration.Input
-  }) => Effect.Effect<{ sessionId: string }, never>
+  readonly start?: (
+    input: StartInput,
+  ) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
   readonly continue?: (input: {
     readonly sessionId: string
     readonly prompt: string
     readonly cwd: string
     readonly model: string
     readonly variant: string
-  }) => Effect.Effect<{ sessionId: string }, never>
+  }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
     Opencode,
@@ -82,6 +80,7 @@ const run = <A, E>(
     E,
     | Layer.Layer.Success<typeof PlatformLayer>
     | Layer.Layer.Success<typeof DbServiceLive>
+    | Layer.Layer.Success<typeof DatabaseTest>
     | Opencode
   >,
   opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
@@ -94,6 +93,31 @@ const run = <A, E>(
       Effect.provide(PlatformLayer),
     ),
   )
+
+const seedWorkItem = (workItemId: string, repositoryId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `INSERT INTO work_item (
+         id, repository_id, github_issue_number, model, variant,
+         review_model, review_variant, state, state_ready_at, worktree_path,
+         session_id, failure_code, failure_message, created_at, updated_at
+       ) VALUES (?, ?, 80, 'opencode/test-model', 'high', 'opencode/test-model', 'high',
+         'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+      [workItemId, repositoryId, now, now, now],
+    )
+  })
+
+const readSessionId = (workItemId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = (yield* sql.unsafe(
+      `SELECT session_id FROM work_item WHERE id = ? LIMIT 1`,
+      [workItemId],
+    )) as readonly { readonly session_id: string | null }[]
+    return rows[0]?.session_id ?? null
+  })
 
 const withTemp = async (assert: (root: string) => Promise<void>) => {
   const root = await mkdtemp(join(tmpdir(), "rfa-implement-"))
@@ -364,5 +388,112 @@ describe("implement", () => {
       )
       expect(error).toBeInstanceOf(ImplementOpenCodeError)
       expect((error as ImplementOpenCodeError).message).toContain("Session ID")
+    }))
+
+  it("persists session_id mid-run before OpenCode completes", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const midRunSessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          yield* seedWorkItem(workItemId, repository.id)
+
+          const fiber = yield* Effect.forkChild(
+            implement(
+              baseContext(root, {
+                workItemId,
+                repositoryId: repository.id,
+              }),
+            ),
+          )
+
+          let midSessionId: string | null = null
+          for (let attempt = 0; attempt < 50; attempt += 1) {
+            const sessionId = yield* readSessionId(workItemId)
+            if (sessionId !== null && sessionId !== "") {
+              midSessionId = sessionId
+              break
+            }
+            yield* Effect.sleep("20 millis")
+          }
+
+          const finalSessionId = yield* Fiber.join(fiber)
+          return { midSessionId, finalSessionId }
+        }),
+        stubOpencode({
+          start: (input) =>
+            Effect.gen(function* () {
+              expect(input.onSessionId).toBeDefined()
+              yield* input.onSessionId!("ses_mid_build")
+              yield* Effect.sleep("150 millis")
+              return {
+                sessionId: "ses_mid_build",
+                assistantText: "",
+              }
+            }),
+        }),
+      )
+
+      expect(midRunSessionId.midSessionId).toBe("ses_mid_build")
+      expect(midRunSessionId.finalSessionId).toBe("ses_mid_build")
+    }))
+
+  it("keeps a mid-run session_id when OpenCode later fails", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const outcome = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          yield* seedWorkItem(workItemId, repository.id)
+          const error = yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+            }),
+          ).pipe(Effect.flip)
+          const sessionId = yield* readSessionId(workItemId)
+          return { error, sessionId }
+        }),
+        stubOpencode({
+          start: (input) =>
+            Effect.gen(function* () {
+              yield* input.onSessionId!("ses_failed_after_emit")
+              return yield* Effect.fail(
+                new OpencodeExitError({ exitCode: 2, cwd: root }),
+              )
+            }),
+        }),
+      )
+
+      expect(outcome.error).toBeInstanceOf(ImplementOpenCodeError)
+      expect(outcome.sessionId).toBe("ses_failed_after_emit")
+    }))
+
+  it("does not fail implement when mid-run session persist has no matching row", () =>
+    withTemp(async (root) => {
+      const workItemId = makeWorkItemId()
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* implement(
+            baseContext(root, {
+              workItemId,
+              repositoryId: repository.id,
+            }),
+          )
+        }),
+        stubOpencode({
+          start: (input) =>
+            Effect.gen(function* () {
+              yield* input.onSessionId!("ses_no_row")
+              return {
+                sessionId: "ses_no_row",
+                assistantText: "",
+              }
+            }),
+        }),
+      )
+
+      expect(sessionId).toBe("ses_no_row")
     }))
 })
