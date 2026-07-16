@@ -155,6 +155,7 @@ const makeGitHubLayer = (
     getPullRequestCheckStatus: () =>
       Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
     markPullRequestReadyForReview: () => Effect.void,
+    mergePullRequest: () => Effect.void,
     listReadyIssues: ({ owner, name }) => {
       actions.push(`github:${owner}/${name}`)
       return error ? Effect.fail(error) : Effect.succeed(issues)

@@ -286,6 +286,36 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             ),
           ),
+        mergePullRequest: (repository, headRefName) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(repository, "merge pull request")
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const head = encodeArgument(headRefName)
+            const result = yield* keymaxxer.runWithSecrets({
+              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/merge-pull-request.ts ${owner} ${name} ${head}`,
+              cwd: options.workspaceRoot,
+              secrets: [tokenName],
+              timeoutMs: 60_000,
+            })
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "merge pull request",
+                result.stderr || result.stdout,
+              )
+            }
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(requestError(repository, "merge pull request")),
+            ),
+          ),
         listReadyIssues: (repository) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

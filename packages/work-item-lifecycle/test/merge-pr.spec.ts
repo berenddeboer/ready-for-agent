@@ -10,7 +10,7 @@ import {
 import {
   type LifecycleStepContext,
   makeWorkItemId,
-  markPrReadyForReview,
+  mergePr,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -32,25 +32,22 @@ const db = stubDbServiceLayer({
   listRepositories: Effect.succeed([repository]),
 })
 
-describe("markPrReadyForReview", () => {
-  it("marks the deterministic Work Item branch PR ready for review", async () => {
+describe("mergePr", () => {
+  it("merges the deterministic Work Item branch PR", async () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
-      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
-      markPullRequestReadyForReview: (_repository, branch) => {
+      markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: (_repository, branch) => {
         requestedBranch = branch
         return Effect.void
       },
-      mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     await Effect.runPromise(
-      markPrReadyForReview(context).pipe(
-        Effect.provide(Layer.merge(db, github)),
-      ),
+      mergePr(context).pipe(Effect.provide(Layer.merge(db, github))),
     )
 
     expect(requestedBranch).toBe(`rfa/acme-widgets/42/${context.workItemId}`)
@@ -59,7 +56,6 @@ describe("markPrReadyForReview", () => {
   it("requires a worktree path", async () => {
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
-      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -68,7 +64,7 @@ describe("markPrReadyForReview", () => {
 
     const exit = await Effect.runPromise(
       Effect.exit(
-        markPrReadyForReview({ ...context, worktreePath: null }).pipe(
+        mergePr({ ...context, worktreePath: null }).pipe(
           Effect.provide(Layer.merge(db, github)),
         ),
       ),

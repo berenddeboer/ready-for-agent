@@ -61,6 +61,9 @@ export interface LifecycleStepsShape {
   readonly decidePrMerge: (
     context: LifecycleStepContext,
   ) => Effect.Effect<DecidePrMergeResult, unknown>
+  readonly mergePr: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
   readonly removeWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>

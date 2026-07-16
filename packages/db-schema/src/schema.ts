@@ -202,6 +202,7 @@ export const workItem = snakeCase.table(
         "investigate_pr_status_checks",
         "mark_pr_ready_for_review",
         "decide_pr_merge",
+        "merge_pr",
         "complete",
         "failed",
         "abandoned",
@@ -260,6 +261,7 @@ export const stepRun = snakeCase.table(
         "investigate_pr_status_checks",
         "mark_pr_ready_for_review",
         "decide_pr_merge",
+        "merge_pr",
       ],
     }).notNull(),
     status: text({

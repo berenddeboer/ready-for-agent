@@ -27,6 +27,7 @@
         "src/bin/get-pr-check-status.ts",
         "src/bin/list-ready-issues.ts",
         "src/bin/mark-pr-ready-for-review.ts",
+        "src/bin/merge-pull-request.ts",
         "test/**/*.{test,spec}.ts"
       ],
       "project": ["src/**/*.ts", "test/**/*.ts"]

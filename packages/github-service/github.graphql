@@ -6,6 +6,7 @@ schema {
 scalar DateTime
 scalar URI
 scalar ID
+scalar GitObjectID
 
 type Query {
   repository(owner: String!, name: String!): Repository
@@ -15,6 +16,7 @@ type Mutation {
   markPullRequestReadyForReview(
     input: MarkPullRequestReadyForReviewInput!
   ): MarkPullRequestReadyForReviewPayload
+  mergePullRequest(input: MergePullRequestInput!): MergePullRequestPayload
 }
 
 input MarkPullRequestReadyForReviewInput {
@@ -23,6 +25,24 @@ input MarkPullRequestReadyForReviewInput {
 }
 
 type MarkPullRequestReadyForReviewPayload {
+  clientMutationId: String
+  pullRequest: PullRequest
+}
+
+input MergePullRequestInput {
+  pullRequestId: ID!
+  expectedHeadOid: GitObjectID
+  mergeMethod: PullRequestMergeMethod
+  clientMutationId: String
+}
+
+enum PullRequestMergeMethod {
+  MERGE
+  SQUASH
+  REBASE
+}
+
+type MergePullRequestPayload {
   clientMutationId: String
   pullRequest: PullRequest
 }

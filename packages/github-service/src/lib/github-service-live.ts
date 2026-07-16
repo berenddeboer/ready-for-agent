@@ -767,6 +767,123 @@ export const makeGitHubService = (
         })
       }
     }),
+  mergePullRequest: (repository, headRefName) =>
+    Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          client.query({
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  headRefName,
+                },
+                nodes: {
+                  id: true,
+                  state: true,
+                  merged: true,
+                  headRefOid: true,
+                  statusCheckRollup: {
+                    state: true,
+                  },
+                },
+              },
+            },
+          }),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+      if (result.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      const pullRequest = result.repository.pullRequests.nodes?.[0]
+      if (pullRequest === null || pullRequest === undefined) {
+        return yield* new GitHubRequestError({
+          message: `No pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (typeof pullRequest.id !== "string" || pullRequest.id.trim() === "") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request id for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (pullRequest.merged === true || pullRequest.state === "MERGED") {
+        return
+      }
+      if (pullRequest.state === "CLOSED") {
+        return yield* new GitHubRequestError({
+          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is closed`,
+        })
+      }
+      if (pullRequest.state !== "OPEN") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request state for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        typeof pullRequest.headRefOid !== "string" ||
+        pullRequest.headRefOid.trim() === ""
+      ) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request head for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        pullRequest.statusCheckRollup !== null &&
+        pullRequest.statusCheckRollup.state !== "SUCCESS"
+      ) {
+        return yield* new GitHubRequestError({
+          message: `Pull request checks are not successful for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (client.mutation === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      const mutate = client.mutation
+      const mutation = yield* Effect.tryPromise({
+        try: () =>
+          mutate({
+            mergePullRequest: {
+              __args: {
+                input: {
+                  pullRequestId: pullRequest.id,
+                  expectedHeadOid: pullRequest.headRefOid,
+                  mergeMethod: "SQUASH",
+                },
+              },
+              pullRequest: {
+                merged: true,
+                state: true,
+              },
+            },
+          }),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to merge pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+      const mergedPullRequest = mutation.mergePullRequest?.pullRequest
+      if (mergedPullRequest === null || mergedPullRequest === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub did not return a pull request after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        mergedPullRequest.merged !== true &&
+        mergedPullRequest.state !== "MERGED"
+      ) {
+        return yield* new GitHubRequestError({
+          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} was not merged`,
+        })
+      }
+    }),
   listReadyIssues: (repository) =>
     Effect.gen(function* () {
       const issues: InternalReadyLabeledIssue[] = []

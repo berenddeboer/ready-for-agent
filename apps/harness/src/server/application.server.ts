@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
-import { Effect, Layer, ManagedRuntime } from "effect"
+import { Effect, Layer, Logger, ManagedRuntime } from "effect"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbServiceLive } from "@ready-for-agent/db-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
@@ -82,6 +82,7 @@ export const createApplication = async (
     Layer.provideMerge(reconcilerLayer),
     Layer.provideMerge(lifecycleLayer),
   )
+  const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const appLayer =
     options.startWorker === false
       ? Layer.mergeAll(
@@ -90,6 +91,7 @@ export const createApplication = async (
           keymaxxerLayer,
           opencodeLayer,
           lifecycleLayer,
+          loggingLayer,
         )
       : Layer.mergeAll(
           reconcilerLayer,
@@ -98,6 +100,7 @@ export const createApplication = async (
           keymaxxerLayer,
           opencodeLayer,
           lifecycleLayer,
+          loggingLayer,
         )
   const runtime = ManagedRuntime.make(appLayer)
 

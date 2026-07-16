@@ -17,7 +17,7 @@ Per-Repository operator preferences: Paused, optional build model and variant (n
 _Avoid_: Project config, repo config file
 
 **Auto-merge**:
-A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests.
+A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge.
 _Avoid_: Automerge (GitHub product), auto-approve
 
 **Issue**:
@@ -100,7 +100,7 @@ An Implementable Issue with no unfinished Work Item. Only an Actionable Issue ma
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while checks remain pending, and advances to Mark PR Ready for Review once the aggregate is green and every observed terminal check is handled. After the PR is ready for review, Decide PR Merge asks the Implement OpenCode Session whether risk is low enough for a clanker to merge (Complete) or a human must merge (Needs Human); the step does not merge.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled. After the PR is ready for review, Decide PR Merge asks the Implement OpenCode Session whether risk is low enough for a clanker to merge or a human must; clanker merge advances to Merge PR, which squash-merges the PR via GitHub, then Complete; needs-human is terminal Needs Human without merging.
 _Avoid_: Last completed step, phase
 
 **PR Status Check**:
@@ -136,8 +136,8 @@ A terminal Work Item that cannot continue autonomously: either a Status Check Ha
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item for which implementation, pull-request creation, status checking, all observed Status Check Handoffs, Mark PR Ready for Review, and Decide PR Merge executed successfully, with GitHub reporting no failing or pending status checks, the PR marked ready for review, and OpenCode assessing merge risk as low enough for a clanker. Complete does not mean GitHub closed the Issue or the PR was merged.
-_Avoid_: Approved, merged, done Issue
+A terminal Work Item for which implementation, pull-request creation, status checking, all observed Status Check Handoffs, Mark PR Ready for Review, Decide PR Merge, and Merge PR executed successfully: GitHub reported no failing or pending status checks, the PR was marked ready for review, OpenCode assessed merge risk as low enough for a clanker, and the harness squash-merged the PR. Complete does not mean GitHub closed the Issue.
+_Avoid_: Approved, done Issue
 
 **Relevant Issue**:
 A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no Issue-closing PR or have at least one Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. PR state does not affect this test, and an Issue-closing PR affects only its own Issue rather than the Issue's parent or children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned Issue-closing PRs is not relevant.

@@ -77,6 +77,7 @@ const githubWith = (status: PullRequestCheckStatus) =>
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () => Effect.succeed(status),
     markPullRequestReadyForReview: () => Effect.void,
+    mergePullRequest: () => Effect.void,
   } satisfies GitHubServiceShape)
 
 const opencodeWith = (
@@ -110,6 +111,7 @@ describe("PR status check steps", () => {
         return Effect.succeed({ _tag: "pending", terminalChecks: [] })
       },
       markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const status = await Effect.runPromise(
@@ -200,6 +202,7 @@ describe("PR status check steps", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const second = await Effect.runPromise(
