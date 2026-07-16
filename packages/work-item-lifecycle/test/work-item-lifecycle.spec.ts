@@ -2808,6 +2808,87 @@ describe("WorkItemLifecycle", () => {
   })
 
   describe("delivery safety and interruption", () => {
+    it("marks a Running Step Run Interrupted when its queue job is missing", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRun = created.stepRuns[0]!
+          const now = Date.now()
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [now, now, stepRun.id],
+          )
+          yield* sql.unsafe("DELETE FROM job_queue WHERE id = ?", [
+            stepRun.queueJobId,
+          ])
+
+          expect(yield* lifecycle.recoverOrphanedStepRuns).toBe(1)
+
+          const recovered = yield* lifecycle.getWorkItem(created.id)
+          expect(recovered.stepRuns[0]?.status).toBe("interrupted")
+          expect(recovered.stepRuns[0]?.reasonCode).toBe(
+            STEP_RUN_REASON.interrupted,
+          )
+          expect(recovered.stepRuns[0]?.reasonMessage).toBe(
+            "Lifecycle Step lost its queue delivery",
+          )
+        }),
+      ))
+
+    it("marks a Running Step Run Interrupted when its final queue lease expires", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRun = created.stepRuns[0]!
+          const now = Date.now()
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [now, now, stepRun.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE job_queue
+             SET job_attempts = job_retry_limit,
+                 locked_until = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+            [now + 60_000, now, stepRun.queueJobId],
+          )
+
+          expect(yield* lifecycle.recoverOrphanedStepRuns).toBe(0)
+
+          yield* sql.unsafe(
+            `UPDATE job_queue SET locked_until = ?, updated_at = ? WHERE id = ?`,
+            [now - 1, now, stepRun.queueJobId],
+          )
+
+          expect(yield* lifecycle.recoverOrphanedStepRuns).toBe(1)
+
+          const recovered = yield* lifecycle.getWorkItem(created.id)
+          expect(recovered.stepRuns[0]?.status).toBe("interrupted")
+          expect(recovered.stepRuns[0]?.reasonCode).toBe(
+            STEP_RUN_REASON.interrupted,
+          )
+        }),
+      ))
+
     it("acknowledges a stale delivery without invoking a handler", () => {
       let createCalls = 0
       const steps: LifecycleStepsShape = {

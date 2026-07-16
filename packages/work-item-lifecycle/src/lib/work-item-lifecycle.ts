@@ -410,6 +410,10 @@ export type RunStepResult =
 
 export interface WorkItemLifecycleShape {
   readonly maxDurations: LifecycleMaxDurations
+  readonly recoverOrphanedStepRuns: Effect.Effect<
+    number,
+    WorkItemLifecycleDatabaseError
+  >
   readonly implementNow: (
     repositoryId: string,
     githubIssueNumber: number,
@@ -1328,6 +1332,48 @@ export const makeWorkItemLifecycleLive = (
             Effect.mapError((error): RunStepError => error),
           )
         })
+
+      const recoverOrphanedStepRuns = Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        const rows = (yield* sql
+          .unsafe(
+            `UPDATE step_run
+             SET status = 'interrupted',
+                 finished_at = ?,
+                 reason_code = ?,
+                 reason_message = ?,
+                 updated_at = ?
+             WHERE status = 'running'
+               AND (
+                 queue_job_id IS NULL
+                 OR NOT EXISTS (
+                   SELECT 1 FROM job_queue
+                   WHERE job_queue.id = step_run.queue_job_id
+                 )
+                 OR EXISTS (
+                   SELECT 1 FROM job_queue
+                   WHERE job_queue.id = step_run.queue_job_id
+                     AND job_queue.job_attempts >= job_queue.job_retry_limit
+                     AND (
+                       job_queue.locked_until IS NULL
+                       OR job_queue.locked_until <= ?
+                     )
+                 )
+               )
+             RETURNING id`,
+            [
+              now,
+              STEP_RUN_REASON.interrupted,
+              "Lifecycle Step lost its queue delivery",
+              now,
+              now,
+            ],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly id: string
+        }[]
+        return rows.length
+      })
 
       const runStep = Effect.fn("WorkItemLifecycle.runStep")(function* (
         stepRunId: string,
@@ -2498,6 +2544,7 @@ export const makeWorkItemLifecycleLive = (
 
       return WorkItemLifecycle.of({
         maxDurations,
+        recoverOrphanedStepRuns,
         implementNow,
         implementLocally,
         runStep,
