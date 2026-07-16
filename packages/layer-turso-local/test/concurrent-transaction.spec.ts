@@ -130,6 +130,42 @@ describe("makeTursoLive", () => {
     }
   })
 
+  it("enables foreign keys on startup", async () => {
+    const dbPath = tempDbPath()
+    const TestLayer = makeTestLayer(dbPath)
+
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const pragma = yield* sql(sqlQuery("PRAGMA foreign_keys"))
+          yield* sql(
+            sqlQuery(
+              "CREATE TABLE parent (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            ),
+          )
+          yield* sql(
+            sqlQuery(
+              "CREATE TABLE child (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent(id))",
+            ),
+          )
+          const insertOrphan = yield* Effect.exit(
+            sql.unsafe(
+              "INSERT INTO child (id, parent_id) VALUES (?, ?)",
+              [1, 999],
+            ),
+          )
+          return { pragma, insertOrphan }
+        }).pipe(Effect.provide(TestLayer)),
+      )
+
+      expect(result.pragma).toEqual([{ foreign_keys: 1 }])
+      expect(result.insertOrphan._tag).toBe("Failure")
+    } finally {
+      await cleanupDb(dbPath)
+    }
+  })
+
   it("preserves duplicate selected columns in values mode", async () => {
     const dbPath = tempDbPath()
     const TestLayer = makeTestLayer(dbPath)

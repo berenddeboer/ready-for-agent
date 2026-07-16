@@ -57,19 +57,19 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
       Effect.promise(() => db.close()).pipe(Effect.ignore),
     )
 
-    let pragmasExecuted = false
+    yield* Effect.tryPromise({
+      try: async () => {
+        await db.all("PRAGMA foreign_keys = ON")
+        await db.all("PRAGMA journal_mode = wal")
+        const timeout = options?.busy_timeout ?? 1500
+        if (timeout > 0) await db.all(`PRAGMA busy_timeout = ${timeout}`)
+      },
+      catch: (cause) => sqlError(cause, "configure database"),
+    })
+
     const execute = (sql: string, params: ReadonlyArray<unknown> = []) =>
       Effect.tryPromise({
-        try: async () => {
-          if (!pragmasExecuted) {
-            await db.all("PRAGMA foreign_keys = ON")
-            await db.all("PRAGMA journal_mode = wal")
-            const timeout = options?.busy_timeout ?? 1500
-            if (timeout > 0) await db.all(`PRAGMA busy_timeout = ${timeout}`)
-            pragmasExecuted = true
-          }
-          return (await db.all(sql, [...params])) as TursoRow[]
-        },
+        try: async () => (await db.all(sql, [...params])) as TursoRow[],
         catch: (cause) => sqlError(cause, "execute statement"),
       })
 

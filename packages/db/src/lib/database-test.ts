@@ -1,6 +1,6 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
 import { type Config, Effect, Layer } from "effect"
-import type { SqlClient } from "effect/unstable/sql"
+import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   type MigrationReadError,
@@ -12,11 +12,19 @@ import {
 export { MigrationsFolderConfig, defaultMigrationsFolder }
 
 /**
- * In-memory SQLite client for tests.
+ * In-memory SQLite client for tests, with foreign keys enabled on startup.
  */
-export const SqliteTest = SqliteClient.layer({
-  filename: ":memory:",
-})
+export const SqliteTest = Layer.provideMerge(
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`PRAGMA foreign_keys = ON`
+    }),
+  ),
+  SqliteClient.layer({
+    filename: ":memory:",
+  }),
+)
 
 const MigrationLayer = Layer.effectDiscard(
   Effect.gen(function* () {
