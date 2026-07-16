@@ -17,12 +17,16 @@ export type RepositoryIssuesLiveQueries = {
 }
 
 /**
- * Keeps a Repository's Issues and reconciliation metadata fresh via the
+ * Keeps Repository Issues and reconciliation metadata fresh via the
  * Issues-changed invalidation subscription, with reconnect and tab-visibility
  * refetch as fallback for missed ephemeral notifications.
+ *
+ * The subscription stays open across membership changes; callers supply the
+ * current Repository IDs via `getRepositoryIds` so reconnect races cannot drop
+ * a just-finished Refresh Job invalidation.
  */
 export const followRepositoryIssuesLive = async ({
-  repositoryIds,
+  getRepositoryIds,
   queryClient,
   queries,
   signal,
@@ -30,7 +34,7 @@ export const followRepositoryIssuesLive = async ({
   documentRef = typeof document === "undefined" ? undefined : document,
   retryDelayMs = 1_000,
 }: {
-  repositoryIds: readonly string[]
+  getRepositoryIds: () => readonly string[]
   queryClient: QueryClient
   queries: RepositoryIssuesLiveQueries
   signal: AbortSignal
@@ -58,6 +62,7 @@ export const followRepositoryIssuesLive = async ({
   }
 
   const refreshAll = async () => {
+    const repositoryIds = getRepositoryIds()
     await Promise.all([
       fetchFresh(queries.repositories),
       ...repositoryIds.map((repositoryId) =>

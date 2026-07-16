@@ -255,7 +255,8 @@ function RepositoryCards() {
   const queryClient = useQueryClient()
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
-  const repositoryIdsKey = repositories.map(({ id }) => id).join("\0")
+  const repositoryIdsRef = useRef(repositories.map(({ id }) => id))
+  repositoryIdsRef.current = repositories.map(({ id }) => id)
 
   useEffect(() => {
     let cancelled = false
@@ -319,10 +320,8 @@ function RepositoryCards() {
 
   useEffect(() => {
     const controller = new AbortController()
-    const repositoryIds =
-      repositoryIdsKey === "" ? [] : repositoryIdsKey.split("\0")
     void followRepositoryIssuesLive({
-      repositoryIds,
+      getRepositoryIds: () => repositoryIdsRef.current,
       queryClient,
       queries: {
         repositories: repositoriesQuery,
@@ -332,7 +331,7 @@ function RepositoryCards() {
       signal: controller.signal,
     })
     return () => controller.abort()
-  }, [queryClient, repositoryIdsKey])
+  }, [queryClient])
 
   const warning = liveUpdatesUnavailable ? (
     <p
