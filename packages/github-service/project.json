@@ -41,7 +41,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test"
+        "command": "vitest run"
       },
       "inputs": ["default", "^production"],
       "cache": true,

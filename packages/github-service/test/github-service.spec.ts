@@ -1,4 +1,8 @@
-import { Effect, Result } from "effect"
+import { spawnSync } from "node:child_process"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Fiber, Result } from "effect"
+import { TestClock } from "effect/testing"
+import { decodeArgument } from "../src/bin/cli.js"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -10,7 +14,6 @@ import {
   type GitHubGraphqlClient,
   makeGitHubService,
 } from "../src/lib/github-service-live.js"
-import { describe, expect, it } from "bun:test"
 
 const repository = { owner: "acme", name: "widgets" }
 
@@ -33,6 +36,52 @@ const issue = (
 })
 
 describe("GitHubService live implementation", () => {
+  it.effect("aborts an in-flight request when interrupted", () =>
+    Effect.gen(function* () {
+      let requestSignal: AbortSignal | undefined
+      const service = makeGitHubService({
+        query: (_request, signal) => {
+          requestSignal = signal
+          return new Promise(() => undefined)
+        },
+      })
+
+      const fiber = yield* service
+        .getOpenPullRequestNumber(repository, "branch")
+        .pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(fiber)
+
+      expect(requestSignal?.aborted).toBe(true)
+    }),
+  )
+
+  it.effect("aborts and maps a request timeout to GitHubRequestError", () =>
+    Effect.gen(function* () {
+      let requestSignal: AbortSignal | undefined
+      const service = makeGitHubService({
+        query: (_request, signal) => {
+          requestSignal = signal
+          return new Promise(() => undefined)
+        },
+      })
+
+      const fiber = yield* service
+        .getOpenPullRequestNumber(repository, "branch")
+        .pipe(Effect.result, Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("30 seconds")
+      const result = yield* Fiber.join(fiber)
+
+      expect(requestSignal?.aborted).toBe(true)
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(GitHubRequestError)
+        expect(result.failure.message).toContain("timed out")
+      }
+    }),
+  )
+
   it("resolves the open pull request number for a branch", async () => {
     let request: unknown
     const service = makeGitHubService({
@@ -1385,6 +1434,35 @@ describe("GitHubService live implementation", () => {
       expect(result.failure).toBeInstanceOf(GitHubRequestError)
       expect(result.failure.message).toContain("omitted the next page cursor")
     }
+  })
+})
+
+describe("CLI arguments", () => {
+  it.effect("reports a missing argument as a typed failure", () =>
+    Effect.gen(function* () {
+      const error = yield* decodeArgument(undefined, "owner").pipe(Effect.flip)
+      expect(error._tag).toBe("CliArgumentError")
+      expect(error.message).toBe("Missing owner argument")
+    }),
+  )
+
+  it("exits with status 1 for a missing argument", () => {
+    const result = spawnSync(
+      "bun",
+      [
+        "--conditions",
+        "@ready-for-agent/source",
+        "src/bin/get-open-pr-number.ts",
+      ],
+      {
+        cwd: new URL("../", import.meta.url),
+        encoding: "utf8",
+        env: { ...process.env, GITHUB_TOKEN: "test-token" },
+      },
+    )
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("Missing owner argument")
   })
 })
 

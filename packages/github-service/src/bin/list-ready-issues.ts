@@ -1,33 +1,15 @@
-import { Effect, Result } from "effect"
-import {
-  GitHubRepositoryUnavailableError,
-  GitHubService,
-  GitHubServiceLive,
-} from "../index.js"
+import { Effect } from "effect"
+import { GitHubService } from "../index.js"
+import { decodeArgument, runGitHubCli, writeStandardOutput } from "./cli.js"
 
-const decodeArgument = (value: string | undefined): string => {
-  if (value === undefined) throw new Error("Missing Repository argument")
-  return Buffer.from(value, "base64url").toString("utf8")
-}
-
-if (import.meta.main) {
+const program = Effect.gen(function* () {
   const repository = {
-    owner: decodeArgument(process.argv[2]),
-    name: decodeArgument(process.argv[3]),
+    owner: yield* decodeArgument(process.argv[2], "owner"),
+    name: yield* decodeArgument(process.argv[3], "name"),
   }
-  const result = await Effect.runPromise(
-    Effect.gen(function* () {
-      const github = yield* GitHubService
-      return yield* github.listReadyIssues(repository)
-    }).pipe(Effect.provide(GitHubServiceLive), Effect.result),
-  )
+  const github = yield* GitHubService
+  const issues = yield* github.listReadyIssues(repository)
+  yield* writeStandardOutput(JSON.stringify(issues))
+})
 
-  if (Result.isSuccess(result)) {
-    process.stdout.write(JSON.stringify(result.success))
-  } else if (result.failure instanceof GitHubRepositoryUnavailableError) {
-    process.exitCode = 2
-  } else {
-    process.stderr.write("GitHub query failed\n")
-    process.exitCode = 1
-  }
-}
+if (import.meta.main) runGitHubCli(program)
