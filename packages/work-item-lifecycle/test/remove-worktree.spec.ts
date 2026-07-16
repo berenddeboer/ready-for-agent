@@ -15,6 +15,7 @@ import {
   RemoveWorktreeCredentialError,
   RemoveWorktreeRemoteError,
   createWorktree,
+  localCleanup,
   makeWorkItemId,
   removeWorktree,
   workItemBranchName,
@@ -92,6 +93,62 @@ const initBareRepository = async (root: string) => {
 }
 
 describe("removeWorktree", () => {
+  it("locally removes the worktree and branch without remote cleanup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-local-cleanup-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      let remoteCalls = 0
+
+      const { path, branch } = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = {
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            model: "opencode/test",
+            variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
+            worktreePath: null,
+            sessionId: null,
+          } as const
+
+          const path = yield* createWorktree(context)
+          yield* localCleanup({ ...context, worktreePath: path })
+          return {
+            path,
+            branch: workItemBranchName({
+              githubOwner: "acme",
+              githubRepo: "widgets",
+              githubIssueNumber: 42,
+              workItemId,
+            }),
+          }
+        }),
+        stubKeymaxxer({
+          runWithSecrets: () => {
+            remoteCalls += 1
+            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
+          },
+        }),
+      )
+
+      expect(await Bun.file(join(path, "README.md")).exists()).toBe(false)
+      expect(await git(bare, ["branch", "--list", branch])).toBe("")
+      expect(remoteCalls).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("removes the worktree directory and deletes the Work Item branch", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-"))
     try {

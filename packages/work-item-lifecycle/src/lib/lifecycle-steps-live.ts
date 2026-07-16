@@ -19,7 +19,7 @@ import {
   watchPrStatusChecks,
 } from "./pr-status-checks.js"
 import { preCommit } from "./pre-commit.js"
-import { removeWorktree } from "./remove-worktree.js"
+import { localCleanup, removeWorktree } from "./remove-worktree.js"
 import { resolvePrMergeConflict } from "./resolve-pr-merge-conflict.js"
 import { review } from "./review.js"
 
@@ -87,6 +87,7 @@ export const LifecycleStepsLive = Layer.effect(
         withServices(markPrReadyForReview(context)),
       decidePrMerge: (context) => withServices(decidePrMerge(context)),
       mergePr: (context) => withServices(mergePr(context)),
+      localCleanup: (context) => withServices(localCleanup(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

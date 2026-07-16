@@ -315,6 +315,8 @@ const nextOperationalStep = (
     case "decide_pr_merge":
       return "merge_pr"
     case "merge_pr":
+      return "local_cleanup"
+    case "local_cleanup":
       return "complete"
   }
 }
@@ -737,7 +739,7 @@ export const makeWorkItemLifecycleLive = (
         workItem: WorkItemRow,
       ): Effect.Effect<
         {
-          readonly worktreePath?: string
+          readonly worktreePath?: string | null
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
@@ -901,6 +903,10 @@ export const makeWorkItemLifecycleLive = (
             )
           case "merge_pr":
             return steps.mergePr(context).pipe(Effect.as({}))
+          case "local_cleanup":
+            return steps
+              .localCleanup(context)
+              .pipe(Effect.as({ worktreePath: null }))
         }
       }
 
@@ -945,7 +951,7 @@ export const makeWorkItemLifecycleLive = (
         readonly stepRun: StepRunRow
         readonly workItem: WorkItemRow
         readonly output: {
-          readonly worktreePath?: string
+          readonly worktreePath?: string | null
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
@@ -973,7 +979,10 @@ export const makeWorkItemLifecycleLive = (
           const transition = output.transition
           const nextStep =
             transition?.nextState ?? nextOperationalStep(stepRun.step)
-          const worktreePath = output.worktreePath ?? workItem.worktree_path
+          const worktreePath =
+            output.worktreePath === undefined
+              ? workItem.worktree_path
+              : output.worktreePath
           const sessionId = output.sessionId ?? workItem.session_id
           const githubPullRequestNumber =
             output.githubPullRequestNumber ??
@@ -1426,10 +1435,13 @@ export const makeWorkItemLifecycleLive = (
                     return { _tag: "processed" as const, workItem: failed }
                   }
 
-                  const revalidation = yield* revalidateIssue(
-                    workItem.repository_id,
-                    workItem.github_issue_number,
-                  )
+                  const revalidation =
+                    stepRun.step === "local_cleanup"
+                      ? ({ ok: true } as const)
+                      : yield* revalidateIssue(
+                          workItem.repository_id,
+                          workItem.github_issue_number,
+                        )
 
                   const completed = yield* completeSuccessfulStep({
                     stepRun: afterStart,

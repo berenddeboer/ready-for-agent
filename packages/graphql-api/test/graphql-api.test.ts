@@ -176,6 +176,7 @@ const makeRuntime = (
       mark_pr_ready_for_review: Duration.minutes(5),
       decide_pr_merge: Duration.minutes(15),
       merge_pr: Duration.minutes(5),
+      local_cleanup: Duration.minutes(5),
     },
     implementNow: unused,
     runStep: unused,

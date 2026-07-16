@@ -68,6 +68,9 @@ export interface LifecycleStepsShape {
   readonly mergePr: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
+  readonly localCleanup: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
   readonly removeWorktree: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>

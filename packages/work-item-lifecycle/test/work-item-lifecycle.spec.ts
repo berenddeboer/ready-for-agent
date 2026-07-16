@@ -66,6 +66,7 @@ describe("WorkItemLifecycle", () => {
     markPrReadyForReview: () => Effect.void,
     decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
     mergePr: () => Effect.void,
+    localCleanup: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
 
@@ -591,7 +592,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 12; i++) {
+          for (let i = 0; i < 13; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -652,7 +653,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 12; i++) {
+          for (let i = 0; i < 13; i++) {
             const sql = yield* SqlClient.SqlClient
             yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -1033,17 +1034,27 @@ describe("WorkItemLifecycle", () => {
           const afterMerge = yield* claimAndRunPending
           expect(afterMerge._tag).toBe("processed")
           if (afterMerge._tag === "processed") {
-            expect(afterMerge.workItem.state).toBe("complete")
+            expect(afterMerge.workItem.state).toBe("local_cleanup")
             expect(afterMerge.workItem.worktreePath).toBe(
               "/tmp/worktrees/acme-widgets-42",
             )
-            expect(afterMerge.workItem.sessionId).toBe(
+          }
+
+          const afterCleanup = yield* claimAndRunPending
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.state).toBe("complete")
+            expect(afterCleanup.workItem.worktreePath).toBeNull()
+            expect(afterCleanup.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterMerge.workItem.githubPullRequestNumber).toBe(101)
-            expect(afterMerge.workItem.failureCode).toBeNull()
+            expect(afterCleanup.workItem.githubPullRequestNumber).toBe(101)
+            expect(afterCleanup.workItem.failureCode).toBeNull()
             expect(
-              afterMerge.workItem.stepRuns.map((run) => [run.step, run.status]),
+              afterCleanup.workItem.stepRuns.map((run) => [
+                run.step,
+                run.status,
+              ]),
             ).toEqual([
               ["create_worktree", "succeeded"],
               ["install_dependencies", "succeeded"],
@@ -1057,6 +1068,7 @@ describe("WorkItemLifecycle", () => {
               ["mark_pr_ready_for_review", "succeeded"],
               ["decide_pr_merge", "succeeded"],
               ["merge_pr", "succeeded"],
+              ["local_cleanup", "succeeded"],
             ])
           }
 
@@ -1066,9 +1078,68 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(12)
+          expect(final.stepRuns).toHaveLength(13)
         }),
       ))
+
+    it("retains the worktree path when local cleanup fails and clears it after Retry", () => {
+      let cleanupAttempts = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        localCleanup: () => {
+          cleanupAttempts += 1
+          return cleanupAttempts === 1
+            ? Effect.fail(new Error("worktree is locked"))
+            : Effect.void
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 12; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const failedCleanup = yield* claimAndRunPending
+          expect(failedCleanup._tag).toBe("processed")
+          if (failedCleanup._tag === "processed") {
+            expect(failedCleanup.workItem.state).toBe("local_cleanup")
+            expect(failedCleanup.workItem.worktreePath).toBe(
+              "/tmp/worktrees/acme-widgets-42",
+            )
+            expect(failedCleanup.workItem.stepRuns.at(-1)?.status).toBe(
+              "failed",
+            )
+          }
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("local_cleanup")
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+            state: "CLOSED",
+          })
+          const completed = yield* claimAndRunPending
+          expect(completed._tag).toBe("processed")
+          if (completed._tag === "processed") {
+            expect(completed.workItem.state).toBe("complete")
+            expect(completed.workItem.worktreePath).toBeNull()
+          }
+          expect(cleanupAttempts).toBe(2)
+        }),
+      )
+    })
 
     it("keeps no_checks pending for 60 seconds before treating as green", () => {
       const steps: LifecycleStepsShape = {
@@ -1579,6 +1650,10 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.void
         },
+        localCleanup: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
         removeWorktree: () => Effect.void,
       }
 
@@ -1597,12 +1672,12 @@ describe("WorkItemLifecycle", () => {
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 13; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
-          expect(seen).toHaveLength(12)
+          expect(seen).toHaveLength(13)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -1645,6 +1720,8 @@ describe("WorkItemLifecycle", () => {
           expect(seen[10]!.sessionId).toBe("ses_recorded")
           expect(seen[11]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[11]!.sessionId).toBe("ses_recorded")
+          expect(seen[12]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[12]!.sessionId).toBe("ses_recorded")
         }),
       )
     })

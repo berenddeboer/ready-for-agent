@@ -31,6 +31,7 @@ export type OperationalLifecycleStep =
   | "mark_pr_ready_for_review"
   | "decide_pr_merge"
   | "merge_pr"
+  | "local_cleanup"
 
 export type WorkItemState =
   | OperationalLifecycleStep
@@ -136,6 +137,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   mark_pr_ready_for_review: Duration.minutes(5),
   decide_pr_merge: Duration.minutes(15),
   merge_pr: Duration.minutes(5),
+  local_cleanup: Duration.minutes(5),
 }
 
 export type WorkItemLifecycleConfig = {
