@@ -1,4 +1,4 @@
-import { Config, Effect, Layer, Redacted } from "effect"
+import { Config, Duration, Effect, Layer, Redacted, Schedule } from "effect"
 import {
   type FieldsSelection,
   createClient,
@@ -25,7 +25,6 @@ import type {
 } from "./types.js"
 
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
-const GITHUB_REST_URL = "https://api.github.com"
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
 const REQUEST_TIMEOUT = "30 seconds"
@@ -39,15 +38,6 @@ export interface GitHubGraphqlClient {
     request: R & { readonly __name?: string },
     signal?: AbortSignal,
   ) => Promise<FieldsSelection<Mutation, R>>
-}
-
-/**
- * Minimal REST client used for individual PR status checks.
- * Fine-grained PATs cannot read CheckRun GraphQL nodes (Checks API gap);
- * Actions jobs + classic commit statuses remain available via REST.
- */
-export interface GitHubRestClient {
-  readonly getJson: (path: string, signal?: AbortSignal) => Promise<unknown>
 }
 
 const githubRequest = <A>(
@@ -66,13 +56,51 @@ const githubRequest = <A>(
     ),
   )
 
+const githubQuery = <A>(
+  message: string,
+  request: (signal: AbortSignal) => Promise<A>,
+): Effect.Effect<A, GitHubRequestError> =>
+  githubRequest(message, request).pipe(
+    Effect.retry({
+      schedule: Schedule.addDelay(Schedule.recurs(2), () =>
+        Effect.succeed(Duration.millis(500)),
+      ),
+    }),
+  )
+
+interface GitHubApiCheckRun {
+  readonly __typename?: "CheckRun"
+  readonly databaseId?: unknown
+  readonly name?: unknown
+  readonly status?: unknown
+  readonly conclusion?: unknown
+}
+
+interface GitHubApiStatusContext {
+  readonly __typename?: "StatusContext"
+  readonly id?: unknown
+  readonly context?: unknown
+  readonly state?: unknown
+}
+
 interface GitHubApiPullRequest {
   readonly state: unknown
   readonly merged: unknown
   readonly headRefOid?: unknown
   readonly baseRefName: unknown
   readonly mergeable: unknown
-  readonly statusCheckRollup: { readonly state: unknown } | null
+  readonly statusCheckRollup: {
+    readonly state: unknown
+    readonly contexts?: {
+      readonly nodes?:
+        | readonly (GitHubApiCheckRun | GitHubApiStatusContext | null)[]
+        | null
+      readonly pageInfo?: {
+        readonly endCursor?: unknown
+        readonly hasNextPage?: unknown
+      }
+    }
+  } | null
 }
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
@@ -154,207 +182,118 @@ const toPullRequestCheckStatus = (
   throw new Error(`Invalid GitHub status check state: ${state}`)
 }
 
-const mapActionsJob = (job: {
-  readonly id?: unknown
-  readonly name?: unknown
-  readonly status?: unknown
-  readonly conclusion?: unknown
-}): TerminalPrStatusCheck | null => {
-  if (job.status !== "completed") {
+const mapCheckRun = (
+  check: GitHubApiCheckRun,
+): TerminalPrStatusCheck | null => {
+  if (check.status !== "COMPLETED") {
     return null
   }
-  if (typeof job.id !== "number" || !Number.isSafeInteger(job.id)) {
-    throw new Error("Invalid GitHub Actions job identity")
+  if (
+    typeof check.databaseId !== "number" ||
+    !Number.isSafeInteger(check.databaseId)
+  ) {
+    throw new Error("Invalid GitHub CheckRun identity")
   }
-  if (typeof job.name !== "string" || job.name.trim() === "") {
-    throw new Error("Invalid GitHub Actions job name")
+  if (typeof check.name !== "string" || check.name.trim() === "") {
+    throw new Error("Invalid GitHub CheckRun name")
   }
-  const conclusion = job.conclusion
-  if (conclusion === "success") {
+  const conclusion = check.conclusion
+  if (conclusion === "SUCCESS") {
     return {
-      externalId: `actions-job:${job.id}`,
-      name: job.name,
+      externalId: `actions-job:${check.databaseId}`,
+      name: check.name,
       outcome: "green",
     }
   }
   if (
-    conclusion === "failure" ||
-    conclusion === "timed_out" ||
-    conclusion === "action_required" ||
-    conclusion === "startup_failure"
+    conclusion === "FAILURE" ||
+    conclusion === "TIMED_OUT" ||
+    conclusion === "ACTION_REQUIRED" ||
+    conclusion === "STARTUP_FAILURE"
   ) {
     return {
-      externalId: `actions-job:${job.id}`,
-      name: job.name,
+      externalId: `actions-job:${check.databaseId}`,
+      name: check.name,
       outcome: "red",
     }
   }
-  // cancelled, skipped, neutral, stale, etc. do not hand off
+  // CANCELLED, SKIPPED, NEUTRAL, STALE, etc. do not hand off
   return null
 }
 
-const mapCommitStatus = (status: {
-  readonly id?: unknown
-  readonly context?: unknown
-  readonly state?: unknown
-}): TerminalPrStatusCheck | null => {
-  if (status.state === "pending") {
+const mapStatusContext = (
+  status: GitHubApiStatusContext,
+): TerminalPrStatusCheck | null => {
+  if (status.state === "PENDING" || status.state === "EXPECTED") {
     return null
   }
   if (typeof status.context !== "string" || status.context.trim() === "") {
-    throw new Error("Invalid GitHub commit status context")
+    throw new Error("Invalid GitHub StatusContext name")
   }
   const externalId =
-    typeof status.id === "number" && Number.isSafeInteger(status.id)
+    typeof status.id === "string" && status.id.trim() !== ""
       ? `status:${status.id}`
       : `status:${status.context}`
-  if (status.state === "success") {
+  if (status.state === "SUCCESS") {
     return {
       externalId,
       name: status.context,
       outcome: "green",
     }
   }
-  if (status.state === "failure" || status.state === "error") {
+  if (status.state === "FAILURE" || status.state === "ERROR") {
     return {
       externalId,
       name: status.context,
       outcome: "red",
     }
   }
-  throw new Error(`Invalid GitHub commit status state: ${status.state}`)
+  throw new Error(`Invalid GitHub StatusContext state: ${status.state}`)
 }
 
-const listTerminalChecksFromRest = (
-  rest: GitHubRestClient,
+const terminalChecksFromRollup = (
+  rollup: GitHubApiPullRequest["statusCheckRollup"],
   repository: { owner: string; name: string },
-  headSha: string,
-): Effect.Effect<readonly TerminalPrStatusCheck[], GitHubRequestError> =>
-  Effect.gen(function* () {
-    const checks: TerminalPrStatusCheck[] = []
-    let runsPage = 1
-    while (true) {
-      const runsPath =
-        `/repos/${repository.owner}/${repository.name}/actions/runs` +
-        `?head_sha=${encodeURIComponent(headSha)}&per_page=${PAGE_SIZE}&page=${runsPage}`
-      const runsBody = yield* githubRequest(
-        `Failed to list Actions runs for ${repository.owner}/${repository.name}@${headSha}`,
-        (signal) => rest.getJson(runsPath, signal),
-      )
-      const workflowRuns =
-        typeof runsBody === "object" &&
-        runsBody !== null &&
-        "workflow_runs" in runsBody &&
-        Array.isArray(runsBody.workflow_runs)
-          ? runsBody.workflow_runs
-          : []
-      for (const run of workflowRuns) {
+): Effect.Effect<readonly TerminalPrStatusCheck[], GitHubRequestError> => {
+  if (rollup === null || rollup.contexts?.nodes === undefined) {
+    return Effect.succeed(emptyTerminalChecks)
+  }
+  const checks: TerminalPrStatusCheck[] = []
+  for (const node of rollup.contexts.nodes ?? []) {
+    if (node === null || typeof node !== "object") {
+      continue
+    }
+    const mapped = (() => {
+      try {
         if (
-          typeof run !== "object" ||
-          run === null ||
-          !("id" in run) ||
-          typeof run.id !== "number"
+          node.__typename === "CheckRun" ||
+          ("databaseId" in node && "conclusion" in node)
         ) {
-          continue
+          return mapCheckRun(node as GitHubApiCheckRun)
         }
-        let jobsPage = 1
-        while (true) {
-          const jobsPath =
-            `/repos/${repository.owner}/${repository.name}/actions/runs/${run.id}/jobs` +
-            `?filter=all&per_page=${PAGE_SIZE}&page=${jobsPage}`
-          const jobsBody = yield* githubRequest(
-            `Failed to list Actions jobs for run ${run.id} on ${repository.owner}/${repository.name}`,
-            (signal) => rest.getJson(jobsPath, signal),
-          )
-          const jobs =
-            typeof jobsBody === "object" &&
-            jobsBody !== null &&
-            "jobs" in jobsBody &&
-            Array.isArray(jobsBody.jobs)
-              ? jobsBody.jobs
-              : []
-          for (const job of jobs) {
-            if (typeof job !== "object" || job === null) {
-              continue
-            }
-            const mapped = yield* Effect.try({
-              try: () => mapActionsJob(job as never),
-              catch: (cause) =>
-                new GitHubRequestError({
-                  message: `GitHub returned invalid Actions job data for ${repository.owner}/${repository.name}`,
-                  cause,
-                }),
-            })
-            if (mapped !== null) {
-              checks.push(mapped)
-            }
-          }
-          if (jobs.length < PAGE_SIZE) {
-            break
-          }
-          jobsPage += 1
+        if (
+          node.__typename === "StatusContext" ||
+          ("context" in node && "state" in node)
+        ) {
+          return mapStatusContext(node as GitHubApiStatusContext)
         }
-      }
-      if (workflowRuns.length < PAGE_SIZE) {
-        break
-      }
-      runsPage += 1
-    }
-
-    let statusesPage = 1
-    while (true) {
-      const statusesPath =
-        `/repos/${repository.owner}/${repository.name}/commits/${encodeURIComponent(headSha)}/statuses` +
-        `?per_page=${PAGE_SIZE}&page=${statusesPage}`
-      const statusesBody = yield* githubRequest(
-        `Failed to list commit statuses for ${repository.owner}/${repository.name}@${headSha}`,
-        (signal) => rest.getJson(statusesPath, signal),
-      )
-      const statuses = Array.isArray(statusesBody) ? statusesBody : []
-      for (const status of statuses) {
-        if (typeof status !== "object" || status === null) {
-          continue
-        }
-        const mapped = yield* Effect.try({
-          try: () => mapCommitStatus(status as never),
-          catch: (cause) =>
-            new GitHubRequestError({
-              message: `GitHub returned invalid commit status data for ${repository.owner}/${repository.name}`,
-              cause,
-            }),
+        return null
+      } catch (cause) {
+        return new GitHubRequestError({
+          message: `GitHub returned invalid status check data for ${repository.owner}/${repository.name}`,
+          cause,
         })
-        if (mapped !== null) {
-          checks.push(mapped)
-        }
       }
-      if (statuses.length < PAGE_SIZE) {
-        break
-      }
-      statusesPage += 1
+    })()
+    if (mapped instanceof GitHubRequestError) {
+      return Effect.fail(mapped)
     }
-
-    return uniqueTerminalChecks(checks)
-  })
-
-const makeGitHubRestClient = (token: string): GitHubRestClient => ({
-  getJson: async (path, signal) => {
-    const response = await fetch(`${GITHUB_REST_URL}${path}`, {
-      signal,
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${token}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    })
-    if (!response.ok) {
-      const body = await response.text()
-      throw new Error(
-        `GitHub REST ${path} failed with ${response.status}: ${body.slice(0, 300)}`,
-      )
+    if (mapped !== null) {
+      checks.push(mapped)
     }
-    return response.json() as Promise<unknown>
-  },
-})
+  }
+  return Effect.succeed(uniqueTerminalChecks(checks))
+}
 
 interface GitHubApiIssue {
   readonly number: unknown
@@ -643,14 +582,36 @@ const sortDependencies = (
       left.number - right.number || left.url.localeCompare(right.url),
   )
 
+const statusCheckRollupSelection = (after?: string) =>
+  ({
+    state: true,
+    contexts: {
+      __args: { first: PAGE_SIZE, ...(after === undefined ? {} : { after }) },
+      nodes: {
+        __typename: true,
+        on_CheckRun: {
+          databaseId: true,
+          name: true,
+          status: true,
+          conclusion: true,
+        },
+        on_StatusContext: {
+          id: true,
+          context: true,
+          state: true,
+        },
+      },
+      pageInfo: { endCursor: true, hasNextPage: true },
+    },
+  }) as const
+
 export const makeGitHubService = (
   client: GitHubGraphqlClient,
-  rest?: GitHubRestClient,
 ): GitHubServiceShape => ({
   getPullRequestCheckStatus: Effect.fn(
     "GitHubService.getPullRequestCheckStatus",
   )(function* (repository, headRefName) {
-    const result = yield* githubRequest(
+    const result = yield* githubQuery(
       `Failed to get pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
       (signal) =>
         client.query(
@@ -668,11 +629,7 @@ export const makeGitHubService = (
                   headRefOid: true,
                   baseRefName: true,
                   mergeable: true,
-                  // Aggregate only: individual CheckRun GraphQL nodes require
-                  // the Checks API, which fine-grained PATs cannot use.
-                  statusCheckRollup: {
-                    state: true,
-                  },
+                  statusCheckRollup: statusCheckRollupSelection(),
                 },
               },
             },
@@ -694,22 +651,61 @@ export const makeGitHubService = (
       }
     }
 
-    let terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks
-    if (
-      rest !== undefined &&
-      pullRequest.state === "OPEN" &&
-      typeof pullRequest.headRefOid === "string" &&
-      pullRequest.headRefOid.trim() !== ""
-    ) {
-      terminalChecks = yield* listTerminalChecksFromRest(
-        rest,
+    const terminalChecks = [
+      ...(yield* terminalChecksFromRollup(
+        pullRequest.statusCheckRollup,
         repository,
-        pullRequest.headRefOid,
+      )),
+    ]
+    let pageInfo = pullRequest.statusCheckRollup?.contexts?.pageInfo
+    while (pageInfo?.hasNextPage === true) {
+      const after = pageInfo.endCursor
+      if (typeof after !== "string") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned invalid status check pagination for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      const page = yield* githubQuery(
+        `Failed to get pull request check page for ${repository.owner}/${repository.name}:${headRefName}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                pullRequests: {
+                  __args: { first: 1, headRefName },
+                  nodes: {
+                    statusCheckRollup: statusCheckRollupSelection(after),
+                  },
+                },
+              },
+            },
+            signal,
+          ),
       )
+      if (page.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      const rollup = (page.repository.pullRequests.nodes?.[0]
+        ?.statusCheckRollup ??
+        null) as GitHubApiPullRequest["statusCheckRollup"]
+      if (rollup === null) {
+        return yield* new GitHubRequestError({
+          message: `GitHub omitted status check page data for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      terminalChecks.push(
+        ...(yield* terminalChecksFromRollup(rollup, repository)),
+      )
+      pageInfo = rollup?.contexts?.pageInfo
     }
 
     return yield* Effect.try({
-      try: () => toPullRequestCheckStatus(pullRequest, terminalChecks),
+      try: () =>
+        toPullRequestCheckStatus(
+          pullRequest,
+          uniqueTerminalChecks(terminalChecks),
+        ),
       catch: (cause) =>
         new GitHubRequestError({
           message: `GitHub returned invalid pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
@@ -719,7 +715,7 @@ export const makeGitHubService = (
   }),
   getOpenPullRequestNumber: Effect.fn("GitHubService.getOpenPullRequestNumber")(
     function* (repository, headRefName) {
-      const result = yield* githubRequest(
+      const result = yield* githubQuery(
         `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
         (signal) =>
           client.query(
@@ -754,7 +750,7 @@ export const makeGitHubService = (
   markPullRequestReadyForReview: Effect.fn(
     "GitHubService.markPullRequestReadyForReview",
   )(function* (repository, headRefName) {
-    const result = yield* githubRequest(
+    const result = yield* githubQuery(
       `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
       (signal) =>
         client.query(
@@ -851,7 +847,7 @@ export const makeGitHubService = (
   }),
   mergePullRequest: Effect.fn("GitHubService.mergePullRequest")(
     function* (repository, headRefName) {
-      const result = yield* githubRequest(
+      const result = yield* githubQuery(
         `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
         (signal) =>
           client.query(
@@ -973,7 +969,7 @@ export const makeGitHubService = (
       let after: string | null = null
 
       while (true) {
-        const result = yield* githubRequest(
+        const result = yield* githubQuery(
           `Failed to list Ready-labeled Issues for ${repository.owner}/${repository.name}`,
           (signal) =>
             client.query(
@@ -1093,7 +1089,7 @@ export const makeGitHubService = (
               })
             }
 
-            const dependencyResult = yield* githubRequest(
+            const dependencyResult = yield* githubQuery(
               `Failed to list dependencies for ${repository.owner}/${repository.name}#${mappedIssue.number}`,
               (signal) =>
                 client.query(
@@ -1146,7 +1142,7 @@ export const makeGitHubService = (
               })
             }
 
-            const pullRequestResult = yield* githubRequest(
+            const pullRequestResult = yield* githubQuery(
               `Failed to list closing pull requests for ${repositoryName}#${mappedIssue.number}`,
               (signal) =>
                 client.query(
@@ -1206,7 +1202,7 @@ export const makeGitHubService = (
               })
             }
 
-            const subIssueResult = yield* githubRequest(
+            const subIssueResult = yield* githubQuery(
               `Failed to list sub-issues for ${repositoryName}#${mappedIssue.number}`,
               (signal) =>
                 client.query(
@@ -1388,12 +1384,8 @@ const makeGitHubGraphqlClient = (token: string): GitHubGraphqlClient => {
 export const GitHubServiceLive = Layer.effect(
   GitHubService,
   Config.redacted("GITHUB_TOKEN").pipe(
-    Effect.map((token) => {
-      const value = Redacted.value(token)
-      return makeGitHubService(
-        makeGitHubGraphqlClient(value),
-        makeGitHubRestClient(value),
-      )
-    }),
+    Effect.map((token) =>
+      makeGitHubService(makeGitHubGraphqlClient(Redacted.value(token))),
+    ),
   ),
 )
