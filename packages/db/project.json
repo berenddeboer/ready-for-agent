@@ -16,7 +16,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "mkdir -p ../../tmp && SQLITE_DATABASE_PATH=${SQLITE_DATABASE_PATH:-../../tmp/ready-for-agent.db} bun --conditions @ready-for-agent/source src/bin/migrate.ts"
+        "command": "ROOT=\"$(cd ../.. && pwd)\" && mkdir -p \"$ROOT/tmp\" && SQLITE_DATABASE_PATH=\"${SQLITE_DATABASE_PATH:-$ROOT/tmp/ready-for-agent.db}\" bun --conditions @ready-for-agent/source src/bin/migrate.ts"
       }
     }
   }

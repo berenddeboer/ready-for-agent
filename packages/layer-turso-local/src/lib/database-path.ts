@@ -1,3 +1,4 @@
+import { isAbsolute, resolve } from "node:path"
 import { Context } from "effect"
 import * as Config from "effect/Config"
 
@@ -17,16 +18,19 @@ export const isLocalFilePath = (path: string): boolean => {
   return protocol === undefined || protocol === "file"
 }
 
+const resolveLocalFilePath = (path: string): string =>
+  path === ":memory:" || isAbsolute(path) ? path : resolve(path)
+
 export const toTursoDatabasePath = (path: string): string => {
   if (path.startsWith("file://")) {
-    return path.slice("file://".length)
+    return resolveLocalFilePath(path.slice("file://".length))
   }
 
   if (path.startsWith("file:")) {
-    return path.slice("file:".length)
+    return resolveLocalFilePath(path.slice("file:".length))
   }
 
-  return path
+  return resolveLocalFilePath(path)
 }
 
 /**

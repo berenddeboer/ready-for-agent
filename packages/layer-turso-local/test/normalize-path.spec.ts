@@ -22,8 +22,15 @@ describe("Turso database path helpers", () => {
     expect(isLocalFilePath("libsql://example.turso.io")).toBe(false)
   })
 
-  it("converts file URLs to Turso SDK paths", () => {
-    expect(toTursoDatabasePath("file://./data/app.db")).toBe("./data/app.db")
-    expect(toTursoDatabasePath("file:./data/app.db")).toBe("./data/app.db")
+  it("converts file URLs to absolute Turso SDK paths", () => {
+    expect(toTursoDatabasePath("file://./data/app.db")).toBe(
+      `${process.cwd()}/data/app.db`,
+    )
+    expect(toTursoDatabasePath("file:./data/app.db")).toBe(
+      `${process.cwd()}/data/app.db`,
+    )
+    expect(toTursoDatabasePath("/abs/data/app.db")).toBe("/abs/data/app.db")
+    expect(toTursoDatabasePath(":memory:")).toBe(":memory:")
+    expect(toTursoDatabasePath("file::memory:")).toBe(":memory:")
   })
 })
