@@ -1113,6 +1113,64 @@ describe("GraphQL API", () => {
     expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
   })
 
+  test("serializes local_cleanup as a lifecycle phase", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const cleanedUp = {
+      ...workItem,
+      state: "complete",
+      stepRuns: [
+        { ...baseRun, step: "merge_pr", status: "succeeded" },
+        { ...baseRun, step: "local_cleanup", status: "succeeded" },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([cleanedUp]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            state lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "COMPLETE",
+            lifecycleLabels: [
+              {
+                phase: "MERGE_PR",
+                label: "Merge PR: Merged",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "LOCAL_CLEANUP",
+                label: "Local cleanup: Succeeded",
+                status: "SUCCEEDED",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
   test("projects repeated status-check runs as one lifecycle phase", async () => {
     const baseRun = workItem.stepRuns[0]!
     const polling = {
