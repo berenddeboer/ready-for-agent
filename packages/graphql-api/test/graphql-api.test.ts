@@ -265,14 +265,18 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("queues a Refresh Job when adding a repository that already has a GitHub token", async () => {
-    let enqueued:
-      | {
-          queue: string
-          payload: Record<string, unknown>
-          retryLimit: number | undefined
-        }
-      | undefined
+  test("activates Issue Polling when adding a repository that already has a GitHub token", async () => {
+    const ensured: Array<{
+      queue: string
+      key: string
+      payload: Record<string, unknown>
+      delayMs: number
+    }> = []
+    const enqueued: Array<{
+      queue: string
+      payload: Record<string, unknown>
+      retryLimit: number | undefined
+    }> = []
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -287,13 +291,23 @@ describe("GraphQL API", () => {
           ),
       },
       {
+        ensureKeyed: (queueName, key, payload, delay) =>
+          Effect.sync(() => {
+            ensured.push({
+              queue: queueName,
+              key,
+              payload,
+              delayMs: Duration.toMillis(delay),
+            })
+            return { jobId: makeJobId(), created: true }
+          }),
         enqueue: (queueName, payload, options) =>
           Effect.sync(() => {
-            enqueued = {
+            enqueued.push({
               queue: queueName,
               payload,
               retryLimit: options?.retryLimit,
-            }
+            })
             return makeJobId()
           }),
       },
@@ -313,17 +327,29 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(enqueued).toEqual({
-      queue: "issue-refresh",
-      payload: {
-        _tag: "refresh-repository",
-        repositoryId: repository.id,
-      },
-      retryLimit: 1,
+    expect(ensured).toHaveLength(1)
+    expect(ensured[0]?.queue).toBe("issue-poll")
+    expect(ensured[0]?.key).toBe(repository.id)
+    expect(ensured[0]?.payload).toEqual({
+      _tag: "refresh-repository",
+      repositoryId: repository.id,
     })
+    expect(ensured[0]?.delayMs).toBeGreaterThanOrEqual(120_000)
+    expect(ensured[0]?.delayMs).toBeLessThanOrEqual(150_000)
+    expect(enqueued).toEqual([
+      {
+        queue: "issue-refresh",
+        payload: {
+          _tag: "refresh-repository",
+          repositoryId: repository.id,
+        },
+        retryLimit: 1,
+      },
+    ])
   })
 
-  test("does not queue a Refresh Job when adding a repository without a GitHub token", async () => {
+  test("does not activate Issue Polling when adding a repository without a GitHub token", async () => {
+    let ensured = false
     let enqueued = false
     await runtime.dispose()
     runtime = makeRuntime(
@@ -333,6 +359,10 @@ describe("GraphQL API", () => {
         findSecret: () => Effect.succeed(null),
       },
       {
+        ensureKeyed: () => {
+          ensured = true
+          return Effect.succeed({ jobId: makeJobId(), created: true })
+        },
         enqueue: () => {
           enqueued = true
           return Effect.succeed(makeJobId())
@@ -354,10 +384,11 @@ describe("GraphQL API", () => {
         },
       },
     })
+    expect(ensured).toBe(false)
     expect(enqueued).toBe(false)
   })
 
-  test("keeps the added repository when its automatic Refresh Job cannot be queued", async () => {
+  test("keeps the added repository when automatic Issue Polling activation fails", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -366,10 +397,10 @@ describe("GraphQL API", () => {
         findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
       },
       {
-        enqueue: () =>
+        ensureKeyed: () =>
           Effect.fail(
             new EnqueueError({
-              queue: "issue-refresh",
+              queue: "issue-poll",
               message: "queue unavailable",
             }),
           ),
@@ -516,6 +547,8 @@ describe("GraphQL API", () => {
     let addCalls = 0
     let addedInput: Parameters<KeymaxxerServiceShape["addSecret"]>[0] | null =
       null
+    const ensured: string[] = []
+    const enqueued: string[] = []
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -531,6 +564,18 @@ describe("GraphQL API", () => {
               return true
             }),
           ),
+      },
+      {
+        ensureKeyed: (_queue, key) =>
+          Effect.sync(() => {
+            ensured.push(key)
+            return { jobId: makeJobId(), created: true }
+          }),
+        enqueue: (_queue) =>
+          Effect.sync(() => {
+            enqueued.push("refresh")
+            return makeJobId()
+          }),
       },
     )
 
@@ -573,6 +618,10 @@ describe("GraphQL API", () => {
         "Fine-grained GitHub token for Ready for Agent on acme/widgets",
       tags: "ready-for-agent,harness,github",
     })
+    // Concurrent requests share token provisioning; both may activate polling.
+    expect(ensured.every((id) => id === repository.id)).toBe(true)
+    expect(ensured.length).toBeGreaterThanOrEqual(1)
+    expect(enqueued.length).toBeGreaterThanOrEqual(1)
   })
 
   test("rejects a saved token whose metadata no longer matches", async () => {
@@ -607,8 +656,9 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("removes a repository GitHub token", async () => {
+  test("removes a repository GitHub token and suspends Issue Polling", async () => {
     let removedName: string | undefined
+    const removedKeys: Array<{ queue: string; key: string }> = []
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -622,6 +672,12 @@ describe("GraphQL API", () => {
           Effect.sync(() => {
             removedName = name
             return true
+          }),
+      },
+      {
+        removeKeyed: (queueName, key) =>
+          Effect.sync(() => {
+            removedKeys.push({ queue: queueName, key })
           }),
       },
     )
@@ -647,10 +703,12 @@ describe("GraphQL API", () => {
       },
     })
     expect(removedName).toBe("GITHUB_TOKEN_ACME_WIDGETS")
+    expect(removedKeys).toEqual([{ queue: "issue-poll", key: repository.id }])
   })
 
   test("remove repository GitHub token is idempotent when missing", async () => {
     let removeCalls = 0
+    let removeKeyedCalls = 0
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -661,6 +719,12 @@ describe("GraphQL API", () => {
           Effect.sync(() => {
             removeCalls += 1
             return false
+          }),
+      },
+      {
+        removeKeyed: () =>
+          Effect.sync(() => {
+            removeKeyedCalls += 1
           }),
       },
     )
@@ -685,17 +749,29 @@ describe("GraphQL API", () => {
       },
     })
     expect(removeCalls).toBe(0)
+    expect(removeKeyedCalls).toBe(1)
   })
 
-  test("removes a repository", async () => {
+  test("removes a repository and suspends Issue Polling", async () => {
     let removedRepositoryId: string | undefined
+    let removeKeyedCalls = 0
     await runtime.dispose()
-    runtime = makeRuntime({
-      removeRepository: (repositoryId) => {
-        removedRepositoryId = repositoryId
-        return Effect.void
+    runtime = makeRuntime(
+      {
+        removeRepository: (repositoryId) => {
+          removedRepositoryId = repositoryId
+          return Effect.void
+        },
       },
-    })
+      {},
+      {},
+      {
+        removeKeyed: () =>
+          Effect.sync(() => {
+            removeKeyedCalls += 1
+          }),
+      },
+    )
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
@@ -710,6 +786,7 @@ describe("GraphQL API", () => {
       data: { removeRepository: repository.id },
     })
     expect(removedRepositoryId).toBe(repository.id)
+    expect(removeKeyedCalls).toBe(1)
   })
 
   test("resets a Work Item", async () => {
