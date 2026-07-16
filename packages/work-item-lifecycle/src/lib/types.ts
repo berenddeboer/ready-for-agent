@@ -77,6 +77,8 @@ export interface WorkItemRecord {
   readonly state: WorkItemState
   readonly stateReadyAt: Date
   readonly paused: boolean
+  /** When set, advancement into this step auto-pauses (no Step Run enqueued). */
+  readonly pauseBeforeStep: OperationalLifecycleStep | null
   readonly worktreePath: string | null
   readonly sessionId: string | null
   readonly failureCode: string | null
