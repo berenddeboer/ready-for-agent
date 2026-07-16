@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect } from "effect"
@@ -48,6 +48,75 @@ describe("runMigrations", () => {
 
         expect(exit._tag).toBe("Failure")
         expect(tables).toEqual([])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("preserves historical Needs Human conflicts while rejecting new ones", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260717120000_needs_human_unfinished/migration.sql",
+      ),
+      "utf8",
+    )
+    const folder = await migrationFolder(
+      "20260717120000_needs_human_unfinished",
+      migrationSql,
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE work_item (
+            id text PRIMARY KEY,
+            repository_id text NOT NULL,
+            github_issue_number integer NOT NULL,
+            state text NOT NULL
+          )
+        `)
+        yield* sql.unsafe(`
+          CREATE UNIQUE INDEX work_item_one_unfinished_v2_uidx
+          ON work_item (repository_id, github_issue_number)
+          WHERE state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+        `)
+        yield* sql.unsafe(
+          `INSERT INTO work_item VALUES
+            ('old-handoff', 'repo-1', 42, 'needs_human'),
+            ('new-attempt', 'repo-1', 42, 'implement')`,
+        )
+
+        const migration = yield* Effect.exit(runMigrations(folder))
+        expect(migration._tag).toBe("Success")
+
+        const insertConflict = yield* Effect.exit(
+          sql.unsafe(
+            `INSERT INTO work_item VALUES ('third-attempt', 'repo-1', 42, 'needs_human')`,
+          ),
+        )
+        expect(insertConflict._tag).toBe("Failure")
+
+        const resumeConflict = yield* Effect.exit(
+          sql.unsafe(
+            `UPDATE work_item SET state = 'local_cleanup' WHERE id = 'old-handoff'`,
+          ),
+        )
+        expect(resumeConflict._tag).toBe("Failure")
+
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'abandoned' WHERE id = 'new-attempt'`,
+        )
+        yield* sql.unsafe(
+          `UPDATE work_item SET state = 'local_cleanup' WHERE id = 'old-handoff'`,
+        )
+        const rows = yield* sql.unsafe(
+          `SELECT id, state FROM work_item ORDER BY id`,
+        )
+        expect(rows).toEqual([
+          { id: "new-attempt", state: "abandoned" },
+          { id: "old-handoff", state: "local_cleanup" },
+        ])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

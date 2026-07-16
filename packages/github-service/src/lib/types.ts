@@ -45,6 +45,16 @@ export interface GitHubIssueReference {
 
 export type GitHubPullRequestLifecycleState = "OPEN" | "MERGED" | "CLOSED"
 
+/**
+ * Lifecycle state of the pull request on a head ref, or not found.
+ * Distinct from check rollup: used to detect human merge/close outcomes.
+ */
+export type PullRequestLifecycleStatus =
+  | { readonly _tag: "open" }
+  | { readonly _tag: "merged" }
+  | { readonly _tag: "closed" }
+  | { readonly _tag: "not_found" }
+
 export interface GitHubPullRequestReference {
   readonly number: number
   readonly repository: string

@@ -92,3 +92,18 @@ export class ResetCleanupError extends Data.TaggedError("ResetCleanupError")<{
   readonly message: string
   readonly cause: unknown
 }> {}
+
+export class AbandonCleanupError extends Data.TaggedError(
+  "AbandonCleanupError",
+)<{
+  readonly workItemId: string
+  readonly message: string
+  readonly cause: unknown
+}> {}
+
+export class NeedsHumanHandoffNotEligibleError extends Data.TaggedError(
+  "NeedsHumanHandoffNotEligibleError",
+)<{
+  readonly workItemId: string
+  readonly reason: string
+}> {}

@@ -131,6 +131,22 @@ const keymaxxerLayer = (
     runWithSecrets: () => Effect.die("not used"),
   })
 
+const defaultGithubLayer = Layer.succeed(GitHubService, {
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+    }),
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  markPullRequestReadyForReview: () => Effect.void,
+  mergePullRequest: () => Effect.void,
+  listReadyIssues: () => Effect.succeed([]),
+} satisfies GitHubServiceShape)
+
 const queueLayer = (
   jobs: RawJob[],
   onAcknowledge: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
@@ -150,7 +166,8 @@ const queueLayer = (
     delay: Duration.Duration,
   ) => Effect.Effect<unknown> = () => Effect.void,
 ) =>
-  Layer.merge(
+  Layer.mergeAll(
+    defaultGithubLayer,
     Layer.succeed(QueueService, {
       queueInTransaction: true,
       enqueue: unused,
@@ -210,7 +227,8 @@ const queueLayer = (
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     }),
   )
 
@@ -374,6 +392,8 @@ describe("Job worker", () => {
           mergeability: "mergeable",
           baseRefName: "main",
         }),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
       listReadyIssues: () =>
@@ -1306,6 +1326,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: unused,
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1398,6 +1419,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: unused,
+      continueAfterHumanPrOutcome: unused,
     })
     // Block Keymaxxer so auto-heal cannot finish during startup.
     const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
@@ -1524,6 +1546,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: unused,
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1707,6 +1730,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: unused,
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1811,6 +1835,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: unused,
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(

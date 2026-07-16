@@ -26,10 +26,12 @@ import {
   QueueService,
 } from "@ready-for-agent/queue-service"
 import {
+  AbandonCleanupError,
   ActiveStepRunExistsError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
+  NeedsHumanHandoffNotEligibleError,
   NonTransactionalQueueError,
   ParentIssueError,
   ResetCleanupError,
@@ -93,6 +95,8 @@ const isUnfinishedWorkItemUniqueViolation = (error: SqlError): boolean => {
   return (
     (message.includes("unique") || message.includes("sqlite_constraint")) &&
     (message.includes("work_item_one_unfinished_uidx") ||
+      message.includes("work_item_one_unfinished_v2_uidx") ||
+      message.includes("work_item_one_unfinished_v3_uidx") ||
       (message.includes("work_item.repository_id") &&
         message.includes("work_item.github_issue_number")))
   )
@@ -372,9 +376,20 @@ export type AbandonError =
   | WorkItemNotFoundError
   | WorkItemTerminalError
   | WorkItemHasRunningStepError
+  | AbandonCleanupError
   | WorkItemLifecycleDatabaseError
   | AcknowledgeError
   | JobNotFoundError
+
+export type HumanPrOutcome = "merged" | "closed_unmerged"
+
+export type ContinueAfterHumanPrOutcomeError =
+  | WorkItemNotFoundError
+  | NeedsHumanHandoffNotEligibleError
+  | AbandonCleanupError
+  | WorkItemLifecycleDatabaseError
+  | EnqueueError
+  | InvalidQueueNameError
 
 export type ResetError =
   | WorkItemNotFoundError
@@ -448,6 +463,10 @@ export interface WorkItemLifecycleShape {
   readonly listWorkItemsForRepository: (
     repositoryId: string,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
+  readonly continueAfterHumanPrOutcome: (
+    workItemId: string,
+    outcome: HumanPrOutcome,
+  ) => Effect.Effect<WorkItemRecord, ContinueAfterHumanPrOutcomeError>
 }
 
 export class WorkItemLifecycle extends Context.Service<
@@ -500,7 +519,7 @@ export const makeWorkItemLifecycleLive = (
               `SELECT id FROM work_item
              WHERE repository_id = ?
                AND github_issue_number = ?
-               AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+               AND state NOT IN ('complete', 'failed', 'abandoned')
              ORDER BY created_at ASC, rowid ASC
              LIMIT 1`,
               [repositoryId, githubIssueNumber],
@@ -1864,6 +1883,63 @@ export const makeWorkItemLifecycleLive = (
         )
       })
 
+      const toLifecycleStepContext = (
+        row: WorkItemRow,
+      ): LifecycleStepContext => ({
+        workItemId: row.id as WorkItemId,
+        repositoryId: row.repository_id,
+        githubIssueNumber: row.github_issue_number,
+        model: row.model,
+        variant: row.variant,
+        reviewModel: row.review_model,
+        reviewVariant: row.review_variant,
+        worktreePath: row.worktree_path,
+        sessionId: row.session_id,
+      })
+
+      const isDecidePrMergeNeedsHumanHandoff = (
+        row: WorkItemRow,
+        latestStep: OperationalLifecycleStep | null,
+      ): boolean =>
+        row.state === "needs_human" &&
+        row.github_pull_request_number !== null &&
+        latestStep === "decide_pr_merge"
+
+      const loadLatestStep = (
+        workItemId: string,
+      ): Effect.Effect<
+        OperationalLifecycleStep | null,
+        WorkItemLifecycleDatabaseError
+      > =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT step FROM step_run
+               WHERE work_item_id = ?
+               ORDER BY queued_at DESC, rowid DESC
+               LIMIT 1`,
+              [workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly step: OperationalLifecycleStep
+          }[]
+          return rows[0]?.step ?? null
+        })
+
+      const cleanupNeedsHumanWorktree = (
+        row: WorkItemRow,
+      ): Effect.Effect<void, AbandonCleanupError> =>
+        steps.localCleanup(toLifecycleStepContext(row)).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AbandonCleanupError({
+                workItemId: row.id,
+                message: `Failed to clean up worktree for Needs Human Work Item ${row.id}`,
+                cause,
+              }),
+          ),
+        )
+
       const abandon = Effect.fn("WorkItemLifecycle.abandon")(function* (
         workItemId: string,
       ) {
@@ -1872,7 +1948,9 @@ export const makeWorkItemLifecycleLive = (
           return yield* new WorkItemNotFoundError({ workItemId })
         }
 
-        if (isTerminalWorkItemState(workItem.state)) {
+        if (workItem.state === "needs_human") {
+          yield* cleanupNeedsHumanWorktree(workItem)
+        } else if (isTerminalWorkItemState(workItem.state)) {
           return yield* new WorkItemTerminalError({
             workItemId,
             state: workItem.state,
@@ -1880,12 +1958,29 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const now = yield* Clock.currentTimeMillis
+        const clearFailure = workItem.state === "needs_human"
 
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
               const abandonedRows = (yield* sql.unsafe(
-                `UPDATE work_item
+                clearFailure
+                  ? `UPDATE work_item
+                  SET state = 'abandoned',
+                      state_ready_at = ?,
+                      failure_code = NULL,
+                      failure_message = NULL,
+                      worktree_path = NULL,
+                      updated_at = ?
+                  WHERE id = ?
+                    AND state = 'needs_human'
+                    AND NOT EXISTS (
+                      SELECT 1 FROM step_run
+                      WHERE step_run.work_item_id = work_item.id
+                        AND step_run.status = 'running'
+                    )
+                  RETURNING id`
+                  : `UPDATE work_item
                   SET state = 'abandoned',
                       state_ready_at = ?,
                       updated_at = ?
@@ -1905,7 +2000,16 @@ export const makeWorkItemLifecycleLive = (
                 if (!current) {
                   return yield* new WorkItemNotFoundError({ workItemId })
                 }
-                if (isTerminalWorkItemState(current.state)) {
+                if (
+                  isTerminalWorkItemState(current.state) &&
+                  current.state !== "needs_human"
+                ) {
+                  return yield* new WorkItemTerminalError({
+                    workItemId,
+                    state: current.state,
+                  })
+                }
+                if (current.state === "needs_human" && !clearFailure) {
                   return yield* new WorkItemTerminalError({
                     workItemId,
                     state: current.state,
@@ -1959,7 +2063,8 @@ export const makeWorkItemLifecycleLive = (
               if (
                 error instanceof WorkItemNotFoundError ||
                 error instanceof WorkItemTerminalError ||
-                error instanceof WorkItemHasRunningStepError
+                error instanceof WorkItemHasRunningStepError ||
+                error instanceof AbandonCleanupError
               ) {
                 return Effect.fail(error)
               }
@@ -1998,6 +2103,131 @@ export const makeWorkItemLifecycleLive = (
             (error) =>
               new WorkItemLifecycleDatabaseError({
                 message: `Work Item missing after abandon: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+      })
+
+      const continueAfterHumanPrOutcome = Effect.fn(
+        "WorkItemLifecycle.continueAfterHumanPrOutcome",
+      )(function* (workItemId: string, outcome: HumanPrOutcome) {
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (!workItem) {
+          return yield* new WorkItemNotFoundError({ workItemId })
+        }
+
+        const latestStep = yield* loadLatestStep(workItemId)
+        if (!isDecidePrMergeNeedsHumanHandoff(workItem, latestStep)) {
+          return yield* new NeedsHumanHandoffNotEligibleError({
+            workItemId,
+            reason:
+              "Work Item is not a Decide PR Merge Needs Human handoff with a Work Item PR",
+          })
+        }
+
+        if (outcome === "closed_unmerged") {
+          return yield* abandon(workItemId).pipe(
+            Effect.mapError((error): ContinueAfterHumanPrOutcomeError => {
+              if (
+                error instanceof WorkItemNotFoundError ||
+                error instanceof AbandonCleanupError ||
+                error instanceof WorkItemLifecycleDatabaseError
+              ) {
+                return error
+              }
+              return new WorkItemLifecycleDatabaseError({
+                message: `Failed to abandon Needs Human Work Item after closed PR: ${String(error)}`,
+                cause: error,
+              })
+            }),
+          )
+        }
+
+        const now = yield* Clock.currentTimeMillis
+        const nextStepRunId = makeStepRunId()
+
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const updated = (yield* sql.unsafe(
+                `UPDATE work_item
+                 SET state = 'local_cleanup',
+                     state_ready_at = ?,
+                     failure_code = NULL,
+                     failure_message = NULL,
+                     updated_at = ?
+                 WHERE id = ?
+                   AND state = 'needs_human'
+                 RETURNING id`,
+                [now, now, workItemId],
+              )) as readonly { readonly id: string }[]
+
+              if (!updated[0]) {
+                return yield* new NeedsHumanHandoffNotEligibleError({
+                  workItemId,
+                  reason: "Work Item is no longer Needs Human",
+                })
+              }
+
+              yield* sql.unsafe(
+                `INSERT INTO step_run (
+                   id, work_item_id, step, status, queue_job_id, queued_at,
+                   started_at, finished_at, reason_code, reason_message,
+                   created_at, updated_at
+                 ) VALUES (?, ?, 'local_cleanup', 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                [nextStepRunId, workItemId, now, now, now],
+              )
+
+              const payload = yield* encodeStepJob(nextStepRunId)
+              const jobId = yield* queue.enqueue(
+                WORK_ITEM_LIFECYCLE_QUEUE,
+                payload,
+                { retryLimit: 1 },
+              )
+              yield* sql.unsafe(
+                `UPDATE step_run SET queue_job_id = ?, updated_at = ? WHERE id = ?`,
+                [jobId, now, nextStepRunId],
+              )
+            }),
+          )
+          .pipe(
+            Effect.catch(
+              (
+                error,
+              ): Effect.Effect<never, ContinueAfterHumanPrOutcomeError> => {
+                if (
+                  error instanceof NeedsHumanHandoffNotEligibleError ||
+                  error instanceof WorkItemLifecycleDatabaseError ||
+                  error instanceof EnqueueError ||
+                  error instanceof InvalidQueueNameError
+                ) {
+                  return Effect.fail(error)
+                }
+                if (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "_tag" in error &&
+                  (error as { _tag: string })._tag === "SqlError"
+                ) {
+                  return Effect.fail(toDatabaseError(error as SqlError))
+                }
+                return Effect.fail(
+                  new WorkItemLifecycleDatabaseError({
+                    message: `Unexpected failure resuming after human merge: ${String(error)}`,
+                    cause: error,
+                  }),
+                )
+              },
+            ),
+          )
+
+        return yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after human merge resume: ${error.workItemId}`,
                 cause: error,
               }),
           ),
@@ -2401,8 +2631,7 @@ export const makeWorkItemLifecycleLive = (
             (item) =>
               item.state !== "complete" &&
               item.state !== "failed" &&
-              item.state !== "abandoned" &&
-              item.state !== "needs_human",
+              item.state !== "abandoned",
           )
           if (unfinished) {
             return yield* unfinishedWorkItemExistsError(
@@ -2556,6 +2785,7 @@ export const makeWorkItemLifecycleLive = (
         getWorkItem,
         listWorkItemsForIssue,
         listWorkItemsForRepository,
+        continueAfterHumanPrOutcome,
       })
     }),
   )

@@ -1378,11 +1378,10 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("needs_human")
-          const nextAttempt = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
+          const blocked = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
           )
-          expect(nextAttempt.id).not.toBe(created.id)
+          expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
         }),
       )
     })
@@ -1859,6 +1858,211 @@ describe("WorkItemLifecycle", () => {
           expect(final.state).toBe("needs_human")
           expect(final.failureCode).toBe("needs_human")
           expect(final.failureMessage).toBe("Touches authentication secrets")
+        }),
+      )
+    })
+
+    it("resumes local cleanup after human merge of a Decide PR Merge handoff", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        decidePrMerge: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "Auto-merge is disabled for this repository",
+          }),
+        mergePr: () =>
+          Effect.die("merge must not run after human merge resume"),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 11; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const needsHuman = yield* lifecycle.getWorkItem(created.id)
+          expect(needsHuman.state).toBe("needs_human")
+
+          const resumed = yield* lifecycle.continueAfterHumanPrOutcome(
+            created.id,
+            "merged",
+          )
+          expect(resumed.state).toBe("local_cleanup")
+          expect(resumed.failureCode).toBeNull()
+          expect(resumed.failureMessage).toBeNull()
+
+          yield* makeQueuedJobsAvailable
+          const afterCleanup = yield* claimAndRunPending
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.state).toBe("complete")
+            expect(afterCleanup.workItem.worktreePath).toBeNull()
+            expect(
+              afterCleanup.workItem.stepRuns.map((run) => [
+                run.step,
+                run.status,
+              ]),
+            ).toContainEqual(["local_cleanup", "succeeded"])
+            expect(
+              afterCleanup.workItem.stepRuns.some(
+                (run) => run.step === "merge_pr",
+              ),
+            ).toBe(false)
+          }
+        }),
+      )
+    })
+
+    it("abandons a Decide PR Merge handoff after cleanup when the PR is closed unmerged", () => {
+      let cleanupCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        decidePrMerge: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "Auto-merge is disabled for this repository",
+          }),
+        localCleanup: () => {
+          cleanupCalls += 1
+          return Effect.void
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 11; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const abandoned = yield* lifecycle.continueAfterHumanPrOutcome(
+            created.id,
+            "closed_unmerged",
+          )
+          expect(abandoned.state).toBe("abandoned")
+          expect(abandoned.failureCode).toBeNull()
+          expect(abandoned.worktreePath).toBeNull()
+          expect(cleanupCalls).toBe(1)
+        }),
+      )
+    })
+
+    it("stays Needs Human when abandon cleanup fails", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        decidePrMerge: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "Auto-merge is disabled for this repository",
+          }),
+        localCleanup: () => Effect.fail(new Error("worktree locked")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 11; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const result = yield* lifecycle
+            .continueAfterHumanPrOutcome(created.id, "closed_unmerged")
+            .pipe(Effect.result)
+          expect(Result.isFailure(result)).toBe(true)
+
+          const stillNeedsHuman = yield* lifecycle.getWorkItem(created.id)
+          expect(stillNeedsHuman.state).toBe("needs_human")
+          expect(stillNeedsHuman.failureMessage).toBe(
+            "Auto-merge is disabled for this repository",
+          )
+        }),
+      )
+    })
+
+    it("blocks Implement Now while a Needs Human Work Item exists", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        decidePrMerge: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "Auto-merge is disabled for this repository",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          for (let index = 0; index < 11; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const blocked = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+          )
+          expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
+        }),
+      )
+    })
+
+    it("allows operator Abandon from Needs Human after local cleanup", () => {
+      let cleanupCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        decidePrMerge: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "Touches authentication secrets",
+          }),
+        localCleanup: () => {
+          cleanupCalls += 1
+          return Effect.void
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 11; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const abandoned = yield* lifecycle.abandon(created.id)
+          expect(abandoned.state).toBe("abandoned")
+          expect(abandoned.worktreePath).toBeNull()
+          expect(cleanupCalls).toBe(1)
         }),
       )
     })

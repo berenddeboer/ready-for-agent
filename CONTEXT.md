@@ -108,11 +108,11 @@ A current, open Leaf Issue with no listed blockers. A Work Item revalidates this
 _Avoid_: Ready-labeled Issue, Relevant Issue, Leaf Issue
 
 **Actionable Issue**:
-An Implementable Issue with no unfinished Work Item. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability.
+An Implementable Issue with no unfinished Work Item, including no Needs Human Work Item for that Issue. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability.
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch prioritizes a known merge conflict over completed checks, otherwise batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while mergeability or checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled; a merely behind branch does not trigger conflict resolution. After the PR is ready for review, Decide PR Merge asks the Implement OpenCode Session whether risk is low enough for a clanker to merge or a human must; clanker merge advances to Merge PR, which squash-merges the PR via GitHub, then Complete; needs-human is terminal Needs Human without merging.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch prioritizes a known merge conflict over completed checks, otherwise batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while mergeability or checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled; a merely behind branch does not trigger conflict resolution. After the PR is ready for review, Decide PR Merge asks whether a clanker may merge or a human must (Auto-merge disabled always requires a human); clanker merge advances to Merge PR (squash via GitHub), then local cleanup, then Complete; human handoff is Needs Human without merging, until a Refresh Job sees the Work Item PR merged (local cleanup then Complete) or closed unmerged (Abandon after local cleanup).
 _Avoid_: Last completed step, phase
 
 **PR Status Check**:
@@ -144,7 +144,7 @@ An explicit operator request that clears a Work Item's paused flag. If no Step R
 _Avoid_: Resume, unpause, Retry
 
 **Abandon**:
-An operator-directed transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. Repository removal may apply it automatically to non-running Work Items before deleting that Repository's lifecycle history; an Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon.
+A transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. From an operational Lifecycle Step it does not remove the worktree; from Needs Human it runs local cleanup first and only Abandons if cleanup succeeds. It may be operator-directed (including from Needs Human) or applied automatically when a Refresh Job finds that a Decide PR Merge Needs Human Work Item's Work Item PR was closed unmerged. Repository removal may apply it to non-running Work Items before deleting that Repository's lifecycle history. An Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon.
 _Avoid_: Delete, cancel
 
 **Reset**:
@@ -156,11 +156,11 @@ A terminal Work Item that cannot advance because a lifecycle precondition, such 
 _Avoid_: Failed Step Run, Abandoned
 
 **Needs Human Work Item**:
-A terminal Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, or Decide PR Merge judged the PR too risky for a clanker to merge. The Work Item records OpenCode's concise intervention reason.
+A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, or Decide PR Merge requires a human (including when Auto-merge is disabled). It records a concise intervention reason. It is terminal for ordinary Lifecycle Step advancement, Pause, Start, and Retry, and it blocks a second Implement Now or Implement Locally for the same Issue. A Refresh Job may still leave Needs Human when the latest step was Decide PR Merge: a merged Work Item PR advances to local cleanup toward Complete; a closed unmerged Work Item PR Abandons after local cleanup succeeds. Other Needs Human causes are not auto-resumed by Refresh.
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item for which implementation, pull-request creation, conflict resolution, status checking, all observed Status Check Handoffs, Mark PR Ready for Review, Decide PR Merge, and Merge PR executed successfully: the last status watch found no merge conflict or failing or pending status checks, the PR was marked ready for review, OpenCode assessed merge risk as low enough for a clanker, and the harness squash-merged the PR. Complete does not mean GitHub closed the Issue.
+A terminal Work Item whose Work Item PR is merged and whose local cleanup has finished. Merge may be the harness Merge PR step after a clanker Decide PR Merge decision, or a human merge detected on a Refresh Job after a Decide PR Merge Needs Human handoff (local cleanup only; no Merge PR Step Run). Complete does not mean GitHub closed the Issue.
 _Avoid_: Approved, done Issue
 
 **Relevant Issue**:

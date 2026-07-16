@@ -74,6 +74,13 @@ const SerializedPullRequestCheckStatus = Schema.Union([
   }),
 ])
 
+const SerializedPullRequestLifecycleStatus = Schema.Union([
+  Schema.TaggedStruct("open", {}),
+  Schema.TaggedStruct("merged", {}),
+  Schema.TaggedStruct("closed", {}),
+  Schema.TaggedStruct("not_found", {}),
+])
+
 const requestError = (
   repository: { owner: string; name: string },
   operation: string,
@@ -261,6 +268,52 @@ export const keymaxxerGitHubLayer = (options: {
             Effect.catchTag("KeymaxxerError", () =>
               Effect.fail(
                 requestError(repository, "get pull request check status"),
+              ),
+            ),
+          ),
+        getPullRequestLifecycleStatus: (repository, headRefName) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "get pull request lifecycle status",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const head = encodeArgument(headRefName)
+            const result = yield* keymaxxer.runWithSecrets({
+              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-lifecycle-status.ts ${owner} ${name} ${head}`,
+              cwd: options.workspaceRoot,
+              secrets: [tokenName],
+              timeoutMs: 60_000,
+            })
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "get pull request lifecycle status",
+                result.stderr || result.stdout,
+              )
+            }
+            return yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(SerializedPullRequestLifecycleStatus),
+            )(result.stdout).pipe(
+              Effect.mapError(() =>
+                requestError(
+                  repository,
+                  "decode pull request lifecycle status",
+                  result.stdout,
+                ),
+              ),
+            )
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "get pull request lifecycle status"),
               ),
             ),
           ),

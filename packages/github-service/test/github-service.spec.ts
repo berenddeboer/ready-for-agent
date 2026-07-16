@@ -202,6 +202,61 @@ describe("GitHubService live implementation", () => {
     })
   })
 
+  it("reports pull request lifecycle status for open, merged, closed, and missing PRs", async () => {
+    const responses = [
+      {
+        repository: {
+          pullRequests: {
+            nodes: [{ state: "OPEN", merged: false }],
+          },
+        },
+      },
+      {
+        repository: {
+          pullRequests: {
+            nodes: [{ state: "MERGED", merged: true }],
+          },
+        },
+      },
+      {
+        repository: {
+          pullRequests: {
+            nodes: [{ state: "CLOSED", merged: false }],
+          },
+        },
+      },
+      {
+        repository: {
+          pullRequests: { nodes: [] },
+        },
+      },
+    ]
+    const service = makeGitHubService({
+      query: () => Promise.resolve(responses.shift()!) as never,
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestLifecycleStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "open" })
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestLifecycleStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "merged" })
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestLifecycleStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "closed" })
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestLifecycleStatus(repository, "branch"),
+      ),
+    ).toEqual({ _tag: "not_found" })
+  })
+
   it("distinguishes closed and merged PRs from a not-yet-visible PR", async () => {
     const responses = [
       {

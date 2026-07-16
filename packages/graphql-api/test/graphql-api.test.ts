@@ -197,6 +197,7 @@ const makeRuntime = (
     getWorkItem: unused,
     listWorkItemsForIssue: unused,
     listWorkItemsForRepository: unused,
+    continueAfterHumanPrOutcome: unused,
     ...lifecycleOverrides,
   }
   return ManagedRuntime.make(
