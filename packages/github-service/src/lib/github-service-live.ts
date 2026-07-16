@@ -1,5 +1,14 @@
 import { Config, Effect, Layer, Redacted } from "effect"
-import { type Client, createClient } from "../internal/generated/index.js"
+import {
+  type FieldsSelection,
+  createClient,
+} from "../internal/generated/index.js"
+import type {
+  Mutation,
+  MutationGenqlSelection,
+  Query,
+  QueryGenqlSelection,
+} from "../internal/generated/schema.js"
 import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -19,9 +28,18 @@ const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const GITHUB_REST_URL = "https://api.github.com"
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
+const REQUEST_TIMEOUT = "30 seconds"
 
-export type GitHubGraphqlClient = Pick<Client, "query"> &
-  Partial<Pick<Client, "mutation">>
+export interface GitHubGraphqlClient {
+  readonly query: <R extends QueryGenqlSelection>(
+    request: R & { readonly __name?: string },
+    signal?: AbortSignal,
+  ) => Promise<FieldsSelection<Query, R>>
+  readonly mutation?: <R extends MutationGenqlSelection>(
+    request: R & { readonly __name?: string },
+    signal?: AbortSignal,
+  ) => Promise<FieldsSelection<Mutation, R>>
+}
 
 /**
  * Minimal REST client used for individual PR status checks.
@@ -29,8 +47,24 @@ export type GitHubGraphqlClient = Pick<Client, "query"> &
  * Actions jobs + classic commit statuses remain available via REST.
  */
 export interface GitHubRestClient {
-  readonly getJson: (path: string) => Promise<unknown>
+  readonly getJson: (path: string, signal?: AbortSignal) => Promise<unknown>
 }
+
+const githubRequest = <A>(
+  message: string,
+  request: (signal: AbortSignal) => Promise<A>,
+): Effect.Effect<A, GitHubRequestError> =>
+  Effect.tryPromise({
+    try: request,
+    catch: (cause) => new GitHubRequestError({ message, cause }),
+  }).pipe(
+    Effect.timeout(REQUEST_TIMEOUT),
+    Effect.catchTag("TimeoutError", (cause) =>
+      Effect.fail(
+        new GitHubRequestError({ message: `${message} timed out`, cause }),
+      ),
+    ),
+  )
 
 interface GitHubApiPullRequest {
   readonly state: unknown
@@ -203,14 +237,10 @@ const listTerminalChecksFromRest = (
       const runsPath =
         `/repos/${repository.owner}/${repository.name}/actions/runs` +
         `?head_sha=${encodeURIComponent(headSha)}&per_page=${PAGE_SIZE}&page=${runsPage}`
-      const runsBody = yield* Effect.tryPromise({
-        try: () => rest.getJson(runsPath),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to list Actions runs for ${repository.owner}/${repository.name}@${headSha}`,
-            cause,
-          }),
-      })
+      const runsBody = yield* githubRequest(
+        `Failed to list Actions runs for ${repository.owner}/${repository.name}@${headSha}`,
+        (signal) => rest.getJson(runsPath, signal),
+      )
       const workflowRuns =
         typeof runsBody === "object" &&
         runsBody !== null &&
@@ -232,14 +262,10 @@ const listTerminalChecksFromRest = (
           const jobsPath =
             `/repos/${repository.owner}/${repository.name}/actions/runs/${run.id}/jobs` +
             `?filter=all&per_page=${PAGE_SIZE}&page=${jobsPage}`
-          const jobsBody = yield* Effect.tryPromise({
-            try: () => rest.getJson(jobsPath),
-            catch: (cause) =>
-              new GitHubRequestError({
-                message: `Failed to list Actions jobs for run ${run.id} on ${repository.owner}/${repository.name}`,
-                cause,
-              }),
-          })
+          const jobsBody = yield* githubRequest(
+            `Failed to list Actions jobs for run ${run.id} on ${repository.owner}/${repository.name}`,
+            (signal) => rest.getJson(jobsPath, signal),
+          )
           const jobs =
             typeof jobsBody === "object" &&
             jobsBody !== null &&
@@ -280,14 +306,10 @@ const listTerminalChecksFromRest = (
       const statusesPath =
         `/repos/${repository.owner}/${repository.name}/commits/${encodeURIComponent(headSha)}/statuses` +
         `?per_page=${PAGE_SIZE}&page=${statusesPage}`
-      const statusesBody = yield* Effect.tryPromise({
-        try: () => rest.getJson(statusesPath),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to list commit statuses for ${repository.owner}/${repository.name}@${headSha}`,
-            cause,
-          }),
-      })
+      const statusesBody = yield* githubRequest(
+        `Failed to list commit statuses for ${repository.owner}/${repository.name}@${headSha}`,
+        (signal) => rest.getJson(statusesPath, signal),
+      )
       const statuses = Array.isArray(statusesBody) ? statusesBody : []
       for (const status of statuses) {
         if (typeof status !== "object" || status === null) {
@@ -315,8 +337,9 @@ const listTerminalChecksFromRest = (
   })
 
 const makeGitHubRestClient = (token: string): GitHubRestClient => ({
-  getJson: async (path) => {
+  getJson: async (path, signal) => {
     const response = await fetch(`${GITHUB_REST_URL}${path}`, {
+      signal,
       headers: {
         Accept: "application/vnd.github+json",
         Authorization: `Bearer ${token}`,
@@ -624,11 +647,14 @@ export const makeGitHubService = (
   client: GitHubGraphqlClient,
   rest?: GitHubRestClient,
 ): GitHubServiceShape => ({
-  getPullRequestCheckStatus: (repository, headRefName) =>
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          client.query({
+  getPullRequestCheckStatus: Effect.fn(
+    "GitHubService.getPullRequestCheckStatus",
+  )(function* (repository, headRefName) {
+    const result = yield* githubRequest(
+      `Failed to get pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        client.query(
+          {
             repository: {
               __args: repository,
               pullRequests: {
@@ -650,73 +676,69 @@ export const makeGitHubService = (
                 },
               },
             },
-          }),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to get pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
-      })
-      if (result.repository === null) {
-        return yield* new GitHubRepositoryUnavailableError(repository)
+          },
+          signal,
+        ),
+    )
+    if (result.repository === null) {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const pullRequest = (result.repository.pullRequests.nodes?.[0] ??
+      null) as GitHubApiPullRequest | null
+    if (pullRequest === null) {
+      return {
+        _tag: "pending",
+        terminalChecks: emptyTerminalChecks,
+        mergeability: "unknown",
+        baseRefName: null,
       }
-      const pullRequest = (result.repository.pullRequests.nodes?.[0] ??
-        null) as GitHubApiPullRequest | null
-      if (pullRequest === null) {
-        return {
-          _tag: "pending",
-          terminalChecks: emptyTerminalChecks,
-          mergeability: "unknown",
-          baseRefName: null,
-        }
-      }
+    }
 
-      let terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks
-      if (
-        rest !== undefined &&
-        pullRequest.state === "OPEN" &&
-        typeof pullRequest.headRefOid === "string" &&
-        pullRequest.headRefOid.trim() !== ""
-      ) {
-        terminalChecks = yield* listTerminalChecksFromRest(
-          rest,
-          repository,
-          pullRequest.headRefOid,
-        )
-      }
+    let terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks
+    if (
+      rest !== undefined &&
+      pullRequest.state === "OPEN" &&
+      typeof pullRequest.headRefOid === "string" &&
+      pullRequest.headRefOid.trim() !== ""
+    ) {
+      terminalChecks = yield* listTerminalChecksFromRest(
+        rest,
+        repository,
+        pullRequest.headRefOid,
+      )
+    }
 
-      return yield* Effect.try({
-        try: () => toPullRequestCheckStatus(pullRequest, terminalChecks),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `GitHub returned invalid pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
-      })
-    }),
-  getOpenPullRequestNumber: (repository, headRefName) =>
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          client.query({
-            repository: {
-              __args: repository,
-              pullRequests: {
-                __args: {
-                  first: 1,
-                  states: ["OPEN"],
-                  headRefName,
+    return yield* Effect.try({
+      try: () => toPullRequestCheckStatus(pullRequest, terminalChecks),
+      catch: (cause) =>
+        new GitHubRequestError({
+          message: `GitHub returned invalid pull request checks for ${repository.owner}/${repository.name}:${headRefName}`,
+          cause,
+        }),
+    })
+  }),
+  getOpenPullRequestNumber: Effect.fn("GitHubService.getOpenPullRequestNumber")(
+    function* (repository, headRefName) {
+      const result = yield* githubRequest(
+        `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                pullRequests: {
+                  __args: {
+                    first: 1,
+                    states: ["OPEN"],
+                    headRefName,
+                  },
+                  nodes: { number: true },
                 },
-                nodes: { number: true },
               },
             },
-          }),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
-      })
+            signal,
+          ),
+      )
       if (result.repository === null) {
         return yield* new GitHubRepositoryUnavailableError(repository)
       }
@@ -727,12 +749,16 @@ export const makeGitHubService = (
         })
       }
       return Number(number)
-    }),
-  markPullRequestReadyForReview: (repository, headRefName) =>
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          client.query({
+    },
+  ),
+  markPullRequestReadyForReview: Effect.fn(
+    "GitHubService.markPullRequestReadyForReview",
+  )(function* (repository, headRefName) {
+    const result = yield* githubRequest(
+      `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        client.query(
+          {
             repository: {
               __args: repository,
               pullRequests: {
@@ -747,59 +773,58 @@ export const makeGitHubService = (
                 },
               },
             },
-          }),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
+          },
+          signal,
+        ),
+    )
+    if (result.repository === null) {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const pullRequest = result.repository.pullRequests.nodes?.[0]
+    if (pullRequest === null || pullRequest === undefined) {
+      return yield* new GitHubRequestError({
+        message: `No pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
       })
-      if (result.repository === null) {
-        return yield* new GitHubRepositoryUnavailableError(repository)
-      }
-      const pullRequest = result.repository.pullRequests.nodes?.[0]
-      if (pullRequest === null || pullRequest === undefined) {
-        return yield* new GitHubRequestError({
-          message: `No pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      if (typeof pullRequest.id !== "string" || pullRequest.id.trim() === "") {
-        return yield* new GitHubRequestError({
-          message: `GitHub returned an invalid pull request id for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      if (pullRequest.isDraft !== true && pullRequest.isDraft !== false) {
-        return yield* new GitHubRequestError({
-          message: `GitHub returned an invalid draft flag for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      if (pullRequest.state === "CLOSED") {
-        return yield* new GitHubRequestError({
-          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is closed`,
-        })
-      }
-      if (pullRequest.state !== "OPEN" && pullRequest.state !== "MERGED") {
-        return yield* new GitHubRequestError({
-          message: `GitHub returned an invalid pull request state for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      if (pullRequest.isDraft === false) {
-        return
-      }
-      if (pullRequest.state === "MERGED") {
-        return yield* new GitHubRequestError({
-          message: `GitHub returned a merged draft pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      if (client.mutation === undefined) {
-        return yield* new GitHubRequestError({
-          message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      const mutate = client.mutation
-      const mutation = yield* Effect.tryPromise({
-        try: () =>
-          mutate({
+    }
+    if (typeof pullRequest.id !== "string" || pullRequest.id.trim() === "") {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned an invalid pull request id for ${repository.owner}/${repository.name}:${headRefName}`,
+      })
+    }
+    if (pullRequest.isDraft !== true && pullRequest.isDraft !== false) {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned an invalid draft flag for ${repository.owner}/${repository.name}:${headRefName}`,
+      })
+    }
+    if (pullRequest.state === "CLOSED") {
+      return yield* new GitHubRequestError({
+        message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is closed`,
+      })
+    }
+    if (pullRequest.state !== "OPEN" && pullRequest.state !== "MERGED") {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned an invalid pull request state for ${repository.owner}/${repository.name}:${headRefName}`,
+      })
+    }
+    if (pullRequest.isDraft === false) {
+      return
+    }
+    if (pullRequest.state === "MERGED") {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned a merged draft pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+      })
+    }
+    if (client.mutation === undefined) {
+      return yield* new GitHubRequestError({
+        message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}:${headRefName}`,
+      })
+    }
+    const mutate = client.mutation
+    const mutation = yield* githubRequest(
+      `Failed to mark pull request ready for review for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        mutate(
+          {
             markPullRequestReadyForReview: {
               __args: {
                 input: { pullRequestId: pullRequest.id },
@@ -808,56 +833,51 @@ export const makeGitHubService = (
                 isDraft: true,
               },
             },
-          }),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to mark pull request ready for review for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
+          },
+          signal,
+        ),
+    )
+    const readyPullRequest = mutation.markPullRequestReadyForReview?.pullRequest
+    if (readyPullRequest === null || readyPullRequest === undefined) {
+      return yield* new GitHubRequestError({
+        message: `GitHub did not return a pull request after marking ready for review for ${repository.owner}/${repository.name}:${headRefName}`,
       })
-      const readyPullRequest =
-        mutation.markPullRequestReadyForReview?.pullRequest
-      if (readyPullRequest === null || readyPullRequest === undefined) {
-        return yield* new GitHubRequestError({
-          message: `GitHub did not return a pull request after marking ready for review for ${repository.owner}/${repository.name}:${headRefName}`,
-        })
-      }
-      if (readyPullRequest.isDraft !== false) {
-        return yield* new GitHubRequestError({
-          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is still a draft`,
-        })
-      }
-    }),
-  mergePullRequest: (repository, headRefName) =>
-    Effect.gen(function* () {
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          client.query({
-            repository: {
-              __args: repository,
-              pullRequests: {
-                __args: {
-                  first: 1,
-                  headRefName,
-                },
-                nodes: {
-                  id: true,
-                  state: true,
-                  merged: true,
-                  headRefOid: true,
-                  statusCheckRollup: {
+    }
+    if (readyPullRequest.isDraft !== false) {
+      return yield* new GitHubRequestError({
+        message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is still a draft`,
+      })
+    }
+  }),
+  mergePullRequest: Effect.fn("GitHubService.mergePullRequest")(
+    function* (repository, headRefName) {
+      const result = yield* githubRequest(
+        `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                pullRequests: {
+                  __args: {
+                    first: 1,
+                    headRefName,
+                  },
+                  nodes: {
+                    id: true,
                     state: true,
+                    merged: true,
+                    headRefOid: true,
+                    statusCheckRollup: {
+                      state: true,
+                    },
                   },
                 },
               },
             },
-          }),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
-      })
+            signal,
+          ),
+      )
       if (result.repository === null) {
         return yield* new GitHubRepositoryUnavailableError(repository)
       }
@@ -907,29 +927,28 @@ export const makeGitHubService = (
         })
       }
       const mutate = client.mutation
-      const mutation = yield* Effect.tryPromise({
-        try: () =>
-          mutate({
-            mergePullRequest: {
-              __args: {
-                input: {
-                  pullRequestId: pullRequest.id,
-                  expectedHeadOid: pullRequest.headRefOid,
-                  mergeMethod: "SQUASH",
+      const mutation = yield* githubRequest(
+        `Failed to merge pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+        (signal) =>
+          mutate(
+            {
+              mergePullRequest: {
+                __args: {
+                  input: {
+                    pullRequestId: pullRequest.id,
+                    expectedHeadOid: pullRequest.headRefOid,
+                    mergeMethod: "SQUASH",
+                  },
+                },
+                pullRequest: {
+                  merged: true,
+                  state: true,
                 },
               },
-              pullRequest: {
-                merged: true,
-                state: true,
-              },
             },
-          }),
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: `Failed to merge pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-            cause,
-          }),
-      })
+            signal,
+          ),
+      )
       const mergedPullRequest = mutation.mergePullRequest?.pullRequest
       if (mergedPullRequest === null || mergedPullRequest === undefined) {
         return yield* new GitHubRequestError({
@@ -944,87 +963,87 @@ export const makeGitHubService = (
           message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} was not merged`,
         })
       }
-    }),
-  listReadyIssues: (repository) =>
-    Effect.gen(function* () {
+    },
+  ),
+  listReadyIssues: Effect.fn("GitHubService.listReadyIssues")(
+    function* (repository) {
       const issues: InternalReadyLabeledIssue[] = []
       const subIssuePositions = new Map<string, number>()
       const repositoryName = `${repository.owner}/${repository.name}`
       let after: string | null = null
 
       while (true) {
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            client.query({
-              repository: {
-                __args: repository,
-                issues: {
-                  __args: {
-                    first: PAGE_SIZE,
-                    after,
-                    labels: [READY_FOR_AGENT_LABEL],
-                  },
-                  nodes: {
-                    number: true,
-                    title: true,
-                    body: true,
-                    url: true,
-                    createdAt: true,
-                    state: true,
-                    parent: {
+        const result = yield* githubRequest(
+          `Failed to list Ready-labeled Issues for ${repository.owner}/${repository.name}`,
+          (signal) =>
+            client.query(
+              {
+                repository: {
+                  __args: repository,
+                  issues: {
+                    __args: {
+                      first: PAGE_SIZE,
+                      after,
+                      labels: [READY_FOR_AGENT_LABEL],
+                    },
+                    nodes: {
                       number: true,
+                      title: true,
+                      body: true,
                       url: true,
+                      createdAt: true,
                       state: true,
-                      repository: { nameWithOwner: true },
                       parent: {
                         number: true,
                         url: true,
-                        repository: { nameWithOwner: true },
-                      },
-                    },
-                    subIssuesSummary: { total: true },
-                    subIssues: {
-                      __args: { first: PAGE_SIZE },
-                      nodes: {
-                        number: true,
-                        url: true,
-                        repository: { nameWithOwner: true },
-                        subIssuesSummary: { total: true },
-                      },
-                      pageInfo: { endCursor: true, hasNextPage: true },
-                    },
-                    blockedBy: {
-                      __args: { first: PAGE_SIZE },
-                      nodes: { number: true, url: true, state: true },
-                      pageInfo: { endCursor: true, hasNextPage: true },
-                    },
-                    closedByPullRequestsReferences: {
-                      __args: {
-                        first: PAGE_SIZE,
-                        includeClosedPrs: true,
-                      },
-                      nodes: {
-                        number: true,
                         state: true,
-                        merged: true,
                         repository: { nameWithOwner: true },
+                        parent: {
+                          number: true,
+                          url: true,
+                          repository: { nameWithOwner: true },
+                        },
                       },
-                      pageInfo: { endCursor: true, hasNextPage: true },
+                      subIssuesSummary: { total: true },
+                      subIssues: {
+                        __args: { first: PAGE_SIZE },
+                        nodes: {
+                          number: true,
+                          url: true,
+                          repository: { nameWithOwner: true },
+                          subIssuesSummary: { total: true },
+                        },
+                        pageInfo: { endCursor: true, hasNextPage: true },
+                      },
+                      blockedBy: {
+                        __args: { first: PAGE_SIZE },
+                        nodes: { number: true, url: true, state: true },
+                        pageInfo: { endCursor: true, hasNextPage: true },
+                      },
+                      closedByPullRequestsReferences: {
+                        __args: {
+                          first: PAGE_SIZE,
+                          includeClosedPrs: true,
+                        },
+                        nodes: {
+                          number: true,
+                          state: true,
+                          merged: true,
+                          repository: { nameWithOwner: true },
+                        },
+                        pageInfo: { endCursor: true, hasNextPage: true },
+                      },
                     },
-                  },
-                  pageInfo: {
-                    endCursor: true,
-                    hasNextPage: true,
+                    pageInfo: {
+                      endCursor: true,
+                      hasNextPage: true,
+                    },
                   },
                 },
               },
-            }),
-          catch: (cause) =>
-            new GitHubRequestError({
-              message: `Failed to list Ready-labeled Issues for ${repository.owner}/${repository.name}`,
-              cause,
-            }),
-        })
+              signal,
+            ),
+        )
 
         if (result.repository === null) {
           return yield* new GitHubRepositoryUnavailableError(repository)
@@ -1074,30 +1093,29 @@ export const makeGitHubService = (
               })
             }
 
-            const dependencyResult = yield* Effect.tryPromise({
-              try: () =>
-                client.query({
-                  repository: {
-                    __args: repository,
-                    issue: {
-                      __args: { number: mappedIssue.number },
-                      blockedBy: {
-                        __args: {
-                          first: PAGE_SIZE,
-                          after: blockedByPage.endCursor,
+            const dependencyResult = yield* githubRequest(
+              `Failed to list dependencies for ${repository.owner}/${repository.name}#${mappedIssue.number}`,
+              (signal) =>
+                client.query(
+                  {
+                    repository: {
+                      __args: repository,
+                      issue: {
+                        __args: { number: mappedIssue.number },
+                        blockedBy: {
+                          __args: {
+                            first: PAGE_SIZE,
+                            after: blockedByPage.endCursor,
+                          },
+                          nodes: { number: true, url: true, state: true },
+                          pageInfo: { endCursor: true, hasNextPage: true },
                         },
-                        nodes: { number: true, url: true, state: true },
-                        pageInfo: { endCursor: true, hasNextPage: true },
                       },
                     },
                   },
-                }),
-              catch: (cause) =>
-                new GitHubRequestError({
-                  message: `Failed to list dependencies for ${repository.owner}/${repository.name}#${mappedIssue.number}`,
-                  cause,
-                }),
-            })
+                  signal,
+                ),
+            )
             if (dependencyResult.repository === null) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -1128,36 +1146,35 @@ export const makeGitHubService = (
               })
             }
 
-            const pullRequestResult = yield* Effect.tryPromise({
-              try: () =>
-                client.query({
-                  repository: {
-                    __args: repository,
-                    issue: {
-                      __args: { number: mappedIssue.number },
-                      closedByPullRequestsReferences: {
-                        __args: {
-                          first: PAGE_SIZE,
-                          after: closingPullRequestsPage.endCursor,
-                          includeClosedPrs: true,
+            const pullRequestResult = yield* githubRequest(
+              `Failed to list closing pull requests for ${repositoryName}#${mappedIssue.number}`,
+              (signal) =>
+                client.query(
+                  {
+                    repository: {
+                      __args: repository,
+                      issue: {
+                        __args: { number: mappedIssue.number },
+                        closedByPullRequestsReferences: {
+                          __args: {
+                            first: PAGE_SIZE,
+                            after: closingPullRequestsPage.endCursor,
+                            includeClosedPrs: true,
+                          },
+                          nodes: {
+                            number: true,
+                            state: true,
+                            merged: true,
+                            repository: { nameWithOwner: true },
+                          },
+                          pageInfo: { endCursor: true, hasNextPage: true },
                         },
-                        nodes: {
-                          number: true,
-                          state: true,
-                          merged: true,
-                          repository: { nameWithOwner: true },
-                        },
-                        pageInfo: { endCursor: true, hasNextPage: true },
                       },
                     },
                   },
-                }),
-              catch: (cause) =>
-                new GitHubRequestError({
-                  message: `Failed to list closing pull requests for ${repositoryName}#${mappedIssue.number}`,
-                  cause,
-                }),
-            })
+                  signal,
+                ),
+            )
             if (pullRequestResult.repository === null) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -1189,35 +1206,34 @@ export const makeGitHubService = (
               })
             }
 
-            const subIssueResult = yield* Effect.tryPromise({
-              try: () =>
-                client.query({
-                  repository: {
-                    __args: repository,
-                    issue: {
-                      __args: { number: mappedIssue.number },
-                      subIssues: {
-                        __args: {
-                          first: PAGE_SIZE,
-                          after: subIssuesPage.endCursor,
+            const subIssueResult = yield* githubRequest(
+              `Failed to list sub-issues for ${repositoryName}#${mappedIssue.number}`,
+              (signal) =>
+                client.query(
+                  {
+                    repository: {
+                      __args: repository,
+                      issue: {
+                        __args: { number: mappedIssue.number },
+                        subIssues: {
+                          __args: {
+                            first: PAGE_SIZE,
+                            after: subIssuesPage.endCursor,
+                          },
+                          nodes: {
+                            number: true,
+                            url: true,
+                            repository: { nameWithOwner: true },
+                            subIssuesSummary: { total: true },
+                          },
+                          pageInfo: { endCursor: true, hasNextPage: true },
                         },
-                        nodes: {
-                          number: true,
-                          url: true,
-                          repository: { nameWithOwner: true },
-                          subIssuesSummary: { total: true },
-                        },
-                        pageInfo: { endCursor: true, hasNextPage: true },
                       },
                     },
                   },
-                }),
-              catch: (cause) =>
-                new GitHubRequestError({
-                  message: `Failed to list sub-issues for ${repositoryName}#${mappedIssue.number}`,
-                  cause,
-                }),
-            })
+                  signal,
+                ),
+            )
             if (subIssueResult.repository === null) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -1349,8 +1365,25 @@ export const makeGitHubService = (
           }
         })
         .sort((left, right) => left.number - right.number)
-    }),
+    },
+  ),
 })
+
+const makeGitHubGraphqlClient = (token: string): GitHubGraphqlClient => {
+  const client = (signal?: AbortSignal) =>
+    createClient({
+      url: GITHUB_GRAPHQL_URL,
+      signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+
+  return {
+    query: (request, signal) => client(signal).query(request),
+    mutation: (request, signal) => client(signal).mutation(request),
+  }
+}
 
 export const GitHubServiceLive = Layer.effect(
   GitHubService,
@@ -1358,12 +1391,7 @@ export const GitHubServiceLive = Layer.effect(
     Effect.map((token) => {
       const value = Redacted.value(token)
       return makeGitHubService(
-        createClient({
-          url: GITHUB_GRAPHQL_URL,
-          headers: {
-            Authorization: `Bearer ${value}`,
-          },
-        }),
+        makeGitHubGraphqlClient(value),
         makeGitHubRestClient(value),
       )
     }),

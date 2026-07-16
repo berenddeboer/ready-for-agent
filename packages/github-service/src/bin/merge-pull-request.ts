@@ -1,29 +1,14 @@
 import { Effect } from "effect"
-import { GitHubService, GitHubServiceLive } from "../index.js"
-
-const decodeArgument = (value: string | undefined): string => {
-  if (value === undefined) throw new Error("Missing encoded argument")
-  return Buffer.from(value, "base64url").toString("utf8")
-}
+import { GitHubService } from "../index.js"
+import { decodeArgument, runGitHubCli, writeStandardOutput } from "./cli.js"
 
 const program = Effect.gen(function* () {
-  const owner = decodeArgument(process.argv[2])
-  const name = decodeArgument(process.argv[3])
-  const headRefName = decodeArgument(process.argv[4])
+  const owner = yield* decodeArgument(process.argv[2], "owner")
+  const name = yield* decodeArgument(process.argv[3], "name")
+  const headRefName = yield* decodeArgument(process.argv[4], "head ref")
   const github = yield* GitHubService
   yield* github.mergePullRequest({ owner, name }, headRefName)
-  process.stdout.write(JSON.stringify({ _tag: "merged" }))
-}).pipe(
-  Effect.provide(GitHubServiceLive),
-  Effect.catchTag("GitHubRepositoryUnavailableError", () =>
-    Effect.sync(() => process.exit(2)),
-  ),
-  Effect.catch((error) =>
-    Effect.sync(() => {
-      console.error(error)
-      process.exit(1)
-    }),
-  ),
-)
+  yield* writeStandardOutput(JSON.stringify({ _tag: "merged" }))
+})
 
-Effect.runPromise(program)
+if (import.meta.main) runGitHubCli(program)

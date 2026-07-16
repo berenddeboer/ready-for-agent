@@ -1,13 +1,17 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class GitHubRepositoryUnavailableError extends Data.TaggedError(
+export class GitHubRepositoryUnavailableError extends Schema.TaggedErrorClass<GitHubRepositoryUnavailableError>()(
   "GitHubRepositoryUnavailableError",
-)<{
-  readonly owner: string
-  readonly name: string
-}> {}
+  {
+    owner: Schema.String,
+    name: Schema.String,
+  },
+) {}
 
-export class GitHubRequestError extends Data.TaggedError("GitHubRequestError")<{
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class GitHubRequestError extends Schema.TaggedErrorClass<GitHubRequestError>()(
+  "GitHubRequestError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
