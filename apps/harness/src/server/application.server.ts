@@ -81,6 +81,7 @@ export const createApplication = async (
     Layer.provideMerge(queueLayer),
     Layer.provideMerge(reconcilerLayer),
     Layer.provideMerge(lifecycleLayer),
+    Layer.provideMerge(keymaxxerLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const appLayer =

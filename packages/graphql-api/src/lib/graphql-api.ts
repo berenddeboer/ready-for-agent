@@ -17,7 +17,6 @@ import {
   type IssueRecord,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
-  RepositoryId,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
@@ -31,7 +30,7 @@ import {
 } from "@ready-for-agent/issue-reconciler"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
-import { EnqueueError, QueueService } from "@ready-for-agent/queue-service"
+import { EnqueueError, type QueueService } from "@ready-for-agent/queue-service"
 import {
   ActiveStepRunExistsError,
   IssueBlockedError,
@@ -50,6 +49,11 @@ import {
   WorkItemTerminalError,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
+import {
+  activateRepositoryPolling,
+  enqueueRefreshRepositoryJob,
+  suspendRepositoryPolling,
+} from "./issue-polling.js"
 
 type AddRepositoryArgs = {
   input: {
@@ -245,31 +249,14 @@ export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
   unknown
 >
 
-/** High-priority manual Issue Refresh Job queue (must match harness). */
-export const ISSUE_REFRESH_QUEUE = "issue-refresh"
-const JOB_RECOVERY_RETRY_LIMIT = 1
-
 type Repository = {
   id: string
   githubOwner: string
   githubRepo: string
 }
 
-const enqueueRefreshRepositoryJob = (repository: Repository) =>
-  Effect.gen(function* () {
-    const queue = yield* QueueService
-    return yield* queue.enqueue(
-      ISSUE_REFRESH_QUEUE,
-      {
-        _tag: "refresh-repository",
-        repositoryId: RepositoryId.make(repository.id),
-      },
-      { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-    )
-  })
-
-/** Enqueue a Refresh Job only when a GitHub token is already configured. */
-const enqueueRefreshIfCredentialed = (repository: Repository) =>
+/** Activate durable Issue Polling only when a GitHub token is already configured. */
+const activatePollingIfCredentialed = (repository: Repository) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
     const credential = yield* keymaxxer.findSecret({
@@ -277,7 +264,7 @@ const enqueueRefreshIfCredentialed = (repository: Repository) =>
       account: `${repository.githubOwner}/${repository.githubRepo}`,
     })
     if (credential === null) return
-    yield* enqueueRefreshRepositoryJob(repository)
+    yield* activateRepositoryPolling(repository.id)
   })
 
 class RepositoryCredentialError extends Data.TaggedError(
@@ -816,10 +803,10 @@ export const createGraphqlApi = (
                 Effect.gen(function* () {
                   const db = yield* DbService
                   const added = yield* db.addRepository(args.input)
-                  yield* enqueueRefreshIfCredentialed(added).pipe(
+                  yield* activatePollingIfCredentialed(added).pipe(
                     Effect.catch((error) =>
                       Effect.logWarning(
-                        "Automatic Repository refresh was not queued",
+                        "Automatic Repository polling was not activated",
                         {
                           repositoryId: added.id,
                           error,
@@ -894,6 +881,17 @@ export const createGraphqlApi = (
                         })
                       }
                     }
+                    yield* activateRepositoryPolling(repository.id).pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          "Automatic Repository polling was not activated",
+                          {
+                            repositoryId: repository.id,
+                            error,
+                          },
+                        ),
+                      ),
+                    )
                     return repositoryCredential(repository, tokenName)
                   }),
                 ),
@@ -932,6 +930,17 @@ export const createGraphqlApi = (
                     if (existingToken !== null) {
                       yield* keymaxxer.removeSecret(existingToken)
                     }
+                    yield* suspendRepositoryPolling(repository.id).pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          "Repository polling was not suspended",
+                          {
+                            repositoryId: repository.id,
+                            error,
+                          },
+                        ),
+                      ),
+                    )
                     return repositoryCredential(repository, null)
                   }),
                 ),
@@ -951,6 +960,17 @@ export const createGraphqlApi = (
                 Effect.gen(function* () {
                   const db = yield* DbService
                   yield* db.removeRepository(args.repositoryId)
+                  yield* suspendRepositoryPolling(args.repositoryId).pipe(
+                    Effect.catch((error) =>
+                      Effect.logWarning(
+                        "Repository polling was not suspended after removal",
+                        {
+                          repositoryId: args.repositoryId,
+                          error,
+                        },
+                      ),
+                    ),
+                  )
                   return args.repositoryId
                 }),
               ),
@@ -1003,7 +1023,9 @@ export const createGraphqlApi = (
                     })
                   }
 
-                  const jobId = yield* enqueueRefreshRepositoryJob(repository)
+                  const jobId = yield* enqueueRefreshRepositoryJob(
+                    repository.id,
+                  )
                   return {
                     id: jobId,
                     repositoryId: repository.id,

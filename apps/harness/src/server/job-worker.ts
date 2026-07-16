@@ -13,7 +13,14 @@ import {
   RepositoryId,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
+import {
+  ISSUE_POLL_QUEUE,
+  ISSUE_REFRESH_QUEUE,
+  JOB_RECOVERY_RETRY_LIMIT,
+  sampleIssuePollingDelay,
+} from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
+import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
@@ -22,13 +29,11 @@ import {
 
 /** Work Item lifecycle queue (unchanged). */
 export const JOBS_QUEUE = "jobs"
-/** High-priority manual Issue Refresh Job queue. */
-export const ISSUE_REFRESH_QUEUE = "issue-refresh"
+export { ISSUE_POLL_QUEUE, ISSUE_REFRESH_QUEUE, JOB_RECOVERY_RETRY_LIMIT }
 export const JOB_VISIBILITY_TIMEOUT = Duration.minutes(5)
 const LIFECYCLE_JOB_VISIBILITY_GRACE = Duration.minutes(1)
 const JOB_IDLE_POLL_INTERVAL = Duration.millis(1500)
 const ORPHAN_RECOVERY_INTERVAL = Duration.seconds(30)
-export const JOB_RECOVERY_RETRY_LIMIT = 1
 const REFRESH_REPOSITORY_TAG = "refresh-repository"
 
 /**
@@ -100,6 +105,19 @@ export const transferPersistedRefreshJobs = Effect.gen(function* () {
   )
 })
 
+const repositoryHasGitHubCredential = (
+  githubOwner: string,
+  githubRepo: string,
+) =>
+  Effect.gen(function* () {
+    const keymaxxer = yield* KeymaxxerService
+    const credential = yield* keymaxxer.findSecret({
+      provider: "github",
+      account: `${githubOwner}/${githubRepo}`,
+    })
+    return credential !== null
+  })
+
 const refreshRepository = (repositoryId: RepositoryId) =>
   Effect.gen(function* () {
     const db = yield* DbService
@@ -120,6 +138,8 @@ export interface JobWorkerOptions {
   readonly idlePollInterval?: Duration.Duration
   readonly visibilityTimeout?: Duration.Duration
   readonly orphanRecoveryInterval?: Duration.Duration
+  /** Override cadence sampling for deterministic tests. */
+  readonly samplePollingDelay?: Effect.Effect<Duration.Duration>
 }
 
 const runQueuePollLoop = <E, R>(
@@ -147,11 +167,14 @@ const runQueuePollLoop = <E, R>(
     }
   })
 
-const claimAndRunRefreshJob = (visibilityTimeout: Duration.Duration) =>
+const claimRefreshJob = (
+  queueName: string,
+  visibilityTimeout: Duration.Duration,
+) =>
   Effect.gen(function* () {
     const queue = yield* QueueService
-    const claimed = yield* QueueService.claim(
-      ISSUE_REFRESH_QUEUE,
+    return yield* QueueService.claim(
+      queueName,
       RefreshRepositoryJob,
       visibilityTimeout,
     ).pipe(
@@ -161,25 +184,149 @@ const claimAndRunRefreshJob = (visibilityTimeout: Duration.Duration) =>
           .pipe(Effect.as(Option.none())),
       ),
     )
+  })
 
-    if (Option.isNone(claimed)) return "idle" as const
+type AttemptResult =
+  | { readonly _tag: "Failure"; readonly failure: unknown }
+  | { readonly _tag: "Success"; readonly success: unknown }
 
-    const job = claimed.value
+const finalizeManualRefresh = (
+  jobId: string,
+  result: AttemptResult,
+  repositoryId: RepositoryId,
+) =>
+  Effect.gen(function* () {
+    const queue = yield* QueueService
+    if (result._tag === "Failure") {
+      yield* Effect.logError("Refresh Job failed", {
+        jobId,
+        repositoryId,
+        error: formatLogError(result.failure),
+      })
+      yield* queue.fail(jobId, { retryable: false })
+    } else {
+      yield* queue.acknowledge(jobId)
+    }
+  })
+
+const finalizeScheduledRefresh = (
+  jobId: string,
+  repositoryId: RepositoryId,
+  result: AttemptResult,
+  sampleDelay: Effect.Effect<Duration.Duration>,
+) =>
+  Effect.gen(function* () {
+    const queue = yield* QueueService
+    const db = yield* DbService
+    const repositories = yield* db.listRepositories
+    const repository = repositories.find(({ id }) => id === repositoryId)
+
+    if (repository === undefined) {
+      yield* Effect.logWarning(
+        "Scheduled Issue poll finalized without recurrence; Repository missing",
+        { jobId, repositoryId },
+      )
+      yield* queue.acknowledge(jobId)
+      return
+    }
+
+    const credentialed = yield* repositoryHasGitHubCredential(
+      repository.githubOwner,
+      repository.githubRepo,
+    )
+    if (!credentialed) {
+      yield* Effect.logWarning(
+        "Scheduled Issue poll finalized without recurrence; Repository uncredentialed",
+        { jobId, repositoryId },
+      )
+      yield* queue.acknowledge(jobId)
+      return
+    }
+
+    if (result._tag === "Failure") {
+      yield* Effect.logError("Scheduled Issue poll failed", {
+        jobId,
+        repositoryId,
+        error: formatLogError(result.failure),
+      })
+    }
+
+    const delay = yield* sampleDelay
+    yield* queue.postponeKeyed(jobId, delay)
+  })
+
+/**
+ * One dedicated polling worker: always claim high-priority manual work before
+ * scheduled recurring entries. Never interrupts a running reconciliation.
+ */
+const claimAndRunRefreshJob = (
+  visibilityTimeout: Duration.Duration,
+  sampleDelay: Effect.Effect<Duration.Duration>,
+) =>
+  Effect.gen(function* () {
+    const highPriority = yield* claimRefreshJob(
+      ISSUE_REFRESH_QUEUE,
+      visibilityTimeout,
+    )
+    if (Option.isSome(highPriority)) {
+      const job = highPriority.value
+      const result = yield* Effect.result(
+        refreshRepository(job.payload.repositoryId),
+      )
+      yield* finalizeManualRefresh(job.jobId, result, job.payload.repositoryId)
+      return "busy" as const
+    }
+
+    const scheduled = yield* claimRefreshJob(
+      ISSUE_POLL_QUEUE,
+      visibilityTimeout,
+    )
+    if (Option.isNone(scheduled)) return "idle" as const
+
+    const job = scheduled.value
+    const db = yield* DbService
+    const repositories = yield* db.listRepositories
+    const repository = repositories.find(
+      ({ id }) => id === job.payload.repositoryId,
+    )
+    if (repository === undefined) {
+      yield* finalizeScheduledRefresh(
+        job.jobId,
+        job.payload.repositoryId,
+        {
+          _tag: "Failure",
+          failure: new RepositoryNotFoundError({
+            repositoryId: job.payload.repositoryId,
+          }),
+        },
+        sampleDelay,
+      )
+      return "busy" as const
+    }
+
+    const credentialed = yield* repositoryHasGitHubCredential(
+      repository.githubOwner,
+      repository.githubRepo,
+    )
+    if (!credentialed) {
+      yield* finalizeScheduledRefresh(
+        job.jobId,
+        job.payload.repositoryId,
+        { _tag: "Failure", failure: "Repository uncredentialed" },
+        sampleDelay,
+      )
+      return "busy" as const
+    }
+
     const result = yield* Effect.result(
       refreshRepository(job.payload.repositoryId),
     )
-
-    if (result._tag === "Failure") {
-      yield* Effect.logError("Refresh Job failed", {
-        jobId: job.jobId,
-        repositoryId: job.payload.repositoryId,
-        error: formatLogError(result.failure),
-      })
-      yield* queue.fail(job.jobId, { retryable: false })
-    } else {
-      yield* queue.acknowledge(job.jobId)
-    }
-
+    yield* finalizeScheduledRefresh(
+      job.jobId,
+      job.payload.repositoryId,
+      result,
+      sampleDelay,
+    )
     return "busy" as const
   })
 
@@ -237,7 +384,7 @@ const claimAndRunLifecycleJob = (
 }
 
 /**
- * Host lifecycle and Issue Refresh workers as independent fibers that share one
+ * Host lifecycle and Issue polling workers as independent fibers that share one
  * generation token so HMR retires both together.
  */
 export const runJobWorker = (options: JobWorkerOptions = {}) =>
@@ -248,6 +395,7 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
       options.visibilityTimeout ?? JOB_VISIBILITY_TIMEOUT
     const orphanRecoveryInterval =
       options.orphanRecoveryInterval ?? ORPHAN_RECOVERY_INTERVAL
+    const sampleDelay = options.samplePollingDelay ?? sampleIssuePollingDelay
 
     yield* Effect.all(
       [
@@ -260,8 +408,8 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
         runQueuePollLoop(
           generation,
           idlePollInterval,
-          claimAndRunRefreshJob(visibilityTimeout),
-          "Issue refresh job queue",
+          claimAndRunRefreshJob(visibilityTimeout, sampleDelay),
+          "Issue polling job queue",
         ),
       ],
       { concurrency: "unbounded", discard: true },

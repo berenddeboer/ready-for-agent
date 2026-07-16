@@ -45,6 +45,7 @@ import {
   makeStepRunId,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
+  ISSUE_POLL_QUEUE,
   ISSUE_REFRESH_QUEUE,
   JOBS_QUEUE,
   JOB_RECOVERY_RETRY_LIMIT,
@@ -76,12 +77,13 @@ const refreshPayload = {
 const rawJob = (
   payload: unknown,
   queue: string = ISSUE_REFRESH_QUEUE,
+  key: string | null = null,
 ): RawJob => {
   const now = DateTime.makeUnsafe(0)
   return {
     jobId: makeJobId(),
     queue,
-    key: null,
+    key,
     payload,
     attempts: 1,
     maxAttempts: 2,
@@ -102,6 +104,27 @@ const dbLayer = (
     listRepositories: Effect.succeed(repositories),
   })
 
+const keymaxxerLayer = (
+  credentialedAccounts: ReadonlySet<string> = new Set([
+    `${repository.githubOwner}/${repository.githubRepo}`,
+    `${otherRepository.githubOwner}/${otherRepository.githubRepo}`,
+  ]),
+) =>
+  Layer.succeed(KeymaxxerService, {
+    initialize: Effect.void,
+    findSecret: ({ account, provider }) =>
+      Effect.succeed(
+        provider === "github" && credentialedAccounts.has(account)
+          ? `GITHUB_TOKEN_${account.replace("/", "_").toUpperCase()}`
+          : null,
+      ),
+    findSecrets: () => Effect.die("not used"),
+    hasSecret: () => Effect.die("not used"),
+    addSecret: () => Effect.die("not used"),
+    removeSecret: () => Effect.die("not used"),
+    runWithSecrets: () => Effect.die("not used"),
+  })
+
 const queueLayer = (
   jobs: RawJob[],
   onAcknowledge: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
@@ -116,6 +139,10 @@ const queueLayer = (
     timeout: Duration.Duration,
   ) => Effect.Effect<unknown> = () => Effect.void,
   recoverOrphanedStepRuns: Effect.Effect<number> = Effect.succeed(0),
+  onPostponeKeyed: (
+    jobId: string,
+    delay: Duration.Duration,
+  ) => Effect.Effect<unknown> = () => Effect.void,
 ) =>
   Layer.merge(
     Layer.succeed(QueueService, {
@@ -124,7 +151,8 @@ const queueLayer = (
       enqueueWithDelay: unused,
       ensureKeyed: unused,
       listKeyed: unused,
-      postponeKeyed: unused,
+      postponeKeyed: (jobId, delay) =>
+        onPostponeKeyed(jobId, delay).pipe(Effect.asVoid),
       removeKeyed: unused,
       rawClaim: (queueName, visibilityTimeout) =>
         Effect.gen(function* () {
@@ -259,7 +287,7 @@ describe("Job worker", () => {
         yield* Effect.sleep("10 millis")
         expect(acknowledged).toEqual([])
       }),
-      Layer.merge(
+      Layer.mergeAll(
         queueLayer(
           [job],
           (jobId) =>
@@ -279,10 +307,9 @@ describe("Job worker", () => {
             }),
           Deferred.succeed(recovered, undefined).pipe(Effect.as(0)),
         ),
-        Layer.merge(
-          dbLayer(),
-          Layer.succeed(IssueReconciler, { reconcile: unused }),
-        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, { reconcile: unused }),
+        keymaxxerLayer(),
       ),
     )
   })
@@ -307,7 +334,7 @@ describe("Job worker", () => {
         yield* Deferred.await(recoveredTwice).pipe(Effect.timeout("100 millis"))
         expect(recoveryCalls).toBeGreaterThanOrEqual(2)
       }),
-      Layer.merge(
+      Layer.mergeAll(
         queueLayer(
           [],
           undefined,
@@ -317,10 +344,9 @@ describe("Job worker", () => {
           undefined,
           recover,
         ),
-        Layer.merge(
-          dbLayer(),
-          Layer.succeed(IssueReconciler, { reconcile: unused }),
-        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, { reconcile: unused }),
+        keymaxxerLayer(),
       ),
     )
   })
@@ -366,7 +392,7 @@ describe("Job worker", () => {
       Layer.provideMerge(database),
       Layer.provideMerge(github),
     )
-    const layer = Layer.mergeAll(database, reconciler, queue)
+    const layer = Layer.mergeAll(database, reconciler, queue, keymaxxerLayer())
 
     await runScoped(
       Effect.gen(function* () {
@@ -420,14 +446,13 @@ describe("Job worker", () => {
           )
           expect(yield* Deferred.await(failed)).toBe(job.jobId)
         }),
-        Layer.merge(
+        Layer.mergeAll(
           queueLayer([job], undefined, (jobId) =>
             Deferred.succeed(failed, jobId),
           ),
-          Layer.merge(
-            dbLayer(),
-            Layer.succeed(IssueReconciler, { reconcile: unused }),
-          ),
+          dbLayer(),
+          Layer.succeed(IssueReconciler, { reconcile: unused }),
+          keymaxxerLayer(),
         ),
       )
     }
@@ -481,6 +506,7 @@ describe("Job worker", () => {
           }),
         ),
         reconciler,
+        keymaxxerLayer(),
       ),
     )
   })
@@ -514,22 +540,13 @@ describe("Job worker", () => {
           }
         }),
     } satisfies IssueReconcilerShape)
-    const keymaxxer = Layer.succeed(KeymaxxerService, {
-      initialize: Effect.void,
-      findSecret: () => Effect.die("not used"),
-      findSecrets: () => Effect.die("not used"),
-      hasSecret: () => Effect.die("not used"),
-      addSecret: () => Effect.die("not used"),
-      removeSecret: () => Effect.die("not used"),
-      runWithSecrets: () => Effect.die("not used"),
-    })
     const opencode = Layer.succeed(Opencode, {
       start: () => Effect.die("not used"),
       continue: () => Effect.die("not used"),
       listModels: () => Effect.die("not used"),
     })
     const runtime = ManagedRuntime.make(
-      Layer.mergeAll(database, queue, reconciler, keymaxxer, opencode),
+      Layer.mergeAll(database, queue, reconciler, keymaxxerLayer(), opencode),
     )
     const controller = new AbortController()
 
@@ -636,6 +653,7 @@ describe("Job worker", () => {
         ),
         dbLayer(),
         reconciler,
+        keymaxxerLayer(),
       ),
     )
   })
@@ -692,6 +710,7 @@ describe("Job worker", () => {
         queueLayer(jobs),
         dbLayer([repository, otherRepository]),
         reconciler,
+        keymaxxerLayer(),
       ),
     )
   })
@@ -737,7 +756,7 @@ describe("Job worker", () => {
         )
         yield* Deferred.succeed(releaseRefresh, undefined)
       }),
-      Layer.merge(
+      Layer.mergeAll(
         queueLayer(
           jobs,
           undefined,
@@ -751,7 +770,9 @@ describe("Job worker", () => {
             }),
           (jobId) => Deferred.succeed(lifecycleLeaseExtended, jobId),
         ),
-        Layer.merge(dbLayer(), reconciler),
+        dbLayer(),
+        reconciler,
+        keymaxxerLayer(),
       ),
     )
   })
@@ -801,6 +822,7 @@ describe("Job worker", () => {
               unchanged: 0,
             }),
         }),
+        keymaxxerLayer(),
       ),
     )
   })
@@ -841,6 +863,7 @@ describe("Job worker", () => {
         ),
         dbLayer(),
         reconciler,
+        keymaxxerLayer(),
       ),
     )
   })
@@ -894,6 +917,446 @@ describe("Job worker", () => {
         const noDuplicate = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
         expect(Option.isNone(noDuplicate)).toBe(true)
       }).pipe(Effect.provide(layer), Effect.orDie),
+    )
+  })
+
+  test("checks high-priority Refresh Jobs before scheduled Issue polls", async () => {
+    const claimOrder: string[] = []
+    const repositoryOrder: string[] = []
+    const manualJob = rawJob(refreshPayload, ISSUE_REFRESH_QUEUE)
+    const scheduledJob = rawJob(
+      {
+        _tag: "refresh-repository",
+        repositoryId: RepositoryId.make(otherRepository.id),
+      },
+      ISSUE_POLL_QUEUE,
+      otherRepository.id,
+    )
+    const jobs = [scheduledJob, manualJob]
+    const done = await Effect.runPromise(Deferred.make<void>())
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        yield* Deferred.await(done)
+        expect(repositoryOrder).toEqual([repository.id, otherRepository.id])
+        const refreshClaims = claimOrder.filter(
+          (queueName) =>
+            queueName === ISSUE_REFRESH_QUEUE || queueName === ISSUE_POLL_QUEUE,
+        )
+        expect(refreshClaims[0]).toBe(ISSUE_REFRESH_QUEUE)
+        expect(refreshClaims).toContain(ISSUE_POLL_QUEUE)
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          jobs,
+          undefined,
+          undefined,
+          (queueName) =>
+            Effect.sync(() => {
+              claimOrder.push(queueName)
+              const index = jobs.findIndex((job) => job.queue === queueName)
+              if (index === -1) return Option.none()
+              const [job] = jobs.splice(index, 1)
+              return Option.some(job)
+            }),
+          undefined,
+          undefined,
+          undefined,
+          () => Deferred.succeed(done, undefined),
+        ),
+        dbLayer([repository, otherRepository]),
+        Layer.succeed(IssueReconciler, {
+          reconcile: (repo) =>
+            Effect.sync(() => {
+              repositoryOrder.push(repo.id)
+              return {
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }
+            }),
+        }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("postpones a successful scheduled poll by the sampled cadence", async () => {
+    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+    const postponed = await Effect.runPromise(
+      Deferred.make<{ jobId: string; delayMs: number }>(),
+    )
+    const notifications: string[] = []
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(137)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(postponed)).toEqual({
+          jobId: job.jobId,
+          delayMs: 137_000,
+        })
+        expect(notifications).toEqual([repository.id])
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          [job],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (jobId, delay) =>
+            Deferred.succeed(postponed, {
+              jobId,
+              delayMs: Duration.toMillis(delay),
+            }),
+        ),
+        dbLayer([repository], (repositoryId) =>
+          Effect.sync(() => {
+            notifications.push(repositoryId)
+          }),
+        ),
+        Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Effect.succeed({
+              fetched: 0,
+              inserted: 0,
+              updated: 0,
+              deleted: 0,
+              unchanged: 0,
+            }),
+        }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("postpones a failed scheduled poll without publishing success", async () => {
+    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+    const postponed = await Effect.runPromise(Deferred.make<string>())
+    const notifications: string[] = []
+    let failed = false
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+        expect(notifications).toEqual([])
+        expect(failed).toBe(false)
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          [job],
+          undefined,
+          () =>
+            Effect.sync(() => {
+              failed = true
+            }),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (jobId) => Deferred.succeed(postponed, jobId),
+        ),
+        dbLayer([repository], (repositoryId) =>
+          Effect.sync(() => {
+            notifications.push(repositoryId)
+          }),
+        ),
+        Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Effect.fail(new DatabaseError({ message: "scheduled fail" })),
+        }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("finalizes a scheduled poll without recurrence when the Repository is missing", async () => {
+    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+    const acknowledged = await Effect.runPromise(Deferred.make<string>())
+    let postponed = false
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+        expect(postponed).toBe(false)
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          [job],
+          (jobId) => Deferred.succeed(acknowledged, jobId),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () =>
+            Effect.sync(() => {
+              postponed = true
+            }),
+        ),
+        dbLayer([]),
+        Layer.succeed(IssueReconciler, { reconcile: unused }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("finalizes a scheduled poll without recurrence when uncredentialed", async () => {
+    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+    const acknowledged = await Effect.runPromise(Deferred.make<string>())
+    let postponed = false
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+        expect(postponed).toBe(false)
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          [job],
+          (jobId) => Deferred.succeed(acknowledged, jobId),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () =>
+            Effect.sync(() => {
+              postponed = true
+            }),
+        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Effect.fail(new DatabaseError({ message: "no credential" })),
+        }),
+        keymaxxerLayer(new Set()),
+      ),
+    )
+  })
+
+  test("does not alter a scheduled entry when a manual Refresh Job runs", async () => {
+    const scheduledJob = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+    const manualJob = rawJob(refreshPayload)
+    const jobs = [manualJob]
+    const acknowledged = await Effect.runPromise(Deferred.make<string>())
+    let postponed = false
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(acknowledged)).toBe(manualJob.jobId)
+        expect(postponed).toBe(false)
+        expect(jobs).toEqual([])
+        // Scheduled job remains unclaimed in its queue (not in the jobs list
+        // because we only enqueued the manual job).
+        expect(scheduledJob.queue).toBe(ISSUE_POLL_QUEUE)
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          jobs,
+          (jobId) => Deferred.succeed(acknowledged, jobId),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          () =>
+            Effect.sync(() => {
+              postponed = true
+            }),
+        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Effect.succeed({
+              fetched: 0,
+              inserted: 0,
+              updated: 0,
+              deleted: 0,
+              unchanged: 0,
+            }),
+        }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("polls a Paused Repository on the scheduled cadence", async () => {
+    const paused = makeRepositoryRecord({
+      id: repository.id,
+      paused: true,
+    })
+    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, paused.id)
+    const postponed = await Effect.runPromise(Deferred.make<string>())
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(125)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+      }),
+      Layer.mergeAll(
+        queueLayer(
+          [job],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (jobId) => Deferred.succeed(postponed, jobId),
+        ),
+        dbLayer([paused]),
+        Layer.succeed(IssueReconciler, {
+          reconcile: (repo) =>
+            Effect.sync(() => {
+              expect(repo.paused).toBe(true)
+              return {
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }
+            }),
+        }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("persists a scheduled entry across worker restarts without replaying", async () => {
+    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+    const reconciliations: string[] = []
+    const reconciler = Layer.succeed(IssueReconciler, {
+      reconcile: (repo) =>
+        Effect.sync(() => {
+          reconciliations.push(repo.id)
+          return {
+            fetched: 0,
+            inserted: 0,
+            updated: 0,
+            deleted: 0,
+            unchanged: 0,
+          }
+        }),
+    } satisfies IssueReconcilerShape)
+    const lifecycle = Layer.succeed(WorkItemLifecycle, {
+      maxDurations: {
+        create_worktree: Duration.minutes(5),
+        install_dependencies: Duration.minutes(15),
+        implement: Duration.hours(2),
+        pre_commit: Duration.hours(2),
+        review: Duration.hours(1),
+        commit: Duration.minutes(5),
+        create_pr: Duration.minutes(10),
+        watch_pr_status_checks: Duration.minutes(5),
+        resolve_pr_merge_conflict: Duration.hours(2),
+        investigate_pr_status_checks: Duration.hours(2),
+        mark_pr_ready_for_review: Duration.minutes(5),
+        decide_pr_merge: Duration.minutes(15),
+        merge_pr: Duration.minutes(5),
+        local_cleanup: Duration.minutes(5),
+      },
+      implementNow: unused,
+      implementLocally: unused,
+      recoverOrphanedStepRuns: Effect.succeed(0),
+      runStep: () => Effect.succeed({ _tag: "noop" as const }),
+      retry: unused,
+      pause: unused,
+      start: unused,
+      abandon: unused,
+      reset: unused,
+      getWorkItem: unused,
+      listWorkItemsForIssue: unused,
+      listWorkItemsForRepository: unused,
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const service = yield* QueueService
+        const added = yield* db.addRepository({
+          githubOwner: repository.githubOwner,
+          githubRepo: repository.githubRepo,
+          localPath: repository.localPath,
+          isBare: true,
+        })
+        yield* service.ensureKeyed(
+          ISSUE_POLL_QUEUE,
+          added.id,
+          {
+            _tag: "refresh-repository",
+            repositoryId: RepositoryId.make(added.id),
+          },
+          Duration.zero,
+          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+        )
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            while (reconciliations.length < 1) {
+              yield* Effect.sleep("5 millis")
+            }
+          }),
+        )
+
+        expect(reconciliations).toEqual([added.id])
+
+        const keyed = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+        expect(keyed).toHaveLength(1)
+        expect(keyed[0]?.key).toBe(added.id)
+        expect(keyed[0]?.attempts).toBe(0)
+
+        // Not immediately available again (postponed 120s).
+        const claimNow = yield* service.rawClaim(ISSUE_POLL_QUEUE)
+        expect(Option.isNone(claimNow)).toBe(true)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            database,
+            queue,
+            reconciler,
+            keymaxxerLayer(),
+            lifecycle,
+          ),
+        ),
+        Effect.orDie,
+      ),
     )
   })
 })
