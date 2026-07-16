@@ -32,6 +32,8 @@ export const stubDbService = (
   updateConfig: unused,
   addRepository: unused,
   updateRepositorySettings: unused,
+  pauseRepository: unused,
+  unpauseRepository: unused,
   listRepositories: unused(),
   removeRepository: unused,
   storeIssue: unused,

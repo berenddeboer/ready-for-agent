@@ -306,6 +306,114 @@ describe("DbService", () => {
       ))
   })
 
+  describe("pauseRepository and unpauseRepository", () => {
+    it("unpauses a Repository without changing other settings", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
+            autoMerge: true,
+          })
+
+          const unpaused = yield* db.unpauseRepository(repo.id)
+
+          expect(unpaused).toEqual({
+            ...repo,
+            paused: false,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
+            autoMerge: true,
+          })
+          expect(yield* db.listRepositories).toEqual([unpaused])
+        }),
+      ))
+
+    it("pauses a Repository without changing other settings", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          const configured = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: false,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewVariant: "max",
+            autoMerge: true,
+          })
+
+          const paused = yield* db.pauseRepository(repo.id)
+
+          expect(paused).toEqual({
+            ...configured,
+            paused: true,
+          })
+          expect(yield* db.listRepositories).toEqual([paused])
+        }),
+      ))
+
+    it("is idempotent when already paused or unpaused", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+
+          const stillPaused = yield* db.pauseRepository(repo.id)
+          expect(stillPaused.paused).toBe(true)
+
+          const unpaused = yield* db.unpauseRepository(repo.id)
+          const stillUnpaused = yield* db.unpauseRepository(repo.id)
+          expect(stillUnpaused).toEqual(unpaused)
+          expect(stillUnpaused.paused).toBe(false)
+        }),
+      ))
+
+    it("rejects unknown repositories", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const missingId = "repo-01J00000000000000000000000"
+
+          const pauseError = yield* Effect.flip(db.pauseRepository(missingId))
+          expect(pauseError).toBeInstanceOf(RepositoryNotFoundError)
+
+          const unpauseError = yield* Effect.flip(
+            db.unpauseRepository(missingId),
+          )
+          expect(unpauseError).toBeInstanceOf(RepositoryNotFoundError)
+        }),
+      ))
+
+    it("publishes repository changes", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          const changes = yield* db.repositoryChanges.pipe(
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkChild,
+          )
+          yield* Effect.yieldNow
+
+          yield* db.unpauseRepository(repo.id)
+          yield* db.pauseRepository(repo.id)
+
+          expect(yield* Fiber.join(changes)).toEqual([undefined, undefined])
+        }),
+      ))
+  })
+
   describe("listRepositories", () => {
     it("returns an empty list when none exist", () =>
       runTest(
