@@ -17,6 +17,10 @@ import {
   ISSUE_POLL_QUEUE,
   ISSUE_REFRESH_QUEUE,
   JOB_RECOVERY_RETRY_LIMIT,
+  POLLING_AUTO_HEAL_BACKOFF,
+  POLLING_AUTO_HEAL_KEY,
+  enqueuePollingAutoHealJob,
+  repairPollingSchedules,
   sampleIssuePollingDelay,
 } from "@ready-for-agent/graphql-api"
 import { IssueReconciler } from "@ready-for-agent/issue-reconciler"
@@ -29,12 +33,20 @@ import {
 
 /** Work Item lifecycle queue (unchanged). */
 export const JOBS_QUEUE = "jobs"
-export { ISSUE_POLL_QUEUE, ISSUE_REFRESH_QUEUE, JOB_RECOVERY_RETRY_LIMIT }
+export {
+  ISSUE_POLL_QUEUE,
+  ISSUE_REFRESH_QUEUE,
+  JOB_RECOVERY_RETRY_LIMIT,
+  POLLING_AUTO_HEAL_BACKOFF,
+  POLLING_AUTO_HEAL_KEY,
+  enqueuePollingAutoHealJob,
+}
 export const JOB_VISIBILITY_TIMEOUT = Duration.minutes(5)
 const LIFECYCLE_JOB_VISIBILITY_GRACE = Duration.minutes(1)
 const JOB_IDLE_POLL_INTERVAL = Duration.millis(1500)
 const ORPHAN_RECOVERY_INTERVAL = Duration.seconds(30)
 const REFRESH_REPOSITORY_TAG = "refresh-repository"
+const POLLING_AUTO_HEAL_TAG = "polling-auto-heal"
 
 /**
  * Process-global generation so HMR/runtime restarts retire zombie workers that
@@ -83,6 +95,8 @@ const RefreshRepositoryJob = Schema.TaggedStruct("refresh-repository", {
   repositoryId: RepositoryId,
 })
 
+const PollingAutoHealJob = Schema.TaggedStruct("polling-auto-heal", {})
+
 export const enqueueRefreshRepositoryJob = (repositoryId: RepositoryId) =>
   Effect.gen(function* () {
     const queue = yield* QueueService
@@ -118,6 +132,31 @@ const repositoryHasGitHubCredential = (
     return credential !== null
   })
 
+const listCredentialedRepositoryIds = Effect.gen(function* () {
+  const db = yield* DbService
+  const repositories = yield* db.listRepositories
+  const credentialed: string[] = []
+  for (const repository of repositories) {
+    const hasCredential = yield* repositoryHasGitHubCredential(
+      repository.githubOwner,
+      repository.githubRepo,
+    )
+    if (hasCredential) {
+      credentialed.push(repository.id)
+    }
+  }
+  return credentialed
+})
+
+const runPollingAutoHeal = (sampleDelay: Effect.Effect<Duration.Duration>) =>
+  Effect.gen(function* () {
+    const credentialedRepositoryIds = yield* listCredentialedRepositoryIds
+    yield* repairPollingSchedules({
+      credentialedRepositoryIds,
+      sampleDelay,
+    })
+  })
+
 const refreshRepository = (repositoryId: RepositoryId) =>
   Effect.gen(function* () {
     const db = yield* DbService
@@ -140,6 +179,8 @@ export interface JobWorkerOptions {
   readonly orphanRecoveryInterval?: Duration.Duration
   /** Override cadence sampling for deterministic tests. */
   readonly samplePollingDelay?: Effect.Effect<Duration.Duration>
+  /** Override Auto-heal failure backoff for deterministic tests. */
+  readonly sampleAutoHealBackoff?: Effect.Effect<Duration.Duration>
 }
 
 const runQueuePollLoop = <E, R>(
@@ -209,6 +250,25 @@ const finalizeManualRefresh = (
     }
   })
 
+const finalizePollingAutoHeal = (
+  jobId: string,
+  result: AttemptResult,
+  sampleBackoff: Effect.Effect<Duration.Duration>,
+) =>
+  Effect.gen(function* () {
+    const queue = yield* QueueService
+    if (result._tag === "Failure") {
+      yield* Effect.logError("Polling Auto-heal Job failed", {
+        jobId,
+        error: formatLogError(result.failure),
+      })
+      const delay = yield* sampleBackoff
+      yield* queue.postponeKeyed(jobId, delay)
+      return
+    }
+    yield* queue.acknowledge(jobId)
+  })
+
 const finalizeScheduledRefresh = (
   jobId: string,
   repositoryId: RepositoryId,
@@ -255,6 +315,18 @@ const finalizeScheduledRefresh = (
     yield* queue.postponeKeyed(jobId, delay)
   })
 
+const payloadTag = (payload: unknown): string | undefined => {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "_tag" in payload &&
+    typeof (payload as { _tag: unknown })._tag === "string"
+  ) {
+    return (payload as { _tag: string })._tag
+  }
+  return undefined
+}
+
 /**
  * One dedicated polling worker: always claim high-priority manual work before
  * scheduled recurring entries. Never interrupts a running reconciliation.
@@ -262,18 +334,51 @@ const finalizeScheduledRefresh = (
 const claimAndRunRefreshJob = (
   visibilityTimeout: Duration.Duration,
   sampleDelay: Effect.Effect<Duration.Duration>,
+  sampleAutoHealBackoff: Effect.Effect<Duration.Duration>,
 ) =>
   Effect.gen(function* () {
-    const highPriority = yield* claimRefreshJob(
+    const queue = yield* QueueService
+    const highPriorityRaw = yield* queue.rawClaim(
       ISSUE_REFRESH_QUEUE,
       visibilityTimeout,
     )
-    if (Option.isSome(highPriority)) {
-      const job = highPriority.value
-      const result = yield* Effect.result(
-        refreshRepository(job.payload.repositoryId),
-      )
-      yield* finalizeManualRefresh(job.jobId, result, job.payload.repositoryId)
+    if (Option.isSome(highPriorityRaw)) {
+      const job = highPriorityRaw.value
+      const tag = payloadTag(job.payload)
+
+      if (tag === POLLING_AUTO_HEAL_TAG) {
+        const decoded = yield* Schema.decodeUnknownEffect(PollingAutoHealJob)(
+          job.payload,
+        ).pipe(Effect.result)
+        if (decoded._tag === "Failure") {
+          yield* queue.fail(job.jobId, { retryable: false })
+          return "busy" as const
+        }
+        const result = yield* Effect.result(runPollingAutoHeal(sampleDelay))
+        yield* finalizePollingAutoHeal(job.jobId, result, sampleAutoHealBackoff)
+        return "busy" as const
+      }
+
+      if (tag === REFRESH_REPOSITORY_TAG) {
+        const decoded = yield* Schema.decodeUnknownEffect(RefreshRepositoryJob)(
+          job.payload,
+        ).pipe(Effect.result)
+        if (decoded._tag === "Failure") {
+          yield* queue.fail(job.jobId, { retryable: false })
+          return "busy" as const
+        }
+        const result = yield* Effect.result(
+          refreshRepository(decoded.success.repositoryId),
+        )
+        yield* finalizeManualRefresh(
+          job.jobId,
+          result,
+          decoded.success.repositoryId,
+        )
+        return "busy" as const
+      }
+
+      yield* queue.fail(job.jobId, { retryable: false })
       return "busy" as const
     }
 
@@ -396,6 +501,8 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
     const orphanRecoveryInterval =
       options.orphanRecoveryInterval ?? ORPHAN_RECOVERY_INTERVAL
     const sampleDelay = options.samplePollingDelay ?? sampleIssuePollingDelay
+    const sampleAutoHealBackoff =
+      options.sampleAutoHealBackoff ?? Effect.succeed(POLLING_AUTO_HEAL_BACKOFF)
 
     yield* Effect.all(
       [
@@ -408,7 +515,11 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
         runQueuePollLoop(
           generation,
           idlePollInterval,
-          claimAndRunRefreshJob(visibilityTimeout, sampleDelay),
+          claimAndRunRefreshJob(
+            visibilityTimeout,
+            sampleDelay,
+            sampleAutoHealBackoff,
+          ),
           "Issue polling job queue",
         ),
       ],
@@ -416,9 +527,17 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
     )
   })
 
-export const JobWorkerLive = Layer.effectDiscard(
+/**
+ * Start the polling runtime and durably enqueue one high-priority Polling
+ * Auto-heal Job without awaiting repair completion.
+ */
+export const startJobWorker = (options: JobWorkerOptions = {}) =>
   Effect.gen(function* () {
     yield* transferPersistedRefreshJobs
-    yield* runJobWorker().pipe(Effect.forkScoped({ startImmediately: true }))
-  }),
-)
+    yield* enqueuePollingAutoHealJob
+    yield* runJobWorker(options).pipe(
+      Effect.forkScoped({ startImmediately: true }),
+    )
+  })
+
+export const JobWorkerLive = Layer.effectDiscard(startJobWorker())
