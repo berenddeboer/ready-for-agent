@@ -67,6 +67,7 @@ const rawJob = (payload: unknown): RawJob => {
   return {
     jobId: makeJobId(),
     queue: JOBS_QUEUE,
+    key: null,
     payload,
     attempts: 1,
     maxAttempts: 2,
@@ -102,6 +103,10 @@ const queueLayer = (
       queueInTransaction: true,
       enqueue: unused,
       enqueueWithDelay: unused,
+      ensureKeyed: unused,
+      listKeyed: unused,
+      postponeKeyed: unused,
+      removeKeyed: unused,
       rawClaim: (_queue, visibilityTimeout) =>
         Effect.gen(function* () {
           expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
@@ -179,6 +184,10 @@ describe("Job worker", () => {
           return makeJobId()
         }),
       enqueueWithDelay: unused,
+      ensureKeyed: unused,
+      listKeyed: unused,
+      postponeKeyed: unused,
+      removeKeyed: unused,
       rawClaim: unused,
       acknowledge: unused,
       fail: unused,

@@ -122,6 +122,11 @@ export const jobQueue = snakeCase.table(
       .primaryKey()
       .$defaultFn(() => `qjob-${ulid()}`),
     queue: text().notNull(),
+    /**
+     * Stable identity for recurring entries. Null for one-shot jobs.
+     * Non-null (queue, key) pairs are unique.
+     */
+    key: text(),
     jobPayload: text({ mode: "json" })
       .$type<Record<string, unknown>>()
       .notNull(),
@@ -145,6 +150,9 @@ export const jobQueue = snakeCase.table(
       t.jobAttempts,
       t.availableAt,
     ),
+    uniqueIndex("job_queue_queue_key_uidx")
+      .on(t.queue, t.key)
+      .where(sql`${t.key} IS NOT NULL`),
   ],
 )
 

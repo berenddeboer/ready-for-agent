@@ -6,14 +6,31 @@ import type {
   EnqueueError,
   JobNotFoundError,
 } from "./errors.js"
-import { InvalidQueueNameError, PayloadParseError } from "./errors.js"
-import type { Job, JobId, Payload, QueueStats, RawJob } from "./types.js"
+import {
+  InvalidJobKeyError,
+  InvalidQueueNameError,
+  PayloadParseError,
+} from "./errors.js"
+import type {
+  EnsureKeyedResult,
+  Job,
+  JobId,
+  KeyedQueueEntry,
+  Payload,
+  QueueStats,
+  RawJob,
+} from "./types.js"
 
 /**
  * Maximum length for AWS SQS Standard queue names.
  * AWS SQS supports up to 80 characters for Standard queues.
  */
 export const MAX_QUEUE_NAME_LENGTH = 80
+
+/**
+ * Maximum length for durable queue entry keys.
+ */
+export const MAX_JOB_KEY_LENGTH = 256
 
 /**
  * Regular expression to validate queue names according to AWS SQS rules.
@@ -67,6 +84,34 @@ export const validateQueueName = (
 }
 
 /**
+ * Validates a durable job key.
+ * Keys must be non-empty and within the maximum length.
+ */
+export const validateJobKey = (
+  key: string,
+): Effect.Effect<string, InvalidJobKeyError> => {
+  if (key.length === 0) {
+    return Effect.fail(
+      new InvalidJobKeyError({
+        key,
+        message: "Job key cannot be empty",
+      }),
+    )
+  }
+
+  if (key.length > MAX_JOB_KEY_LENGTH) {
+    return Effect.fail(
+      new InvalidJobKeyError({
+        key,
+        message: `Job key exceeds maximum length of ${MAX_JOB_KEY_LENGTH} characters (got ${key.length})`,
+      }),
+    )
+  }
+
+  return Effect.succeed(key)
+}
+
+/**
  * Queue service interface.
  * Implementations provide rawClaim which returns unparsed payloads.
  * Use QueueService.claim() for type-safe payload parsing with a schema.
@@ -106,6 +151,50 @@ export interface QueueServiceShape {
     delay: Duration.Duration,
     options?: { readonly retryLimit?: number },
   ) => Effect.Effect<JobId, EnqueueError | InvalidQueueNameError>
+
+  /**
+   * Idempotently ensure a durable keyed entry exists for the queue.
+   * Concurrent or repeated ensures for the same (queue, key) produce exactly
+   * one entry. Existing entries are left unchanged (payload and availability).
+   * Reports whether this call created the entry.
+   */
+  readonly ensureKeyed: <P extends Payload>(
+    queue: string,
+    key: string,
+    payload: P,
+    delay: Duration.Duration,
+    options?: { readonly retryLimit?: number },
+  ) => Effect.Effect<
+    EnsureKeyedResult,
+    EnqueueError | InvalidQueueNameError | InvalidJobKeyError
+  >
+
+  /**
+   * List all keyed entries in a queue (backend-neutral inspection).
+   */
+  readonly listKeyed: (
+    queue: string,
+  ) => Effect.Effect<ReadonlyArray<KeyedQueueEntry>, InvalidQueueNameError>
+
+  /**
+   * Postpone a claimed keyed entry in place: preserve identity, release claim,
+   * reset recurrence delivery attempts, and set next availability from now + delay.
+   */
+  readonly postponeKeyed: (
+    jobId: string,
+    delay: Duration.Duration,
+  ) => Effect.Effect<void, AcknowledgeError | JobNotFoundError>
+
+  /**
+   * Remove a keyed entry by queue and key. Idempotent when the key is absent.
+   */
+  readonly removeKeyed: (
+    queue: string,
+    key: string,
+  ) => Effect.Effect<
+    void,
+    EnqueueError | InvalidQueueNameError | InvalidJobKeyError
+  >
 
   /**
    * Claim the next available job from the queue (raw, unparsed payload).
@@ -194,6 +283,7 @@ export class QueueService extends Context.Service<
       return Option.some<Job<A>>({
         jobId: rawJob.jobId,
         queue: rawJob.queue,
+        key: rawJob.key,
         payload,
         attempts: rawJob.attempts,
         maxAttempts: rawJob.maxAttempts,

@@ -1,7 +1,12 @@
 import { DateTime, Duration, Effect, Layer, Option, Schedule } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
-import type { Payload, RawJob } from "@ready-for-agent/queue-service"
+import type {
+  EnsureKeyedResult,
+  KeyedQueueEntry,
+  Payload,
+  RawJob,
+} from "@ready-for-agent/queue-service"
 import {
   AcknowledgeError,
   ClaimError,
@@ -12,6 +17,7 @@ import {
   JobNotFoundError,
   QueueService,
   makeJobId,
+  validateJobKey,
   validateQueueName,
 } from "@ready-for-agent/queue-service"
 
@@ -52,9 +58,17 @@ const retrySqliteBusy = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const toUtc = (millis: number): DateTime.Utc => DateTime.makeUnsafe(millis)
 
+const retryLimitFromOptions = (options?: {
+  readonly retryLimit?: number
+}): number =>
+  options?.retryLimit === undefined
+    ? DEFAULT_MAX_RETRIES
+    : options.retryLimit + 1
+
 type JobRow = {
   readonly id: string
   readonly queue: string
+  readonly key: string | null
   readonly job_payload: string
   readonly job_attempts: number
   readonly job_retry_limit: number
@@ -65,11 +79,23 @@ type JobRow = {
 const rawJob = (row: JobRow): RawJob => ({
   jobId: JobId.make(row.id),
   queue: row.queue,
+  key: row.key,
   payload: JSON.parse(row.job_payload),
   attempts: row.job_attempts,
   maxAttempts: row.job_retry_limit,
   availableAt: toUtc(row.available_at),
   lockedUntil: toUtc(row.locked_until ?? row.available_at),
+})
+
+const keyedEntry = (row: JobRow): KeyedQueueEntry => ({
+  jobId: JobId.make(row.id),
+  queue: row.queue,
+  key: row.key as string,
+  payload: JSON.parse(row.job_payload),
+  attempts: row.job_attempts,
+  maxAttempts: row.job_retry_limit,
+  availableAt: toUtc(row.available_at),
+  lockedUntil: row.locked_until === null ? null : toUtc(row.locked_until),
 })
 
 export const SqliteQueueServiceLive = Layer.effect(
@@ -96,9 +122,7 @@ export const SqliteQueueServiceLive = Layer.effect(
                 jobId,
                 queue,
                 JSON.stringify(payload),
-                options?.retryLimit === undefined
-                  ? DEFAULT_MAX_RETRIES
-                  : options.retryLimit + 1,
+                retryLimitFromOptions(options),
                 now,
                 now,
                 now,
@@ -140,9 +164,7 @@ export const SqliteQueueServiceLive = Layer.effect(
                 jobId,
                 queue,
                 JSON.stringify(payload),
-                options?.retryLimit === undefined
-                  ? DEFAULT_MAX_RETRIES
-                  : options.retryLimit + 1,
+                retryLimitFromOptions(options),
                 now + Duration.toMillis(delay),
                 now,
                 now,
@@ -166,6 +188,175 @@ export const SqliteQueueServiceLive = Layer.effect(
             })
           return JobId.make(row.id)
         }),
+      ensureKeyed: <P extends Payload>(
+        queue: string,
+        key: string,
+        payload: P,
+        delay: Duration.Duration,
+        options?: { readonly retryLimit?: number },
+      ) =>
+        Effect.gen(function* () {
+          yield* validateQueueName(queue)
+          yield* validateJobKey(key)
+          const now = Date.now()
+          const jobId = makeJobId()
+          const availableAt = now + Duration.toMillis(delay)
+          const result = yield* retrySqliteBusy(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const inserted = yield* sql.unsafe(
+                  `INSERT INTO job_queue (id, queue, key, job_payload, job_retry_limit, available_at, locked_until, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                   ON CONFLICT(queue, key) WHERE key IS NOT NULL DO NOTHING
+                   RETURNING id`,
+                  [
+                    jobId,
+                    queue,
+                    key,
+                    JSON.stringify(payload),
+                    retryLimitFromOptions(options),
+                    availableAt,
+                    now,
+                    now,
+                  ],
+                )
+                const insertedRow = inserted[0] as
+                  | { readonly id: string }
+                  | undefined
+                if (insertedRow) {
+                  return {
+                    jobId: JobId.make(insertedRow.id),
+                    created: true,
+                  } satisfies EnsureKeyedResult
+                }
+                const existing = yield* sql.unsafe(
+                  `SELECT id FROM job_queue WHERE queue = ? AND key = ?`,
+                  [queue, key],
+                )
+                const existingRow = existing[0] as
+                  | { readonly id: string }
+                  | undefined
+                if (!existingRow) {
+                  return yield* new EnqueueError({
+                    queue,
+                    message: `Keyed entry not found after conflict for key ${key}`,
+                  })
+                }
+                return {
+                  jobId: JobId.make(existingRow.id),
+                  created: false,
+                } satisfies EnsureKeyedResult
+              }),
+            ),
+          ).pipe(
+            Effect.mapError((error) =>
+              error instanceof EnqueueError
+                ? error
+                : new EnqueueError({
+                    queue,
+                    message: `Database error: ${formatSqlError(error as SqlError)}`,
+                    cause: error,
+                  }),
+            ),
+          )
+          return result
+        }),
+      listKeyed: (queue: string) =>
+        Effect.gen(function* () {
+          yield* validateQueueName(queue)
+          const rows = yield* sql
+            .unsafe(
+              `SELECT id, queue, key, job_payload, job_attempts, job_retry_limit, available_at, locked_until
+               FROM job_queue
+               WHERE queue = ? AND key IS NOT NULL
+               ORDER BY key, id`,
+              [queue],
+            )
+            .pipe(Effect.orElseSucceed(() => []))
+          return (rows as ReadonlyArray<JobRow>).map(keyedEntry)
+        }),
+      postponeKeyed: (jobId: string, delay: Duration.Duration) =>
+        Effect.gen(function* () {
+          const now = Date.now()
+          const availableAt = now + Duration.toMillis(delay)
+          const rows = yield* retrySqliteBusy(
+            sql.unsafe(
+              `UPDATE job_queue
+               SET locked_until = NULL,
+                   job_attempts = 0,
+                   available_at = ?,
+                   updated_at = ?
+               WHERE id = ?
+                 AND key IS NOT NULL
+                 AND locked_until IS NOT NULL
+               RETURNING id`,
+              [availableAt, now, jobId],
+            ),
+          ).pipe(
+            Effect.mapError(
+              (error) =>
+                new AcknowledgeError({
+                  jobId,
+                  message: `Database error: ${formatSqlError(error)}`,
+                  cause: error,
+                }),
+            ),
+          )
+          if (rows[0]) return
+          const existing = yield* sql
+            .unsafe(
+              `SELECT id, key, locked_until FROM job_queue WHERE id = ?`,
+              [jobId],
+            )
+            .pipe(
+              Effect.mapError(
+                (error) =>
+                  new AcknowledgeError({
+                    jobId,
+                    message: `Database error: ${formatSqlError(error)}`,
+                    cause: error,
+                  }),
+              ),
+            )
+          const row = existing[0] as
+            | {
+                readonly id: string
+                readonly key: string | null
+                readonly locked_until: number | null
+              }
+            | undefined
+          if (!row) return yield* new JobNotFoundError({ jobId })
+          if (row.key === null) {
+            return yield* new AcknowledgeError({
+              jobId,
+              message: "Cannot postpone an unkeyed job",
+            })
+          }
+          return yield* new AcknowledgeError({
+            jobId,
+            message: "Cannot postpone an unclaimed keyed job",
+          })
+        }),
+      removeKeyed: (queue: string, key: string) =>
+        Effect.gen(function* () {
+          yield* validateQueueName(queue)
+          yield* validateJobKey(key)
+          yield* retrySqliteBusy(
+            sql.unsafe(`DELETE FROM job_queue WHERE queue = ? AND key = ?`, [
+              queue,
+              key,
+            ]),
+          ).pipe(
+            Effect.mapError(
+              (error) =>
+                new EnqueueError({
+                  queue,
+                  message: `Database error: ${formatSqlError(error)}`,
+                  cause: error,
+                }),
+            ),
+          )
+        }),
       rawClaim: (
         queue: string,
         visibilityTimeout = DEFAULT_VISIBILITY_TIMEOUT,
@@ -184,7 +375,7 @@ export const SqliteQueueServiceLive = Layer.effect(
                      AND job_attempts < job_retry_limit
                    ORDER BY job_attempts, available_at, id LIMIT 1
                  )
-                 RETURNING id, queue, job_payload, job_attempts, job_retry_limit, available_at, locked_until`,
+                 RETURNING id, queue, key, job_payload, job_attempts, job_retry_limit, available_at, locked_until`,
                 [lockedUntil, now, queue, now, now],
               ),
             ),
