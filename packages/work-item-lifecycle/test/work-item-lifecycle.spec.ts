@@ -464,6 +464,14 @@ describe("WorkItemLifecycle", () => {
             JobId,
             never
           >,
+        ensureKeyed: () =>
+          Effect.die("ensureKeyed should not be called") as Effect.Effect<
+            never,
+            never
+          >,
+        listKeyed: () => Effect.succeed([]),
+        postponeKeyed: () => Effect.void,
+        removeKeyed: () => Effect.void,
         rawClaim: () => Effect.succeed(Option.none()),
         acknowledge: () => Effect.void,
         fail: () => Effect.void,
@@ -933,6 +941,14 @@ describe("WorkItemLifecycle", () => {
             JobId,
             never
           >,
+        ensureKeyed: () =>
+          Effect.die("ensureKeyed should not be called") as Effect.Effect<
+            never,
+            never
+          >,
+        listKeyed: () => Effect.succeed([]),
+        postponeKeyed: () => Effect.void,
+        removeKeyed: () => Effect.void,
         rawClaim: () => Effect.succeed(Option.none()),
         acknowledge: () => Effect.void,
         fail: () => Effect.void,
@@ -2236,6 +2252,14 @@ describe("WorkItemLifecycle", () => {
             JobId,
             never
           >,
+        ensureKeyed: () =>
+          Effect.die("ensureKeyed should not be called") as Effect.Effect<
+            never,
+            never
+          >,
+        listKeyed: () => Effect.succeed([]),
+        postponeKeyed: () => Effect.void,
+        removeKeyed: () => Effect.void,
         rawClaim: () => Effect.succeed(Option.none()),
         acknowledge: () => Effect.void,
         fail: () => Effect.void,

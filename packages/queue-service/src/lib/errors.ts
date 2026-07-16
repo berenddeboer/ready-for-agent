@@ -51,3 +51,14 @@ export class PayloadParseError extends Schema.TaggedErrorClass<PayloadParseError
     error: Schema.Defect(),
   },
 ) {}
+
+/**
+ * Error thrown when a job key is empty or otherwise invalid.
+ */
+export class InvalidJobKeyError extends Schema.TaggedErrorClass<InvalidJobKeyError>()(
+  "InvalidJobKeyError",
+  {
+    key: Schema.String,
+    message: Schema.String,
+  },
+) {}

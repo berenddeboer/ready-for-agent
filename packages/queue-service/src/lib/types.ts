@@ -24,6 +24,7 @@ export const DEFAULT_MAX_RETRIES = 5
 export interface RawJob {
   readonly jobId: JobId
   readonly queue: string
+  readonly key: string | null
   readonly payload: unknown
   readonly attempts: number
   readonly maxAttempts: number
@@ -37,11 +38,34 @@ export interface RawJob {
 export interface Job<A> {
   readonly jobId: JobId
   readonly queue: string
+  readonly key: string | null
   readonly payload: A
   readonly attempts: number
   readonly maxAttempts: number
   readonly availableAt: DateTime.Utc
   readonly lockedUntil: DateTime.Utc
+}
+
+/**
+ * A durable keyed queue entry for inspection (recurring schedules).
+ */
+export interface KeyedQueueEntry {
+  readonly jobId: JobId
+  readonly queue: string
+  readonly key: string
+  readonly payload: unknown
+  readonly attempts: number
+  readonly maxAttempts: number
+  readonly availableAt: DateTime.Utc
+  readonly lockedUntil: DateTime.Utc | null
+}
+
+/**
+ * Result of ensuring a keyed entry: one durable identity, with create signal.
+ */
+export interface EnsureKeyedResult {
+  readonly jobId: JobId
+  readonly created: boolean
 }
 
 export interface QueueStats {
