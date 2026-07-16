@@ -228,6 +228,12 @@ export interface DbServiceShape {
     RepositoryRecord,
     InvalidRepositorySettingsError | RepositoryNotFoundError | DatabaseError
   >
+  readonly pauseRepository: (
+    repositoryId: string,
+  ) => Effect.Effect<RepositoryRecord, RepositoryNotFoundError | DatabaseError>
+  readonly unpauseRepository: (
+    repositoryId: string,
+  ) => Effect.Effect<RepositoryRecord, RepositoryNotFoundError | DatabaseError>
   readonly listRepositories: Effect.Effect<
     readonly RepositoryRecord[],
     DatabaseError
@@ -578,6 +584,50 @@ export const DbServiceLive = Layer.effect(
         yield* publishRepositoryChanged()
         return repository
       })
+
+    const setRepositoryPaused = (
+      repositoryId: string,
+      paused: boolean,
+    ): Effect.Effect<
+      RepositoryRecord,
+      RepositoryNotFoundError | DatabaseError
+    > =>
+      Effect.gen(function* () {
+        const now = Date.now()
+        const result = yield* sql
+          .unsafe(
+            `UPDATE repository
+             SET paused = ?,
+                 updated_at = ?
+             WHERE id = ?
+             RETURNING ${repositorySelectColumns}`,
+            [paused, now, repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))
+
+        const row = result[0] as RepositoryRow | undefined
+        if (!row) {
+          return yield* new RepositoryNotFoundError({ repositoryId })
+        }
+
+        const repository = toRecordFromRow(row)
+        yield* publishRepositoryChanged()
+        return repository
+      })
+
+    const pauseRepository = (
+      repositoryId: string,
+    ): Effect.Effect<
+      RepositoryRecord,
+      RepositoryNotFoundError | DatabaseError
+    > => setRepositoryPaused(repositoryId, true)
+
+    const unpauseRepository = (
+      repositoryId: string,
+    ): Effect.Effect<
+      RepositoryRecord,
+      RepositoryNotFoundError | DatabaseError
+    > => setRepositoryPaused(repositoryId, false)
 
     const listRepositories: Effect.Effect<
       readonly RepositoryRecord[],
@@ -1093,6 +1143,8 @@ export const DbServiceLive = Layer.effect(
       updateConfig,
       addRepository,
       updateRepositorySettings,
+      pauseRepository,
+      unpauseRepository,
       listRepositories,
       removeRepository,
       storeIssue,

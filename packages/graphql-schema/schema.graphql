@@ -187,6 +187,8 @@ type Mutation {
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
   updateRepositorySettings(input: UpdateRepositorySettingsInput!): Repository!
+  pauseRepository(repositoryId: ID!): Repository!
+  unpauseRepository(repositoryId: ID!): Repository!
 }
 
 type Subscription {

@@ -776,6 +776,40 @@ export const createGraphqlApi = (
             }
             return result.success
           },
+          pauseRepository: async (
+            _parent: unknown,
+            args: RefreshRepositoryArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.pauseRepository(args.repositoryId)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          unpauseRepository: async (
+            _parent: unknown,
+            args: RefreshRepositoryArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const db = yield* DbService
+                  return yield* db.unpauseRepository(args.repositoryId)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
           addRepository: async (_parent: unknown, args: AddRepositoryArgs) => {
             const result = await runtime.runPromise(
               Effect.result(

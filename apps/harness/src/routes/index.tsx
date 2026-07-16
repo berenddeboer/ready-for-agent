@@ -653,6 +653,55 @@ function RepositoryCard({
     },
   })
 
+  const updateRepositoryPaused = (updated: { id: string; paused: boolean }) => {
+    queryClient.setQueryData<readonly Repository[]>(
+      repositoriesQuery.queryKey,
+      (repositories) =>
+        repositories?.map((candidate) =>
+          candidate.id === updated.id
+            ? { ...candidate, paused: updated.paused }
+            : candidate,
+        ),
+    )
+  }
+
+  const pauseRepository = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        pauseRepository: {
+          __args: { repositoryId: repository.id },
+          id: true,
+          paused: true,
+        },
+      })
+      return result.pauseRepository
+    },
+    onSuccess: updateRepositoryPaused,
+  })
+
+  const unpauseRepository = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        unpauseRepository: {
+          __args: { repositoryId: repository.id },
+          id: true,
+          paused: true,
+        },
+      })
+      return result.unpauseRepository
+    },
+    onSuccess: updateRepositoryPaused,
+  })
+
+  const pausePending = pauseRepository.isPending || unpauseRepository.isPending
+  const pauseFailed = pauseRepository.isError || unpauseRepository.isError
+  const pauseLabel = repository.paused
+    ? "Unpause repository"
+    : "Pause repository"
+  const pauseButtonClass = repository.paused
+    ? "text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
+    : "text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+
   return (
     <article className="relative min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
       <div className="mb-[1.4rem] flex items-center justify-between gap-4">
@@ -665,13 +714,55 @@ function RepositoryCard({
           </a>
         </h2>
         <div className="flex shrink-0 items-center gap-1">
-          {repository.paused && (
-            <button
-              type="button"
-              className="inline-flex size-8 items-center justify-center rounded-md text-amber-700 hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-600"
-              aria-label="Paused"
-              title="Paused"
-            >
+          <button
+            type="button"
+            className={`inline-flex size-8 items-center justify-center rounded-md transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : pauseButtonClass}`}
+            disabled={pausePending}
+            onClick={() =>
+              repository.paused
+                ? unpauseRepository.mutate()
+                : pauseRepository.mutate()
+            }
+            aria-label={pausePending ? `${pauseLabel} in progress` : pauseLabel}
+            title={
+              pauseFailed
+                ? `Could not ${pauseLabel.toLowerCase()}. Try again.`
+                : pauseLabel
+            }
+          >
+            {pausePending ? (
+              <svg
+                aria-hidden="true"
+                className="size-4 animate-spin motion-reduce:animate-none"
+                viewBox="0 0 24 24"
+                fill="none"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="9"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                />
+                <path
+                  className="opacity-75"
+                  d="M12 3a9 9 0 0 1 9 9"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+              </svg>
+            ) : repository.paused ? (
+              <svg
+                aria-hidden="true"
+                className="size-4"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="m8 5 11 7-11 7V5Z" />
+              </svg>
+            ) : (
               <svg
                 aria-hidden="true"
                 className="size-4"
@@ -681,8 +772,8 @@ function RepositoryCard({
                 <rect x="6" y="5" width="4" height="14" rx="1" />
                 <rect x="14" y="5" width="4" height="14" rx="1" />
               </svg>
-            </button>
-          )}
+            )}
+          </button>
           <span className="relative" data-repo-menu={repository.id}>
             <button
               type="button"

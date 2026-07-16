@@ -849,6 +849,65 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("pauses and unpauses a repository", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      pauseRepository: (repositoryId) =>
+        Effect.succeed({
+          ...repository,
+          id: repositoryId,
+          paused: true,
+        }),
+      unpauseRepository: (repositoryId) =>
+        Effect.succeed({
+          ...repository,
+          id: repositoryId,
+          paused: false,
+        }),
+    })
+
+    const api = createGraphqlApi(runtime)
+    const paused = await api.fetch(
+      graphqlRequest({
+        query: `mutation PauseRepository($repositoryId: ID!) {
+          pauseRepository(repositoryId: $repositoryId) {
+            id
+            paused
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+    expect(await paused.json()).toEqual({
+      data: {
+        pauseRepository: {
+          id: repository.id,
+          paused: true,
+        },
+      },
+    })
+
+    const unpaused = await api.fetch(
+      graphqlRequest({
+        query: `mutation UnpauseRepository($repositoryId: ID!) {
+          unpauseRepository(repositoryId: $repositoryId) {
+            id
+            paused
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+    expect(await unpaused.json()).toEqual({
+      data: {
+        unpauseRepository: {
+          id: repository.id,
+          paused: false,
+        },
+      },
+    })
+  })
+
   test("lists models provided by OpenCode and caches the result", async () => {
     let listCount = 0
     await runtime.dispose()
