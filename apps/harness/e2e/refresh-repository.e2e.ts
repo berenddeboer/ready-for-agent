@@ -62,6 +62,9 @@ test("Refresh returns after enqueueing and updates after worker invalidation", a
     if (query.includes("issues(")) {
       return { data: { issues: workerCompleted ? [issue] : [] } }
     }
+    if (query.includes("workItems")) {
+      return { data: { workItems: [] } }
+    }
     if (query.includes("config")) {
       return {
         data: {
