@@ -135,7 +135,7 @@ const workIssueProjection = (
 
   return issues
     .filter((issue) => issue.parent === null)
-    .sort((left, right) => left.githubIssueNumber - right.githubIssueNumber)
+    .sort((left, right) => right.githubIssueNumber - left.githubIssueNumber)
     .flatMap((issue) => {
       if (!issue.hasChildren) return [issue]
       const children = childrenByParent.get(issue.githubIssueNumber) ?? []
