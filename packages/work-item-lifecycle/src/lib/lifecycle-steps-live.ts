@@ -13,6 +13,7 @@ import { implement } from "./implement.js"
 import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
 import { markPrReadyForReview } from "./mark-pr-ready-for-review.js"
+import { mergePr } from "./merge-pr.js"
 import {
   investigatePrStatusChecks,
   watchPrStatusChecks,
@@ -82,6 +83,7 @@ export const LifecycleStepsLive = Layer.effect(
       markPrReadyForReview: (context) =>
         withServices(markPrReadyForReview(context)),
       decidePrMerge: (context) => withServices(decidePrMerge(context)),
+      mergePr: (context) => withServices(mergePr(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })
   }),

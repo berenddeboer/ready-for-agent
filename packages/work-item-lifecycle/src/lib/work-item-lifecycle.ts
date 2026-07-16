@@ -283,6 +283,8 @@ const toWorkItemRecord = (
 
 const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
 const PR_STATUS_CHECKS_MIN_GREEN_WAIT = Duration.seconds(60)
+/** Stored on a green watch Step Run that requeues for one confirmation poll. */
+const PR_STATUS_CHECKS_GREEN_CONFIRMING = "pr_checks_green_confirming"
 
 const nextOperationalStep = (
   step: OperationalLifecycleStep,
@@ -309,6 +311,8 @@ const nextOperationalStep = (
     case "mark_pr_ready_for_review":
       return "decide_pr_merge"
     case "decide_pr_merge":
+      return "merge_pr"
+    case "merge_pr":
       return "complete"
   }
 }
@@ -705,6 +709,26 @@ export const makeWorkItemLifecycleLive = (
           ),
         )
 
+      const previousWatchPollNote = (
+        workItemId: string,
+      ): Effect.Effect<string | null, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT reason_message FROM step_run
+             WHERE work_item_id = ?
+               AND step = 'watch_pr_status_checks'
+               AND status = 'succeeded'
+             ORDER BY finished_at DESC
+             LIMIT 1`,
+              [workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly reason_message: string | null
+          }[]
+          return rows[0]?.reason_message ?? null
+        })
+
       const runHandler = (
         step: OperationalLifecycleStep,
         context: LifecycleStepContext,
@@ -715,6 +739,7 @@ export const makeWorkItemLifecycleLive = (
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
+          readonly stepRunNote?: string
           readonly transition?: {
             readonly nextState:
               | OperationalLifecycleStep
@@ -779,7 +804,7 @@ export const makeWorkItemLifecycleLive = (
                       },
                     }
                   }
-                  // succeeded, or no_checks after the grace (checks never registered)
+                  // no_checks: wait the grace before treating absence as green
                   if (status === "no_checks") {
                     const now = yield* Clock.currentTimeMillis
                     const watchedMs = Math.max(0, now - workItem.state_ready_at)
@@ -788,6 +813,21 @@ export const makeWorkItemLifecycleLive = (
                       Duration.toMillis(PR_STATUS_CHECKS_MIN_GREEN_WAIT)
                     ) {
                       return {
+                        transition: {
+                          nextState: "watch_pr_status_checks" as const,
+                          delay: PR_STATUS_CHECKS_POLL_DELAY,
+                        },
+                      }
+                    }
+                  }
+                  // succeeded (and no_checks after grace): require two consecutive
+                  // green polls so a brief SUCCESS cannot race into merge while a
+                  // second check is still starting.
+                  if (status === "succeeded" || status === "no_checks") {
+                    const priorNote = yield* previousWatchPollNote(workItem.id)
+                    if (priorNote !== PR_STATUS_CHECKS_GREEN_CONFIRMING) {
+                      return {
+                        stepRunNote: PR_STATUS_CHECKS_GREEN_CONFIRMING,
                         transition: {
                           nextState: "watch_pr_status_checks" as const,
                           delay: PR_STATUS_CHECKS_POLL_DELAY,
@@ -823,18 +863,19 @@ export const makeWorkItemLifecycleLive = (
             return steps.markPrReadyForReview(context).pipe(Effect.as({}))
           case "decide_pr_merge":
             return steps.decidePrMerge(context).pipe(
-              Effect.map((result) => ({
-                transition:
-                  result._tag === "clanker_merge"
-                    ? {
-                        nextState: "complete" as const,
-                      }
-                    : {
+              Effect.map((result) =>
+                result._tag === "clanker_merge"
+                  ? {}
+                  : {
+                      transition: {
                         nextState: "needs_human" as const,
                         reason: result.reason,
                       },
-              })),
+                    },
+              ),
             )
+          case "merge_pr":
+            return steps.mergePr(context).pipe(Effect.as({}))
         }
       }
 
@@ -883,6 +924,7 @@ export const makeWorkItemLifecycleLive = (
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
+          readonly stepRunNote?: string
           readonly transition?: {
             readonly nextState:
               | OperationalLifecycleStep
@@ -917,9 +959,12 @@ export const makeWorkItemLifecycleLive = (
               Effect.gen(function* () {
                 yield* sql.unsafe(
                   `UPDATE step_run
-                 SET status = 'succeeded', finished_at = ?, updated_at = ?
+                 SET status = 'succeeded',
+                     finished_at = ?,
+                     reason_message = ?,
+                     updated_at = ?
                  WHERE id = ? AND status = 'running'`,
-                  [now, now, stepRun.id],
+                  [now, output.stepRunNote ?? null, now, stepRun.id],
                 )
 
                 for (const checkId of output.handledCheckIds ?? []) {
@@ -1080,7 +1125,7 @@ export const makeWorkItemLifecycleLive = (
       }): Effect.Effect<WorkItemRecord, RunStepError> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
-          const { stepRun, workItem, reasonCode, reasonMessage, cause } = input
+          const { stepRun, workItem, reasonCode, reasonMessage } = input
 
           yield* Effect.logError("Lifecycle Step handler failed", {
             workItemId: workItem.id,
@@ -1088,7 +1133,6 @@ export const makeWorkItemLifecycleLive = (
             step: stepRun.step,
             reasonCode,
             reasonMessage,
-            cause: Cause.pretty(cause),
           })
 
           yield* sql
@@ -1133,17 +1177,14 @@ export const makeWorkItemLifecycleLive = (
       }): Effect.Effect<void, RunStepError> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
-          const { stepRun, reasonMessage, cause } = input
+          const { stepRun, reasonMessage } = input
 
-          if (cause) {
-            yield* Effect.logWarning("Lifecycle Step interrupted", {
-              workItemId: stepRun.work_item_id,
-              stepRunId: stepRun.id,
-              step: stepRun.step,
-              reasonMessage,
-              cause: Cause.pretty(cause),
-            })
-          }
+          yield* Effect.logWarning("Lifecycle Step interrupted", {
+            workItemId: stepRun.work_item_id,
+            stepRunId: stepRun.id,
+            step: stepRun.step,
+            reasonMessage,
+          })
 
           yield* sql
             .withTransaction(

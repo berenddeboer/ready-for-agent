@@ -517,6 +517,133 @@ describe("GitHubService live implementation", () => {
     }
   })
 
+  it("merges an open PR and no-ops when already merged", async () => {
+    const mutations: unknown[] = []
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  statusCheckRollup: { state: "SUCCESS" },
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          mergePullRequest: {
+            pullRequest: { merged: true, state: "MERGED" },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(service.mergePullRequest(repository, "branch"))
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]).toMatchObject({
+      mergePullRequest: {
+        __args: {
+          input: {
+            pullRequestId: "PR_kwDOOpen",
+            expectedHeadOid: "abc123",
+            mergeMethod: "SQUASH",
+          },
+        },
+      },
+    })
+
+    const alreadyMerged = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOMerged",
+                  state: "MERGED",
+                  merged: true,
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () => {
+        throw new Error("mutation should not run for an already merged PR")
+      },
+    })
+
+    await Effect.runPromise(
+      alreadyMerged.mergePullRequest(repository, "branch"),
+    )
+  })
+
+  it("fails merge when the PR is closed unmerged", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOClosed",
+                  state: "CLOSED",
+                  merged: false,
+                },
+              ],
+            },
+          },
+        }) as never,
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(service.mergePullRequest(repository, "branch")),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+    }
+  })
+
+  it("does not merge a PR whose current head checks are not successful", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOPending",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "new-head",
+                  statusCheckRollup: { state: "PENDING" },
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () => {
+        throw new Error("mutation should not run for unchecked head")
+      },
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(service.mergePullRequest(repository, "branch")),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRequestError)
+    }
+  })
+
   it("fetches every ready-for-agent page and returns mapped issues by number", async () => {
     const requests: unknown[] = []
     const responses = [

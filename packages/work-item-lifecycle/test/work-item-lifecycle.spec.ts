@@ -64,6 +64,7 @@ describe("WorkItemLifecycle", () => {
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
     markPrReadyForReview: () => Effect.void,
     decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
+    mergePr: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
 
@@ -573,6 +574,8 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           const claimAndRun = Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -587,7 +590,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 10; i++) {
+          for (let i = 0; i < 12; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -648,7 +651,9 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 10; i++) {
+          for (let i = 0; i < 12; i++) {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
             expect(Option.isSome(job)).toBe(true)
             if (Option.isNone(job)) {
@@ -903,6 +908,11 @@ describe("WorkItemLifecycle", () => {
         yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
       })
 
+    const makeQueuedJobsAvailable = Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+    })
+
     it("drives the complete happy path to Complete with typed outputs", () =>
       runTest(
         Effect.gen(function* () {
@@ -994,6 +1004,13 @@ describe("WorkItemLifecycle", () => {
             ])
           }
 
+          const firstGreen = yield* claimAndRunPending
+          expect(firstGreen._tag).toBe("processed")
+          if (firstGreen._tag === "processed") {
+            expect(firstGreen.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          yield* makeQueuedJobsAvailable
           const afterChecks = yield* claimAndRunPending
           expect(afterChecks._tag).toBe("processed")
           if (afterChecks._tag === "processed") {
@@ -1009,20 +1026,23 @@ describe("WorkItemLifecycle", () => {
           const afterDecide = yield* claimAndRunPending
           expect(afterDecide._tag).toBe("processed")
           if (afterDecide._tag === "processed") {
-            expect(afterDecide.workItem.state).toBe("complete")
-            expect(afterDecide.workItem.worktreePath).toBe(
+            expect(afterDecide.workItem.state).toBe("merge_pr")
+          }
+
+          const afterMerge = yield* claimAndRunPending
+          expect(afterMerge._tag).toBe("processed")
+          if (afterMerge._tag === "processed") {
+            expect(afterMerge.workItem.state).toBe("complete")
+            expect(afterMerge.workItem.worktreePath).toBe(
               "/tmp/worktrees/acme-widgets-42",
             )
-            expect(afterDecide.workItem.sessionId).toBe(
+            expect(afterMerge.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterDecide.workItem.githubPullRequestNumber).toBe(101)
-            expect(afterDecide.workItem.failureCode).toBeNull()
+            expect(afterMerge.workItem.githubPullRequestNumber).toBe(101)
+            expect(afterMerge.workItem.failureCode).toBeNull()
             expect(
-              afterDecide.workItem.stepRuns.map((run) => [
-                run.step,
-                run.status,
-              ]),
+              afterMerge.workItem.stepRuns.map((run) => [run.step, run.status]),
             ).toEqual([
               ["create_worktree", "succeeded"],
               ["install_dependencies", "succeeded"],
@@ -1032,8 +1052,10 @@ describe("WorkItemLifecycle", () => {
               ["commit", "succeeded"],
               ["create_pr", "succeeded"],
               ["watch_pr_status_checks", "succeeded"],
+              ["watch_pr_status_checks", "succeeded"],
               ["mark_pr_ready_for_review", "succeeded"],
               ["decide_pr_merge", "succeeded"],
+              ["merge_pr", "succeeded"],
             ])
           }
 
@@ -1043,7 +1065,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(10)
+          expect(final.stepRuns).toHaveLength(12)
         }),
       ))
 
@@ -1094,6 +1116,15 @@ describe("WorkItemLifecycle", () => {
           const watchStartedAt = readyAt[0]!.state_ready_at
 
           yield* allowPrChecksToAppear(created.id)
+          const firstGreenAfterGrace = yield* claimAndRunPending
+          expect(firstGreenAfterGrace._tag).toBe("processed")
+          if (firstGreenAfterGrace._tag === "processed") {
+            expect(firstGreenAfterGrace.workItem.state).toBe(
+              "watch_pr_status_checks",
+            )
+          }
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
           const afterGrace = yield* claimAndRunPending
           expect(afterGrace._tag).toBe("processed")
           if (afterGrace._tag === "processed") {
@@ -1252,6 +1283,7 @@ describe("WorkItemLifecycle", () => {
         "pending",
         "handoff_needed",
         "succeeded",
+        "succeeded",
       ] as const
       let watchIndex = 0
       let investigations = 0
@@ -1321,6 +1353,13 @@ describe("WorkItemLifecycle", () => {
             )
           }
           expect(investigations).toBe(2)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const firstGreen = yield* claimAndRunPending
+          expect(firstGreen._tag).toBe("processed")
+          if (firstGreen._tag === "processed") {
+            expect(firstGreen.workItem.state).toBe("watch_pr_status_checks")
+          }
 
           yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
           const ready = yield* claimAndRunPending
@@ -1442,6 +1481,10 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.succeed({ _tag: "clanker_merge" })
         },
+        mergePr: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
         removeWorktree: () => Effect.void,
       }
 
@@ -1460,18 +1503,12 @@ describe("WorkItemLifecycle", () => {
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
+          for (let index = 0; index < 12; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
 
-          expect(seen).toHaveLength(10)
+          expect(seen).toHaveLength(12)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -1510,6 +1547,10 @@ describe("WorkItemLifecycle", () => {
           expect(seen[8]!.sessionId).toBe("ses_recorded")
           expect(seen[9]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[9]!.sessionId).toBe("ses_recorded")
+          expect(seen[10]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[10]!.sessionId).toBe("ses_recorded")
+          expect(seen[11]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[11]!.sessionId).toBe("ses_recorded")
         }),
       )
     })
@@ -1522,6 +1563,7 @@ describe("WorkItemLifecycle", () => {
             _tag: "needs_human",
             reason: "Touches authentication secrets",
           }),
+        mergePr: () => Effect.die("merge must not run after needs_human"),
       }
 
       return runWithSteps(
@@ -1533,7 +1575,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 10; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
+            yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
@@ -2124,6 +2167,7 @@ describe("WorkItemLifecycle", () => {
           investigate_pr_status_checks: Duration.hours(2),
           mark_pr_ready_for_review: Duration.minutes(5),
           decide_pr_merge: Duration.minutes(15),
+          merge_pr: Duration.minutes(5),
         },
       }).pipe(
         Layer.provideMerge(

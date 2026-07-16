@@ -41,6 +41,7 @@ export const makeGitHubServiceTest = (
     getPullRequestCheckStatus: () =>
       Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
     markPullRequestReadyForReview: () => Effect.void,
+    mergePullRequest: () => Effect.void,
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))
       if (fixture === undefined) {

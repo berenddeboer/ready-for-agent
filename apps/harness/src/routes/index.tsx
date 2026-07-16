@@ -154,6 +154,7 @@ type WorkItemState =
   | "INVESTIGATE_PR_STATUS_CHECKS"
   | "MARK_PR_READY_FOR_REVIEW"
   | "DECIDE_PR_MERGE"
+  | "MERGE_PR"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"
@@ -229,6 +230,9 @@ const formatLifecycleLabel = (value: string) => {
   if (value.toLowerCase() === "decide_pr_merge") {
     return "Decide PR merge"
   }
+  if (value.toLowerCase() === "merge_pr") {
+    return "Merge PR"
+  }
   return value
     .toLowerCase()
     .replaceAll("_", " ")
@@ -240,9 +244,12 @@ const formatStepRunOutcome = (
   workItemState: WorkItemState,
 ) => {
   if (stepRun.step === "DECIDE_PR_MERGE" && stepRun.status === "SUCCEEDED") {
-    return workItemState === "COMPLETE"
-      ? "Automated merge"
-      : "Human review before merge"
+    return workItemState === "NEEDS_HUMAN"
+      ? "Human review before merge"
+      : "Clanker may merge"
+  }
+  if (stepRun.step === "MERGE_PR" && stepRun.status === "SUCCEEDED") {
+    return "Merged"
   }
   return formatLifecycleLabel(stepRun.status)
 }

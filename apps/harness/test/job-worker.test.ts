@@ -132,6 +132,7 @@ const queueLayer = (
         investigate_pr_status_checks: Duration.hours(2),
         mark_pr_ready_for_review: Duration.minutes(5),
         decide_pr_merge: Duration.minutes(15),
+        merge_pr: Duration.minutes(5),
       },
       implementNow: unused,
       runStep,
@@ -240,6 +241,7 @@ describe("Job worker", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
       markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.void,
       listReadyIssues: () =>
         Effect.succeed([
           {

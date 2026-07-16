@@ -17,6 +17,25 @@ export const JOB_VISIBILITY_TIMEOUT = Duration.minutes(5)
 const JOB_IDLE_POLL_INTERVAL = Duration.seconds(1)
 export const JOB_RECOVERY_RETRY_LIMIT = 1
 
+const formatLogError = (error: unknown): string => {
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error.trim()
+  }
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim()
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string" &&
+    (error as { message: string }).message.trim().length > 0
+  ) {
+    return (error as { message: string }).message.trim()
+  }
+  return String(error)
+}
+
 const RefreshRepositoryJob = Schema.TaggedStruct("refresh-repository", {
   repositoryId: RepositoryId,
 })
@@ -89,7 +108,7 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
             yield* Effect.logError("Refresh Job failed", {
               jobId: job.jobId,
               repositoryId: job.payload.repositoryId,
-              error: result.failure,
+              error: formatLogError(result.failure),
             })
             yield* queue.fail(job.jobId, { retryable: false })
           } else {
@@ -107,7 +126,7 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
             yield* Effect.logError("Work Item Lifecycle Job failed", {
               jobId: job.jobId,
               stepRunId: job.payload.stepRunId,
-              error: result.failure,
+              error: formatLogError(result.failure),
             })
           } else if (result.success._tag === "noop") {
             yield* queue.acknowledge(job.jobId)
@@ -121,9 +140,9 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
 
     const poll = claimAndRun.pipe(
       Effect.catch((error) =>
-        Effect.logError("Job queue poll failed", { error }).pipe(
-          Effect.as(true),
-        ),
+        Effect.logError("Job queue poll failed", {
+          error: formatLogError(error),
+        }).pipe(Effect.as(true)),
       ),
       Effect.flatMap((idle) =>
         idle ? Effect.sleep(idlePollInterval) : Effect.void,

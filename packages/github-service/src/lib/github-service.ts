@@ -37,6 +37,13 @@ export interface GitHubServiceShape {
     void,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
+  readonly mergePullRequest: (
+    repository: GitHubRepository,
+    headRefName: string,
+  ) => Effect.Effect<
+    void,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
 }
 
 export class GitHubService extends Context.Service<
