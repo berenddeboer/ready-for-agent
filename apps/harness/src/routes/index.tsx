@@ -1009,7 +1009,11 @@ function RepositoryIssues({
   const { data: issues } = useSuspenseQuery(issuesQuery(repositoryId))
 
   if (issues.length === 0) {
-    return <p className="m-0 text-sm text-slate-500">No relevant issues.</p>
+    return (
+      <p className="m-0 text-sm text-slate-500">
+        No issues found this harness can work on.
+      </p>
+    )
   }
 
   const childrenByParent = new Map<number, RepositoryIssue[]>()
