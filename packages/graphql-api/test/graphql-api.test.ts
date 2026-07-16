@@ -993,7 +993,6 @@ describe("GraphQL API", () => {
     expect(await response.json()).toEqual({
       data: {
         issues: [
-          { githubIssueNumber: 3, hasChildren: false, parent: null },
           { githubIssueNumber: 10, hasChildren: true, parent: null },
           {
             githubIssueNumber: 14,
@@ -1015,6 +1014,7 @@ describe("GraphQL API", () => {
             hasChildren: false,
             parent: { githubIssueNumber: 10 },
           },
+          { githubIssueNumber: 3, hasChildren: false, parent: null },
         ],
       },
     })
