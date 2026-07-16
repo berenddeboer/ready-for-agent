@@ -1,3 +1,4 @@
+import { dirname } from "node:path"
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Opencode } from "@ready-for-agent/opencode"
@@ -92,10 +93,16 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
 const writeHookOutputLog = (workItemId: string, output: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem
-    const logPath = yield* fs.makeTempFileScoped({
-      prefix: `ready-for-agent-pre-commit-${workItemId}-`,
-      suffix: ".log",
-    })
+    const logPath = yield* Effect.acquireRelease(
+      fs.makeTempFile({
+        prefix: `ready-for-agent-pre-commit-${workItemId}-`,
+        suffix: ".log",
+      }),
+      (path) =>
+        fs
+          .remove(dirname(path), { recursive: true, force: true })
+          .pipe(Effect.orDie),
+    )
     yield* fs.writeFileString(logPath, output)
     yield* fs.chmod(logPath, 0o600)
     return logPath

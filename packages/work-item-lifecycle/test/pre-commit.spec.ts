@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { type Duration, Effect, Layer } from "effect"
 import {
@@ -287,6 +287,40 @@ describe("preCommit", () => {
       expect(logContents).toContain(tail)
       expect(logMode).toBe(0o600)
       await expect(access(logPath)).rejects.toThrow()
+    }))
+
+  it("succeeds when the diagnostic consumer removes the temporary log directory", () =>
+    withTempGit(async (root) => {
+      await writeHook(
+        root,
+        [
+          "#!/usr/bin/env bash",
+          'if [ -f ".pre-commit-fixed" ]; then',
+          "  exit 0",
+          "fi",
+          "exit 1",
+          "",
+        ].join("\n"),
+      )
+      await writeFile(join(root, "change.txt"), "hello\n")
+
+      await run(
+        preCommit(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            const match = input.prompt.match(/Full hook output is at: (.+)$/m)
+            const logPath = match?.[1]?.trim() ?? ""
+            return Effect.promise(async () => {
+              await rm(dirname(logPath), { recursive: true })
+              await writeFile(join(root, ".pre-commit-fixed"), "ok\n")
+              return {
+                sessionId: input.sessionId,
+                assistantText: "fixed",
+              }
+            })
+          },
+        }),
+      )
     }))
 
   it("asks OpenCode again when the hook still fails after a fix attempt", () =>
