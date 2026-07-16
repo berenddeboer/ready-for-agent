@@ -100,7 +100,7 @@ An Implementable Issue with no unfinished Work Item. Only an Actionable Issue ma
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled. After the PR is ready for review, Decide PR Merge asks the Implement OpenCode Session whether risk is low enough for a clanker to merge or a human must; clanker merge advances to Merge PR, which squash-merges the PR via GitHub, then Complete; needs-human is terminal Needs Human without merging.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch prioritizes a known merge conflict over completed checks, otherwise batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while mergeability or checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled; a merely behind branch does not trigger conflict resolution. After the PR is ready for review, Decide PR Merge asks the Implement OpenCode Session whether risk is low enough for a clanker to merge or a human must; clanker merge advances to Merge PR, which squash-merges the PR via GitHub, then Complete; needs-human is terminal Needs Human without merging.
 _Avoid_: Last completed step, phase
 
 **PR Status Check**:
@@ -110,6 +110,10 @@ _Avoid_: Aggregate status-check rollup, workflow run
 **Status Check Handoff**:
 A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks. The prompt names red checks to diagnose and fix; when any check is green, it also asks OpenCode to inspect the latest pull-request review comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback.
 _Avoid_: Check classification, one prompt per check
+
+**Merge Conflict Handoff**:
+A highest-priority request given to the Work Item's Implement Session by Resolve PR Merge Conflict when its pull request conflicts with its current base branch. It asks only for rebasing the branch; completed PR Status Checks not previously handed off are retired because the rebase restarts them. A merely behind branch does not trigger this handoff.
+_Avoid_: PR Status Check, conflict status check
 
 **Step Run**:
 A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately.
@@ -136,7 +140,7 @@ A terminal Work Item that cannot continue autonomously: either a Status Check Ha
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item for which implementation, pull-request creation, status checking, all observed Status Check Handoffs, Mark PR Ready for Review, Decide PR Merge, and Merge PR executed successfully: GitHub reported no failing or pending status checks, the PR was marked ready for review, OpenCode assessed merge risk as low enough for a clanker, and the harness squash-merged the PR. Complete does not mean GitHub closed the Issue.
+A terminal Work Item for which implementation, pull-request creation, conflict resolution, status checking, all observed Status Check Handoffs, Mark PR Ready for Review, Decide PR Merge, and Merge PR executed successfully: the last status watch found no merge conflict or failing or pending status checks, the PR was marked ready for review, OpenCode assessed merge risk as low enough for a clanker, and the harness squash-merged the PR. Complete does not mean GitHub closed the Issue.
 _Avoid_: Approved, done Issue
 
 **Relevant Issue**:

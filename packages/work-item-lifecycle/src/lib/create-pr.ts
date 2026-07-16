@@ -62,14 +62,20 @@ const resolveSessionId = (context: LifecycleStepContext) => {
   return Effect.succeed(sessionId)
 }
 
-const buildCreatePrPrompt = (githubIssueNumber: number, tokenName: string) =>
+const buildCreatePrPrompt = (
+  githubIssueNumber: number,
+  branch: string,
+  tokenName: string,
+) =>
   [
     "Create a pull request for the committed implementation changes in this worktree.",
-    "Push the branch if needed, then open a PR against the repository default base branch.",
+    `The current Work Item branch is ${branch}. Keep this branch checked out and use it as the pull request head.`,
+    "Do not create or switch to another branch.",
+    "Push this exact branch if needed, then open a PR against the repository default base branch.",
     "Create the pull request as a draft.",
     `The PR must reference GitHub issue #${githubIssueNumber} (for example Closes #${githubIssueNumber}).`,
     "Follow this repository's PR title and body conventions.",
-    "If a suitable open PR for this branch already exists, succeed without creating a duplicate.",
+    `If a suitable open PR whose head is exactly ${branch} already exists, succeed without creating a duplicate.`,
     "Do not merge the pull request.",
     `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
   ].join("\n")
@@ -130,13 +136,24 @@ export const createPr = (context: LifecycleStepContext) =>
       })
     }
 
+    const branch = workItemBranchName({
+      githubOwner: repository.githubOwner,
+      githubRepo: repository.githubRepo,
+      githubIssueNumber: context.githubIssueNumber,
+      workItemId: context.workItemId,
+    })
+
     const timeout =
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.create_pr
     const opencode = yield* Opencode
     yield* opencode
       .continue({
         sessionId,
-        prompt: buildCreatePrPrompt(context.githubIssueNumber, tokenName),
+        prompt: buildCreatePrPrompt(
+          context.githubIssueNumber,
+          branch,
+          tokenName,
+        ),
         cwd: worktreePath,
         model: context.model,
         variant: context.variant,
@@ -154,12 +171,6 @@ export const createPr = (context: LifecycleStepContext) =>
         ),
       )
 
-    const branch = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
-      workItemId: context.workItemId,
-    })
     const github = yield* GitHubService
     return yield* github
       .getOpenPullRequestNumber(

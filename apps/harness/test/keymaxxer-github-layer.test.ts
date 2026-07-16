@@ -186,6 +186,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
           exitCode: 0,
           stdout: JSON.stringify({
             _tag: "failed",
+            mergeability: "conflicting",
+            baseRefName: "develop",
             terminalChecks: [
               {
                 externalId: "checkrun:1",
@@ -214,6 +216,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
 
     expect(status).toEqual({
       _tag: "failed",
+      mergeability: "conflicting",
+      baseRefName: "develop",
       terminalChecks: [
         {
           externalId: "checkrun:1",
@@ -260,9 +264,15 @@ describe("Keymaxxer-backed GitHub layer", () => {
 
   test("decodes no_checks and pending terminalChecks from the bin", async () => {
     const responses = [
-      JSON.stringify({ _tag: "no_checks" }),
+      JSON.stringify({
+        _tag: "no_checks",
+        mergeability: "mergeable",
+        baseRefName: "main",
+      }),
       JSON.stringify({
         _tag: "pending",
+        mergeability: "unknown",
+        baseRefName: "main",
         terminalChecks: [
           {
             externalId: "status:SC_ci",
@@ -298,7 +308,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
         )
       }).pipe(Effect.provide(layer)),
     )
-    expect(noChecks).toEqual({ _tag: "no_checks" })
+    expect(noChecks).toEqual({
+      _tag: "no_checks",
+      mergeability: "mergeable",
+      baseRefName: "main",
+    })
 
     const pending = await Effect.runPromise(
       Effect.gen(function* () {
@@ -311,6 +325,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
     )
     expect(pending).toEqual({
       _tag: "pending",
+      mergeability: "unknown",
+      baseRefName: "main",
       terminalChecks: [
         {
           externalId: "status:SC_ci",

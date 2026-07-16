@@ -38,7 +38,12 @@ describe("mergePr", () => {
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+        }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: (_repository, branch) => {
         requestedBranch = branch
@@ -57,7 +62,12 @@ describe("mergePr", () => {
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+        }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)

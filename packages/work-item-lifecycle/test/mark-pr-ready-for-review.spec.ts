@@ -39,7 +39,12 @@ describe("markPrReadyForReview", () => {
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+        }),
       markPullRequestReadyForReview: (_repository, branch) => {
         requestedBranch = branch
         return Effect.void
@@ -61,7 +66,12 @@ describe("markPrReadyForReview", () => {
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+        }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)

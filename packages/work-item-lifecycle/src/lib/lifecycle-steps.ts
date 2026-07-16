@@ -4,6 +4,7 @@ import type {
   PrStatusCheckInvestigationResult,
   PrStatusCheckResult,
 } from "./pr-status-checks.js"
+import type { ResolvePrMergeConflictResult } from "./resolve-pr-merge-conflict.js"
 import type { WorkItemId } from "./types.js"
 
 /**
@@ -52,6 +53,9 @@ export interface LifecycleStepsShape {
   readonly watchPrStatusChecks: (
     context: LifecycleStepContext,
   ) => Effect.Effect<PrStatusCheckResult, unknown>
+  readonly resolvePrMergeConflict: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<ResolvePrMergeConflictResult, unknown>
   readonly investigatePrStatusChecks: (
     context: LifecycleStepContext,
   ) => Effect.Effect<PrStatusCheckInvestigationResult, unknown>

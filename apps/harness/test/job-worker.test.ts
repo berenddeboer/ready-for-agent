@@ -129,6 +129,7 @@ const queueLayer = (
         commit: Duration.minutes(5),
         create_pr: Duration.minutes(10),
         watch_pr_status_checks: Duration.minutes(5),
+        resolve_pr_merge_conflict: Duration.hours(2),
         investigate_pr_status_checks: Duration.hours(2),
         mark_pr_ready_for_review: Duration.minutes(5),
         decide_pr_merge: Duration.minutes(15),
@@ -239,7 +240,12 @@ describe("Job worker", () => {
     const github = Layer.succeed(GitHubService, {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+        }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
       listReadyIssues: () =>

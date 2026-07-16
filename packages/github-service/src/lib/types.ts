@@ -14,7 +14,9 @@ export interface TerminalPrStatusCheck {
   readonly outcome: TerminalPrStatusCheckOutcome
 }
 
-export type PullRequestCheckStatus =
+export type PullRequestMergeability = "mergeable" | "conflicting" | "unknown"
+
+export type PullRequestCheckStatus = (
   | {
       readonly _tag: "pending"
       readonly terminalChecks: readonly TerminalPrStatusCheck[]
@@ -29,6 +31,10 @@ export type PullRequestCheckStatus =
       readonly terminalChecks: readonly TerminalPrStatusCheck[]
     }
   | { readonly _tag: "closed" }
+) & {
+  readonly mergeability: PullRequestMergeability
+  readonly baseRefName: string | null
+}
 
 export type GitHubIssueState = "OPEN" | "CLOSED"
 

@@ -60,6 +60,7 @@ describe("WorkItemLifecycle", () => {
     commit: () => Effect.void,
     createPr: () => Effect.succeed(101),
     watchPrStatusChecks: () => Effect.succeed("succeeded"),
+    resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
     markPrReadyForReview: () => Effect.void,
@@ -1211,6 +1212,98 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("retires completed checks atomically when conflict resolution is queued and returns to delayed Watch", () => {
+      const checkId = "psc-conflict-retired"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({ _tag: "conflict", retiredCheckIds: [checkId] }),
+        resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 7; index += 1) {
+            yield* claimAndRunPending
+          }
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES (?, ?, 'checkrun:conflict', 'lint', 'red', NULL, ?, ?, ?)`,
+            [checkId, created.id, now, now, now],
+          )
+
+          const watched = yield* claimAndRunPending
+          expect(watched._tag).toBe("processed")
+          if (watched._tag === "processed") {
+            expect(watched.workItem.state).toBe("resolve_pr_merge_conflict")
+            expect(watched.workItem.stepRuns.at(-1)?.step).toBe(
+              "resolve_pr_merge_conflict",
+            )
+          }
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+            [checkId],
+          )) as readonly { handled_at: number | null }[]
+          expect(checks[0]?.handled_at).not.toBeNull()
+
+          const resolved = yield* claimAndRunPending
+          expect(resolved._tag).toBe("processed")
+          if (resolved._tag === "processed") {
+            expect(resolved.workItem.state).toBe("watch_pr_status_checks")
+          }
+          const delayed = (yield* sql.unsafe(
+            `SELECT available_at, created_at FROM job_queue`,
+          )) as readonly { available_at: number; created_at: number }[]
+          expect(delayed).toHaveLength(1)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+        }),
+      )
+    })
+
+    it("moves a merge conflict requiring human intervention to Needs Human", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({ _tag: "conflict", retiredCheckIds: [] }),
+        resolvePrMergeConflict: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "The conflict requires a product decision",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+          const resolved = yield* claimAndRunPending
+          expect(resolved._tag).toBe("processed")
+          if (resolved._tag === "processed") {
+            expect(resolved.workItem.state).toBe("needs_human")
+            expect(resolved.workItem.failureMessage).toBe(
+              "The conflict requires a product decision",
+            )
+          }
+        }),
+      )
+    })
+
     it("leaves handed-off checks unhandled when the lifecycle transition rolls back", () => {
       const checkId = "psc-transition-rollback"
       const steps: LifecycleStepsShape = {
@@ -1471,6 +1564,7 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.succeed("succeeded")
         },
+        resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: (context) => {
@@ -2164,6 +2258,7 @@ describe("WorkItemLifecycle", () => {
           commit: Duration.minutes(5),
           create_pr: Duration.minutes(10),
           watch_pr_status_checks: Duration.minutes(5),
+          resolve_pr_merge_conflict: Duration.hours(2),
           investigate_pr_status_checks: Duration.hours(2),
           mark_pr_ready_for_review: Duration.minutes(5),
           decide_pr_merge: Duration.minutes(15),

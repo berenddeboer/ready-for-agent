@@ -4,6 +4,12 @@
 
 Issues live in GitHub Issues for berenddeboer/ready-for-agent (via `gh`). See `docs/agents/issue-tracker.md`.
 
+### Credentials
+
+Keymaxxer is used by the Ready for Agent harness. Interactive coding agents do
+not need to use Keymaxxer themselves; use normally authenticated tools such as
+`gh` and `git` directly.
+
 ### Triage labels
 
 Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.

@@ -82,6 +82,8 @@ describe("GitHubService live implementation", () => {
                     state: "OPEN",
                     merged: false,
                     headRefOid: "abc123",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
                     statusCheckRollup: { state },
                   },
                 ],
@@ -97,7 +99,12 @@ describe("GitHubService live implementation", () => {
         ),
       )
 
-      expect(status).toEqual({ _tag: expected, terminalChecks: [] })
+      expect(status).toEqual({
+        _tag: expected,
+        terminalChecks: [],
+        mergeability: "mergeable",
+        baseRefName: "main",
+      })
     })
   }
 
@@ -107,7 +114,15 @@ describe("GitHubService live implementation", () => {
       {
         repository: {
           pullRequests: {
-            nodes: [{ state: "OPEN", merged: false, statusCheckRollup: null }],
+            nodes: [
+              {
+                state: "OPEN",
+                merged: false,
+                baseRefName: "develop",
+                mergeable: "CONFLICTING",
+                statusCheckRollup: null,
+              },
+            ],
           },
         },
       },
@@ -120,12 +135,21 @@ describe("GitHubService live implementation", () => {
       await Effect.runPromise(
         service.getPullRequestCheckStatus(repository, "branch"),
       ),
-    ).toEqual({ _tag: "pending", terminalChecks: [] })
+    ).toEqual({
+      _tag: "pending",
+      terminalChecks: [],
+      mergeability: "unknown",
+      baseRefName: null,
+    })
     expect(
       await Effect.runPromise(
         service.getPullRequestCheckStatus(repository, "branch"),
       ),
-    ).toEqual({ _tag: "no_checks" })
+    ).toEqual({
+      _tag: "no_checks",
+      mergeability: "conflicting",
+      baseRefName: "develop",
+    })
   })
 
   it("distinguishes closed and merged PRs from a not-yet-visible PR", async () => {
@@ -134,7 +158,13 @@ describe("GitHubService live implementation", () => {
         repository: {
           pullRequests: {
             nodes: [
-              { state: "CLOSED", merged: false, statusCheckRollup: null },
+              {
+                state: "CLOSED",
+                merged: false,
+                baseRefName: "main",
+                mergeable: "UNKNOWN",
+                statusCheckRollup: null,
+              },
             ],
           },
         },
@@ -142,7 +172,15 @@ describe("GitHubService live implementation", () => {
       {
         repository: {
           pullRequests: {
-            nodes: [{ state: "CLOSED", merged: true, statusCheckRollup: null }],
+            nodes: [
+              {
+                state: "CLOSED",
+                merged: true,
+                baseRefName: "main",
+                mergeable: "UNKNOWN",
+                statusCheckRollup: null,
+              },
+            ],
           },
         },
       },
@@ -155,12 +193,21 @@ describe("GitHubService live implementation", () => {
       await Effect.runPromise(
         service.getPullRequestCheckStatus(repository, "branch"),
       ),
-    ).toEqual({ _tag: "closed" })
+    ).toEqual({
+      _tag: "closed",
+      mergeability: "unknown",
+      baseRefName: "main",
+    })
     expect(
       await Effect.runPromise(
         service.getPullRequestCheckStatus(repository, "branch"),
       ),
-    ).toEqual({ _tag: "succeeded", terminalChecks: [] })
+    ).toEqual({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "unknown",
+      baseRefName: "main",
+    })
   })
 
   it("loads terminal Actions jobs and commit statuses via REST", async () => {
@@ -176,6 +223,8 @@ describe("GitHubService live implementation", () => {
                     state: "OPEN",
                     merged: false,
                     headRefOid: "sha-head",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
                     statusCheckRollup: { state: "PENDING" },
                   },
                 ],
@@ -265,6 +314,8 @@ describe("GitHubService live implementation", () => {
 
     expect(status).toEqual({
       _tag: "pending",
+      mergeability: "mergeable",
+      baseRefName: "main",
       terminalChecks: [
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
         { externalId: "actions-job:101", name: "lint", outcome: "red" },
@@ -302,6 +353,8 @@ describe("GitHubService live implementation", () => {
                     state: "OPEN",
                     merged: false,
                     headRefOid: "sha-head",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
                     statusCheckRollup: { state: "FAILURE" },
                   },
                 ],
@@ -347,6 +400,8 @@ describe("GitHubService live implementation", () => {
 
     expect(status).toEqual({
       _tag: "failed",
+      mergeability: "mergeable",
+      baseRefName: "main",
       terminalChecks: [
         { externalId: "actions-job:100", name: "lint", outcome: "red" },
         { externalId: "actions-job:101", name: "lint", outcome: "green" },
@@ -368,6 +423,8 @@ describe("GitHubService live implementation", () => {
                     state: "OPEN",
                     merged: false,
                     headRefOid: "sha-head",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
                     statusCheckRollup: { state: "PENDING" },
                   },
                 ],
@@ -402,6 +459,8 @@ describe("GitHubService live implementation", () => {
 
     expect(status).toEqual({
       _tag: "pending",
+      mergeability: "mergeable",
+      baseRefName: "main",
       terminalChecks: [
         { externalId: "status:1", name: "ci/status-1", outcome: "green" },
         { externalId: "status:101", name: "ci/deploy", outcome: "red" },
