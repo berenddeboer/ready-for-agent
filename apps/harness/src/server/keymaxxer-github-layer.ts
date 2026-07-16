@@ -36,6 +36,7 @@ const SerializedIssue = Schema.Struct({
     Schema.Struct({
       number: Schema.Finite,
       repository: Schema.String,
+      state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
     }),
   ),
 })

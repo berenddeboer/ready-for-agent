@@ -74,21 +74,31 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
     ),
   )
 
+const isActiveClosingPullRequest = (
+  pullRequest: ReadyLabeledIssue["closingPullRequests"][number],
+): boolean => pullRequest.state === "OPEN" || pullRequest.state === "MERGED"
+
 const isRelevant = (
   issue: ReadyLabeledIssue,
   repositoryName: string,
   workItemPullRequestNumbers: ReadonlySet<number>,
-): boolean =>
-  issue.hierarchySupported &&
-  (issue.parent === null
-    ? issue.state === "OPEN"
-    : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled) &&
-  (issue.closingPullRequests.length === 0 ||
-    issue.closingPullRequests.some(
-      (pullRequest) =>
-        pullRequest.repository.toLowerCase() === repositoryName &&
-        workItemPullRequestNumbers.has(pullRequest.number),
-    ))
+): boolean => {
+  const activeClosingPullRequests = issue.closingPullRequests.filter(
+    isActiveClosingPullRequest,
+  )
+  return (
+    issue.hierarchySupported &&
+    (issue.parent === null
+      ? issue.state === "OPEN"
+      : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled) &&
+    (activeClosingPullRequests.length === 0 ||
+      activeClosingPullRequests.some(
+        (pullRequest) =>
+          pullRequest.repository.toLowerCase() === repositoryName &&
+          workItemPullRequestNumbers.has(pullRequest.number),
+      ))
+  )
+}
 
 export const IssueReconcilerLive = Layer.effect(
   IssueReconciler,

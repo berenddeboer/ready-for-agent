@@ -8,6 +8,8 @@ import { GitHubService, type GitHubServiceShape } from "./github-service.js"
 import type {
   GitHubIssueReference,
   GitHubIssueState,
+  GitHubPullRequestLifecycleState,
+  GitHubPullRequestReference,
   PullRequestCheckStatus,
   ReadyLabeledIssue,
   TerminalPrStatusCheck,
@@ -317,6 +319,8 @@ interface GitHubApiIssue {
 
 interface GitHubApiPullRequestReference {
   readonly number: unknown
+  readonly state: unknown
+  readonly merged: unknown
   readonly repository: GitHubApiRepositoryReference
 }
 
@@ -415,9 +419,28 @@ const mapBlockedByPage = (
     .filter((issue) => toIssueState(issue.state) === "OPEN")
     .map(toIssueReference)
 
+const toClosingPullRequestState = (
+  state: unknown,
+  merged: unknown,
+): GitHubPullRequestLifecycleState => {
+  if (merged === true || state === "MERGED") {
+    return "MERGED"
+  }
+  if (merged !== false) {
+    throw new Error(`Invalid GitHub pull request merged value: ${merged}`)
+  }
+  if (state === "OPEN") {
+    return "OPEN"
+  }
+  if (state === "CLOSED") {
+    return "CLOSED"
+  }
+  throw new Error(`Invalid GitHub pull request state: ${state}`)
+}
+
 const mapClosingPullRequestPage = (
   connection: GitHubApiPullRequestConnection | undefined,
-): readonly { readonly number: number; readonly repository: string }[] =>
+): readonly GitHubPullRequestReference[] =>
   (connection?.nodes ?? [])
     .filter((pullRequest) => pullRequest !== null)
     .map((pullRequest) => {
@@ -432,6 +455,7 @@ const mapClosingPullRequestPage = (
       return {
         number: Number(pullRequest.number),
         repository: toRepositoryName(pullRequest.repository),
+        state: toClosingPullRequestState(pullRequest.state, pullRequest.merged),
       }
     })
 
@@ -944,6 +968,8 @@ export const makeGitHubService = (
                       },
                       nodes: {
                         number: true,
+                        state: true,
+                        merged: true,
                         repository: { nameWithOwner: true },
                       },
                       pageInfo: { endCursor: true, hasNextPage: true },
@@ -1080,6 +1106,8 @@ export const makeGitHubService = (
                         },
                         nodes: {
                           number: true,
+                          state: true,
+                          merged: true,
                           repository: { nameWithOwner: true },
                         },
                         pageInfo: { endCursor: true, hasNextPage: true },

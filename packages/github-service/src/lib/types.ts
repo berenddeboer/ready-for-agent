@@ -37,9 +37,12 @@ export interface GitHubIssueReference {
   readonly url: string
 }
 
+export type GitHubPullRequestLifecycleState = "OPEN" | "MERGED" | "CLOSED"
+
 export interface GitHubPullRequestReference {
   readonly number: number
   readonly repository: string
+  readonly state: GitHubPullRequestLifecycleState
 }
 
 export interface GitHubIssueParent extends GitHubIssueReference {

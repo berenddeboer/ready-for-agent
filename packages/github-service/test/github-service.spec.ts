@@ -689,6 +689,8 @@ describe("GitHubService live implementation", () => {
                   nodes: [
                     {
                       number: 22,
+                      state: "OPEN",
+                      merged: false,
                       repository: { nameWithOwner: "acme/widgets" },
                     },
                   ],
@@ -768,7 +770,7 @@ describe("GitHubService live implementation", () => {
       },
     ])
     expect(result[1]?.closingPullRequests).toEqual([
-      { number: 22, repository: "acme/widgets" },
+      { number: 22, repository: "acme/widgets", state: "OPEN" },
     ])
     expect(requests).toHaveLength(2)
 
@@ -825,6 +827,8 @@ describe("GitHubService live implementation", () => {
         __args: { first: 100, includeClosedPrs: true },
         nodes: {
           number: true,
+          state: true,
+          merged: true,
           repository: { nameWithOwner: true },
         },
         pageInfo: { endCursor: true, hasNextPage: true },
@@ -947,6 +951,8 @@ describe("GitHubService live implementation", () => {
                   nodes: [
                     {
                       number: 20,
+                      state: "CLOSED",
+                      merged: false,
                       repository: { nameWithOwner: "acme/widgets" },
                     },
                   ],
@@ -968,6 +974,8 @@ describe("GitHubService live implementation", () => {
               nodes: [
                 {
                   number: 10,
+                  state: "CLOSED",
+                  merged: true,
                   repository: { nameWithOwner: "acme/widgets" },
                 },
               ],
@@ -989,8 +997,8 @@ describe("GitHubService live implementation", () => {
     )
 
     expect(result[0]?.closingPullRequests).toEqual([
-      { number: 10, repository: "acme/widgets" },
-      { number: 20, repository: "acme/widgets" },
+      { number: 10, repository: "acme/widgets", state: "MERGED" },
+      { number: 20, repository: "acme/widgets", state: "CLOSED" },
     ])
     const continuation = requests[1] as {
       repository: {
