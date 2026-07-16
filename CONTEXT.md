@@ -9,8 +9,8 @@ A GitHub repository the harness is configured to work on, identified by owner an
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **Paused**:
-A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused.
-_Avoid_: Disabled, inactive, enabled=false
+A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused. Not the same as a paused Work Item (see Pause Work Item).
+_Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
 Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults), optional review model and variant (null falls back to harness review settings, then the build model/variant), and Auto-merge. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created.
@@ -120,15 +120,23 @@ A durable record of one scheduled execution attempt for a Work Item's Lifecycle 
 _Avoid_: Step duration, job attempt
 
 **Retry**:
-An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically.
+An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. Retry is not allowed while a Work Item is paused; the operator must Start first.
 _Avoid_: Queue redelivery, resume
 
+**Pause Work Item**:
+An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. Pause is idempotent when already paused and is rejected for missing or terminal Work Items. A paused Work Item remains unfinished and still blocks Implement Now for that Issue. Distinct from Repository Paused.
+_Avoid_: Suspend, hold, Abandon, Repository Paused
+
+**Start Work Item**:
+An explicit operator request that clears a Work Item's paused flag. If no Step Run is running and the latest run does not require Retry, a new Step Run for the current Lifecycle Step is enqueued once; if a Step Run is still running, only the flag is cleared so normal advancement resumes when it finishes. Start is idempotent when not paused and is rejected for missing or terminal Work Items.
+_Avoid_: Resume, unpause, Retry
+
 **Abandon**:
-An operator-directed transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. Repository removal may apply it automatically to non-running Work Items before deleting that Repository's lifecycle history; an Abandoned Work Item no longer prevents a later Implement Now request for the same Issue.
+An operator-directed transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. Repository removal may apply it automatically to non-running Work Items before deleting that Repository's lifecycle history; an Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon.
 _Avoid_: Delete, cancel
 
 **Reset**:
-An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history.
+An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused and removes the Work Item entirely.
 _Avoid_: Abandon, Retry, cancel
 
 **Failed Work Item**:

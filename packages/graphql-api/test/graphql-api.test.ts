@@ -74,6 +74,7 @@ const workItem = {
   reviewVariant: config.defaultVariant,
   state: "create_worktree",
   stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
+  paused: false,
   worktreePath: null,
   sessionId: null,
   failureCode: null,
@@ -181,6 +182,8 @@ const makeRuntime = (
     implementNow: unused,
     runStep: unused,
     retry: unused,
+    pause: unused,
+    start: unused,
     abandon: unused,
     reset: unused,
     getWorkItem: unused,
@@ -1072,7 +1075,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
           workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            id state stateLabel status statusLabel statusMessage canRetry isTerminal
+            id state stateLabel status statusLabel statusMessage paused canRetry isTerminal
             stateReadyAt createdAt updatedAt
             lifecycleLabels { phase label status durationMs }
           }
@@ -1094,6 +1097,7 @@ describe("GraphQL API", () => {
             status: "RUNNING",
             statusLabel: "Running",
             statusMessage: null,
+            paused: false,
             canRetry: false,
             isTerminal: false,
             stateReadyAt: "2026-07-14T08:00:00.000Z",

@@ -183,6 +183,7 @@ type WorkItem = {
   status: WorkItemStatus
   statusLabel: string
   statusMessage: string | null
+  paused: boolean
   canRetry: boolean
   isTerminal: boolean
   sessionId: string | null
@@ -204,6 +205,7 @@ const workItemFields = {
   status: true,
   statusLabel: true,
   statusMessage: true,
+  paused: true,
   canRetry: true,
   isTerminal: true,
   sessionId: true,
@@ -1392,9 +1394,12 @@ function JobsCard() {
                   <p className="m-0 truncate text-xs font-semibold text-slate-700">
                     {repositoryLabel}
                   </p>
-                  <span className="font-mono text-xs font-semibold text-blue-600">
-                    Issue #{workItem.githubIssueNumber}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono text-xs font-semibold text-blue-600">
+                      Issue #{workItem.githubIssueNumber}
+                    </span>
+                    <WorkItemPauseButton workItem={workItem} />
+                  </div>
                 </div>
                 <span className="shrink-0 text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
                   {workItem.stateLabel}
@@ -1433,6 +1438,109 @@ function JobsCardSkeleton() {
   )
 }
 
+function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
+  const queryClient = useQueryClient()
+  const updateWorkItem = (updated: WorkItem) => {
+    queryClient.setQueryData<readonly WorkItem[]>(
+      workItemsQuery(workItem.repositoryId).queryKey,
+      (current) =>
+        current?.map((candidate) =>
+          candidate.id === updated.id ? updated : candidate,
+        ),
+    )
+  }
+  const pause = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        pauseWorkItem: {
+          __args: { workItemId: workItem.id },
+          ...workItemFields,
+        },
+      })
+      return result.pauseWorkItem
+    },
+    onSuccess: updateWorkItem,
+  })
+  const start = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        startWorkItem: {
+          __args: { workItemId: workItem.id },
+          ...workItemFields,
+        },
+      })
+      return result.startWorkItem
+    },
+    onSuccess: updateWorkItem,
+  })
+
+  if (workItem.isTerminal) {
+    return null
+  }
+
+  const pending = pause.isPending || start.isPending
+  const failed = pause.isError || start.isError
+  const label = workItem.paused ? "Start job" : "Pause job"
+  const buttonClass = workItem.paused
+    ? "text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
+    : "text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+
+  return (
+    <button
+      type="button"
+      className={`inline-flex size-8 shrink-0 items-center justify-center rounded-md transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${failed ? "text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : buttonClass}`}
+      disabled={pending}
+      onClick={() => (workItem.paused ? start.mutate() : pause.mutate())}
+      aria-label={pending ? `${label} in progress` : label}
+      title={failed ? `Could not ${label.toLowerCase()}. Try again.` : label}
+    >
+      {pending ? (
+        <svg
+          aria-hidden="true"
+          className="size-4 animate-spin motion-reduce:animate-none"
+          viewBox="0 0 24 24"
+          fill="none"
+        >
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="9"
+            stroke="currentColor"
+            strokeWidth="3"
+          />
+          <path
+            className="opacity-75"
+            d="M12 3a9 9 0 0 1 9 9"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : workItem.paused ? (
+        <svg
+          aria-hidden="true"
+          className="size-4"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <path d="m8 5 11 7-11 7V5Z" />
+        </svg>
+      ) : (
+        <svg
+          aria-hidden="true"
+          className="size-4"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+        >
+          <rect x="6" y="5" width="4" height="14" rx="1" />
+          <rect x="14" y="5" width="4" height="14" rx="1" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 function WorkItemLifecycleStatus({
   workItem,
   compact = false,
@@ -1444,6 +1552,15 @@ function WorkItemLifecycleStatus({
   const status = workItem.status
   const canRetry = compact && workItem.canRetry
   const canReset = compact
+  const patchWorkItem = (updated: WorkItem) => {
+    queryClient.setQueryData<readonly WorkItem[]>(
+      workItemsQuery(workItem.repositoryId).queryKey,
+      (current) =>
+        current?.map((candidate) =>
+          candidate.id === updated.id ? updated : candidate,
+        ),
+    )
+  }
   const retry = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -1454,15 +1571,7 @@ function WorkItemLifecycleStatus({
       })
       return result.retryWorkItem
     },
-    onSuccess: (retried) => {
-      queryClient.setQueryData<readonly WorkItem[]>(
-        workItemsQuery(workItem.repositoryId).queryKey,
-        (current) =>
-          current?.map((candidate) =>
-            candidate.id === retried.id ? retried : candidate,
-          ),
-      )
-    },
+    onSuccess: patchWorkItem,
   })
   const reset = useMutation({
     mutationFn: async () => {

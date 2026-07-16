@@ -3471,4 +3471,194 @@ describe("WorkItemLifecycle", () => {
         }),
       ))
   })
+
+  describe("pause and start", () => {
+    const claimAndRunPending = Effect.gen(function* () {
+      const lifecycle = yield* WorkItemLifecycle
+      const queue = yield* QueueService
+      const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+      expect(Option.isSome(claimed)).toBe(true)
+      if (Option.isNone(claimed)) {
+        return yield* Effect.die("expected a queued lifecycle job")
+      }
+      const payload = claimed.value.payload as { stepRunId: string }
+      return yield* lifecycle.runStep(payload.stepRunId)
+    })
+
+    it("marks a Work Item paused and cancels queued Step Runs", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(created.paused).toBe(false)
+          expect(created.stepRuns[0]!.status).toBe("queued")
+
+          const paused = yield* lifecycle.pause(created.id)
+          expect(paused.paused).toBe(true)
+          expect(paused.stepRuns).toHaveLength(1)
+          expect(paused.stepRuns[0]!.status).toBe("cancelled")
+          expect(paused.stepRuns[0]!.reasonCode).toBe(STEP_RUN_REASON.paused)
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const again = yield* lifecycle.pause(created.id)
+          expect(again.paused).toBe(true)
+        }),
+      ))
+
+    it("starts a paused Work Item and enqueues the current Lifecycle Step", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* lifecycle.pause(created.id)
+
+          const started = yield* lifecycle.start(created.id)
+          expect(started.paused).toBe(false)
+          expect(started.state).toBe("create_worktree")
+          expect(started.stepRuns.map((run) => run.status)).toEqual([
+            "cancelled",
+            "queued",
+          ])
+          expect(started.stepRuns[1]!.step).toBe("create_worktree")
+
+          const idle = yield* lifecycle.start(created.id)
+          expect(idle.paused).toBe(false)
+          expect(idle.stepRuns).toHaveLength(2)
+        }),
+      ))
+
+    it("advances state while paused without enqueueing the next Step Run", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const release = await Effect.runPromise(Deferred.make<void>())
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as("/tmp/worktrees/paused-drain"),
+          ),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+
+          const fiber = yield* Effect.forkChild(lifecycle.runStep(stepRunId))
+          yield* Deferred.await(started)
+
+          const paused = yield* lifecycle.pause(created.id)
+          expect(paused.paused).toBe(true)
+          expect(
+            paused.stepRuns.find((run) => run.id === stepRunId)?.status,
+          ).toBe("running")
+
+          yield* Deferred.succeed(release, undefined)
+          const result = yield* Fiber.join(fiber)
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.paused).toBe(true)
+            expect(result.workItem.state).toBe("install_dependencies")
+            expect(
+              result.workItem.stepRuns.map((run) => [run.step, run.status]),
+            ).toEqual([["create_worktree", "succeeded"]])
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const afterStart = yield* lifecycle.start(created.id)
+          expect(afterStart.paused).toBe(false)
+          expect(afterStart.state).toBe("install_dependencies")
+          expect(afterStart.stepRuns.at(-1)).toMatchObject({
+            step: "install_dependencies",
+            status: "queued",
+          })
+        }),
+      )
+    })
+
+    it("rejects Retry while paused and allows it after Start", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => Effect.fail(new Error("fail for retry")),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+          yield* lifecycle.pause(created.id)
+
+          const blocked = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(blocked).toBeInstanceOf(RetryNotEligibleError)
+          if (blocked instanceof RetryNotEligibleError) {
+            expect(blocked.reason).toBe("paused")
+          }
+
+          const started = yield* lifecycle.start(created.id)
+          expect(started.paused).toBe(false)
+          // failed latest still needs explicit Retry after Start
+          expect(started.stepRuns.every((run) => run.status !== "queued")).toBe(
+            true,
+          )
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.stepRuns.at(-1)?.status).toBe("queued")
+        }),
+      )
+    })
+
+    it("rejects pause and start for terminal Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `UPDATE work_item SET state = 'complete', updated_at = ? WHERE id = ?`,
+            [Date.now(), created.id],
+          )
+
+          const pauseError = yield* Effect.flip(lifecycle.pause(created.id))
+          expect(pauseError).toBeInstanceOf(WorkItemTerminalError)
+
+          const startError = yield* Effect.flip(lifecycle.start(created.id))
+          expect(startError).toBeInstanceOf(WorkItemTerminalError)
+        }),
+      ))
+  })
 })

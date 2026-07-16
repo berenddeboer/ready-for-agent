@@ -672,9 +672,11 @@ export const createGraphqlApi = (
             statusLabel(workItemStatus(workItem)),
           statusMessage: (workItem: WorkItemRecord) =>
             workItem.failureMessage ?? latestStepRun(workItem)?.reasonMessage,
+          paused: (workItem: WorkItemRecord) => workItem.paused,
           canRetry: (workItem: WorkItemRecord) => {
             const latestStatus = latestStepRun(workItem)?.status
             return (
+              !workItem.paused &&
               !isTerminalWorkItemState(workItem.state) &&
               (latestStatus === "failed" || latestStatus === "interrupted")
             )
@@ -1003,6 +1005,34 @@ export const createGraphqlApi = (
                 Effect.gen(function* () {
                   const lifecycle = yield* WorkItemLifecycle
                   return yield* lifecycle.retry(args.workItemId)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          pauseWorkItem: async (_parent: unknown, args: WorkItemArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.pause(args.workItemId)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          startWorkItem: async (_parent: unknown, args: WorkItemArgs) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.start(args.workItemId)
                 }),
               ),
             )

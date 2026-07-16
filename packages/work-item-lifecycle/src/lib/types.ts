@@ -76,6 +76,7 @@ export interface WorkItemRecord {
   readonly reviewVariant: string
   readonly state: WorkItemState
   readonly stateReadyAt: Date
+  readonly paused: boolean
   readonly worktreePath: string | null
   readonly sessionId: string | null
   readonly failureCode: string | null
@@ -113,6 +114,7 @@ export const STEP_RUN_REASON = {
   interrupted: "interrupted",
   abandoned: "abandoned",
   reset: "reset",
+  paused: "paused",
 } as const
 
 export type StepRunReasonCode =
