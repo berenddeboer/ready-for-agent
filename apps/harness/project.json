@@ -9,7 +9,7 @@
       "continuous": true,
       "executor": "nx:run-commands",
       "options": {
-        "command": "mkdir -p ../../tmp && export SQLITE_DATABASE_PATH=${SQLITE_DATABASE_PATH:-../../tmp/ready-for-agent.db} && bun --conditions @ready-for-agent/source ../../scripts/run-with-keymaxxer-sidecar.ts bash -c 'bun --conditions @ready-for-agent/source src/server/preflight.ts && vite'",
+        "command": "ROOT=\"$(cd ../.. && pwd)\" && mkdir -p \"$ROOT/tmp\" && export SQLITE_DATABASE_PATH=\"${SQLITE_DATABASE_PATH:-$ROOT/tmp/ready-for-agent.db}\" && bun --conditions @ready-for-agent/source ../../scripts/run-with-keymaxxer-sidecar.ts bash -c 'bun --conditions @ready-for-agent/source src/server/preflight.ts && vite'",
         "cwd": "apps/harness"
       },
       "dependsOn": [
@@ -32,7 +32,7 @@
       "continuous": true,
       "executor": "nx:run-commands",
       "options": {
-        "command": "mkdir -p ../../tmp && export SQLITE_DATABASE_PATH=${SQLITE_DATABASE_PATH:-../../tmp/ready-for-agent.db} && bun --conditions @ready-for-agent/source ../../scripts/run-with-keymaxxer-sidecar.ts bun --conditions @ready-for-agent/source server.ts",
+        "command": "ROOT=\"$(cd ../.. && pwd)\" && mkdir -p \"$ROOT/tmp\" && export SQLITE_DATABASE_PATH=\"${SQLITE_DATABASE_PATH:-$ROOT/tmp/ready-for-agent.db}\" && bun --conditions @ready-for-agent/source ../../scripts/run-with-keymaxxer-sidecar.ts bun --conditions @ready-for-agent/source server.ts",
         "cwd": "apps/harness"
       },
       "dependsOn": ["build", "db:migrate"]
