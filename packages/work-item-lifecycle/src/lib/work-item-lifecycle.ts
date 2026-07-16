@@ -204,6 +204,7 @@ type WorkItemRow = {
   readonly review_variant: string
   readonly state: WorkItemState
   readonly state_ready_at: number
+  readonly paused: boolean | number
   readonly worktree_path: string | null
   readonly session_id: string | null
   readonly failure_code: string | null
@@ -271,6 +272,7 @@ const toWorkItemRecord = (
   reviewVariant: row.review_variant,
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
+  paused: Boolean(row.paused),
   worktreePath: row.worktree_path,
   sessionId: row.session_id,
   failureCode: row.failure_code,
@@ -280,6 +282,11 @@ const toWorkItemRecord = (
   stateResidenceMs: Math.max(0, nowMs - row.state_ready_at),
   stepRuns,
 })
+
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, model, variant, review_model,
+                   review_variant, state, state_ready_at, paused, worktree_path, session_id,
+                   github_pull_request_number, failure_code,
+                   failure_message, created_at, updated_at`
 
 const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
 const PR_STATUS_CHECKS_MIN_GREEN_WAIT = Duration.seconds(60)
@@ -374,6 +381,22 @@ export type ResetError =
   | AcknowledgeError
   | JobNotFoundError
 
+export type PauseError =
+  | WorkItemNotFoundError
+  | WorkItemTerminalError
+  | WorkItemLifecycleDatabaseError
+  | AcknowledgeError
+  | JobNotFoundError
+
+export type StartError =
+  | WorkItemNotFoundError
+  | WorkItemTerminalError
+  | WorkItemLifecycleDatabaseError
+  | EnqueueError
+  | InvalidQueueNameError
+  | AcknowledgeError
+  | JobNotFoundError
+
 export type RunStepResult =
   | {
       readonly _tag: "processed"
@@ -395,6 +418,12 @@ export interface WorkItemLifecycleShape {
   readonly retry: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, RetryError>
+  readonly pause: (
+    workItemId: string,
+  ) => Effect.Effect<WorkItemRecord, PauseError>
+  readonly start: (
+    workItemId: string,
+  ) => Effect.Effect<WorkItemRecord, StartError>
   readonly abandon: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, AbandonError>
@@ -534,10 +563,7 @@ export const makeWorkItemLifecycleLive = (
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                   review_variant, state, state_ready_at, worktree_path, session_id,
-                   github_pull_request_number, failure_code,
-                   failure_message, created_at, updated_at
+            `SELECT ${WORK_ITEM_SELECT_COLUMNS}
            FROM work_item
            WHERE id = ?
            LIMIT 1`,
@@ -564,10 +590,7 @@ export const makeWorkItemLifecycleLive = (
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                   review_variant, state, state_ready_at, worktree_path, session_id,
-                   github_pull_request_number, failure_code,
-                   failure_message, created_at, updated_at
+            `SELECT ${WORK_ITEM_SELECT_COLUMNS}
            FROM work_item
            WHERE repository_id = ? AND github_issue_number = ?
            ORDER BY created_at ASC, rowid ASC`,
@@ -590,10 +613,7 @@ export const makeWorkItemLifecycleLive = (
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
-            `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                   review_variant, state, state_ready_at, worktree_path, session_id,
-                   github_pull_request_number, failure_code,
-                   failure_message, created_at, updated_at
+            `SELECT ${WORK_ITEM_SELECT_COLUMNS}
            FROM work_item
            WHERE repository_id = ?
            ORDER BY created_at ASC, rowid ASC`,
@@ -633,10 +653,7 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const rows = (yield* sql
             .unsafe(
-              `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                     review_variant, state, state_ready_at, worktree_path, session_id,
-                     github_pull_request_number, failure_code,
-                     failure_message, created_at, updated_at
+              `SELECT ${WORK_ITEM_SELECT_COLUMNS}
              FROM work_item
              WHERE id = ?
              LIMIT 1`,
@@ -1076,9 +1093,14 @@ export const makeWorkItemLifecycleLive = (
                     ],
                   )
                 } else {
-                  const nextStepRunId = makeStepRunId()
                   const stateReadyAt =
                     nextStep === workItem.state ? workItem.state_ready_at : now
+                  // Re-read: Pause may land while this Step Run was draining.
+                  const pausedRows = (yield* sql.unsafe(
+                    `SELECT paused FROM work_item WHERE id = ? LIMIT 1`,
+                    [workItem.id],
+                  )) as readonly { readonly paused: boolean | number }[]
+                  const isPaused = Boolean(pausedRows[0]?.paused)
 
                   yield* sql.unsafe(
                     `UPDATE work_item
@@ -1100,35 +1122,39 @@ export const makeWorkItemLifecycleLive = (
                     ],
                   )
 
-                  yield* sql.unsafe(
-                    `INSERT INTO step_run (
+                  if (!isPaused) {
+                    const nextStepRunId = makeStepRunId()
+
+                    yield* sql.unsafe(
+                      `INSERT INTO step_run (
                      id, work_item_id, step, status, queue_job_id, queued_at,
                      started_at, finished_at, reason_code, reason_message,
                      created_at, updated_at
                    ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                    [nextStepRunId, workItem.id, nextStep, now, now, now],
-                  )
+                      [nextStepRunId, workItem.id, nextStep, now, now, now],
+                    )
 
-                  const payload = yield* encodeStepJob(nextStepRunId)
-                  const enqueue =
-                    transition?.delay === undefined
-                      ? queue.enqueue(WORK_ITEM_LIFECYCLE_QUEUE, payload, {
-                          retryLimit: 1,
-                        })
-                      : queue.enqueueWithDelay(
-                          WORK_ITEM_LIFECYCLE_QUEUE,
-                          payload,
-                          transition.delay,
-                          { retryLimit: 1 },
-                        )
-                  const jobId = yield* enqueue
+                    const payload = yield* encodeStepJob(nextStepRunId)
+                    const enqueue =
+                      transition?.delay === undefined
+                        ? queue.enqueue(WORK_ITEM_LIFECYCLE_QUEUE, payload, {
+                            retryLimit: 1,
+                          })
+                        : queue.enqueueWithDelay(
+                            WORK_ITEM_LIFECYCLE_QUEUE,
+                            payload,
+                            transition.delay,
+                            { retryLimit: 1 },
+                          )
+                    const jobId = yield* enqueue
 
-                  yield* sql.unsafe(
-                    `UPDATE step_run
+                    yield* sql.unsafe(
+                      `UPDATE step_run
                    SET queue_job_id = ?, updated_at = ?
                    WHERE id = ?`,
-                    [jobId, now, nextStepRunId],
-                  )
+                      [jobId, now, nextStepRunId],
+                    )
+                  }
                 }
 
                 if (stepRun.queue_job_id !== null) {
@@ -1317,6 +1343,7 @@ export const makeWorkItemLifecycleLive = (
                 SELECT 1 FROM work_item
                 WHERE work_item.id = step_run.work_item_id
                   AND work_item.state = step_run.step
+                  AND work_item.paused = 0
                   AND work_item.state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
               )
               AND NOT EXISTS (
@@ -1464,6 +1491,292 @@ export const makeWorkItemLifecycleLive = (
               }
               yield* Deferred.succeed(finished, undefined)
             }),
+        )
+      })
+
+      const pause = Effect.fn("WorkItemLifecycle.pause")(function* (
+        workItemId: string,
+      ) {
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (!workItem) {
+          return yield* new WorkItemNotFoundError({ workItemId })
+        }
+
+        if (isTerminalWorkItemState(workItem.state)) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: workItem.state,
+          })
+        }
+
+        if (workItem.paused) {
+          return yield* getWorkItem(workItemId)
+        }
+
+        const now = yield* Clock.currentTimeMillis
+
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const pausedRows = (yield* sql.unsafe(
+                `UPDATE work_item
+                  SET paused = 1,
+                      updated_at = ?
+                  WHERE id = ?
+                    AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+                  RETURNING id`,
+                [now, workItemId],
+              )) as readonly { readonly id: string }[]
+
+              if (!pausedRows[0]) {
+                const current = yield* loadWorkItemRow(workItemId)
+                if (!current) {
+                  return yield* new WorkItemNotFoundError({ workItemId })
+                }
+                if (isTerminalWorkItemState(current.state)) {
+                  return yield* new WorkItemTerminalError({
+                    workItemId,
+                    state: current.state,
+                  })
+                }
+              }
+
+              const cancelledRows = (yield* sql.unsafe(
+                `UPDATE step_run
+                 SET status = 'cancelled',
+                     finished_at = ?,
+                     reason_code = ?,
+                     reason_message = ?,
+                     updated_at = ?
+                 WHERE work_item_id = ? AND status = 'queued'
+                 RETURNING queue_job_id`,
+                [
+                  now,
+                  STEP_RUN_REASON.paused,
+                  "Work Item was paused before the Step Run started",
+                  now,
+                  workItemId,
+                ],
+              )) as readonly { readonly queue_job_id: string | null }[]
+
+              for (const cancelled of cancelledRows) {
+                if (cancelled.queue_job_id !== null) {
+                  yield* queue
+                    .acknowledge(cancelled.queue_job_id)
+                    .pipe(
+                      Effect.catchTag("JobNotFoundError", () => Effect.void),
+                    )
+                }
+              }
+            }),
+          )
+          .pipe(
+            Effect.catch((error): Effect.Effect<never, PauseError> => {
+              if (
+                error instanceof WorkItemNotFoundError ||
+                error instanceof WorkItemTerminalError
+              ) {
+                return Effect.fail(error)
+              }
+              if (error instanceof WorkItemLifecycleDatabaseError) {
+                return Effect.fail(error)
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error as { _tag: string })._tag === "SqlError"
+              ) {
+                return Effect.fail(toDatabaseError(error as SqlError))
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                ((error as { _tag: string })._tag === "AcknowledgeError" ||
+                  (error as { _tag: string })._tag === "JobNotFoundError")
+              ) {
+                return Effect.fail(
+                  error as unknown as AcknowledgeError | JobNotFoundError,
+                )
+              }
+              return Effect.fail(
+                new WorkItemLifecycleDatabaseError({
+                  message: `Unexpected transaction failure: ${String(error)}`,
+                  cause: error,
+                }),
+              )
+            }),
+          )
+
+        return yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after pause: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+      })
+
+      const start = Effect.fn("WorkItemLifecycle.start")(function* (
+        workItemId: string,
+      ) {
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (!workItem) {
+          return yield* new WorkItemNotFoundError({ workItemId })
+        }
+
+        if (isTerminalWorkItemState(workItem.state)) {
+          return yield* new WorkItemTerminalError({
+            workItemId,
+            state: workItem.state,
+          })
+        }
+
+        if (!workItem.paused) {
+          return yield* getWorkItem(workItemId)
+        }
+
+        const now = yield* Clock.currentTimeMillis
+        yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const startedRows = (yield* sql.unsafe(
+                `UPDATE work_item
+                  SET paused = 0,
+                      updated_at = ?
+                  WHERE id = ?
+                    AND paused = 1
+                    AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+                  RETURNING id, state`,
+                [now, workItemId],
+              )) as readonly {
+                readonly id: string
+                readonly state: OperationalLifecycleStep
+              }[]
+
+              if (!startedRows[0]) {
+                const current = yield* loadWorkItemRow(workItemId)
+                if (!current) {
+                  return yield* new WorkItemNotFoundError({ workItemId })
+                }
+                if (isTerminalWorkItemState(current.state)) {
+                  return yield* new WorkItemTerminalError({
+                    workItemId,
+                    state: current.state,
+                  })
+                }
+                return
+              }
+
+              const pendingStep = startedRows[0].state
+
+              const activeRows = (yield* sql.unsafe(
+                `SELECT id FROM step_run
+                 WHERE work_item_id = ?
+                   AND status IN ('queued', 'running')
+                 LIMIT 1`,
+                [workItemId],
+              )) as readonly { readonly id: string }[]
+              if (activeRows[0]) {
+                return
+              }
+
+              const latestRows = (yield* sql.unsafe(
+                `SELECT status FROM step_run
+                 WHERE work_item_id = ?
+                   AND step = ?
+                 ORDER BY queued_at DESC, id DESC
+                 LIMIT 1`,
+                [workItemId, pendingStep],
+              )) as readonly { readonly status: string }[]
+              const latestStatus = latestRows[0]?.status
+              if (latestStatus === "failed" || latestStatus === "interrupted") {
+                return
+              }
+
+              const nextStepRunId = makeStepRunId()
+              yield* sql.unsafe(
+                `INSERT INTO step_run (
+                 id, work_item_id, step, status, queue_job_id, queued_at,
+                 started_at, finished_at, reason_code, reason_message,
+                 created_at, updated_at
+               ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                [nextStepRunId, workItemId, pendingStep, now, now, now],
+              )
+
+              const payload = yield* encodeStepJob(nextStepRunId)
+              const jobId = yield* queue.enqueue(
+                WORK_ITEM_LIFECYCLE_QUEUE,
+                payload,
+                { retryLimit: 1 },
+              )
+
+              yield* sql.unsafe(
+                `UPDATE step_run
+               SET queue_job_id = ?, updated_at = ?
+               WHERE id = ?`,
+                [jobId, now, nextStepRunId],
+              )
+            }),
+          )
+          .pipe(
+            Effect.catch((error): Effect.Effect<never, StartError> => {
+              if (
+                error instanceof WorkItemNotFoundError ||
+                error instanceof WorkItemTerminalError
+              ) {
+                return Effect.fail(error)
+              }
+              if (error instanceof WorkItemLifecycleDatabaseError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof EnqueueError) {
+                return Effect.fail(error)
+              }
+              if (error instanceof InvalidQueueNameError) {
+                return Effect.fail(error)
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                (error as { _tag: string })._tag === "SqlError"
+              ) {
+                return Effect.fail(toDatabaseError(error as SqlError))
+              }
+              if (
+                typeof error === "object" &&
+                error !== null &&
+                "_tag" in error &&
+                ((error as { _tag: string })._tag === "AcknowledgeError" ||
+                  (error as { _tag: string })._tag === "JobNotFoundError")
+              ) {
+                return Effect.fail(
+                  error as unknown as AcknowledgeError | JobNotFoundError,
+                )
+              }
+              return Effect.fail(
+                new WorkItemLifecycleDatabaseError({
+                  message: `Unexpected transaction failure: ${String(error)}`,
+                  cause: error,
+                }),
+              )
+            }),
+          )
+
+        return yield* getWorkItem(workItemId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after start: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
         )
       })
 
@@ -1793,6 +2106,13 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
+        if (workItem.paused) {
+          return yield* new RetryNotEligibleError({
+            workItemId,
+            reason: "paused",
+          })
+        }
+
         const pendingStep = workItem.state as OperationalLifecycleStep
 
         const activeRows = (yield* sql
@@ -2022,10 +2342,10 @@ export const makeWorkItemLifecycleLive = (
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
                  id, repository_id, github_issue_number, model, variant,
-                 review_model, review_variant, state, state_ready_at,
+                 review_model, review_variant, state, state_ready_at, paused,
                  worktree_path, session_id, failure_code, failure_message,
                  created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
@@ -2121,6 +2441,8 @@ export const makeWorkItemLifecycleLive = (
         implementNow,
         runStep,
         retry,
+        pause,
+        start,
         abandon,
         reset,
         getWorkItem,

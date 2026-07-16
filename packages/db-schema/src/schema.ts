@@ -212,6 +212,7 @@ export const workItem = snakeCase.table(
       ],
     }).notNull(),
     stateReadyAt: integer({ mode: "number" }).notNull(),
+    paused: integer({ mode: "boolean" }).notNull().default(false),
     worktreePath: text(),
     sessionId: text(),
     failureCode: text(),

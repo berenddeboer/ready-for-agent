@@ -139,6 +139,8 @@ const queueLayer = (
       implementNow: unused,
       runStep,
       retry: unused,
+      pause: unused,
+      start: unused,
       abandon: unused,
       reset: unused,
       getWorkItem: unused,

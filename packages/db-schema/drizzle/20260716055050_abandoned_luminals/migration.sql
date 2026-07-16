@@ -1,0 +1,1 @@
+ALTER TABLE `work_item` ADD `paused` integer DEFAULT false NOT NULL;

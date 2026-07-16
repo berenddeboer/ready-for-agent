@@ -137,6 +137,7 @@ type WorkItem {
   status: WorkItemStatus!
   statusLabel: String!
   statusMessage: String
+  paused: Boolean!
   canRetry: Boolean!
   isTerminal: Boolean!
   stateReadyAt: String!
@@ -181,6 +182,8 @@ type Mutation {
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
   retryWorkItem(workItemId: ID!): WorkItem!
+  pauseWorkItem(workItemId: ID!): WorkItem!
+  startWorkItem(workItemId: ID!): WorkItem!
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
   updateRepositorySettings(input: UpdateRepositorySettingsInput!): Repository!
