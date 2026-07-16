@@ -19,7 +19,6 @@ import {
 } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
-  HOOK_OUTPUT_PROMPT_LIMIT,
   PreCommitInvalidWorktreeContextError,
   PreCommitOpenCodeError,
   PreCommitSessionContextMissingError,
@@ -226,17 +225,19 @@ describe("preCommit", () => {
       )
 
       expect(prompts).toHaveLength(1)
-      expect(prompts[0]).toContain(diagnostic)
+      expect(prompts[0]).not.toContain(diagnostic)
       expect(prompts[0]).toContain("pre-commit")
+      expect(prompts[0]).toMatch(/sub-agent/i)
+      expect(prompts[0]).toMatch(/summary/i)
       expect(prompts[0]).toMatch(/fix|Diagnose/i)
       expect(prompts[0]).toMatch(/Full hook output is at: /)
     }))
 
-  it("writes oversized hook output to a log and only embeds a truncated tail in the prompt", () =>
+  it("writes hook output to a log and keeps raw hook logs out of the OpenCode prompt", () =>
     withTempGit(async (root) => {
       const head = "HEAD_MARKER_SHOULD_NOT_BE_IN_PROMPT"
-      const tail = "TAIL_MARKER_MUST_BE_IN_PROMPT"
-      const filler = "x".repeat(HOOK_OUTPUT_PROMPT_LIMIT + 5_000)
+      const tail = "TAIL_MARKER_SHOULD_NOT_BE_IN_PROMPT"
+      const filler = "x".repeat(20_000)
       const diagnostic = `${head}\n${filler}\n${tail}`
       await writeFile(join(root, ".hook-diagnostic"), diagnostic)
       await writeHook(
@@ -278,9 +279,9 @@ describe("preCommit", () => {
         }),
       )
 
-      expect(prompt.length).toBeLessThan(HOOK_OUTPUT_PROMPT_LIMIT + 2_000)
       expect(prompt).not.toContain(head)
-      expect(prompt).toContain(tail)
+      expect(prompt).not.toContain(tail)
+      expect(prompt).toMatch(/sub-agent/i)
       expect(logPath.length).toBeGreaterThan(0)
       expect(logContents).toContain(head)
       expect(logContents).toContain(tail)
