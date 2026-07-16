@@ -219,9 +219,12 @@ const buildInvestigationWorkPrompt = (
   if (hasGreen) {
     lines.push(
       "One or more automated reviews may have completed. Inspect the latest pull-request comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback.",
+      "If review feedback requires changes, verify them, commit them, and push the commit to the existing PR branch.",
     )
   }
   lines.push(
+    "If you create a commit during this handoff, after pushing it post one comment on the existing pull request that includes the commit SHA, summarizes the changes and verification, identifies the review feedback addressed, and lists any review feedback declined with a brief reason (or says none was declined).",
+    "Do not post this summary comment when you did not create a commit.",
     "Do not create or merge another pull request.",
     "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
   )

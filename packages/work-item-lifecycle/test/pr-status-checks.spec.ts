@@ -396,6 +396,18 @@ describe("PR status check steps", () => {
     expect(prompts[0]).toContain(
       "disregard reviews that are visibly still in progress",
     )
+    expect(prompts[0]).toContain(
+      "If review feedback requires changes, verify them, commit them, and push the commit",
+    )
+    expect(prompts[0]).toContain(
+      "post one comment on the existing pull request that includes the commit SHA",
+    )
+    expect(prompts[0]).toContain(
+      "lists any review feedback declined with a brief reason",
+    )
+    expect(prompts[0]).toContain(
+      "Do not post this summary comment when you did not create a commit",
+    )
   })
 
   it("returns OpenCode's structured human intervention reason", async () => {
