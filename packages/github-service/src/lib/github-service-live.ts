@@ -312,6 +312,20 @@ interface GitHubApiIssue {
   readonly subIssuesSummary: { readonly total: unknown }
   readonly subIssues: GitHubApiSubIssueConnection
   readonly blockedBy: GitHubApiIssueConnection
+  readonly closedByPullRequestsReferences?: GitHubApiPullRequestConnection
+}
+
+interface GitHubApiPullRequestReference {
+  readonly number: unknown
+  readonly repository: GitHubApiRepositoryReference
+}
+
+interface GitHubApiPullRequestConnection {
+  readonly nodes: readonly (GitHubApiPullRequestReference | null)[] | null
+  readonly pageInfo: {
+    readonly endCursor: string | null
+    readonly hasNextPage: boolean
+  }
 }
 
 interface GitHubApiIssueConnection {
@@ -400,6 +414,26 @@ const mapBlockedByPage = (
     .filter((issue) => issue !== null)
     .filter((issue) => toIssueState(issue.state) === "OPEN")
     .map(toIssueReference)
+
+const mapClosingPullRequestPage = (
+  connection: GitHubApiPullRequestConnection | undefined,
+): readonly { readonly number: number; readonly repository: string }[] =>
+  (connection?.nodes ?? [])
+    .filter((pullRequest) => pullRequest !== null)
+    .map((pullRequest) => {
+      if (
+        !Number.isSafeInteger(pullRequest.number) ||
+        Number(pullRequest.number) <= 0
+      ) {
+        throw new Error(
+          `Invalid GitHub pull request number: ${pullRequest.number}`,
+        )
+      }
+      return {
+        number: Number(pullRequest.number),
+        repository: toRepositoryName(pullRequest.repository),
+      }
+    })
 
 const toRepositoryName = (repository: GitHubApiRepositoryReference): string => {
   if (
@@ -514,6 +548,9 @@ const toReadyLabeledIssue = (
       repositoryName,
     ),
     blockedBy: mapBlockedByPage(issue.blockedBy),
+    closingPullRequests: mapClosingPullRequestPage(
+      issue.closedByPullRequestsReferences,
+    ),
   }
 }
 
@@ -595,6 +632,40 @@ export const makeGitHubService = (
             cause,
           }),
       })
+    }),
+  getOpenPullRequestNumber: (repository, headRefName) =>
+    Effect.gen(function* () {
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          client.query({
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  states: ["OPEN"],
+                  headRefName,
+                },
+                nodes: { number: true },
+              },
+            },
+          }),
+        catch: (cause) =>
+          new GitHubRequestError({
+            message: `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+            cause,
+          }),
+      })
+      if (result.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      const number = result.repository.pullRequests.nodes?.[0]?.number
+      if (!Number.isSafeInteger(number) || Number(number) <= 0) {
+        return yield* new GitHubRequestError({
+          message: `No open pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      return Number(number)
     }),
   markPullRequestReadyForReview: (repository, headRefName) =>
     Effect.gen(function* () {
@@ -749,6 +820,17 @@ export const makeGitHubService = (
                       nodes: { number: true, url: true, state: true },
                       pageInfo: { endCursor: true, hasNextPage: true },
                     },
+                    closedByPullRequestsReferences: {
+                      __args: {
+                        first: PAGE_SIZE,
+                        includeClosedPrs: true,
+                      },
+                      nodes: {
+                        number: true,
+                        repository: { nameWithOwner: true },
+                      },
+                      pageInfo: { endCursor: true, hasNextPage: true },
+                    },
                   },
                   pageInfo: {
                     endCursor: true,
@@ -782,7 +864,13 @@ export const makeGitHubService = (
               }),
           })
           const blockedBy = [...mappedIssue.blockedBy]
+          const closingPullRequests = [...mappedIssue.closingPullRequests]
           let blockedByPage = issueNode.blockedBy.pageInfo
+          let closingPullRequestsPage = issueNode.closedByPullRequestsReferences
+            ?.pageInfo ?? {
+            endCursor: null,
+            hasNextPage: false,
+          }
           let hasUnsupportedDescendants = mappedIssue.hasUnsupportedDescendants
           let subIssuesPage = issueNode.subIssues.pageInfo
           let subIssueOffset = yield* Effect.try({
@@ -851,6 +939,65 @@ export const makeGitHubService = (
             })
             blockedBy.push(...pageDependencies)
             blockedByPage = connection.pageInfo
+          }
+
+          while (closingPullRequestsPage.hasNextPage) {
+            if (closingPullRequestsPage.endCursor === null) {
+              return yield* new GitHubRequestError({
+                message: `GitHub omitted the closing pull request page cursor for ${repositoryName}#${mappedIssue.number}`,
+              })
+            }
+
+            const pullRequestResult = yield* Effect.tryPromise({
+              try: () =>
+                client.query({
+                  repository: {
+                    __args: repository,
+                    issue: {
+                      __args: { number: mappedIssue.number },
+                      closedByPullRequestsReferences: {
+                        __args: {
+                          first: PAGE_SIZE,
+                          after: closingPullRequestsPage.endCursor,
+                          includeClosedPrs: true,
+                        },
+                        nodes: {
+                          number: true,
+                          repository: { nameWithOwner: true },
+                        },
+                        pageInfo: { endCursor: true, hasNextPage: true },
+                      },
+                    },
+                  },
+                }),
+              catch: (cause) =>
+                new GitHubRequestError({
+                  message: `Failed to list closing pull requests for ${repositoryName}#${mappedIssue.number}`,
+                  cause,
+                }),
+            })
+            if (pullRequestResult.repository === null) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (pullRequestResult.repository.issue === null) {
+              return yield* new GitHubRequestError({
+                message: `GitHub could not find Issue ${repositoryName}#${mappedIssue.number} while listing closing pull requests`,
+              })
+            }
+
+            const connection = pullRequestResult.repository.issue
+              .closedByPullRequestsReferences as GitHubApiPullRequestConnection
+            closingPullRequests.push(
+              ...(yield* Effect.try({
+                try: () => mapClosingPullRequestPage(connection),
+                catch: (cause) =>
+                  new GitHubRequestError({
+                    message: `GitHub returned invalid closing pull request data for ${repositoryName}#${mappedIssue.number}`,
+                    cause,
+                  }),
+              })),
+            )
+            closingPullRequestsPage = connection.pageInfo
           }
 
           while (subIssuesPage.hasNextPage) {
@@ -930,6 +1077,18 @@ export const makeGitHubService = (
             ...mappedIssue,
             hasUnsupportedDescendants,
             blockedBy: sortDependencies(blockedBy),
+            closingPullRequests: [
+              ...new Map(
+                closingPullRequests.map((pullRequest) => [
+                  `${pullRequest.repository.toLowerCase()}#${pullRequest.number}`,
+                  pullRequest,
+                ]),
+              ).values(),
+            ].sort(
+              (left, right) =>
+                left.repository.localeCompare(right.repository) ||
+                left.number - right.number,
+            ),
           })
         }
 
@@ -1004,6 +1163,7 @@ export const makeGitHubService = (
               !issueHierarchy.unsupported &&
               !invalidRoots.has(issueHierarchy.rootUrl),
             blockedBy: issue.blockedBy,
+            closingPullRequests: issue.closingPullRequests,
           }
         })
         .sort((left, right) => left.number - right.number)

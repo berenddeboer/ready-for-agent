@@ -39,9 +39,18 @@ export class CreatePrOpenCodeError extends Data.TaggedError(
   readonly cause?: unknown
 }> {}
 
+export class CreatePrLookupError extends Data.TaggedError(
+  "CreatePrLookupError",
+)<{
+  readonly repositoryId: string
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
 export type CreatePrError =
   | CreatePrWorktreeContextMissingError
   | CreatePrInvalidWorktreeContextError
   | CreatePrSessionContextMissingError
   | CreatePrCredentialError
   | CreatePrOpenCodeError
+  | CreatePrLookupError

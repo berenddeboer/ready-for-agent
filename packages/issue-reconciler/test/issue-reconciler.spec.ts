@@ -3,6 +3,7 @@ import {
   DatabaseError,
   DbService,
   type IssueRecord,
+  type WorkItemPullRequest,
 } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -40,6 +41,7 @@ const remoteIssue = (
   hasChildren: false,
   hierarchySupported: true,
   blockedBy: [],
+  closingPullRequests: [],
   ...overrides,
 })
 
@@ -76,6 +78,7 @@ const localIssue = (
 
 interface DbFixtureOptions {
   readonly issues: readonly IssueRecord[]
+  readonly workItemPullRequests?: readonly WorkItemPullRequest[]
   readonly failStoreNumber?: number
   readonly listError?: DatabaseError
   readonly markError?: DatabaseError
@@ -93,6 +96,8 @@ const makeDbFixture = (options: DbFixtureOptions) => {
         ? Effect.fail(options.listError)
         : Effect.succeed(stored)
     },
+    listWorkItemPullRequests: () =>
+      Effect.succeed(options.workItemPullRequests ?? []),
     storeIssue: (input) => {
       actions.push(`store:${input.githubIssueNumber}`)
       if (input.githubIssueNumber === options.failStoreNumber) {
@@ -146,6 +151,7 @@ const makeGitHubLayer = (
   error?: GitHubRequestError,
 ) =>
   Layer.succeed(GitHubService, {
+    getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () =>
       Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
     markPullRequestReadyForReview: () => Effect.void,
@@ -408,6 +414,63 @@ describe("IssueReconciler", () => {
         expect(
           db.stored.find((issue) => issue.githubIssueNumber === 2)?.state,
         ).toBe("CLOSED")
+      }),
+      db.layer,
+      github,
+    )
+  })
+
+  it("excludes issues whose closing pull requests do not match a Work Item PR", () => {
+    const db = makeDbFixture({
+      issues: [
+        localIssue(1),
+        localIssue(2),
+        localIssue(3),
+        localIssue(4),
+        localIssue(5),
+      ],
+      workItemPullRequests: [
+        { githubIssueNumber: 2, githubPullRequestNumber: 202 },
+        { githubIssueNumber: 3, githubPullRequestNumber: 303 },
+      ],
+    })
+    const github = makeGitHubLayer(
+      [
+        remoteIssue(1),
+        remoteIssue(2, {
+          closingPullRequests: [{ number: 202, repository: "acme/widgets" }],
+        }),
+        remoteIssue(3, {
+          closingPullRequests: [
+            { number: 300, repository: "acme/widgets" },
+            { number: 303, repository: "acme/widgets" },
+          ],
+        }),
+        remoteIssue(4, {
+          closingPullRequests: [{ number: 404, repository: "acme/widgets" }],
+        }),
+        remoteIssue(5, {
+          closingPullRequests: [{ number: 202, repository: "other/widgets" }],
+        }),
+      ],
+      db.actions,
+    )
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary).toEqual({
+          fetched: 5,
+          inserted: 0,
+          updated: 0,
+          deleted: 2,
+          unchanged: 3,
+        })
+        expect(db.stored.map((issue) => issue.githubIssueNumber)).toEqual([
+          1, 2, 3,
+        ])
       }),
       db.layer,
       github,

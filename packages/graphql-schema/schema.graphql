@@ -110,6 +110,7 @@ type WorkItem {
   id: ID!
   repositoryId: ID!
   githubIssueNumber: Int!
+  githubPullRequestNumber: Int
   model: String!
   variant: String!
   state: WorkItemState!

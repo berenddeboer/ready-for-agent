@@ -58,7 +58,7 @@ describe("WorkItemLifecycle", () => {
     preCommit: () => Effect.void,
     review: () => Effect.void,
     commit: () => Effect.void,
-    createPr: () => Effect.void,
+    createPr: () => Effect.succeed(101),
     watchPrStatusChecks: () => Effect.succeed("succeeded"),
     investigatePrStatusChecks: () =>
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
@@ -984,6 +984,14 @@ describe("WorkItemLifecycle", () => {
           expect(afterCreatePr._tag).toBe("processed")
           if (afterCreatePr._tag === "processed") {
             expect(afterCreatePr.workItem.state).toBe("watch_pr_status_checks")
+            expect(afterCreatePr.workItem.githubPullRequestNumber).toBe(101)
+            const db = yield* DbService
+            expect(yield* db.listWorkItemPullRequests(repository.id)).toEqual([
+              {
+                githubIssueNumber: issue.githubIssueNumber,
+                githubPullRequestNumber: 101,
+              },
+            ])
           }
 
           const afterChecks = yield* claimAndRunPending
@@ -1008,6 +1016,7 @@ describe("WorkItemLifecycle", () => {
             expect(afterDecide.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
+            expect(afterDecide.workItem.githubPullRequestNumber).toBe(101)
             expect(afterDecide.workItem.failureCode).toBeNull()
             expect(
               afterDecide.workItem.stepRuns.map((run) => [
@@ -1417,7 +1426,7 @@ describe("WorkItemLifecycle", () => {
         },
         createPr: (context) => {
           seen.push(context)
-          return Effect.void
+          return Effect.succeed(101)
         },
         watchPrStatusChecks: (context) => {
           seen.push(context)

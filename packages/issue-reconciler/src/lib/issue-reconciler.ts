@@ -74,11 +74,21 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
     ),
   )
 
-const isRelevant = (issue: ReadyLabeledIssue): boolean =>
+const isRelevant = (
+  issue: ReadyLabeledIssue,
+  repositoryName: string,
+  workItemPullRequestNumbers: ReadonlySet<number>,
+): boolean =>
   issue.hierarchySupported &&
   (issue.parent === null
     ? issue.state === "OPEN"
-    : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled)
+    : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled) &&
+  (issue.closingPullRequests.length === 0 ||
+    issue.closingPullRequests.some(
+      (pullRequest) =>
+        pullRequest.repository.toLowerCase() === repositoryName &&
+        workItemPullRequestNumbers.has(pullRequest.number),
+    ))
 
 export const IssueReconcilerLive = Layer.effect(
   IssueReconciler,
@@ -90,16 +100,41 @@ export const IssueReconcilerLive = Layer.effect(
       repository: RepositoryRecord,
     ) {
       const localIssues = yield* db.listIssues(repository.id)
+      const workItemPullRequests = yield* db.listWorkItemPullRequests(
+        repository.id,
+      )
       const remoteIssues = yield* github.listReadyIssues({
         owner: repository.githubOwner,
         name: repository.githubRepo,
       })
+      const repositoryName =
+        `${repository.githubOwner}/${repository.githubRepo}`.toLowerCase()
 
       const localByNumber = new Map(
         localIssues.map((issue) => [issue.githubIssueNumber, issue]),
       )
+      const workItemPullRequestsByIssue = new Map<number, Set<number>>()
+      for (const workItemPullRequest of workItemPullRequests) {
+        const numbers =
+          workItemPullRequestsByIssue.get(
+            workItemPullRequest.githubIssueNumber,
+          ) ?? new Set<number>()
+        numbers.add(workItemPullRequest.githubPullRequestNumber)
+        workItemPullRequestsByIssue.set(
+          workItemPullRequest.githubIssueNumber,
+          numbers,
+        )
+      }
       const remoteByNumber = new Map(
-        remoteIssues.filter(isRelevant).map((issue) => [issue.number, issue]),
+        remoteIssues
+          .filter((issue) =>
+            isRelevant(
+              issue,
+              repositoryName,
+              workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
+            ),
+          )
+          .map((issue) => [issue.number, issue]),
       )
       const authoritativeIssues = [...remoteByNumber.values()]
       const upserts = authoritativeIssues

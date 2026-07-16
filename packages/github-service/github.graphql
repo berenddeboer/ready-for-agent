@@ -40,6 +40,7 @@ type Repository {
 
 type PullRequestConnection {
   nodes: [PullRequest]
+  pageInfo: PageInfo!
 }
 
 type PullRequest {
@@ -51,6 +52,7 @@ type PullRequest {
   isDraft: Boolean!
   headRefOid: String!
   statusCheckRollup: StatusCheckRollup
+  repository: Repository!
 }
 
 type StatusCheckRollup {
@@ -139,6 +141,11 @@ type Issue {
   subIssues(first: Int, after: String): IssueConnection!
   subIssuesSummary: SubIssuesSummary!
   blockedBy(first: Int, after: String): IssueConnection!
+  closedByPullRequestsReferences(
+    first: Int
+    after: String
+    includeClosedPrs: Boolean
+  ): PullRequestConnection!
 }
 
 type SubIssuesSummary {

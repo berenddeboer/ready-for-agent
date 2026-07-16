@@ -74,6 +74,7 @@ const seedWorkItem = Effect.gen(function* () {
 const githubWith = (status: PullRequestCheckStatus) =>
   Layer.succeed(GitHubService, {
     listReadyIssues: () => Effect.succeed([]),
+    getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () => Effect.succeed(status),
     markPullRequestReadyForReview: () => Effect.void,
   } satisfies GitHubServiceShape)
@@ -103,6 +104,7 @@ describe("PR status check steps", () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: (_repository, branch) => {
         requestedBranch = branch
         return Effect.succeed({ _tag: "pending", terminalChecks: [] })
@@ -194,6 +196,7 @@ describe("PR status check steps", () => {
     let index = 0
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       markPullRequestReadyForReview: () => Effect.void,

@@ -29,9 +29,41 @@ const issue = (
   hasChildren: false,
   hierarchySupported: true,
   blockedBy: [],
+  closingPullRequests: [],
 })
 
 describe("GitHubService live implementation", () => {
+  it("resolves the open pull request number for a branch", async () => {
+    let request: unknown
+    const service = makeGitHubService({
+      query: (input) => {
+        request = input
+        return Promise.resolve({
+          repository: { pullRequests: { nodes: [{ number: 321 }] } },
+        }) as never
+      },
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.getOpenPullRequestNumber(repository, "rfa/issue-42"),
+      ),
+    ).toBe(321)
+    expect(request).toEqual({
+      repository: {
+        __args: repository,
+        pullRequests: {
+          __args: {
+            first: 1,
+            states: ["OPEN"],
+            headRefName: "rfa/issue-42",
+          },
+          nodes: { number: true },
+        },
+      },
+    })
+  })
+
   for (const [state, expected] of [
     ["PENDING", "pending"],
     ["EXPECTED", "pending"],
@@ -526,6 +558,15 @@ describe("GitHubService live implementation", () => {
                   ],
                   pageInfo: { endCursor: null, hasNextPage: false },
                 },
+                closedByPullRequestsReferences: {
+                  nodes: [
+                    {
+                      number: 22,
+                      repository: { nameWithOwner: "acme/widgets" },
+                    },
+                  ],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
               },
             ],
             pageInfo: { endCursor: "page-2", hasNextPage: true },
@@ -585,6 +626,7 @@ describe("GitHubService live implementation", () => {
       hasChildren: false,
       hierarchySupported: true,
       blockedBy: [],
+      closingPullRequests: [],
     })
     expect(result[1]?.parent).toEqual({
       number: 1,
@@ -597,6 +639,9 @@ describe("GitHubService live implementation", () => {
         number: 3,
         url: "https://github.com/acme/widgets/issues/3",
       },
+    ])
+    expect(result[1]?.closingPullRequests).toEqual([
+      { number: 22, repository: "acme/widgets" },
     ])
     expect(requests).toHaveLength(2)
 
@@ -647,6 +692,14 @@ describe("GitHubService live implementation", () => {
       blockedBy: {
         __args: { first: 100 },
         nodes: { number: true, url: true, state: true },
+        pageInfo: { endCursor: true, hasNextPage: true },
+      },
+      closedByPullRequestsReferences: {
+        __args: { first: 100, includeClosedPrs: true },
+        nodes: {
+          number: true,
+          repository: { nameWithOwner: true },
+        },
         pageInfo: { endCursor: true, hasNextPage: true },
       },
     })
@@ -736,6 +789,101 @@ describe("GitHubService live implementation", () => {
     expect(dependencyRequest.repository.issue.blockedBy.__args).toEqual({
       first: 100,
       after: "dependency-page-2",
+    })
+  })
+
+  it("fetches every open and closed Issue-closing PR page", async () => {
+    const requests: unknown[] = []
+    const responses = [
+      {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 7,
+                title: "Issue with pull requests",
+                body: "Body",
+                url: "https://github.com/acme/widgets/issues/7",
+                createdAt: "2026-07-07T12:00:00Z",
+                state: "OPEN",
+                parent: null,
+                subIssuesSummary: { total: 0 },
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                closedByPullRequestsReferences: {
+                  nodes: [
+                    {
+                      number: 20,
+                      repository: { nameWithOwner: "acme/widgets" },
+                    },
+                  ],
+                  pageInfo: {
+                    endCursor: "pull-request-page-2",
+                    hasNextPage: true,
+                  },
+                },
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+      {
+        repository: {
+          issue: {
+            closedByPullRequestsReferences: {
+              nodes: [
+                {
+                  number: 10,
+                  repository: { nameWithOwner: "acme/widgets" },
+                },
+              ],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            },
+          },
+        },
+      },
+    ]
+    const client = {
+      query: async (request: unknown) => {
+        requests.push(request)
+        return responses.shift()
+      },
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository),
+    )
+
+    expect(result[0]?.closingPullRequests).toEqual([
+      { number: 10, repository: "acme/widgets" },
+      { number: 20, repository: "acme/widgets" },
+    ])
+    const continuation = requests[1] as {
+      repository: {
+        issue: {
+          closedByPullRequestsReferences: {
+            __args: {
+              first: number
+              after: string
+              includeClosedPrs: boolean
+            }
+          }
+        }
+      }
+    }
+    expect(
+      continuation.repository.issue.closedByPullRequestsReferences.__args,
+    ).toEqual({
+      first: 100,
+      after: "pull-request-page-2",
+      includeClosedPrs: true,
     })
   })
 

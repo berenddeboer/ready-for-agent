@@ -51,6 +51,14 @@ _Avoid_: chat, thread, conversation (in formal docs)
 An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, and GitHub state so consumers can decide whether it is actionable.
 _Avoid_: Ready Issue (can imply that the Issue is open and actionable)
 
+**Issue-closing PR**:
+A GitHub pull request that GitHub associates with an Issue through closing semantics, such as a supported closing keyword. A mere mention or other cross-reference does not make a pull request an Issue-closing PR.
+_Avoid_: Related PR, linked PR (both can include incidental references)
+
+**Work Item PR**:
+A GitHub pull request whose exact identity is recorded by a Work Item. A matching Issue number or Git branch alone does not establish that the PR belongs to the Work Item. The PR need not use Issue-closing semantics. Complete, Failed, Needs Human, and Abandoned Work Items retain their Work Item PR; Reset relinquishes ownership by deleting the Work Item. When an Issue has multiple Issue-closing PRs, one matching Work Item PR is sufficient to establish that the harness is managing the Issue.
+_Avoid_: Our PR, harness PR, associated PR
+
 **Supported Issue Hierarchy**:
 A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety.
 _Avoid_: Issue tree (implies arbitrary depth), nested Issues
@@ -72,7 +80,7 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to work a Leaf Issue through the implementation lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number without snapshotting its contents; a Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to work a Leaf Issue through the implementation lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number without snapshotting its contents, and records the exact identity of its pull request when one is created. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement Now**:
@@ -120,7 +128,7 @@ An operator-directed erasure of a Work Item that stops queued or running Step Ru
 _Avoid_: Abandon, Retry, cancel
 
 **Failed Work Item**:
-A terminal Work Item that cannot advance because a lifecycle precondition, such as the referenced Issue still existing, was not met. Its Step Run retains the outcome of the Effect itself, and the Work Item records the separate failure reason.
+A terminal Work Item that cannot advance because a lifecycle precondition, such as the referenced Issue still existing and remaining Relevant, was not met. Its Step Run retains the outcome of the Effect itself, and the Work Item records the separate failure reason.
 _Avoid_: Failed Step Run, Abandoned
 
 **Needs Human Work Item**:
@@ -132,5 +140,5 @@ A terminal Work Item for which implementation, pull-request creation, status che
 _Avoid_: Approved, merged, done Issue
 
 **Relevant Issue**:
-A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness: either an open root Issue, or a direct child whose parent is open and Ready-labeled. A closed root Issue, or a child with a closed or non-Ready-labeled parent, is not relevant.
+A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no Issue-closing PR or have at least one Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. PR state does not affect this test, and an Issue-closing PR affects only its own Issue rather than the Issue's parent or children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned Issue-closing PRs is not relevant.
 _Avoid_: Active Issue (a Relevant Issue may be closed), Actionable Issue (actionability also depends on workflow constraints), Visible Issue (presentation-specific)

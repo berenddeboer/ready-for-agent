@@ -66,6 +66,7 @@ export interface WorkItemRecord {
   readonly id: WorkItemId
   readonly repositoryId: string
   readonly githubIssueNumber: number
+  readonly githubPullRequestNumber: number | null
   readonly model: string
   readonly variant: string
   readonly reviewModel: string
