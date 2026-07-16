@@ -37,6 +37,11 @@ export interface GitHubIssueReference {
   readonly url: string
 }
 
+export interface GitHubPullRequestReference {
+  readonly number: number
+  readonly repository: string
+}
+
 export interface GitHubIssueParent extends GitHubIssueReference {
   readonly state: GitHubIssueState
   readonly isReadyLabeled: boolean
@@ -54,4 +59,5 @@ export interface ReadyLabeledIssue {
   readonly hasChildren: boolean
   readonly hierarchySupported: boolean
   readonly blockedBy: readonly GitHubIssueReference[]
+  readonly closingPullRequests: readonly GitHubPullRequestReference[]
 }

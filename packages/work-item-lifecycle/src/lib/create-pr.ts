@@ -1,16 +1,19 @@
 import { Effect, FileSystem } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
+import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import {
   CreatePrCredentialError,
   CreatePrInvalidWorktreeContextError,
+  CreatePrLookupError,
   CreatePrOpenCodeError,
   CreatePrSessionContextMissingError,
   CreatePrWorktreeContextMissingError,
 } from "./create-pr-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
+import { workItemBranchName } from "./worktree-names.js"
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -75,8 +78,8 @@ const buildCreatePrPrompt = (githubIssueNumber: number, tokenName: string) =>
  * Production Create PR Lifecycle Step.
  * Continues the Implement OpenCode Session in the Work Item worktree and asks
  * it to open a pull request for the committed work, linking the Work Item's
- * GitHub Issue. Success means the command exited successfully; the step does
- * not inspect the resulting PR.
+ * GitHub Issue. Success requires resolving the resulting open PR so its exact
+ * identity can be persisted on the Work Item.
  */
 export const createPr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -146,6 +149,29 @@ export const createPr = (context: LifecycleStepContext) =>
               message: "OpenCode failed to create a pull request",
               worktreePath,
               sessionId,
+              cause,
+            }),
+        ),
+      )
+
+    const branch = workItemBranchName({
+      githubOwner: repository.githubOwner,
+      githubRepo: repository.githubRepo,
+      githubIssueNumber: context.githubIssueNumber,
+      workItemId: context.workItemId,
+    })
+    const github = yield* GitHubService
+    return yield* github
+      .getOpenPullRequestNumber(
+        { owner: repository.githubOwner, name: repository.githubRepo },
+        branch,
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new CreatePrLookupError({
+              repositoryId: context.repositoryId,
+              message: `Failed to resolve the open pull request for ${repository.githubOwner}/${repository.githubRepo}:${branch}`,
               cause,
             }),
         ),

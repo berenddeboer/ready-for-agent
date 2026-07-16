@@ -9,6 +9,10 @@ import {
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
 import {
+  GitHubService,
+  type GitHubServiceShape,
+} from "@ready-for-agent/github-service"
+import {
   KeymaxxerError,
   KeymaxxerService,
   type KeymaxxerServiceShape,
@@ -65,6 +69,21 @@ const stubKeymaxxer = (
     ...overrides,
   })
 
+const stubGitHub = (
+  overrides: Partial<GitHubServiceShape> = {},
+): Layer.Layer<GitHubService> =>
+  Layer.succeed(
+    GitHubService,
+    GitHubService.of({
+      getOpenPullRequestNumber: () => Effect.succeed(321),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
+      markPullRequestReadyForReview: () => Effect.void,
+      listReadyIssues: () => Effect.succeed([]),
+      ...overrides,
+    }),
+  )
+
 const stubOpencode = (
   overrides: {
     continue?: (input: {
@@ -94,10 +113,15 @@ const stubOpencode = (
   )
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, DbService | KeymaxxerService | Opencode>,
+  effect: Effect.Effect<
+    A,
+    E,
+    DbService | GitHubService | KeymaxxerService | Opencode
+  >,
   layers: {
     keymaxxer?: Layer.Layer<KeymaxxerService>
     opencode?: Layer.Layer<Opencode>
+    github?: Layer.Layer<GitHubService>
   } = {},
 ): Promise<A> =>
   Effect.runPromise(
@@ -105,6 +129,7 @@ const run = <A, E>(
       Effect.provide(
         Layer.mergeAll(
           stubDb,
+          layers.github ?? stubGitHub(),
           layers.keymaxxer ?? stubKeymaxxer(),
           layers.opencode ?? stubOpencode(),
         ),
@@ -160,8 +185,9 @@ describe("createPr", () => {
         model: string
         variant: string
       } | null = null
+      let resolvedBranch: string | null = null
 
-      await run(
+      const pullRequestNumber = await run(
         createPr(
           baseContext(root, {
             sessionId: "ses_from_implement",
@@ -189,9 +215,17 @@ describe("createPr", () => {
               })
             },
           }),
+          github: stubGitHub({
+            getOpenPullRequestNumber: (_repository, branch) => {
+              resolvedBranch = branch
+              return Effect.succeed(321)
+            },
+          }),
         },
       )
 
+      expect(pullRequestNumber).toBe(321)
+      expect(resolvedBranch).toContain("/2039/")
       expect(credentialAccount).toBe("acme/widgets")
       expect(continueInput).not.toBeNull()
       expect(continueInput!.cwd).toBe(root)

@@ -32,6 +32,12 @@ const SerializedIssue = Schema.Struct({
       url: Schema.String,
     }),
   ),
+  closingPullRequests: Schema.Array(
+    Schema.Struct({
+      number: Schema.Finite,
+      repository: Schema.String,
+    }),
+  ),
 })
 
 const SerializedIssues = Schema.Array(SerializedIssue)
@@ -125,6 +131,15 @@ const parseIssues = (
               }
               new URL(dependency.url)
             }
+            for (const pullRequest of issue.closingPullRequests) {
+              if (
+                !Number.isSafeInteger(pullRequest.number) ||
+                pullRequest.number <= 0 ||
+                pullRequest.repository.trim() === ""
+              ) {
+                throw new Error("Invalid closing pull request identity")
+              }
+            }
             return { ...issue, createdAt }
           }),
         catch: () => requestError(repository, "list Ready-labeled Issues"),
@@ -146,6 +161,50 @@ export const keymaxxerGitHubLayer = (options: {
         })
 
       const service: GitHubServiceShape = {
+        getOpenPullRequestNumber: (repository, headRefName) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "get open pull request number",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const head = encodeArgument(headRefName)
+            const result = yield* keymaxxer.runWithSecrets({
+              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-open-pr-number.ts ${owner} ${name} ${head}`,
+              cwd: options.workspaceRoot,
+              secrets: [tokenName],
+              timeoutMs: 60_000,
+            })
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "get open pull request number",
+                result.stderr || result.stdout,
+              )
+            }
+            const number = Number(result.stdout.trim())
+            if (!Number.isSafeInteger(number) || number <= 0) {
+              return yield* requestError(
+                repository,
+                "decode open pull request number",
+                result.stdout,
+              )
+            }
+            return number
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "get open pull request number"),
+              ),
+            ),
+          ),
         getPullRequestCheckStatus: (repository, headRefName) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

@@ -23,6 +23,13 @@ export interface GitHubServiceShape {
     PullRequestCheckStatus,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
+  readonly getOpenPullRequestNumber: (
+    repository: GitHubRepository,
+    headRefName: string,
+  ) => Effect.Effect<
+    number,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
   readonly markPullRequestReadyForReview: (
     repository: GitHubRepository,
     headRefName: string,

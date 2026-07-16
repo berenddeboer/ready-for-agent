@@ -22,6 +22,7 @@ import type {
   StoreIssueInput,
   UpdateConfigInput,
   UpdateRepositorySettingsInput,
+  WorkItemPullRequest,
 } from "./types.js"
 
 const formatSqlError = (error: SqlError): string => {
@@ -247,6 +248,12 @@ export interface DbServiceShape {
     repositoryId: string,
   ) => Effect.Effect<
     readonly IssueRecord[],
+    RepositoryNotFoundError | DatabaseError
+  >
+  readonly listWorkItemPullRequests: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    readonly WorkItemPullRequest[],
     RepositoryNotFoundError | DatabaseError
   >
   readonly deleteIssue: (
@@ -961,6 +968,33 @@ export const DbServiceLive = Layer.effect(
         )
       })
 
+    const listWorkItemPullRequests = (
+      repositoryId: string,
+    ): Effect.Effect<
+      readonly WorkItemPullRequest[],
+      RepositoryNotFoundError | DatabaseError
+    > =>
+      Effect.gen(function* () {
+        yield* ensureRepositoryExists(repositoryId)
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT github_issue_number, github_pull_request_number
+             FROM work_item
+             WHERE repository_id = ? AND github_pull_request_number IS NOT NULL
+             ORDER BY github_issue_number ASC, github_pull_request_number ASC`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly github_issue_number: number
+          readonly github_pull_request_number: number
+        }[]
+
+        return rows.map((row) => ({
+          githubIssueNumber: row.github_issue_number,
+          githubPullRequestNumber: row.github_pull_request_number,
+        }))
+      })
+
     const deleteIssue = (
       repositoryId: string,
       githubIssueNumber: number,
@@ -1021,6 +1055,7 @@ export const DbServiceLive = Layer.effect(
       removeRepository,
       storeIssue,
       listIssues,
+      listWorkItemPullRequests,
       deleteIssue,
       markIssuesReconciled,
     })

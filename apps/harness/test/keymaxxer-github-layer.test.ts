@@ -106,6 +106,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
               createdAt: "2026-07-07T12:00:00.000Z",
               state: "OPEN",
               hierarchySupported: true,
+              closingPullRequests: [],
               hasChildren: false,
               parentPosition: 0,
               parent: {
@@ -223,6 +224,38 @@ describe("Keymaxxer-backed GitHub layer", () => {
     })
     expect(runs[0]?.command).toContain("get-pr-check-status.ts")
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+  })
+
+  test("resolves an open PR number through the configured repository token", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({ exitCode: 0, stdout: "321", stderr: "" })
+      },
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    const number = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.getOpenPullRequestNumber(
+          { owner: "acme", name: "widgets" },
+          "rfa/acme-widgets/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(number).toBe(321)
+    expect(runs[0]?.command).toContain("get-open-pr-number.ts")
   })
 
   test("decodes no_checks and pending terminalChecks from the bin", async () => {

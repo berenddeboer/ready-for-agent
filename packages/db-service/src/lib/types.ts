@@ -89,3 +89,8 @@ export interface IssueReference {
 }
 
 export type IssueDependency = IssueReference
+
+export interface WorkItemPullRequest {
+  readonly githubIssueNumber: number
+  readonly githubPullRequestNumber: number
+}

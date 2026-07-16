@@ -236,6 +236,7 @@ describe("Job worker", () => {
     )
     const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
     const github = Layer.succeed(GitHubService, {
+      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -253,6 +254,7 @@ describe("Job worker", () => {
             hasChildren: false,
             hierarchySupported: true,
             blockedBy: [],
+            closingPullRequests: [],
           },
         ]),
     } satisfies GitHubServiceShape)

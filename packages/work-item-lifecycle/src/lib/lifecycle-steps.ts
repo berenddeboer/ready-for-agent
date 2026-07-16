@@ -48,7 +48,7 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<void, unknown>
   readonly createPr: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, unknown>
+  ) => Effect.Effect<number, unknown>
   readonly watchPrStatusChecks: (
     context: LifecycleStepContext,
   ) => Effect.Effect<PrStatusCheckResult, unknown>

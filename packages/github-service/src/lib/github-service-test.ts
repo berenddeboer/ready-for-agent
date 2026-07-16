@@ -37,6 +37,7 @@ export const makeGitHubServiceTest = (
   )
 
   return Layer.succeed(GitHubService, {
+    getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () =>
       Effect.succeed({ _tag: "succeeded", terminalChecks: [] }),
     markPullRequestReadyForReview: () => Effect.void,

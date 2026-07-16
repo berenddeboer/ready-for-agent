@@ -197,6 +197,7 @@ type WorkItemRow = {
   readonly id: string
   readonly repository_id: string
   readonly github_issue_number: number
+  readonly github_pull_request_number: number | null
   readonly model: string
   readonly variant: string
   readonly review_model: string
@@ -263,6 +264,7 @@ const toWorkItemRecord = (
   id: row.id as WorkItemId,
   repositoryId: row.repository_id,
   githubIssueNumber: row.github_issue_number,
+  githubPullRequestNumber: row.github_pull_request_number,
   model: row.model,
   variant: row.variant,
   reviewModel: row.review_model,
@@ -525,8 +527,9 @@ export const makeWorkItemLifecycleLive = (
         const rows = (yield* sql
           .unsafe(
             `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                  review_variant, state, state_ready_at, worktree_path, session_id,
-                  failure_code, failure_message, created_at, updated_at
+                   review_variant, state, state_ready_at, worktree_path, session_id,
+                   github_pull_request_number, failure_code,
+                   failure_message, created_at, updated_at
            FROM work_item
            WHERE id = ?
            LIMIT 1`,
@@ -554,8 +557,9 @@ export const makeWorkItemLifecycleLive = (
         const rows = (yield* sql
           .unsafe(
             `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                  review_variant, state, state_ready_at, worktree_path, session_id,
-                  failure_code, failure_message, created_at, updated_at
+                   review_variant, state, state_ready_at, worktree_path, session_id,
+                   github_pull_request_number, failure_code,
+                   failure_message, created_at, updated_at
            FROM work_item
            WHERE repository_id = ? AND github_issue_number = ?
            ORDER BY created_at ASC, rowid ASC`,
@@ -579,8 +583,9 @@ export const makeWorkItemLifecycleLive = (
         const rows = (yield* sql
           .unsafe(
             `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                  review_variant, state, state_ready_at, worktree_path, session_id,
-                  failure_code, failure_message, created_at, updated_at
+                   review_variant, state, state_ready_at, worktree_path, session_id,
+                   github_pull_request_number, failure_code,
+                   failure_message, created_at, updated_at
            FROM work_item
            WHERE repository_id = ?
            ORDER BY created_at ASC, rowid ASC`,
@@ -621,8 +626,9 @@ export const makeWorkItemLifecycleLive = (
           const rows = (yield* sql
             .unsafe(
               `SELECT id, repository_id, github_issue_number, model, variant, review_model,
-                    review_variant, state, state_ready_at, worktree_path, session_id,
-                    failure_code, failure_message, created_at, updated_at
+                     review_variant, state, state_ready_at, worktree_path, session_id,
+                     github_pull_request_number, failure_code,
+                     failure_message, created_at, updated_at
              FROM work_item
              WHERE id = ?
              LIMIT 1`,
@@ -707,6 +713,7 @@ export const makeWorkItemLifecycleLive = (
         {
           readonly worktreePath?: string
           readonly sessionId?: string
+          readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
           readonly transition?: {
             readonly nextState:
@@ -737,7 +744,11 @@ export const makeWorkItemLifecycleLive = (
           case "commit":
             return steps.commit(context).pipe(Effect.as({}))
           case "create_pr":
-            return steps.createPr(context).pipe(Effect.as({}))
+            return steps.createPr(context).pipe(
+              Effect.map((githubPullRequestNumber) => ({
+                githubPullRequestNumber,
+              })),
+            )
           case "watch_pr_status_checks":
             return steps.watchPrStatusChecks(context).pipe(
               Effect.flatMap((status) =>
@@ -870,6 +881,7 @@ export const makeWorkItemLifecycleLive = (
         readonly output: {
           readonly worktreePath?: string
           readonly sessionId?: string
+          readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
           readonly transition?: {
             readonly nextState:
@@ -896,6 +908,9 @@ export const makeWorkItemLifecycleLive = (
             transition?.nextState ?? nextOperationalStep(stepRun.step)
           const worktreePath = output.worktreePath ?? workItem.worktree_path
           const sessionId = output.sessionId ?? workItem.session_id
+          const githubPullRequestNumber =
+            output.githubPullRequestNumber ??
+            workItem.github_pull_request_number
 
           yield* sql
             .withTransaction(
@@ -923,9 +938,10 @@ export const makeWorkItemLifecycleLive = (
                        state_ready_at = ?,
                        failure_code = ?,
                        failure_message = ?,
-                       worktree_path = ?,
-                       session_id = ?,
-                       updated_at = ?
+                        worktree_path = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        updated_at = ?
                    WHERE id = ?`,
                     [
                       now,
@@ -933,6 +949,7 @@ export const makeWorkItemLifecycleLive = (
                       revalidation.failureMessage,
                       worktreePath,
                       sessionId,
+                      githubPullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -942,11 +959,19 @@ export const makeWorkItemLifecycleLive = (
                     `UPDATE work_item
                    SET state = 'complete',
                        state_ready_at = ?,
-                       worktree_path = ?,
-                       session_id = ?,
-                       updated_at = ?
+                        worktree_path = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        updated_at = ?
                    WHERE id = ?`,
-                    [now, worktreePath, sessionId, now, workItem.id],
+                    [
+                      now,
+                      worktreePath,
+                      sessionId,
+                      githubPullRequestNumber,
+                      now,
+                      workItem.id,
+                    ],
                   )
                 } else if (nextStep === "needs_human") {
                   yield* sql.unsafe(
@@ -955,9 +980,10 @@ export const makeWorkItemLifecycleLive = (
                        state_ready_at = ?,
                        failure_code = 'needs_human',
                        failure_message = ?,
-                       worktree_path = ?,
-                       session_id = ?,
-                       updated_at = ?
+                        worktree_path = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        updated_at = ?
                    WHERE id = ?`,
                     [
                       now,
@@ -965,6 +991,7 @@ export const makeWorkItemLifecycleLive = (
                         "OpenCode requested human intervention",
                       worktreePath,
                       sessionId,
+                      githubPullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -978,15 +1005,17 @@ export const makeWorkItemLifecycleLive = (
                     `UPDATE work_item
                    SET state = ?,
                        state_ready_at = ?,
-                       worktree_path = ?,
-                       session_id = ?,
-                       updated_at = ?
+                        worktree_path = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        updated_at = ?
                    WHERE id = ?`,
                     [
                       nextStep,
                       stateReadyAt,
                       worktreePath,
                       sessionId,
+                      githubPullRequestNumber,
                       now,
                       workItem.id,
                     ],
