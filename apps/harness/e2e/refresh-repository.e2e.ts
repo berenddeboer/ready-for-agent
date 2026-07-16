@@ -119,12 +119,14 @@ test("Refresh returns after enqueueing and updates after worker invalidation", a
   await page.goto("/")
   await expect(page.getByText("Not refreshed yet.")).toBeVisible()
 
-  const refresh = page.getByRole("button", { name: "Refresh issues" })
+  const refresh = page.getByRole("button", { name: /Refresh issues/i })
   await refresh.click()
 
-  // Mutation acceptance ends the pending state while the controlled worker
-  // remains incomplete and the old reconciliation metadata is still shown.
-  await expect(refresh).toBeEnabled()
+  // Spinner stays active after enqueue until the Issues-changed subscription
+  // refetches this Repository (worker still incomplete, old metadata shown).
+  await expect(
+    page.getByRole("button", { name: "Refreshing issues" }),
+  ).toBeDisabled()
   await expect(page.getByText("Not refreshed yet.")).toBeVisible()
 
   workerCompleted = true
@@ -132,4 +134,7 @@ test("Refresh returns after enqueueing and updates after worker invalidation", a
 
   await expect(page.getByText("Asynchronously refreshed Issue")).toBeVisible()
   await expect(page.getByText("Not refreshed yet.")).not.toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Refresh issues" }),
+  ).toBeEnabled()
 })

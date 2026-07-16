@@ -255,6 +255,9 @@ function RepositoryCards() {
   const queryClient = useQueryClient()
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
+  const [issuesChangeCounts, setIssuesChangeCounts] = useState<
+    Readonly<Record<string, number>>
+  >({})
   const repositoryIdsRef = useRef(repositories.map(({ id }) => id))
   repositoryIdsRef.current = repositories.map(({ id }) => id)
 
@@ -322,6 +325,12 @@ function RepositoryCards() {
     const controller = new AbortController()
     void followRepositoryIssuesLive({
       getRepositoryIds: () => repositoryIdsRef.current,
+      onRepositoryChanged: (repositoryId) => {
+        setIssuesChangeCounts((counts) => ({
+          ...counts,
+          [repositoryId]: (counts[repositoryId] ?? 0) + 1,
+        }))
+      },
       queryClient,
       queries: {
         repositories: repositoriesQuery,
@@ -367,17 +376,29 @@ function RepositoryCards() {
         aria-label="Configured repositories"
       >
         {repositories.map((repository) => (
-          <RepositoryCard key={repository.id} repository={repository} />
+          <RepositoryCard
+            issuesChangeCount={issuesChangeCounts[repository.id] ?? 0}
+            key={repository.id}
+            repository={repository}
+          />
         ))}
       </section>
     </>
   )
 }
 
-function RepositoryCard({ repository }: { repository: Repository }) {
+function RepositoryCard({
+  issuesChangeCount,
+  repository,
+}: {
+  issuesChangeCount: number
+  repository: Repository
+}) {
   const queryClient = useQueryClient()
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [awaitingRefresh, setAwaitingRefresh] = useState(false)
+  const issuesChangeCountOnRefresh = useRef(issuesChangeCount)
   const settingsDialogRef = useRef<HTMLDialogElement>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const config = useQuery({ ...configQuery, enabled: settingsOpen })
@@ -548,7 +569,23 @@ function RepositoryCard({ repository }: { repository: Repository }) {
       })
       return result.refreshRepository
     },
+    onMutate: () => {
+      issuesChangeCountOnRefresh.current = issuesChangeCount
+      setAwaitingRefresh(true)
+    },
+    onError: () => {
+      setAwaitingRefresh(false)
+    },
   })
+
+  useEffect(() => {
+    if (!awaitingRefresh) return
+    if (issuesChangeCount !== issuesChangeCountOnRefresh.current) {
+      setAwaitingRefresh(false)
+    }
+  }, [awaitingRefresh, issuesChangeCount])
+
+  const refreshingIssues = refreshIssues.isPending || awaitingRefresh
 
   const addGitHubToken = useMutation({
     mutationFn: async () => {
@@ -934,12 +971,10 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           <button
             type="button"
             className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-wait disabled:opacity-60"
-            disabled={
-              refreshIssues.isPending || !repository.credential.configured
-            }
+            disabled={refreshingIssues || !repository.credential.configured}
             onClick={() => refreshIssues.mutate()}
             aria-label={
-              refreshIssues.isPending ? "Refreshing issues" : "Refresh issues"
+              refreshingIssues ? "Refreshing issues" : "Refresh issues"
             }
             title={
               repository.credential.configured
@@ -949,7 +984,7 @@ function RepositoryCard({ repository }: { repository: Repository }) {
           >
             <svg
               aria-hidden="true"
-              className={`size-4 ${refreshIssues.isPending ? "animate-spin motion-reduce:animate-none" : ""}`}
+              className={`size-4 ${refreshingIssues ? "animate-spin motion-reduce:animate-none" : ""}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
