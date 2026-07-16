@@ -24,7 +24,7 @@
   },
   "dependencies": {
     "drizzle-orm": "1.0.0-rc.4-5d5b77c",
-    "effect": "^3.21.4",
+    "effect": "^3.22.0",
     "tslib": "^2.3.0",
     "ulidx": "^2.4.1"
   },
