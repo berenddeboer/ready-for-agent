@@ -87,6 +87,10 @@ _Avoid_: Issue lifecycle, implementation job, attempt
 An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery.
 _Avoid_: Auto-implement, enqueue Issue
 
+**Implement Locally**:
+An explicit operator request that creates a Work Item for a Leaf Issue like Implement Now, but records that the Work Item should pause before Commit. Local steps (Create Worktree through Review) run normally; after Review succeeds the Work Item advances to Commit and is paused with no Commit Step Run enqueued, so the operator can inspect the worktree. Start resumes at Commit and continues the remote lifecycle.
+_Avoid_: Local-only mode, dry run, Implement Now without PR
+
 **Not Implemented**:
 The derived status of an Issue for which no Work Item has ever been created. It is not a persisted Work Item lifecycle state.
 _Avoid_: Pending, queued
@@ -96,7 +100,7 @@ A current, open Leaf Issue with no listed blockers. A Work Item revalidates this
 _Avoid_: Ready-labeled Issue, Relevant Issue, Leaf Issue
 
 **Actionable Issue**:
-An Implementable Issue with no unfinished Work Item. Only an Actionable Issue may receive Implement Now; Repository pause does not affect actionability.
+An Implementable Issue with no unfinished Work Item. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability.
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:

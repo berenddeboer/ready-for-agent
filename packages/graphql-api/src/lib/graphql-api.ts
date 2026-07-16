@@ -999,6 +999,26 @@ export const createGraphqlApi = (
             }
             return result.success
           },
+          implementLocally: async (
+            _parent: unknown,
+            args: ImplementNowArgs,
+          ) => {
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.implementLocally(
+                    args.repositoryId,
+                    args.githubIssueNumber,
+                  )
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
           retryWorkItem: async (_parent: unknown, args: WorkItemArgs) => {
             const result = await runtime.runPromise(
               Effect.result(

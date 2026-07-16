@@ -181,6 +181,10 @@ type Mutation {
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
+  """
+  Create a Work Item that runs local steps through Review, then pauses before Commit.
+  """
+  implementLocally(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   startWorkItem(workItemId: ID!): WorkItem!

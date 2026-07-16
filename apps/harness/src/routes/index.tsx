@@ -1181,6 +1181,12 @@ function RepositoryIssueRow({
     latestWorkItem !== undefined && !latestWorkItem.isTerminal
   const canImplement =
     isActionable && !workItemsLoading && !hasUnfinishedWorkItem
+  const onImplementSuccess = (workItem: WorkItem) => {
+    queryClient.setQueryData<readonly WorkItem[]>(query.queryKey, (current) => [
+      ...(current ?? []),
+      workItem,
+    ])
+  }
   const implementNow = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -1194,13 +1200,24 @@ function RepositoryIssueRow({
       })
       return result.implementNow
     },
-    onSuccess: (workItem) => {
-      queryClient.setQueryData<readonly WorkItem[]>(
-        query.queryKey,
-        (current) => [...(current ?? []), workItem],
-      )
-    },
+    onSuccess: onImplementSuccess,
   })
+  const implementLocally = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        implementLocally: {
+          __args: {
+            repositoryId: issue.repositoryId,
+            githubIssueNumber: issue.githubIssueNumber,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.implementLocally
+    },
+    onSuccess: onImplementSuccess,
+  })
+  const implementPending = implementNow.isPending || implementLocally.isPending
 
   useEffect(() => {
     if (!menuOpen) return
@@ -1270,19 +1287,35 @@ function RepositoryIssueRow({
               {menuOpen && (
                 <div
                   role="menu"
-                  className="absolute top-full right-0 z-10 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                  className="absolute top-full right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
                 >
                   <button
                     type="button"
                     role="menuitem"
                     className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
-                    disabled={implementNow.isPending}
+                    disabled={implementPending}
                     onClick={() => {
                       setMenuOpen(false)
+                      implementLocally.reset()
                       implementNow.mutate()
                     }}
                   >
                     {implementNow.isPending ? "Starting..." : "Implement now"}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    disabled={implementPending}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      implementNow.reset()
+                      implementLocally.mutate()
+                    }}
+                  >
+                    {implementLocally.isPending
+                      ? "Starting..."
+                      : "Implement locally"}
                   </button>
                 </div>
               )}
@@ -1293,7 +1326,7 @@ function RepositoryIssueRow({
       {latestWorkItem !== undefined && (
         <WorkItemLifecycleStatus workItem={latestWorkItem} />
       )}
-      {implementNow.isError && (
+      {(implementNow.isError || implementLocally.isError) && (
         <p className="mt-1.5 mb-0 pl-11 text-xs text-red-700" role="alert">
           Could not start implementation. Refresh the issues and try again.
         </p>

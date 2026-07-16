@@ -213,6 +213,28 @@ export const workItem = snakeCase.table(
     }).notNull(),
     stateReadyAt: integer({ mode: "number" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * When set, successful advancement into this Lifecycle Step pauses the Work
+     * Item (no Step Run enqueued) so the operator can inspect local work.
+     */
+    pauseBeforeStep: text({
+      enum: [
+        "create_worktree",
+        "install_dependencies",
+        "implement",
+        "pre_commit",
+        "review",
+        "commit",
+        "create_pr",
+        "watch_pr_status_checks",
+        "resolve_pr_merge_conflict",
+        "investigate_pr_status_checks",
+        "mark_pr_ready_for_review",
+        "decide_pr_merge",
+        "merge_pr",
+        "local_cleanup",
+      ],
+    }),
     worktreePath: text(),
     sessionId: text(),
     failureCode: text(),

@@ -205,6 +205,7 @@ type WorkItemRow = {
   readonly state: WorkItemState
   readonly state_ready_at: number
   readonly paused: boolean | number
+  readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
   readonly session_id: string | null
   readonly failure_code: string | null
@@ -273,6 +274,7 @@ const toWorkItemRecord = (
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
   paused: Boolean(row.paused),
+  pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
   sessionId: row.session_id,
   failureCode: row.failure_code,
@@ -284,7 +286,7 @@ const toWorkItemRecord = (
 })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, model, variant, review_model,
-                   review_variant, state, state_ready_at, paused, worktree_path, session_id,
+                   review_variant, state, state_ready_at, paused, pause_before_step, worktree_path, session_id,
                    github_pull_request_number, failure_code,
                    failure_message, created_at, updated_at`
 
@@ -409,6 +411,10 @@ export type RunStepResult =
 export interface WorkItemLifecycleShape {
   readonly maxDurations: LifecycleMaxDurations
   readonly implementNow: (
+    repositoryId: string,
+    githubIssueNumber: number,
+  ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  readonly implementLocally: (
     repositoryId: string,
     githubIssueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
@@ -1097,13 +1103,44 @@ export const makeWorkItemLifecycleLive = (
                     nextStep === workItem.state ? workItem.state_ready_at : now
                   // Re-read: Pause may land while this Step Run was draining.
                   const pausedRows = (yield* sql.unsafe(
-                    `SELECT paused FROM work_item WHERE id = ? LIMIT 1`,
+                    `SELECT paused, pause_before_step FROM work_item WHERE id = ? LIMIT 1`,
                     [workItem.id],
-                  )) as readonly { readonly paused: boolean | number }[]
+                  )) as readonly {
+                    readonly paused: boolean | number
+                    readonly pause_before_step: OperationalLifecycleStep | null
+                  }[]
                   const isPaused = Boolean(pausedRows[0]?.paused)
+                  const pauseBeforeStep =
+                    pausedRows[0]?.pause_before_step ?? null
+                  const shouldPauseBeforeNext =
+                    pauseBeforeStep !== null && pauseBeforeStep === nextStep
+                  // Do not clear operator Pause; only set paused when auto-pausing.
+                  const stayPaused = isPaused || shouldPauseBeforeNext
 
-                  yield* sql.unsafe(
-                    `UPDATE work_item
+                  if (shouldPauseBeforeNext) {
+                    yield* sql.unsafe(
+                      `UPDATE work_item
+                   SET state = ?,
+                       state_ready_at = ?,
+                       paused = 1,
+                        worktree_path = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        updated_at = ?
+                   WHERE id = ?`,
+                      [
+                        nextStep,
+                        stateReadyAt,
+                        worktreePath,
+                        sessionId,
+                        githubPullRequestNumber,
+                        now,
+                        workItem.id,
+                      ],
+                    )
+                  } else {
+                    yield* sql.unsafe(
+                      `UPDATE work_item
                    SET state = ?,
                        state_ready_at = ?,
                         worktree_path = ?,
@@ -1111,18 +1148,19 @@ export const makeWorkItemLifecycleLive = (
                         github_pull_request_number = ?,
                         updated_at = ?
                    WHERE id = ?`,
-                    [
-                      nextStep,
-                      stateReadyAt,
-                      worktreePath,
-                      sessionId,
-                      githubPullRequestNumber,
-                      now,
-                      workItem.id,
-                    ],
-                  )
+                      [
+                        nextStep,
+                        stateReadyAt,
+                        worktreePath,
+                        sessionId,
+                        githubPullRequestNumber,
+                        now,
+                        workItem.id,
+                      ],
+                    )
+                  }
 
-                  if (!isPaused) {
+                  if (!stayPaused) {
                     const nextStepRunId = makeStepRunId()
 
                     yield* sql.unsafe(
@@ -2266,8 +2304,14 @@ export const makeWorkItemLifecycleLive = (
         )
       })
 
-      const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(
-        function* (repositoryId: string, githubIssueNumber: number) {
+      const createWorkItem = (
+        repositoryId: string,
+        githubIssueNumber: number,
+        options: {
+          readonly pauseBeforeStep: OperationalLifecycleStep | null
+        },
+      ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
+        Effect.gen(function* () {
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
             (candidate) => candidate.githubIssueNumber === githubIssueNumber,
@@ -2343,9 +2387,9 @@ export const makeWorkItemLifecycleLive = (
                   `INSERT INTO work_item (
                  id, repository_id, github_issue_number, model, variant,
                  review_model, review_variant, state, state_ready_at, paused,
-                 worktree_path, session_id, failure_code, failure_message,
-                 created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, NULL, NULL, ?, ?)`,
+                 pause_before_step, worktree_path, session_id, failure_code,
+                 failure_message, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
@@ -2356,6 +2400,7 @@ export const makeWorkItemLifecycleLive = (
                     reviewVariant,
                     step,
                     now,
+                    options.pauseBeforeStep,
                     now,
                     now,
                   ],
@@ -2433,12 +2478,28 @@ export const makeWorkItemLifecycleLive = (
                 }),
             ),
           )
+        })
+
+      const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(
+        function* (repositoryId: string, githubIssueNumber: number) {
+          return yield* createWorkItem(repositoryId, githubIssueNumber, {
+            pauseBeforeStep: null,
+          })
+        },
+      )
+
+      const implementLocally = Effect.fn("WorkItemLifecycle.implementLocally")(
+        function* (repositoryId: string, githubIssueNumber: number) {
+          return yield* createWorkItem(repositoryId, githubIssueNumber, {
+            pauseBeforeStep: "commit",
+          })
         },
       )
 
       return WorkItemLifecycle.of({
         maxDurations,
         implementNow,
+        implementLocally,
         runStep,
         retry,
         pause,

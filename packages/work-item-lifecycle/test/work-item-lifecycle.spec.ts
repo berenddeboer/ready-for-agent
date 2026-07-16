@@ -167,6 +167,8 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.state).toBe("create_worktree")
           expect(workItem.model).toBe("opencode/deepseek-v4-flash-free")
           expect(workItem.variant).toBe("low")
+          expect(workItem.paused).toBe(false)
+          expect(workItem.pauseBeforeStep).toBeNull()
           expect(workItem.worktreePath).toBeNull()
           expect(workItem.sessionId).toBeNull()
           expect(workItem.failureCode).toBeNull()
@@ -504,6 +506,90 @@ describe("WorkItemLifecycle", () => {
         }).pipe(Effect.provide(layer)),
       )
     })
+  })
+
+  describe("implementLocally", () => {
+    const claimAndRunPending = Effect.gen(function* () {
+      const lifecycle = yield* WorkItemLifecycle
+      const queue = yield* QueueService
+      const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+      expect(Option.isSome(claimed)).toBe(true)
+      if (Option.isNone(claimed)) {
+        return yield* Effect.die("expected a queued lifecycle job")
+      }
+      const payload = claimed.value.payload as { stepRunId: string }
+      return yield* lifecycle.runStep(payload.stepRunId)
+    })
+
+    it("creates a Work Item that pauses before Commit", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const workItem = yield* lifecycle.implementLocally(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.state).toBe("create_worktree")
+          expect(workItem.paused).toBe(false)
+          expect(workItem.pauseBeforeStep).toBe("commit")
+          expect(workItem.stepRuns).toHaveLength(1)
+          expect(workItem.stepRuns[0]!.status).toBe("queued")
+        }),
+      ))
+
+    it("runs local steps through Review then pauses at Commit without enqueueing", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementLocally(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          // create_worktree → install → implement → pre_commit → review
+          for (const expectedNext of [
+            "install_dependencies",
+            "implement",
+            "pre_commit",
+            "review",
+            "commit",
+          ] as const) {
+            const result = yield* claimAndRunPending
+            expect(result._tag).toBe("processed")
+            if (result._tag === "processed") {
+              expect(result.workItem.state).toBe(expectedNext)
+              if (expectedNext === "commit") {
+                expect(result.workItem.paused).toBe(true)
+                expect(result.workItem.pauseBeforeStep).toBe("commit")
+                expect(
+                  result.workItem.stepRuns.every(
+                    (run) => run.status !== "queued",
+                  ),
+                ).toBe(true)
+              } else {
+                expect(result.workItem.paused).toBe(false)
+              }
+            }
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          const started = yield* lifecycle.start(created.id)
+          expect(started.paused).toBe(false)
+          expect(started.state).toBe("commit")
+          expect(started.stepRuns.at(-1)).toMatchObject({
+            step: "commit",
+            status: "queued",
+          })
+        }),
+      ))
   })
 
   describe("getWorkItem and listWorkItemsForIssue", () => {

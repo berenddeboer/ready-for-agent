@@ -75,6 +75,7 @@ const workItem = {
   state: "create_worktree",
   stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
   paused: false,
+  pauseBeforeStep: null,
   worktreePath: null,
   sessionId: null,
   failureCode: null,
@@ -180,6 +181,7 @@ const makeRuntime = (
       local_cleanup: Duration.minutes(5),
     },
     implementNow: unused,
+    implementLocally: unused,
     runStep: unused,
     retry: unused,
     pause: unused,
@@ -1442,6 +1444,47 @@ describe("GraphQL API", () => {
               status: "RUNNING",
             },
           ],
+        },
+      },
+    })
+    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("starts a Work Item for Implement Locally", async () => {
+    let receivedArgs: readonly [string, number] | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        implementLocally: (repositoryId, githubIssueNumber) => {
+          receivedArgs = [repositoryId, githubIssueNumber]
+          return Effect.succeed(workItem)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementLocally($repositoryId: ID!, $githubIssueNumber: Int!) {
+          implementLocally(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id state
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        implementLocally: {
+          id: workItem.id,
+          state: "CREATE_WORKTREE",
         },
       },
     })
