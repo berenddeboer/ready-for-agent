@@ -267,14 +267,11 @@ function HomePage() {
     <main>
       <header className="my-8 sm:my-14">
         <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
-          Workspace
+          Console
         </p>
-        <h1 className="mt-0.5 mb-2 text-[clamp(2rem,5vw,3.5rem)] leading-[1.05] font-bold tracking-[-0.045em]">
-          Configured repositories
+        <h1 className="mt-0.5 text-[clamp(2rem,5vw,3.5rem)] leading-[1.05] font-bold tracking-[-0.045em]">
+          Clanker Harness
         </h1>
-        <p className="text-slate-500">
-          Local GitHub repositories available to Ready for Agent.
-        </p>
       </header>
       <Suspense fallback={<RepositoryCardsSkeleton />}>
         <RepositoryCards />
