@@ -28,7 +28,7 @@ jobs:
       # Connect your workspace by running "nx connect" and uncomment this line to enable task distribution
       # - run: bunx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
 
-      - run: bun install --no-cache --frozen-lockfile --linker=isolated || bun install --no-cache --frozen-lockfile --linker=isolated
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
       - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
 
       # Prepend any command with "nx record --" to record its logs to Nx Cloud
