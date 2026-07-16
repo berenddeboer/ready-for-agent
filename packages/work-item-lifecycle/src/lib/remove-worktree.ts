@@ -256,20 +256,13 @@ const removeRemoteArtifacts = (input: {
     })
   })
 
-/**
- * Inverse of createWorktree: unregister the worktree, delete the directory if
- * still present, force-delete the Work Item branch, close any open remote PR
- * for that branch, and drop the remote branch when present.
- * Missing local worktree/branch and missing remote PR/branch are success
- * (idempotent). Missing GitHub credential fails.
- */
-export const removeWorktree = (
+const removeLocalArtifacts = (
+  repository: RepositoryRecord,
   context: LifecycleStepContext,
   options: { readonly tmpDir?: string } = {},
 ) =>
   Effect.gen(function* () {
     const pathService = yield* Path.Path
-    const repository = yield* resolveRepository(context.repositoryId)
     const gitRepository = asGitRepository(repository)
 
     const branchName = workItemBranchName({
@@ -323,6 +316,35 @@ export const removeWorktree = (
     if (hasBranch) {
       yield* runGit(gitRepository, ["branch", "-D", branchName])
     }
+
+    return branchName
+  })
+
+/**
+ * Remove only the local worktree and Work Item branch. Missing artifacts are
+ * success so a failed Lifecycle Step can be retried safely.
+ */
+export const localCleanup = (
+  context: LifecycleStepContext,
+  options: { readonly tmpDir?: string } = {},
+) =>
+  Effect.gen(function* () {
+    const repository = yield* resolveRepository(context.repositoryId)
+    yield* removeLocalArtifacts(repository, context, options)
+  })
+
+/**
+ * Inverse of createWorktree: remove local artifacts, close any open remote PR,
+ * and drop the remote branch when present. Missing artifacts are success
+ * (idempotent). Missing GitHub credential fails.
+ */
+export const removeWorktree = (
+  context: LifecycleStepContext,
+  options: { readonly tmpDir?: string } = {},
+) =>
+  Effect.gen(function* () {
+    const repository = yield* resolveRepository(context.repositoryId)
+    const branchName = yield* removeLocalArtifacts(repository, context, options)
 
     yield* removeRemoteArtifacts({ repository, branchName })
   })

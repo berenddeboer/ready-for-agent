@@ -156,6 +156,7 @@ type WorkItemState =
   | "MARK_PR_READY_FOR_REVIEW"
   | "DECIDE_PR_MERGE"
   | "MERGE_PR"
+  | "LOCAL_CLEANUP"
   | "COMPLETE"
   | "FAILED"
   | "ABANDONED"
