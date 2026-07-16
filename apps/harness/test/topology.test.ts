@@ -30,6 +30,7 @@ describe("single application server topology", () => {
     expect(harness.targets.dev?.options?.command).toContain(
       "run-with-keymaxxer-sidecar",
     )
+    expect(harness.targets.dev?.options?.command).toContain("vite")
     expect(harness.targets.dev?.options?.command).toContain(
       "export SQLITE_DATABASE_PATH",
     )

@@ -1,10 +1,19 @@
+import { fileURLToPath } from "node:url"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
+import { backendRuntimeRestart } from "./src/server/backend-runtime-restart.js"
+
+const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url))
 
 export default defineConfig({
-  plugins: [tanstackStart({ spa: { enabled: true } }), react(), tailwindcss()],
+  plugins: [
+    backendRuntimeRestart(workspaceRoot),
+    tanstackStart({ spa: { enabled: true } }),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     conditions: ["@ready-for-agent/source"],
   },
