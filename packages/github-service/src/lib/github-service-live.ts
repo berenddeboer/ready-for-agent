@@ -713,6 +713,51 @@ export const makeGitHubService = (
         }),
     })
   }),
+  getPullRequestLifecycleStatus: Effect.fn(
+    "GitHubService.getPullRequestLifecycleStatus",
+  )(function* (repository, headRefName) {
+    const result = yield* githubQuery(
+      `Failed to get pull request lifecycle for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        client.query(
+          {
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  headRefName,
+                },
+                nodes: {
+                  state: true,
+                  merged: true,
+                },
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    if (result.repository === null) {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const pullRequest = result.repository.pullRequests.nodes?.[0]
+    if (pullRequest === null || pullRequest === undefined) {
+      return { _tag: "not_found" as const }
+    }
+    if (pullRequest.merged === true || pullRequest.state === "MERGED") {
+      return { _tag: "merged" as const }
+    }
+    if (pullRequest.state === "CLOSED") {
+      return { _tag: "closed" as const }
+    }
+    if (pullRequest.state === "OPEN") {
+      return { _tag: "open" as const }
+    }
+    return yield* new GitHubRequestError({
+      message: `GitHub returned an invalid pull request state for ${repository.owner}/${repository.name}:${headRefName}`,
+    })
+  }),
   getOpenPullRequestNumber: Effect.fn("GitHubService.getOpenPullRequestNumber")(
     function* (repository, headRefName) {
       const result = yield* githubQuery(

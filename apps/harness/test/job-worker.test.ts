@@ -131,6 +131,22 @@ const keymaxxerLayer = (
     runWithSecrets: () => Effect.die("not used"),
   })
 
+const defaultGithubLayer = Layer.succeed(GitHubService, {
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+    }),
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  markPullRequestReadyForReview: () => Effect.void,
+  mergePullRequest: () => Effect.void,
+  listReadyIssues: () => Effect.succeed([]),
+} satisfies GitHubServiceShape)
+
 const queueLayer = (
   jobs: RawJob[],
   onAcknowledge: (jobId: string) => Effect.Effect<unknown> = () => Effect.void,
@@ -150,7 +166,8 @@ const queueLayer = (
     delay: Duration.Duration,
   ) => Effect.Effect<unknown> = () => Effect.void,
 ) =>
-  Layer.merge(
+  Layer.mergeAll(
+    defaultGithubLayer,
     Layer.succeed(QueueService, {
       queueInTransaction: true,
       enqueue: unused,
@@ -210,7 +227,8 @@ const queueLayer = (
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     }),
   )
 
@@ -341,6 +359,7 @@ describe("Job worker", () => {
         expect(recoveryCalls).toBeGreaterThanOrEqual(2)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [],
           undefined,
@@ -374,6 +393,8 @@ describe("Job worker", () => {
           mergeability: "mergeable",
           baseRefName: "main",
         }),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
       listReadyIssues: () =>
@@ -398,7 +419,13 @@ describe("Job worker", () => {
       Layer.provideMerge(database),
       Layer.provideMerge(github),
     )
-    const layer = Layer.mergeAll(database, reconciler, queue, keymaxxerLayer())
+    const layer = Layer.mergeAll(
+      database,
+      reconciler,
+      queue,
+      keymaxxerLayer(),
+      defaultGithubLayer,
+    )
 
     await runScoped(
       Effect.gen(function* () {
@@ -453,6 +480,7 @@ describe("Job worker", () => {
           expect(yield* Deferred.await(failed)).toBe(job.jobId)
         }),
         Layer.mergeAll(
+          defaultGithubLayer,
           queueLayer([job], undefined, (jobId) =>
             Deferred.succeed(failed, jobId),
           ),
@@ -501,6 +529,7 @@ describe("Job worker", () => {
         expect(notifications).toEqual([repository.id])
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [successJob, failureJob],
           (jobId) => Deferred.succeed(acknowledged, jobId),
@@ -552,7 +581,14 @@ describe("Job worker", () => {
       listModels: () => Effect.die("not used"),
     })
     const runtime = ManagedRuntime.make(
-      Layer.mergeAll(database, queue, reconciler, keymaxxerLayer(), opencode),
+      Layer.mergeAll(
+        database,
+        queue,
+        reconciler,
+        keymaxxerLayer(),
+        opencode,
+        defaultGithubLayer,
+      ),
     )
     const controller = new AbortController()
 
@@ -654,6 +690,7 @@ describe("Job worker", () => {
         expect(yield* Deferred.await(failed)).toBe(job.jobId)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer([job], undefined, (jobId) =>
           Deferred.succeed(failed, jobId),
         ),
@@ -713,6 +750,7 @@ describe("Job worker", () => {
         expect(maximumActive).toBe(1)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(jobs),
         dbLayer([repository, otherRepository]),
         reconciler,
@@ -763,6 +801,7 @@ describe("Job worker", () => {
         yield* Deferred.succeed(releaseRefresh, undefined)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           jobs,
           undefined,
@@ -811,6 +850,7 @@ describe("Job worker", () => {
         expect(refreshClaims).toBe(2)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [],
           () => Deferred.succeed(acknowledged, undefined),
@@ -862,6 +902,7 @@ describe("Job worker", () => {
         expect(finalized).toBe(false)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [job],
           () => Effect.sync(() => (finalized = true)),
@@ -957,6 +998,7 @@ describe("Job worker", () => {
         expect(refreshClaims).toContain(ISSUE_POLL_QUEUE)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           jobs,
           undefined,
@@ -1013,6 +1055,7 @@ describe("Job worker", () => {
         expect(notifications).toEqual([repository.id])
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [job],
           undefined,
@@ -1064,6 +1107,7 @@ describe("Job worker", () => {
         expect(failed).toBe(false)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [job],
           undefined,
@@ -1106,6 +1150,7 @@ describe("Job worker", () => {
         expect(postponed).toBe(false)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [job],
           (jobId) => Deferred.succeed(acknowledged, jobId),
@@ -1141,6 +1186,7 @@ describe("Job worker", () => {
         expect(postponed).toBe(false)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [job],
           (jobId) => Deferred.succeed(acknowledged, jobId),
@@ -1185,6 +1231,7 @@ describe("Job worker", () => {
         expect(scheduledJob.queue).toBe(ISSUE_POLL_QUEUE)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           jobs,
           (jobId) => Deferred.succeed(acknowledged, jobId),
@@ -1231,6 +1278,7 @@ describe("Job worker", () => {
         expect(yield* Deferred.await(postponed)).toBe(job.jobId)
       }),
       Layer.mergeAll(
+        defaultGithubLayer,
         queueLayer(
           [job],
           undefined,
@@ -1305,7 +1353,8 @@ describe("Job worker", () => {
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1354,6 +1403,7 @@ describe("Job worker", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            defaultGithubLayer,
             database,
             queue,
             reconciler,
@@ -1397,7 +1447,8 @@ describe("Job worker", () => {
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     })
     // Block Keymaxxer so auto-heal cannot finish during startup.
     const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
@@ -1442,6 +1493,7 @@ describe("Job worker", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            defaultGithubLayer,
             database,
             queue,
             Layer.succeed(IssueReconciler, {
@@ -1523,7 +1575,8 @@ describe("Job worker", () => {
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1706,7 +1759,8 @@ describe("Job worker", () => {
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1810,7 +1864,8 @@ describe("Job worker", () => {
       reset: unused,
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      continueAfterHumanPrOutcome: unused,
     })
 
     await Effect.runPromise(
@@ -1863,6 +1918,7 @@ describe("Job worker", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            defaultGithubLayer,
             database,
             queue,
             reconciler,

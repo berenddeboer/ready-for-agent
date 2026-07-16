@@ -45,6 +45,8 @@ describe("markPrReadyForReview", () => {
           mergeability: "mergeable",
           baseRefName: "main",
         }),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: (_repository, branch) => {
         requestedBranch = branch
         return Effect.void
@@ -72,6 +74,8 @@ describe("markPrReadyForReview", () => {
           mergeability: "mergeable",
           baseRefName: "main",
         }),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)

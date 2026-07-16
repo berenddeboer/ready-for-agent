@@ -78,6 +78,8 @@ const githubWith = (status: PullRequestCheckStatus) =>
     listReadyIssues: () => Effect.succeed([]),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () => Effect.succeed(status),
+    getPullRequestLifecycleStatus: () =>
+      Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
   } satisfies GitHubServiceShape)
@@ -116,6 +118,8 @@ describe("PR status check steps", () => {
           ...mergeable,
         })
       },
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)
@@ -215,6 +219,8 @@ describe("PR status check steps", () => {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)
@@ -286,6 +292,8 @@ describe("PR status check steps", () => {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
     } satisfies GitHubServiceShape)

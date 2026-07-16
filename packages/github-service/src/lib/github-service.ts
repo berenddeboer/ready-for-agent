@@ -6,6 +6,7 @@ import type {
 import type {
   GitHubRepository,
   PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
   ReadyLabeledIssue,
 } from "./types.js"
 
@@ -21,6 +22,13 @@ export interface GitHubServiceShape {
     headRefName: string,
   ) => Effect.Effect<
     PullRequestCheckStatus,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
+  readonly getPullRequestLifecycleStatus: (
+    repository: GitHubRepository,
+    headRefName: string,
+  ) => Effect.Effect<
+    PullRequestLifecycleStatus,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
   readonly getOpenPullRequestNumber: (

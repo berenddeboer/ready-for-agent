@@ -45,6 +45,7 @@ export const makeGitHubServiceTest = (
         mergeability: "mergeable",
         baseRefName: "main",
       }),
+    getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "open" }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
     listReadyIssues: (repository) => {

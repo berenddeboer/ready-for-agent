@@ -29,6 +29,7 @@ import { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
   WorkItemStepJob,
+  syncNeedsHumanMergeHandoffs,
 } from "@ready-for-agent/work-item-lifecycle"
 
 /** Work Item lifecycle queue (unchanged). */
@@ -169,6 +170,7 @@ const refreshRepository = (repositoryId: RepositoryId) =>
     }
 
     const summary = yield* reconciler.reconcile(repository)
+    yield* syncNeedsHumanMergeHandoffs(repositoryId)
     yield* db.notifyIssuesChanged(repositoryId)
     return summary
   })

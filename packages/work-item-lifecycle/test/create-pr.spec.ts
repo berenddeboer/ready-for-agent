@@ -83,7 +83,10 @@ const stubGitHub = (
           mergeability: "mergeable",
           baseRefName: "main",
         }),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.void,
       listReadyIssues: () => Effect.succeed([]),
       ...overrides,
     }),

@@ -159,6 +159,8 @@ const makeGitHubLayer = (
         mergeability: "mergeable",
         baseRefName: "main",
       }),
+    getPullRequestLifecycleStatus: () =>
+      Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
     listReadyIssues: ({ owner, name }) => {

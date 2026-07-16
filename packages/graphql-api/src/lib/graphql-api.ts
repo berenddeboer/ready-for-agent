@@ -32,6 +32,7 @@ import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { EnqueueError, type QueueService } from "@ready-for-agent/queue-service"
 import {
+  AbandonCleanupError,
   ActiveStepRunExistsError,
   IssueBlockedError,
   IssueNotFoundError,
@@ -458,6 +459,11 @@ const toGraphQLError = (error: unknown): GraphQLError => {
   if (error instanceof ResetCleanupError) {
     return new GraphQLError(error.message, {
       extensions: { code: "RESET_CLEANUP_FAILED" },
+    })
+  }
+  if (error instanceof AbandonCleanupError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "ABANDON_CLEANUP_FAILED" },
     })
   }
   if (error instanceof GraphQLError) {
