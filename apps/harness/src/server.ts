@@ -1,5 +1,9 @@
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry"
 import type { Application } from "./server/application.server.js"
+import {
+  registerDevelopmentApplicationDisposer,
+  unregisterDevelopmentApplicationDisposer,
+} from "./server/development-application.js"
 import { ignoreClosedStreamErrors } from "./server/ignore-closed-stream-errors.js"
 import type { ApplicationRequestContext } from "./server-context.js"
 
@@ -8,6 +12,18 @@ if (import.meta.env.DEV && typeof Bun === "undefined") {
 }
 
 let applicationPromise: Promise<Application> | undefined
+
+const disposeApplication = async () => {
+  const currentApplication = applicationPromise
+  applicationPromise = undefined
+  if (currentApplication !== undefined) {
+    await (await currentApplication).dispose()
+  }
+}
+
+if (import.meta.env.DEV) {
+  registerDevelopmentApplicationDisposer(disposeApplication)
+}
 
 const getApplication = () => {
   applicationPromise ??= import("./server/application.server.js").then(
@@ -42,10 +58,7 @@ export default createServerEntry({
 
 if (import.meta.hot) {
   import.meta.hot.dispose(async () => {
-    const currentApplication = applicationPromise
-    applicationPromise = undefined
-    if (currentApplication !== undefined) {
-      await (await currentApplication).dispose()
-    }
+    unregisterDevelopmentApplicationDisposer(disposeApplication)
+    await disposeApplication()
   })
 }
