@@ -4,7 +4,7 @@
   "license": "MIT",
   "scripts": {
     "commitlint": "commitlint",
-    "harness-cli": "bun nx run cli:run --",
+    "ready-for-agent": "bun nx run ready-for-agent:run --",
     "knip": "knip --no-config-hints",
     "lint": "biome check .",
     "prepare": "bash scripts/install-git-hooks.sh && effect-tsgo patch && node scripts/fix-bun-typescript-for-nx.mjs"

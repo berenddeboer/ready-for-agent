@@ -23,8 +23,8 @@
       "entry": ["test/**/*.test.ts"],
       "project": ["src/**/*.ts", "test/**/*.ts"]
     },
-    "apps/cli": {
-      "entry": ["src/**/*.test.ts"],
+    "apps/ready-for-agent": {
+      "entry": ["src/**/*.test.ts", "src/main.ts"],
       "project": ["src/**/*.ts"]
     },
     "packages/github-service": {
