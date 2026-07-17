@@ -23,7 +23,7 @@ The GraphQL credential query and mutation use Keymaxxer metadata only; they neve
 
 ## Keyholder
 
-The MCP launcher preserves the known-good development precedence: `KEYMAXXER_ENTRYPOINT`, then `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present, then the installed `keymaxxer` command. The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values.
+The MCP launcher resolves Keymaxxer as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise the installed `keymaxxer` command on PATH. There is no hardcoded developer contrib path. The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values.
 
 ## Startup
 
