@@ -53,6 +53,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           terminalChecks: [],
           mergeability: "mergeable",
           baseRefName: "main",
+          headPushedAt: null,
         }),
       getPullRequestLifecycleStatus: () => Effect.succeed(status),
       markPullRequestReadyForReview: () => Effect.void,

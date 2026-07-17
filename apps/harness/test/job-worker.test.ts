@@ -139,6 +139,7 @@ const defaultGithubLayer = Layer.succeed(GitHubService, {
       terminalChecks: [],
       mergeability: "mergeable",
       baseRefName: "main",
+      headPushedAt: null,
     }),
   getPullRequestLifecycleStatus: () =>
     Effect.succeed({ _tag: "open" as const }),
@@ -392,6 +393,7 @@ describe("Job worker", () => {
           terminalChecks: [],
           mergeability: "mergeable",
           baseRefName: "main",
+          headPushedAt: null,
         }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),

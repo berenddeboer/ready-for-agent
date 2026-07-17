@@ -25,7 +25,11 @@ import {
 import { describe, expect, it } from "bun:test"
 
 const repository = makeRepositoryRecord({ localPath: "/repos/widgets" })
-const mergeable = { mergeability: "mergeable", baseRefName: "main" } as const
+const mergeable = {
+  mergeability: "mergeable",
+  baseRefName: "main",
+  headPushedAt: null,
+} as const
 
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
@@ -135,6 +139,33 @@ describe("PR status check steps", () => {
     expect(requestedBranch).toBe(`rfa/acme-widgets/42/${context.workItemId}`)
   })
 
+  it("forwards no_checks headPushedAt from the GitHub check snapshot", async () => {
+    const headPushedAt = new Date("2026-07-17T10:00:00.000Z")
+    const status = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        return yield* watchPrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "no_checks",
+              ...mergeable,
+              headPushedAt,
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(status).toEqual({
+      _tag: "no_checks",
+      headPushedAt,
+    })
+  })
+
   it("hands off unhandled green results while the aggregate is still pending", async () => {
     const status = await Effect.runPromise(
       Effect.gen(function* () {
@@ -179,6 +210,7 @@ describe("PR status check steps", () => {
               _tag: "failed",
               mergeability: "conflicting",
               baseRefName: "develop",
+              headPushedAt: null,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "lint", outcome: "red" },
                 { externalId: "checkrun:2", name: "review", outcome: "green" },
@@ -203,6 +235,7 @@ describe("PR status check steps", () => {
         _tag: "pending",
         mergeability: "unknown",
         baseRefName: "main",
+        headPushedAt: null,
         terminalChecks: [
           { externalId: "checkrun:1", name: "review", outcome: "green" },
         ],

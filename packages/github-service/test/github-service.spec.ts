@@ -174,6 +174,7 @@ describe("GitHubService live implementation", () => {
         terminalChecks: [],
         mergeability: "mergeable",
         baseRefName: "main",
+        headPushedAt: null,
       })
     })
   }
@@ -210,6 +211,7 @@ describe("GitHubService live implementation", () => {
       terminalChecks: [],
       mergeability: "unknown",
       baseRefName: null,
+      headPushedAt: null,
     })
     expect(
       await Effect.runPromise(
@@ -219,7 +221,142 @@ describe("GitHubService live implementation", () => {
       _tag: "no_checks",
       mergeability: "conflicting",
       baseRefName: "develop",
+      headPushedAt: null,
     })
+  })
+
+  it("reads the current head commit pushedDate as headPushedAt", async () => {
+    let request: unknown
+    const service = makeGitHubService({
+      query: (input) => {
+        request = input
+        return Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  baseRefName: "main",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: null,
+                  commits: {
+                    nodes: [
+                      {
+                        commit: {
+                          oid: "abc123",
+                          pushedDate: "2026-07-17T12:00:00.000Z",
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          },
+        }) as never
+      },
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "branch"),
+      ),
+    ).toEqual({
+      _tag: "no_checks",
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: new Date("2026-07-17T12:00:00.000Z"),
+    })
+    expect(request).toMatchObject({
+      repository: {
+        pullRequests: {
+          nodes: {
+            commits: {
+              __args: { last: 1 },
+              nodes: {
+                commit: {
+                  oid: true,
+                  pushedDate: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+  })
+
+  it("ignores invalid, mismatched, null, and malformed head push timestamps", async () => {
+    const cases = [
+      {
+        headRefOid: "abc123",
+        commits: {
+          nodes: [
+            {
+              commit: {
+                oid: "other",
+                pushedDate: "2026-07-17T12:00:00.000Z",
+              },
+            },
+          ],
+        },
+      },
+      {
+        headRefOid: "abc123",
+        commits: {
+          nodes: [{ commit: { oid: "abc123", pushedDate: null } }],
+        },
+      },
+      {
+        headRefOid: "abc123",
+        commits: {
+          nodes: [{ commit: { oid: "abc123", pushedDate: "not-a-date" } }],
+        },
+      },
+      {
+        headRefOid: "abc123",
+        commits: { nodes: [] },
+      },
+      {
+        headRefOid: "abc123",
+        commits: null,
+      },
+    ] as const
+
+    for (const pullRequest of cases) {
+      const service = makeGitHubService({
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    state: "OPEN",
+                    merged: false,
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: null,
+                    ...pullRequest,
+                  },
+                ],
+              },
+            },
+          }) as never,
+      })
+
+      expect(
+        await Effect.runPromise(
+          service.getPullRequestCheckStatus(repository, "branch"),
+        ),
+      ).toEqual({
+        _tag: "no_checks",
+        mergeability: "mergeable",
+        baseRefName: "main",
+        headPushedAt: null,
+      })
+    }
   })
 
   it("reports pull request lifecycle status for open, merged, closed, and missing PRs", async () => {
@@ -322,6 +459,7 @@ describe("GitHubService live implementation", () => {
       _tag: "closed",
       mergeability: "unknown",
       baseRefName: "main",
+      headPushedAt: null,
     })
     expect(
       await Effect.runPromise(
@@ -332,6 +470,7 @@ describe("GitHubService live implementation", () => {
       terminalChecks: [],
       mergeability: "unknown",
       baseRefName: "main",
+      headPushedAt: null,
     })
   })
 
@@ -423,6 +562,7 @@ describe("GitHubService live implementation", () => {
       _tag: "pending",
       mergeability: "mergeable",
       baseRefName: "main",
+      headPushedAt: null,
       terminalChecks: [
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
         { externalId: "actions-job:101", name: "lint", outcome: "red" },
@@ -567,6 +707,7 @@ describe("GitHubService live implementation", () => {
       _tag: "failed",
       mergeability: "mergeable",
       baseRefName: "main",
+      headPushedAt: null,
       terminalChecks: [
         { externalId: "actions-job:100", name: "lint", outcome: "red" },
         { externalId: "actions-job:101", name: "lint", outcome: "green" },
@@ -608,6 +749,7 @@ describe("GitHubService live implementation", () => {
       _tag: "no_checks",
       mergeability: "mergeable",
       baseRefName: "main",
+      headPushedAt: null,
     })
     expect(attempts).toBe(3)
   })

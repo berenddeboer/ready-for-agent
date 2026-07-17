@@ -296,8 +296,31 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, model,
 
 const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
 const PR_STATUS_CHECKS_MIN_GREEN_WAIT = Duration.seconds(60)
+/**
+ * When a resumed Work Item sees `no_checks` for a PR head that has been
+ * unchanged at least this long, skip the normal grace and confirmation polls.
+ * Intentionally longer than the normal 60s + 30s sequence.
+ */
+const PR_STATUS_CHECKS_STALE_HEAD_NO_CHECK_WAIT = Duration.minutes(2)
 /** Stored on a green watch Step Run that requeues for one confirmation poll. */
 const PR_STATUS_CHECKS_GREEN_CONFIRMING = "pr_checks_green_confirming"
+
+const isStaleNoChecksHead = (
+  headPushedAt: Date | null,
+  nowMs: number,
+): boolean => {
+  if (headPushedAt === null) {
+    return false
+  }
+  const pushedMs = headPushedAt.getTime()
+  if (!Number.isFinite(pushedMs) || pushedMs > nowMs) {
+    return false
+  }
+  return (
+    nowMs - pushedMs >=
+    Duration.toMillis(PR_STATUS_CHECKS_STALE_HEAD_NO_CHECK_WAIT)
+  )
+}
 
 const nextOperationalStep = (
   step: OperationalLifecycleStep,
@@ -831,7 +854,10 @@ export const makeWorkItemLifecycleLive = (
             return steps.watchPrStatusChecks(context).pipe(
               Effect.flatMap((status) =>
                 Effect.gen(function* () {
-                  if (typeof status === "object") {
+                  if (
+                    typeof status === "object" &&
+                    status._tag === "conflict"
+                  ) {
                     return {
                       handledCheckIds: status.retiredCheckIds,
                       transition: {
@@ -865,9 +891,20 @@ export const makeWorkItemLifecycleLive = (
                       },
                     }
                   }
-                  // no_checks: wait the grace before treating absence as green
-                  if (status === "no_checks") {
+                  const isNoChecks =
+                    typeof status === "object" && status._tag === "no_checks"
+                  // no_checks: wait the grace before treating absence as green,
+                  // unless the PR head was already pushed long enough ago that a
+                  // harness restart should not re-run the full confirmation sequence.
+                  if (isNoChecks) {
                     const now = yield* Clock.currentTimeMillis
+                    if (isStaleNoChecksHead(status.headPushedAt, now)) {
+                      return {
+                        transition: {
+                          nextState: "mark_pr_ready_for_review" as const,
+                        },
+                      }
+                    }
                     const watchedMs = Math.max(0, now - workItem.state_ready_at)
                     if (
                       watchedMs <
@@ -884,7 +921,7 @@ export const makeWorkItemLifecycleLive = (
                   // succeeded (and no_checks after grace): require two consecutive
                   // green polls so a brief SUCCESS cannot race into merge while a
                   // second check is still starting.
-                  if (status === "succeeded" || status === "no_checks") {
+                  if (status === "succeeded" || isNoChecks) {
                     const priorNote = yield* previousWatchPollNote(workItem.id)
                     if (priorNote !== PR_STATUS_CHECKS_GREEN_CONFIRMING) {
                       return {
