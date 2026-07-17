@@ -215,6 +215,7 @@ describe("WorkItemLifecycle", () => {
             defaultVariant: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
+            maxConcurrentOpencodeSessions: 2,
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -241,6 +242,7 @@ describe("WorkItemLifecycle", () => {
             defaultVariant: "low",
             reviewModel: null,
             reviewVariant: null,
+            maxConcurrentOpencodeSessions: 2,
           })
           yield* db.updateRepositorySettings({
             repositoryId: repository.id,
@@ -276,6 +278,7 @@ describe("WorkItemLifecycle", () => {
             defaultVariant: "high",
             reviewModel: null,
             reviewVariant: null,
+            maxConcurrentOpencodeSessions: 2,
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -1773,6 +1776,7 @@ describe("WorkItemLifecycle", () => {
             defaultVariant: "high",
             reviewModel: null,
             reviewVariant: null,
+            maxConcurrentOpencodeSessions: 2,
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)

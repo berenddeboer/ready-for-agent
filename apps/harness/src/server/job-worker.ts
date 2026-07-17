@@ -5,6 +5,7 @@ import {
   Effect,
   Layer,
   Option,
+  Ref,
   Schedule,
   Schema,
 } from "effect"
@@ -437,58 +438,105 @@ const claimAndRunRefreshJob = (
     return "busy" as const
   })
 
-const claimAndRunLifecycleJob = (
+/**
+ * Claim-and-fork lifecycle Step Runs so multiple Work Items can progress in
+ * parallel. Concurrency is bounded from Config: enough fibers that OpenCode
+ * can reach max concurrent sessions, plus headroom for non-OpenCode steps.
+ * OpenCode spawn concurrency is capped separately at the Opencode boundary.
+ */
+const runLifecycleClaimLoop = (
+  generation: number,
+  idlePollInterval: Duration.Duration,
   visibilityTimeout: Duration.Duration,
   orphanRecoveryInterval: Duration.Duration,
-) => {
-  let nextOrphanRecoveryAt = 0
-
-  return Effect.gen(function* () {
+) =>
+  Effect.gen(function* () {
     const queue = yield* QueueService
     const lifecycle = yield* WorkItemLifecycle
+    const db = yield* DbService
+    const activeRuns = yield* Ref.make(0)
+    const sleepIdle = yield* Schedule.toStepWithSleep(
+      Schedule.spaced(idlePollInterval).pipe(Schedule.jittered),
+    )
+    const sleepBusy = yield* Schedule.toStepWithSleep(
+      Schedule.spaced(Duration.millis(50)),
+    )
+    let nextOrphanRecoveryAt = 0
     const lifecycleJobVisibilityTimeout = Duration.millis(
       Math.max(
         ...Object.values(lifecycle.maxDurations).map(Duration.toMillis),
       ) + Duration.toMillis(LIFECYCLE_JOB_VISIBILITY_GRACE),
     )
 
-    const now = yield* Clock.currentTimeMillis
-    if (now >= nextOrphanRecoveryAt) {
-      yield* lifecycle.recoverOrphanedStepRuns
-      nextOrphanRecoveryAt = now + Duration.toMillis(orphanRecoveryInterval)
+    while (generation === currentWorkerGeneration()) {
+      const now = yield* Clock.currentTimeMillis
+      if (now >= nextOrphanRecoveryAt) {
+        yield* lifecycle.recoverOrphanedStepRuns.pipe(
+          Effect.catch((error) =>
+            Effect.logError("Lifecycle orphan recovery failed", {
+              error: formatLogError(error),
+            }),
+          ),
+        )
+        nextOrphanRecoveryAt = now + Duration.toMillis(orphanRecoveryInterval)
+      }
+
+      const maxSessions = yield* db.getConfig.pipe(
+        Effect.map((config) =>
+          Math.max(1, config.maxConcurrentOpencodeSessions),
+        ),
+        Effect.orElseSucceed(() => 2),
+      )
+      // Headroom so non-OpenCode steps are not fully starved when OpenCode is saturated.
+      const maxConcurrentStepRuns = maxSessions * 2
+      const active = yield* Ref.get(activeRuns)
+      if (active >= maxConcurrentStepRuns) {
+        yield* sleepBusy(undefined).pipe(Effect.asVoid)
+        continue
+      }
+
+      const claimed = yield* QueueService.claim(
+        JOBS_QUEUE,
+        WorkItemStepJob,
+        visibilityTimeout,
+      ).pipe(
+        Effect.catchTag("PayloadParseError", (error) =>
+          queue
+            .fail(error.jobId, { retryable: false })
+            .pipe(Effect.as(Option.none())),
+        ),
+        Effect.catch((error) =>
+          Effect.logError("Lifecycle job queue poll failed", {
+            error: formatLogError(error),
+          }).pipe(Effect.as(Option.none())),
+        ),
+      )
+
+      if (Option.isNone(claimed)) {
+        yield* sleepIdle(undefined).pipe(Effect.asVoid)
+        continue
+      }
+
+      const job = claimed.value
+      yield* queue.extendVisibility(job.jobId, lifecycleJobVisibilityTimeout)
+      yield* Ref.update(activeRuns, (n) => n + 1)
+      yield* Effect.gen(function* () {
+        const result = yield* Effect.result(
+          lifecycle.runStep(job.payload.stepRunId),
+        )
+        if (result._tag === "Failure") {
+          yield* Effect.logError("Work Item Lifecycle Job failed", {
+            jobId: job.jobId,
+            stepRunId: job.payload.stepRunId,
+            error: formatLogError(result.failure),
+          })
+        }
+      }).pipe(
+        Effect.ensuring(Ref.update(activeRuns, (n) => Math.max(0, n - 1))),
+        Effect.forkDetach({ startImmediately: true }),
+      )
     }
-
-    const claimed = yield* QueueService.claim(
-      JOBS_QUEUE,
-      WorkItemStepJob,
-      visibilityTimeout,
-    ).pipe(
-      Effect.catchTag("PayloadParseError", (error) =>
-        queue
-          .fail(error.jobId, { retryable: false })
-          .pipe(Effect.as(Option.none())),
-      ),
-    )
-
-    if (Option.isNone(claimed)) return "idle" as const
-
-    const job = claimed.value
-    yield* queue.extendVisibility(job.jobId, lifecycleJobVisibilityTimeout)
-    const result = yield* Effect.result(
-      lifecycle.runStep(job.payload.stepRunId),
-    )
-
-    if (result._tag === "Failure") {
-      yield* Effect.logError("Work Item Lifecycle Job failed", {
-        jobId: job.jobId,
-        stepRunId: job.payload.stepRunId,
-        error: formatLogError(result.failure),
-      })
-    }
-
-    return "busy" as const
   })
-}
 
 /**
  * Host lifecycle and Issue polling workers as independent fibers that share one
@@ -508,11 +556,11 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
 
     yield* Effect.all(
       [
-        runQueuePollLoop(
+        runLifecycleClaimLoop(
           generation,
           idlePollInterval,
-          claimAndRunLifecycleJob(visibilityTimeout, orphanRecoveryInterval),
-          "Lifecycle job queue",
+          visibilityTimeout,
+          orphanRecoveryInterval,
         ),
         runQueuePollLoop(
           generation,

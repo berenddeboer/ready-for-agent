@@ -351,15 +351,16 @@ export const DbServiceLive = Layer.effect(
           .unsafe(
             `INSERT OR IGNORE INTO config (
                id, default_model, default_variant, review_model, review_variant,
-               created_at, updated_at
-             ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', NULL, NULL, ?, ?)`,
+               max_concurrent_opencode_sessions, created_at, updated_at
+             ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', NULL, NULL, 2, ?, ?)`,
             [now, now],
           )
           .pipe(Effect.mapError(toDatabaseError))
 
         const rows = yield* sql
           .unsafe(
-            `SELECT default_model, default_variant, review_model, review_variant
+            `SELECT default_model, default_variant, review_model, review_variant,
+                    max_concurrent_opencode_sessions
              FROM config WHERE id = 'default'`,
           )
           .pipe(Effect.mapError(toDatabaseError))
@@ -369,6 +370,7 @@ export const DbServiceLive = Layer.effect(
               default_variant: string
               review_model: string | null
               review_variant: string | null
+              max_concurrent_opencode_sessions: number
             }
           | undefined
         if (!row) {
@@ -381,6 +383,7 @@ export const DbServiceLive = Layer.effect(
           defaultVariant: row.default_variant,
           reviewModel: row.review_model,
           reviewVariant: row.review_variant,
+          maxConcurrentOpencodeSessions: row.max_concurrent_opencode_sessions,
         }
       },
     )
@@ -409,26 +412,40 @@ export const DbServiceLive = Layer.effect(
         const reviewVariant = yield* normalizeOptionalConfigSetting(
           input.reviewVariant,
         )
+        if (
+          !Number.isSafeInteger(input.maxConcurrentOpencodeSessions) ||
+          input.maxConcurrentOpencodeSessions < 1
+        ) {
+          return yield* new InvalidConfigInputError({
+            field: "maxConcurrentOpencodeSessions",
+            message: "maxConcurrentOpencodeSessions must be a positive integer",
+          })
+        }
+        const maxConcurrentOpencodeSessions =
+          input.maxConcurrentOpencodeSessions
 
         const now = Date.now()
         const rows = yield* sql
           .unsafe(
             `INSERT INTO config (
                id, default_model, default_variant, review_model, review_variant,
-               created_at, updated_at
-             ) VALUES ('default', ?, ?, ?, ?, ?, ?)
+               max_concurrent_opencode_sessions, created_at, updated_at
+             ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET
                default_model = excluded.default_model,
                default_variant = excluded.default_variant,
                review_model = excluded.review_model,
                review_variant = excluded.review_variant,
+               max_concurrent_opencode_sessions = excluded.max_concurrent_opencode_sessions,
                updated_at = excluded.updated_at
-             RETURNING default_model, default_variant, review_model, review_variant`,
+             RETURNING default_model, default_variant, review_model, review_variant,
+                       max_concurrent_opencode_sessions`,
             [
               defaultModel,
               defaultVariant,
               reviewModel,
               reviewVariant,
+              maxConcurrentOpencodeSessions,
               now,
               now,
             ],
@@ -440,6 +457,7 @@ export const DbServiceLive = Layer.effect(
               default_variant: string
               review_model: string | null
               review_variant: string | null
+              max_concurrent_opencode_sessions: number
             }
           | undefined
         if (!row) {
@@ -452,6 +470,7 @@ export const DbServiceLive = Layer.effect(
           defaultVariant: row.default_variant,
           reviewModel: row.review_model,
           reviewVariant: row.review_variant,
+          maxConcurrentOpencodeSessions: row.max_concurrent_opencode_sessions,
         }
       })
 
