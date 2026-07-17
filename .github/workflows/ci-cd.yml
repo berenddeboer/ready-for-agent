@@ -1,10 +1,9 @@
-name: CI
+name: CI/CD
 
 on:
   push:
     branches:
       - main
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -25,6 +24,7 @@ jobs:
           bun-version: latest
 
       # Keep this in sync with anomalyco/opencode/github's setup steps.
+      # Required when affected packages run OpenCode integration tests.
       - name: Install OpenCode
         run: curl -fsSL https://opencode.ai/install | bash
       - name: Add OpenCode to PATH
@@ -41,7 +41,7 @@ jobs:
 
       # Prepend any command with "nx record --" to record its logs to Nx Cloud
       # - run: bun nx record -- echo Hello World
-      # PR/main: affected quality gates only. Manual release dispatch: full suite.
+      # Push to main: affected quality gates. Manual release dispatch: full suite.
       - name: Quality gates
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
