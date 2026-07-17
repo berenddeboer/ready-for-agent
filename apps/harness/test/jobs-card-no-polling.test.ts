@@ -37,7 +37,8 @@ describe("JobsCard live updates", () => {
     )
     const stateLabelIndex = jobsCard.indexOf("{workItem.stateLabel}")
     expect(pauseIndex).toBeGreaterThan(-1)
-    expect(stateLabelIndex).toBeGreaterThan(pauseIndex)
+    expect(stateLabelIndex).toBeGreaterThan(-1)
+    expect(pauseIndex).toBeGreaterThan(stateLabelIndex)
   })
 
   test("links issue identity to the Issue store URL when available", () => {

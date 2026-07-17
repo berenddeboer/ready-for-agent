@@ -1561,10 +1561,10 @@ function JobsCard() {
                   )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <WorkItemPauseButton workItem={workItem} />
                   <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
                     {workItem.stateLabel}
                   </span>
+                  <WorkItemPauseButton workItem={workItem} />
                 </div>
               </div>
               {workItem.sessionId !== null && workItem.sessionId !== "" && (
