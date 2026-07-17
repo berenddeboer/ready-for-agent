@@ -20,6 +20,8 @@ import {
   makeJobId,
 } from "@ready-for-agent/queue-service"
 import {
+  STEP_RUN_REASON,
+  WAITING_FOR_OPENCODE_SESSION_MESSAGE,
   WorkItemLifecycle,
   type WorkItemLifecycleShape,
   WorkItemNotFoundError,
@@ -1496,6 +1498,68 @@ describe("GraphQL API", () => {
                 phase: "GITHUB_STATUS_CHECKS",
                 label: "GitHub status checks: Needs human",
                 status: "NEEDS_HUMAN",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  test("projects running Step Run waiting for OpenCode session as Queued", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const waiting = {
+      ...workItem,
+      state: "implement",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "implement",
+          status: "running",
+          reasonCode: STEP_RUN_REASON.waitingForOpencodeSession,
+          reasonMessage: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([waiting]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            stateLabel status statusLabel statusMessage
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            stateLabel: "Build",
+            status: "QUEUED",
+            statusLabel: "Queued",
+            statusMessage: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+            lifecycleLabels: [
+              {
+                phase: "IMPLEMENT",
+                label: "Build: Queued",
+                status: "QUEUED",
               },
             ],
           },

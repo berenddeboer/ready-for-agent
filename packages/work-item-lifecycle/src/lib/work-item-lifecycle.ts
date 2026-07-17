@@ -44,6 +44,7 @@ import {
   WorkItemTerminalError,
 } from "./errors.js"
 import { type LifecycleStepContext, LifecycleSteps } from "./lifecycle-steps.js"
+import { CurrentStepRun } from "./opencode-session-limiter.js"
 import {
   PreCommitHookFailedError,
   PreCommitStageError,
@@ -1886,7 +1887,13 @@ export const makeWorkItemLifecycleLive = (
                       Effect.raceFirst(
                         Effect.suspend(() =>
                           runHandler(stepRun.step, context, workItem),
-                        ).pipe(Effect.timeout(maxDuration)),
+                        ).pipe(
+                          Effect.provideService(CurrentStepRun, {
+                            stepRunId: afterStart.id,
+                            repositoryId: workItem.repository_id,
+                          }),
+                          Effect.timeout(maxDuration),
+                        ),
                         Deferred.await(cancel).pipe(
                           Effect.andThen(Effect.interrupt),
                         ),
