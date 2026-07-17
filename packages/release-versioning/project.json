@@ -20,6 +20,13 @@
         "cwd": "{workspaceRoot}",
         "command": "bun --conditions @ready-for-agent/source packages/release-versioning/src/bin/compute-next-version.ts"
       }
+    },
+    "apply-publish-versions": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "bun --conditions @ready-for-agent/source packages/release-versioning/src/bin/apply-publish-versions.ts"
+      }
     }
   }
 }

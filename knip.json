@@ -64,6 +64,10 @@
     "packages/db": {
       "project": ["src/**/*.{ts,tsx}"]
     },
+    "packages/release-versioning": {
+      "entry": ["src/bin/**/*.ts", "src/index.ts", "test/**/*.{test,spec}.ts"],
+      "project": ["src/**/*.ts", "test/**/*.ts"]
+    },
     "packages/*": {
       "entry": ["test/**/*.{test,spec}.ts"],
       "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
