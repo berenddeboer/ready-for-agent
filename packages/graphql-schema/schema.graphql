@@ -199,4 +199,5 @@ type Subscription {
   repositoriesChanged: Boolean!
   issuesChanged(repositoryId: ID!): Boolean!
   repositoryIssuesChanged: ID!
+  repositoryWorkItemsChanged: ID!
 }

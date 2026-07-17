@@ -488,6 +488,9 @@ export const makeWorkItemLifecycleLive = (
       const db = yield* DbService
       const queue = yield* QueueService
       const steps = yield* LifecycleSteps
+      const notifyWorkItemsChanged = (
+        repositoryId: string,
+      ): Effect.Effect<void> => db.notifyWorkItemsChanged(repositoryId)
       const maxDurations: LifecycleMaxDurations = {
         ...DEFAULT_LIFECYCLE_MAX_DURATIONS,
         ...config.maxDurations,
@@ -1225,7 +1228,7 @@ export const makeWorkItemLifecycleLive = (
             )
             .pipe(Effect.catch(catchTransactionError))
 
-          return yield* getWorkItem(workItem.id).pipe(
+          const completed = yield* getWorkItem(workItem.id).pipe(
             Effect.catchTag(
               "WorkItemNotFoundError",
               (error) =>
@@ -1235,6 +1238,8 @@ export const makeWorkItemLifecycleLive = (
                 }),
             ),
           )
+          yield* notifyWorkItemsChanged(workItem.repository_id)
+          return completed
         })
 
       const completeFailedStep = (input: {
@@ -1279,7 +1284,7 @@ export const makeWorkItemLifecycleLive = (
             )
             .pipe(Effect.catch(catchTransactionError))
 
-          return yield* getWorkItem(workItem.id).pipe(
+          const failed = yield* getWorkItem(workItem.id).pipe(
             Effect.catchTag(
               "WorkItemNotFoundError",
               (error) =>
@@ -1289,6 +1294,8 @@ export const makeWorkItemLifecycleLive = (
                 }),
             ),
           )
+          yield* notifyWorkItemsChanged(workItem.repository_id)
+          return failed
         })
 
       const completeInterruptedStep = (input: {
@@ -1337,6 +1344,11 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
             .pipe(Effect.catch(catchTransactionError))
+
+          const workItem = yield* loadWorkItemRow(stepRun.work_item_id)
+          if (workItem) {
+            yield* notifyWorkItemsChanged(workItem.repository_id)
+          }
         })
 
       const acknowledgeStaleDelivery = (
@@ -1379,7 +1391,7 @@ export const makeWorkItemLifecycleLive = (
                      )
                  )
                )
-             RETURNING id`,
+             RETURNING id, work_item_id`,
             [
               now,
               STEP_RUN_REASON.interrupted,
@@ -1390,7 +1402,22 @@ export const makeWorkItemLifecycleLive = (
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly {
           readonly id: string
+          readonly work_item_id: string
         }[]
+        if (rows.length > 0) {
+          const repositoryIds = new Set<string>()
+          for (const row of rows) {
+            const workItem = yield* loadWorkItemRow(row.work_item_id)
+            if (workItem) {
+              repositoryIds.add(workItem.repository_id)
+            }
+          }
+          yield* Effect.forEach(
+            [...repositoryIds],
+            (repositoryId) => notifyWorkItemsChanged(repositoryId),
+            { discard: true },
+          )
+        }
         return rows.length
       })
 
@@ -1493,6 +1520,8 @@ export const makeWorkItemLifecycleLive = (
                 }
                 return { _tag: "noop" as const }
               }
+
+              yield* notifyWorkItemsChanged(workItem.repository_id)
 
               const maxDuration = maxDurations[stepRun.step]
               const context: LifecycleStepContext = {
@@ -1712,7 +1741,7 @@ export const makeWorkItemLifecycleLive = (
             }),
           )
 
-        return yield* getWorkItem(workItemId).pipe(
+        const paused = yield* getWorkItem(workItemId).pipe(
           Effect.catchTag(
             "WorkItemNotFoundError",
             (error) =>
@@ -1722,6 +1751,8 @@ export const makeWorkItemLifecycleLive = (
               }),
           ),
         )
+        yield* notifyWorkItemsChanged(paused.repositoryId)
+        return paused
       })
 
       const start = Effect.fn("WorkItemLifecycle.start")(function* (
@@ -1871,7 +1902,7 @@ export const makeWorkItemLifecycleLive = (
             }),
           )
 
-        return yield* getWorkItem(workItemId).pipe(
+        const started = yield* getWorkItem(workItemId).pipe(
           Effect.catchTag(
             "WorkItemNotFoundError",
             (error) =>
@@ -1881,6 +1912,8 @@ export const makeWorkItemLifecycleLive = (
               }),
           ),
         )
+        yield* notifyWorkItemsChanged(started.repositoryId)
+        return started
       })
 
       const toLifecycleStepContext = (
@@ -2097,7 +2130,7 @@ export const makeWorkItemLifecycleLive = (
             }),
           )
 
-        return yield* getWorkItem(workItemId).pipe(
+        const abandoned = yield* getWorkItem(workItemId).pipe(
           Effect.catchTag(
             "WorkItemNotFoundError",
             (error) =>
@@ -2107,6 +2140,8 @@ export const makeWorkItemLifecycleLive = (
               }),
           ),
         )
+        yield* notifyWorkItemsChanged(abandoned.repositoryId)
+        return abandoned
       })
 
       const continueAfterHumanPrOutcome = Effect.fn(
@@ -2222,7 +2257,7 @@ export const makeWorkItemLifecycleLive = (
             ),
           )
 
-        return yield* getWorkItem(workItemId).pipe(
+        const resumed = yield* getWorkItem(workItemId).pipe(
           Effect.catchTag(
             "WorkItemNotFoundError",
             (error) =>
@@ -2232,6 +2267,8 @@ export const makeWorkItemLifecycleLive = (
               }),
           ),
         )
+        yield* notifyWorkItemsChanged(resumed.repositoryId)
+        return resumed
       })
 
       const reset = Effect.fn("WorkItemLifecycle.reset")(function* (
@@ -2397,6 +2434,7 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
 
+          yield* notifyWorkItemsChanged(workItem.repository_id)
           return workItem.id as WorkItemId
         }).pipe(
           Effect.ensuring(
@@ -2568,7 +2606,7 @@ export const makeWorkItemLifecycleLive = (
             }),
           )
 
-        return yield* getWorkItem(workItemId).pipe(
+        const retried = yield* getWorkItem(workItemId).pipe(
           Effect.catchTag(
             "WorkItemNotFoundError",
             (error) =>
@@ -2578,6 +2616,8 @@ export const makeWorkItemLifecycleLive = (
               }),
           ),
         )
+        yield* notifyWorkItemsChanged(retried.repositoryId)
+        return retried
       })
 
       const createWorkItem = (
@@ -2743,7 +2783,7 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
 
-          return yield* getWorkItem(createdId).pipe(
+          const created = yield* getWorkItem(createdId).pipe(
             Effect.catchTag(
               "WorkItemNotFoundError",
               (error) =>
@@ -2753,6 +2793,8 @@ export const makeWorkItemLifecycleLive = (
                 }),
             ),
           )
+          yield* notifyWorkItemsChanged(created.repositoryId)
+          return created
         })
 
       const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(

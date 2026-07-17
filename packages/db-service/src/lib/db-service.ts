@@ -208,7 +208,9 @@ const toDatabaseError = (error: SqlError) =>
 export interface DbServiceShape {
   readonly repositoryChanges: Stream.Stream<void>
   readonly issueChanges: Stream.Stream<string>
+  readonly workItemChanges: Stream.Stream<string>
   readonly notifyIssuesChanged: (repositoryId: string) => Effect.Effect<void>
+  readonly notifyWorkItemsChanged: (repositoryId: string) => Effect.Effect<void>
   readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
   readonly updateConfig: (
     input: UpdateConfigInput,
@@ -285,10 +287,14 @@ const repositoryChangesKey = Symbol.for(
   "@ready-for-agent/db-service/repository-changes",
 )
 const issueChangesKey = Symbol.for("@ready-for-agent/db-service/issue-changes")
+const workItemChangesKey = Symbol.for(
+  "@ready-for-agent/db-service/work-item-changes",
+)
 
 type InvalidationGlobal = typeof globalThis & {
   [repositoryChangesKey]?: PubSub.PubSub<void>
   [issueChangesKey]?: PubSub.PubSub<string>
+  [workItemChangesKey]?: PubSub.PubSub<string>
 }
 
 const getRepositoryChanges = (): PubSub.PubSub<void> => {
@@ -303,6 +309,12 @@ const getIssueChanges = (): PubSub.PubSub<string> => {
   return globalState[issueChangesKey]
 }
 
+const getWorkItemChanges = (): PubSub.PubSub<string> => {
+  const globalState = globalThis as InvalidationGlobal
+  globalState[workItemChangesKey] ??= Effect.runSync(PubSub.unbounded<string>())
+  return globalState[workItemChangesKey]
+}
+
 const publishRepositoryChanged = (): Effect.Effect<void> =>
   PubSub.publish(getRepositoryChanges(), undefined).pipe(Effect.asVoid)
 
@@ -312,12 +324,19 @@ const publishIssuesChanged = (repositoryId: string): Effect.Effect<void> =>
     yield* PubSub.publish(getRepositoryChanges(), undefined)
   }).pipe(Effect.asVoid)
 
+const publishWorkItemsChanged = (repositoryId: string): Effect.Effect<void> =>
+  PubSub.publish(getWorkItemChanges(), repositoryId).pipe(Effect.asVoid)
+
 const repositoryChangesStream: Stream.Stream<void> = Stream.fromPubSub(
   getRepositoryChanges(),
 )
 
 const issueChangesStream: Stream.Stream<string> = Stream.fromPubSub(
   getIssueChanges(),
+)
+
+const workItemChangesStream: Stream.Stream<string> = Stream.fromPubSub(
+  getWorkItemChanges(),
 )
 
 export const DbServiceLive = Layer.effect(
@@ -770,6 +789,7 @@ export const DbServiceLive = Layer.effect(
             ),
           )
         yield* publishRepositoryChanged()
+        yield* publishWorkItemsChanged(repositoryId)
       })
 
     const storeIssue = (
@@ -1135,10 +1155,16 @@ export const DbServiceLive = Layer.effect(
     const notifyIssuesChanged = (repositoryId: string): Effect.Effect<void> =>
       publishIssuesChanged(repositoryId)
 
+    const notifyWorkItemsChanged = (
+      repositoryId: string,
+    ): Effect.Effect<void> => publishWorkItemsChanged(repositoryId)
+
     return DbService.of({
       repositoryChanges: repositoryChangesStream,
       issueChanges: issueChangesStream,
+      workItemChanges: workItemChangesStream,
       notifyIssuesChanged,
+      notifyWorkItemsChanged,
       getConfig,
       updateConfig,
       addRepository,

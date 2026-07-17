@@ -27,7 +27,9 @@ export const stubDbService = (
 ): DbServiceShape => ({
   repositoryChanges: Stream.never,
   issueChanges: Stream.never,
+  workItemChanges: Stream.never,
   notifyIssuesChanged: () => Effect.void,
+  notifyWorkItemsChanged: () => Effect.void,
   getConfig: unused(),
   updateConfig: unused,
   addRepository: unused,

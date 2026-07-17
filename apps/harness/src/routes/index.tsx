@@ -9,6 +9,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
+import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -372,6 +373,19 @@ function RepositoryCards() {
       queries: {
         repositories: repositoriesQuery,
         issues: issuesQuery,
+        workItems: workItemsQuery,
+      },
+      signal: controller.signal,
+    })
+    return () => controller.abort()
+  }, [queryClient])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void followRepositoryWorkItemsLive({
+      getRepositoryIds: () => repositoryIdsRef.current,
+      queryClient,
+      queries: {
         workItems: workItemsQuery,
       },
       signal: controller.signal,
@@ -1442,17 +1456,7 @@ function RepositoryIssueRow({
 function JobsCard() {
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const workItemQueries = useQueries({
-    queries: repositories.map((repository) => ({
-      ...workItemsQuery(repository.id),
-      refetchInterval: ({ state }: { state: { data: unknown } }) => {
-        const items = state.data as readonly WorkItem[] | undefined
-        return items?.some(
-          (item) => item.status === "QUEUED" || item.status === "RUNNING",
-        )
-          ? 1_000
-          : false
-      },
-    })),
+    queries: repositories.map((repository) => workItemsQuery(repository.id)),
   })
 
   const repositoryById = new Map(
