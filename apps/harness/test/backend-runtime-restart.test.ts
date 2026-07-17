@@ -21,6 +21,19 @@ type TestPlugin = {
 const testPlugin = (delay = 1) =>
   backendRuntimeRestart(workspaceRoot, delay) as unknown as TestPlugin
 
+const waitFor = async (
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> => {
+  const startedAt = Date.now()
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for condition`)
+    }
+    await Bun.sleep(5)
+  }
+}
+
 afterEach(async () => {
   await disposeDevelopmentApplication()
 })
@@ -81,7 +94,7 @@ describe("backend runtime restart", () => {
       file: resolve(workspaceRoot, "packages/db-service/src/lib/types.ts"),
     })
 
-    await Bun.sleep(10)
+    await waitFor(() => restarts === 1)
     expect(restarts).toBe(1)
   })
 
@@ -104,7 +117,7 @@ describe("backend runtime restart", () => {
       file: resolve(workspaceRoot, "packages/db-service/src/index.ts"),
     })
 
-    await Bun.sleep(10)
+    await waitFor(() => events.length === 2)
     expect(events).toEqual(["disposed", "restarted"])
   })
 
