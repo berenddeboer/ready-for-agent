@@ -10,7 +10,8 @@
       "default"
     ],
     "sharedGlobals": [
-      "{workspaceRoot}/.github/workflows/ci-cd.yml"
+      "{workspaceRoot}/.github/workflows/ci-cd.yml",
+      "{workspaceRoot}/.github/workflows/pr.yml"
     ]
   },
   "plugins": [

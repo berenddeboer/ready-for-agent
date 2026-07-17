@@ -122,7 +122,7 @@ publish.
 1. One-time human setup on npm: configure Trusted Publishing (OIDC) for
    `ready-for-agent` and each platform package, pointing at this repository and
    workflow file.
-2. From GitHub Actions, run the **CI** workflow via **Run workflow**.
+2. From GitHub Actions, run the **CI/CD** workflow via **Run workflow**.
 3. The release job computes the next version from conventional commits (fails if
    nothing to release), builds multi-platform binaries, publishes with OIDC +
    provenance, tags `vX.Y.Z`, and creates a GitHub Release with notes and
