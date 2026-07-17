@@ -474,90 +474,43 @@ describe("GitHubService live implementation", () => {
     })
   })
 
-  it("loads terminal CheckRuns and StatusContexts via GraphQL rollup", async () => {
-    const service = makeGitHubService({
-      query: () =>
-        Promise.resolve({
-          repository: {
-            pullRequests: {
-              nodes: [
-                {
-                  state: "OPEN",
-                  merged: false,
-                  headRefOid: "sha-head",
-                  baseRefName: "main",
-                  mergeable: "MERGEABLE",
-                  statusCheckRollup: {
-                    state: "PENDING",
-                    contexts: {
-                      nodes: [
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 100,
-                          name: "unit",
-                          status: "COMPLETED",
-                          conclusion: "SUCCESS",
-                        },
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 101,
-                          name: "lint",
-                          status: "COMPLETED",
-                          conclusion: "FAILURE",
-                        },
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 102,
-                          name: "e2e",
-                          status: "COMPLETED",
-                          conclusion: "TIMED_OUT",
-                        },
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 103,
-                          name: "optional",
-                          status: "COMPLETED",
-                          conclusion: "SKIPPED",
-                        },
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 104,
-                          name: "build",
-                          status: "IN_PROGRESS",
-                          conclusion: null,
-                        },
-                        {
-                          __typename: "StatusContext",
-                          id: "SC_1",
-                          context: "ci/travis",
-                          state: "SUCCESS",
-                        },
-                        {
-                          __typename: "StatusContext",
-                          id: "SC_2",
-                          context: "ci/deploy",
-                          state: "ERROR",
-                        },
-                        {
-                          __typename: "StatusContext",
-                          id: "SC_3",
-                          context: "ci/pending",
-                          state: "PENDING",
-                        },
-                      ],
-                    },
+  it("loads terminal checks via REST when the rollup is pending or red", async () => {
+    let listedSha: string | undefined
+    const service = makeGitHubService(
+      {
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "sha-head",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: { state: "PENDING" },
                   },
-                },
-              ],
+                ],
+              },
             },
-          },
-        }) as never,
-    })
+          }) as never,
+      },
+      async (_repository, headSha) => {
+        listedSha = headSha
+        return [
+          { externalId: "actions-job:100", name: "unit", outcome: "green" },
+          { externalId: "actions-job:101", name: "lint", outcome: "red" },
+          { externalId: "actions-job:102", name: "e2e", outcome: "red" },
+        ]
+      },
+    )
 
     const status = await Effect.runPromise(
       service.getPullRequestCheckStatus(repository, "branch"),
     )
 
+    expect(listedSha).toBe("sha-head")
     expect(status).toEqual({
       _tag: "pending",
       mergeability: "mergeable",
@@ -567,137 +520,82 @@ describe("GitHubService live implementation", () => {
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
         { externalId: "actions-job:101", name: "lint", outcome: "red" },
         { externalId: "actions-job:102", name: "e2e", outcome: "red" },
-        { externalId: "status:SC_1", name: "ci/travis", outcome: "green" },
-        { externalId: "status:SC_2", name: "ci/deploy", outcome: "red" },
       ],
     })
   })
 
-  it("loads every GraphQL status-check rollup page", async () => {
-    let attempts = 0
-    const service = makeGitHubService({
-      query: () => {
-        attempts += 1
-        return Promise.resolve(
-          attempts === 1
-            ? {
-                repository: {
-                  pullRequests: {
-                    nodes: [
-                      {
-                        state: "OPEN",
-                        merged: false,
-                        headRefOid: "sha-head",
-                        baseRefName: "main",
-                        mergeable: "MERGEABLE",
-                        statusCheckRollup: {
-                          state: "PENDING",
-                          contexts: {
-                            nodes: [
-                              {
-                                __typename: "CheckRun",
-                                databaseId: 100,
-                                name: "unit",
-                                status: "COMPLETED",
-                                conclusion: "SUCCESS",
-                              },
-                            ],
-                            pageInfo: {
-                              endCursor: "page-2",
-                              hasNextPage: true,
-                            },
-                          },
-                        },
-                      },
-                    ],
+  it("loads terminal checks when the rollup is already green", async () => {
+    let listed = false
+    const service = makeGitHubService(
+      {
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "sha-head",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: { state: "SUCCESS" },
                   },
-                },
-              }
-            : {
-                repository: {
-                  pullRequests: {
-                    nodes: [
-                      {
-                        statusCheckRollup: {
-                          state: "PENDING",
-                          contexts: {
-                            nodes: [
-                              {
-                                __typename: "CheckRun",
-                                databaseId: 101,
-                                name: "lint",
-                                status: "COMPLETED",
-                                conclusion: "FAILURE",
-                              },
-                            ],
-                            pageInfo: {
-                              endCursor: null,
-                              hasNextPage: false,
-                            },
-                          },
-                        },
-                      },
-                    ],
-                  },
-                },
+                ],
               },
-        ) as never
+            },
+          }) as never,
       },
-    })
+      async () => {
+        listed = true
+        return [
+          { externalId: "actions-job:100", name: "unit", outcome: "green" },
+        ]
+      },
+    )
 
     const status = await Effect.runPromise(
       service.getPullRequestCheckStatus(repository, "branch"),
     )
 
-    expect(status).toMatchObject({
+    expect(listed).toBe(true)
+    expect(status).toEqual({
+      _tag: "succeeded",
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
       terminalChecks: [
-        { externalId: "actions-job:100", outcome: "green" },
-        { externalId: "actions-job:101", outcome: "red" },
+        { externalId: "actions-job:100", name: "unit", outcome: "green" },
       ],
     })
-    expect(attempts).toBe(2)
   })
 
-  it("treats distinct CheckRun executions with the same name as separate", async () => {
-    const service = makeGitHubService({
-      query: () =>
-        Promise.resolve({
-          repository: {
-            pullRequests: {
-              nodes: [
-                {
-                  state: "OPEN",
-                  merged: false,
-                  headRefOid: "sha-head",
-                  baseRefName: "main",
-                  mergeable: "MERGEABLE",
-                  statusCheckRollup: {
-                    state: "FAILURE",
-                    contexts: {
-                      nodes: [
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 100,
-                          name: "lint",
-                          status: "COMPLETED",
-                          conclusion: "FAILURE",
-                        },
-                        {
-                          __typename: "CheckRun",
-                          databaseId: 101,
-                          name: "lint",
-                          status: "COMPLETED",
-                          conclusion: "SUCCESS",
-                        },
-                      ],
-                    },
+  it("treats distinct check executions with the same name as separate", async () => {
+    const service = makeGitHubService(
+      {
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "sha-head",
+                    baseRefName: "main",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: { state: "FAILURE" },
                   },
-                },
-              ],
+                ],
+              },
             },
-          },
-        }) as never,
-    })
+          }) as never,
+      },
+      async () => [
+        { externalId: "actions-job:100", name: "lint", outcome: "red" },
+        { externalId: "actions-job:101", name: "lint", outcome: "green" },
+      ],
+    )
 
     const status = await Effect.runPromise(
       service.getPullRequestCheckStatus(repository, "branch"),
@@ -711,6 +609,161 @@ describe("GitHubService live implementation", () => {
       terminalChecks: [
         { externalId: "actions-job:100", name: "lint", outcome: "red" },
         { externalId: "actions-job:101", name: "lint", outcome: "green" },
+      ],
+    })
+  })
+
+  it("falls back to Actions jobs when Checks REST returns 403", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("api.github.com/graphql")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                pullRequests: {
+                  nodes: [
+                    {
+                      state: "OPEN",
+                      merged: false,
+                      headRefOid: "sha-head",
+                      baseRefName: "main",
+                      mergeable: "MERGEABLE",
+                      statusCheckRollup: { state: "FAILURE" },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/check-runs")) {
+        return new Response(
+          JSON.stringify({
+            message: "Resource not accessible by personal access token",
+          }),
+          { status: 403, statusText: "Forbidden" },
+        )
+      }
+      if (url.includes("/actions/runs?") || url.includes("/actions/runs&")) {
+        return new Response(
+          JSON.stringify({
+            total_count: 1,
+            workflow_runs: [{ id: 55 }],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/actions/runs/55/jobs")) {
+        return new Response(
+          JSON.stringify({
+            jobs: [
+              {
+                id: 200,
+                name: "lint",
+                status: "completed",
+                conclusion: "failure",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/statuses")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "branch"),
+    )
+
+    expect(status).toEqual({
+      _tag: "failed",
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      terminalChecks: [
+        { externalId: "actions-job:200", name: "lint", outcome: "red" },
+      ],
+    })
+  })
+
+  it("loads only the latest commit status for each context", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("api.github.com/graphql")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                pullRequests: {
+                  nodes: [
+                    {
+                      state: "OPEN",
+                      merged: false,
+                      headRefOid: "sha-head",
+                      baseRefName: "main",
+                      mergeable: "MERGEABLE",
+                      statusCheckRollup: { state: "FAILURE" },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/check-runs")) {
+        return new Response(JSON.stringify({ check_runs: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/statuses")) {
+        return new Response(
+          JSON.stringify([
+            {
+              id: 3,
+              node_id: "SC_3",
+              context: "ci/build",
+              state: "failure",
+            },
+            {
+              id: 2,
+              node_id: "SC_2",
+              context: "ci/build",
+              state: "success",
+            },
+            {
+              id: 1,
+              node_id: "SC_1",
+              context: "ci/deploy",
+              state: "success",
+            },
+          ]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "branch"),
+    )
+
+    expect(status).toMatchObject({
+      _tag: "failed",
+      terminalChecks: [
+        { externalId: "status:SC_1", name: "ci/deploy", outcome: "green" },
+        { externalId: "status:SC_3", name: "ci/build", outcome: "red" },
       ],
     })
   })

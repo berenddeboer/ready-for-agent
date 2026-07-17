@@ -10,6 +10,10 @@ Keymaxxer is used by the Ready for Agent harness. Interactive coding agents do
 not need to use Keymaxxer themselves; use normally authenticated tools such as
 `gh` and `git` directly.
 
+Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
+`statusCheckRollup.contexts`). Use a classic PAT with `repo` for harness CI
+watching.
+
 ### Triage labels
 
 Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix. See `docs/agents/triage-labels.md`.
