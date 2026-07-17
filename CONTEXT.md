@@ -95,12 +95,24 @@ _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 A durable record of one operator-requested attempt to work a Leaf Issue through the implementation lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number without snapshotting its contents, and records the exact identity of its pull request when one is created. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
+**Worker Slot**:
+One unit of harness capacity reserved by an Admitted Work Item. Only Admitted Work Items occupy a Worker Slot; Work Items waiting for a Worker Slot do not. The number of occupied Worker Slots is bounded by a harness-wide maximum concurrent Work Items Config setting (default five, positive integer), re-read on each admission decision. Raising the bound admits waiters immediately up to the new limit; lowering it does not demote already-Admitted Work Items, but blocks new admissions until occupancy is at or below the new bound. Distinct from the OpenCode session limit and from job-worker fiber budget.
+_Avoid_: OpenCode session limit, fiber budget, queue concurrency, concurrent Step Runs
+
+**Admitted Work Item**:
+An unfinished Work Item that has been granted a Worker Slot and may run Lifecycle Steps. A Work Item becomes Admitted when created while a Worker Slot is free, or when it is the next waiter and a slot frees, or when Retry or Start successfully re-acquires a free slot. A Worker Slot is released when the Work Item becomes terminal (Complete, Failed, Abandoned), Needs Human, paused (after any running Step Run finishes), or when a Step Run fails non-terminally (operator may Retry). A failed non-terminal Work Item does not auto-enter the wait queue; only Retry (or Start after Pause) attempts re-admission. Start or Retry when no slot is free leaves the Work Item Waiting for Worker Slot until re-admitted FIFO.
+_Avoid_: Running Work Item (admission is not the same as a running Step Run), active Work Item
+
+**Waiting for Worker Slot**:
+The state of an unfinished, non-paused Work Item that has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission.
+_Avoid_: Queued Step Run, paused, Not Implemented
+
 **Implement Now**:
-An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery.
+An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected.
 _Avoid_: Auto-implement, enqueue Issue
 
 **Implement Locally**:
-An explicit operator request that creates a Work Item for a Leaf Issue like Implement Now, but records that the Work Item should pause before Commit. Local steps (Create Worktree through Review) run normally; after Review succeeds the Work Item advances to Commit and is paused with no Commit Step Run enqueued, so the operator can inspect the worktree. Start resumes at Commit and continues the remote lifecycle.
+An explicit operator request that creates a Work Item for a Leaf Issue like Implement Now, but records that the Work Item should pause before Commit. Subject to the same Worker Slot admission rules as Implement Now. Local steps (Create Worktree through Review) run only after admission; after Review succeeds the Work Item advances to Commit and is paused with no Commit Step Run enqueued, so the operator can inspect the worktree. Start resumes at Commit and continues the remote lifecycle.
 _Avoid_: Local-only mode, dry run, Implement Now without PR
 
 **Not Implemented**:
@@ -136,23 +148,23 @@ A durable record of one scheduled execution attempt for a Work Item's Lifecycle 
 _Avoid_: Step duration, job attempt
 
 **Retry**:
-An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. Retry is not allowed while a Work Item is paused; the operator must Start first.
+An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. Retry is not allowed while a Work Item is paused; the operator must Start first.
 _Avoid_: Queue redelivery, resume
 
 **Pause Work Item**:
-An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. Pause is idempotent when already paused and is rejected for missing or terminal Work Items. A paused Work Item remains unfinished and still blocks Implement Now for that Issue. Distinct from Repository Paused.
+An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing or terminal Work Items. A paused Work Item remains unfinished and still blocks Implement Now for that Issue. Distinct from Repository Paused.
 _Avoid_: Suspend, hold, Abandon, Repository Paused
 
 **Start Work Item**:
-An explicit operator request that clears a Work Item's paused flag. If no Step Run is running and the latest run does not require Retry, a new Step Run for the current Lifecycle Step is enqueued once; if a Step Run is still running, only the flag is cleared so normal advancement resumes when it finishes. Start is idempotent when not paused and is rejected for missing or terminal Work Items.
+An explicit operator request that clears a Work Item's paused flag and attempts to re-acquire a Worker Slot. If a Step Run is still running (Pause has not yet released the slot), only the paused flag is cleared so normal advancement resumes when that Step Run finishes. If no Step Run is running and a Worker Slot is free, the Work Item is re-Admitted and a new Step Run for the current Lifecycle Step is enqueued once when the latest run does not require Retry. If no Worker Slot is free and no Step Run is running, the Work Item becomes Waiting for Worker Slot and no Step Run is enqueued until re-admission. Start is idempotent when not paused and is rejected for missing or terminal Work Items.
 _Avoid_: Resume, unpause, Retry
 
 **Abandon**:
-A transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. From an operational Lifecycle Step it does not remove the worktree; from Needs Human it runs local cleanup first and only Abandons if cleanup succeeds. It may be operator-directed (including from Needs Human) or applied automatically when a Refresh Job finds that a Decide PR Merge Needs Human Work Item's Work Item PR was closed unmerged. Repository removal may apply it to non-running Work Items before deleting that Repository's lifecycle history. An Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon.
+A transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. From an operational Lifecycle Step it does not remove the worktree and releases any Worker Slot; from Needs Human it must re-acquire a Worker Slot, run local cleanup, and only Abandons if cleanup succeeds—if no slot is free, the Work Item becomes Waiting for Worker Slot until admitted for that cleanup. It may be operator-directed (including from Needs Human) or applied automatically when a Refresh Job finds that a Decide PR Merge Needs Human Work Item's Work Item PR was closed unmerged. Repository removal may apply it to non-running Work Items before deleting that Repository's lifecycle history. An Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon. Abandon of a Work Item that is only Waiting for Worker Slot (never admitted, or waiting after Start) is immediate with no cleanup and no slot involved.
 _Avoid_: Delete, cancel
 
 **Reset**:
-An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused and removes the Work Item entirely.
+An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused or Waiting for Worker Slot and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause).
 _Avoid_: Abandon, Retry, cancel
 
 **Failed Work Item**:
@@ -160,7 +172,7 @@ A terminal Work Item that cannot advance because a lifecycle precondition, such 
 _Avoid_: Failed Step Run, Abandoned
 
 **Needs Human Work Item**:
-A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, or Decide PR Merge requires a human (including when Auto-merge is disabled). It records a concise intervention reason. It is terminal for ordinary Lifecycle Step advancement, Pause, Start, and Retry, and it blocks a second Implement Now or Implement Locally for the same Issue. A Refresh Job may still leave Needs Human when the latest step was Decide PR Merge: a merged Work Item PR advances to local cleanup toward Complete; a closed unmerged Work Item PR Abandons after local cleanup succeeds. Other Needs Human causes are not auto-resumed by Refresh.
+A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, or Decide PR Merge requires a human (including when Auto-merge is disabled). It records a concise intervention reason. Entering Needs Human releases its Worker Slot. It is terminal for ordinary Lifecycle Step advancement, Pause, Start, and Retry, and it blocks a second Implement Now or Implement Locally for the same Issue. A Refresh Job may still leave Needs Human when the latest step was Decide PR Merge: a merged Work Item PR advances to local cleanup toward Complete; a closed unmerged Work Item PR Abandons after local cleanup succeeds. Those Refresh-driven resumptions must re-acquire a Worker Slot; if none is free, the Work Item becomes Waiting for Worker Slot until admitted. Other Needs Human causes are not auto-resumed by Refresh.
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
