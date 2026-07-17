@@ -11,12 +11,14 @@ Opinionated agentic software engineering harness to massively increase landed PR
 ## Requirements
 1. git
 2. GitHub CLI tool [gh](https://cli.github.com/)
-3. [keymaxxer](https://github.com/glommer/keymaxxer)
+3. [keymaxxer](https://github.com/glommer/keymaxxer) — workspace pins exact
+   `keymaxxer@0.2.1` in the root lockfile for live e2e vault tooling
 
 The backend starts Keymaxxer through its MCP server. It uses
 `KEYMAXXER_ENTRYPOINT` when set, otherwise prefers the unreleased local source
 at `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present,
-and finally falls back to the installed `keymaxxer` command.
+and finally falls back to the installed `keymaxxer` command (including the
+workspace pin).
 
 When no Keymaxxer entrypoint or executable is available, the harness starts
 without Keymaxxer and uses the user's ambient GitHub authentication. Set
@@ -39,6 +41,15 @@ review comments have been adequately addressed.
 
 The PR review is merged if it seems low risk else a human is asked to
 review it.
+
+## Live end-to-end fixture
+
+The private End-to-End Fixture Repository `berenddeboer/test-ready-for-agent`
+and the checked-in encrypted Keymaxxer vault under `e2e/fixtures/keymaxxer/`
+are maintained for live Harness e2e runs. See [docs/e2e-fixture.md](docs/e2e-fixture.md)
+for the sentinel Issue contract, 90-day token rotation, and vault regeneration
+(`scripts/regenerate-e2e-keymaxxer-vault.sh`). The master key is never committed;
+CI uses the Actions secret `E2E_KEYMAXXER_MASTER_KEY`.
 
 # Architecture
 

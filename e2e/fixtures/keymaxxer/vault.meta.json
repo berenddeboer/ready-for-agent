@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "cipher": "aes256gcm",
+  "kdf": "none"
+}
