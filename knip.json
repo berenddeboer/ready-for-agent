@@ -1,6 +1,12 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "ignoreDependencies": ["@swc/helpers", "effect-solutions", "nx", "tslib"],
+  "ignoreDependencies": [
+    "@swc/helpers",
+    "effect-solutions",
+    "keymaxxer",
+    "nx",
+    "tslib"
+  ],
   "ignoreBinaries": ["skills"],
   "ignoreFiles": [".opencode/plugin/**"],
   "workspaces": {
