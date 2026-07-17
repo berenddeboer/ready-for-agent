@@ -57,4 +57,26 @@ bunx nx affected -t lint,typecheck,test --batch
       }
     }
   }
+  ["pre-push"] {
+    steps {
+      ["no-slot-branch-push"] {
+        // Slot branches (worktreeN) are local-only mirrors of main. Pushing them
+        // creates origin/worktreeN and Magit Unmerged/Rebase noise.
+        // hk does not forward pre-push stdin ref lines to steps, so gate on the
+        // current branch name (same pattern as pre-commit descriptive-branch).
+        check = #"""
+branch_name=$(git branch --show-current)
+
+case "$branch_name" in
+  worktree*[!0-9]* | worktree | "") ;;
+  worktree*)
+    echo "Refusing to push from slot branch '$branch_name'."
+    echo "Push a descriptive feature branch instead; leave worktreeN local-only."
+    exit 1
+    ;;
+esac
+"""#
+      }
+    }
+  }
 }
