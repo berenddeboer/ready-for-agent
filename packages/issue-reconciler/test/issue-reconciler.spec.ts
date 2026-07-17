@@ -428,7 +428,7 @@ describe("IssueReconciler", () => {
     )
   })
 
-  it("excludes issues whose closing pull requests do not match a Work Item PR", () => {
+  it("excludes unmatched ready PRs but ignores draft closing PRs", () => {
     const db = makeDbFixture({
       issues: [
         localIssue(1),
@@ -437,6 +437,7 @@ describe("IssueReconciler", () => {
         localIssue(4),
         localIssue(5),
         localIssue(6),
+        localIssue(7),
       ],
       workItemPullRequests: [
         { githubIssueNumber: 2, githubPullRequestNumber: 202 },
@@ -448,28 +449,68 @@ describe("IssueReconciler", () => {
         remoteIssue(1),
         remoteIssue(2, {
           closingPullRequests: [
-            { number: 202, repository: "acme/widgets", state: "OPEN" },
+            {
+              number: 202,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+            },
           ],
         }),
         remoteIssue(3, {
           closingPullRequests: [
-            { number: 300, repository: "acme/widgets", state: "OPEN" },
-            { number: 303, repository: "acme/widgets", state: "MERGED" },
+            {
+              number: 300,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+            },
+            {
+              number: 303,
+              repository: "acme/widgets",
+              state: "MERGED",
+              isDraft: false,
+            },
           ],
         }),
         remoteIssue(4, {
           closingPullRequests: [
-            { number: 404, repository: "acme/widgets", state: "OPEN" },
+            {
+              number: 404,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: false,
+            },
           ],
         }),
         remoteIssue(5, {
           closingPullRequests: [
-            { number: 202, repository: "other/widgets", state: "OPEN" },
+            {
+              number: 202,
+              repository: "other/widgets",
+              state: "OPEN",
+              isDraft: false,
+            },
           ],
         }),
         remoteIssue(6, {
           closingPullRequests: [
-            { number: 606, repository: "acme/widgets", state: "CLOSED" },
+            {
+              number: 606,
+              repository: "acme/widgets",
+              state: "CLOSED",
+              isDraft: false,
+            },
+          ],
+        }),
+        remoteIssue(7, {
+          closingPullRequests: [
+            {
+              number: 707,
+              repository: "acme/widgets",
+              state: "OPEN",
+              isDraft: true,
+            },
           ],
         }),
       ],
@@ -482,14 +523,14 @@ describe("IssueReconciler", () => {
         const summary = yield* reconciler.reconcile(repository)
 
         expect(summary).toEqual({
-          fetched: 6,
+          fetched: 7,
           inserted: 0,
           updated: 0,
           deleted: 2,
-          unchanged: 4,
+          unchanged: 5,
         })
         expect(db.stored.map((issue) => issue.githubIssueNumber)).toEqual([
-          1, 2, 3, 6,
+          1, 2, 3, 6, 7,
         ])
       }),
       db.layer,

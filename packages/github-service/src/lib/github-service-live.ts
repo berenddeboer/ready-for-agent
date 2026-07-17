@@ -335,6 +335,7 @@ interface GitHubApiPullRequestReference {
   readonly number: unknown
   readonly state: unknown
   readonly merged: unknown
+  readonly isDraft: unknown
   readonly repository: GitHubApiRepositoryReference
 }
 
@@ -466,10 +467,16 @@ const mapClosingPullRequestPage = (
           `Invalid GitHub pull request number: ${pullRequest.number}`,
         )
       }
+      if (typeof pullRequest.isDraft !== "boolean") {
+        throw new Error(
+          `Invalid GitHub pull request draft flag: ${pullRequest.isDraft}`,
+        )
+      }
       return {
         number: Number(pullRequest.number),
         repository: toRepositoryName(pullRequest.repository),
         state: toClosingPullRequestState(pullRequest.state, pullRequest.merged),
+        isDraft: pullRequest.isDraft,
       }
     })
 
@@ -1092,6 +1099,7 @@ export const makeGitHubService = (
                           number: true,
                           state: true,
                           merged: true,
+                          isDraft: true,
                           repository: { nameWithOwner: true },
                         },
                         pageInfo: { endCursor: true, hasNextPage: true },
@@ -1228,6 +1236,7 @@ export const makeGitHubService = (
                             number: true,
                             state: true,
                             merged: true,
+                            isDraft: true,
                             repository: { nameWithOwner: true },
                           },
                           pageInfo: { endCursor: true, hasNextPage: true },

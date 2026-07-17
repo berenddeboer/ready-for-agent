@@ -922,6 +922,7 @@ describe("GitHubService live implementation", () => {
                       number: 22,
                       state: "OPEN",
                       merged: false,
+                      isDraft: true,
                       repository: { nameWithOwner: "acme/widgets" },
                     },
                   ],
@@ -1001,7 +1002,12 @@ describe("GitHubService live implementation", () => {
       },
     ])
     expect(result[1]?.closingPullRequests).toEqual([
-      { number: 22, repository: "acme/widgets", state: "OPEN" },
+      {
+        number: 22,
+        repository: "acme/widgets",
+        state: "OPEN",
+        isDraft: true,
+      },
     ])
     expect(requests).toHaveLength(2)
 
@@ -1060,6 +1066,7 @@ describe("GitHubService live implementation", () => {
           number: true,
           state: true,
           merged: true,
+          isDraft: true,
           repository: { nameWithOwner: true },
         },
         pageInfo: { endCursor: true, hasNextPage: true },
@@ -1184,6 +1191,7 @@ describe("GitHubService live implementation", () => {
                       number: 20,
                       state: "CLOSED",
                       merged: false,
+                      isDraft: false,
                       repository: { nameWithOwner: "acme/widgets" },
                     },
                   ],
@@ -1207,6 +1215,7 @@ describe("GitHubService live implementation", () => {
                   number: 10,
                   state: "CLOSED",
                   merged: true,
+                  isDraft: false,
                   repository: { nameWithOwner: "acme/widgets" },
                 },
               ],
@@ -1228,8 +1237,18 @@ describe("GitHubService live implementation", () => {
     )
 
     expect(result[0]?.closingPullRequests).toEqual([
-      { number: 10, repository: "acme/widgets", state: "MERGED" },
-      { number: 20, repository: "acme/widgets", state: "CLOSED" },
+      {
+        number: 10,
+        repository: "acme/widgets",
+        state: "MERGED",
+        isDraft: false,
+      },
+      {
+        number: 20,
+        repository: "acme/widgets",
+        state: "CLOSED",
+        isDraft: false,
+      },
     ])
     const continuation = requests[1] as {
       repository: {

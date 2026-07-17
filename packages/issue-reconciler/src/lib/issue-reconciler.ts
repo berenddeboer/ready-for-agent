@@ -76,7 +76,9 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
 
 const isActiveClosingPullRequest = (
   pullRequest: ReadyLabeledIssue["closingPullRequests"][number],
-): boolean => pullRequest.state === "OPEN" || pullRequest.state === "MERGED"
+): boolean =>
+  pullRequest.state === "MERGED" ||
+  (pullRequest.state === "OPEN" && !pullRequest.isDraft)
 
 const isRelevant = (
   issue: ReadyLabeledIssue,
