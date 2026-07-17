@@ -62,7 +62,7 @@ export class LocalGit extends Context.Service<
       path: string,
     ) => Effect.Effect<LocalRepository, LocalGitError>
   }
->()("@ready-for-agent/cli/LocalGit") {
+>()("ready-for-agent/LocalGit") {
   static readonly layer = Layer.effect(
     LocalGit,
     Effect.gen(function* () {

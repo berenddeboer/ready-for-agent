@@ -1,7 +1,7 @@
 {
-  "name": "cli",
+  "name": "ready-for-agent",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "apps/cli/src",
+  "sourceRoot": "apps/ready-for-agent/src",
   "projectType": "application",
   "tags": [],
   "targets": {
@@ -22,8 +22,16 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test"
-      }
+        "command": "bun --conditions=@ready-for-agent/source test"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": [
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ]
     }
   }
 }

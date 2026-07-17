@@ -1,21 +1,14 @@
 import { Context, Effect, Layer, Schema } from "effect"
 import { createClient } from "@ready-for-agent/graphql-client"
 import type { LocalRepository } from "../domain.ts"
+import { formatGraphqlRequestFailure } from "../graphql-error.ts"
 import { resolveGraphqlUrl } from "../graphql-url.ts"
+import type { RepositorySummary } from "../resolve-repository-target.ts"
 
-class GraphqlRequestFailed extends Schema.TaggedErrorClass<GraphqlRequestFailed>()(
+export class GraphqlRequestFailed extends Schema.TaggedErrorClass<GraphqlRequestFailed>()(
   "GraphqlRequestFailed",
   { message: Schema.String },
 ) {}
-
-export type RepositorySummary = {
-  readonly id: string
-  readonly githubOwner: string
-  readonly githubRepo: string
-  readonly localPath: string
-  readonly isBare: boolean
-  readonly paused: boolean
-}
 
 export type RepositoryCredentialSummary = {
   readonly repositoryId: string
@@ -38,7 +31,7 @@ export class GraphqlApi extends Context.Service<
       repositoryId: string,
     ) => Effect.Effect<RepositoryCredentialSummary, GraphqlRequestFailed>
   }
->()("@ready-for-agent/cli/GraphqlApi") {
+>()("ready-for-agent/GraphqlApi") {
   static readonly layer = Layer.succeed(GraphqlApi, {
     addRepository: (repository) =>
       Effect.tryPromise({
@@ -72,8 +65,7 @@ export class GraphqlApi extends Context.Service<
         },
         catch: (cause) =>
           new GraphqlRequestFailed({
-            message:
-              cause instanceof Error ? cause.message : "GraphQL request failed",
+            message: formatGraphqlRequestFailure(cause),
           }),
       }),
     listRepositories: Effect.tryPromise({
@@ -95,8 +87,7 @@ export class GraphqlApi extends Context.Service<
       },
       catch: (cause) =>
         new GraphqlRequestFailed({
-          message:
-            cause instanceof Error ? cause.message : "GraphQL request failed",
+          message: formatGraphqlRequestFailure(cause),
         }),
     }),
     removeRepositoryGitHubToken: (repositoryId) =>
@@ -122,8 +113,7 @@ export class GraphqlApi extends Context.Service<
         },
         catch: (cause) =>
           new GraphqlRequestFailed({
-            message:
-              cause instanceof Error ? cause.message : "GraphQL request failed",
+            message: formatGraphqlRequestFailure(cause),
           }),
       }),
   })

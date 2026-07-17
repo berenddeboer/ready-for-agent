@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { resolveRepositoryTarget } from "./cli.ts"
+import { resolveRepositoryTarget } from "./resolve-repository-target.ts"
 import { describe, expect, test } from "bun:test"
 
 const repository = {
@@ -24,6 +24,20 @@ describe("resolveRepositoryTarget", () => {
           return Effect.die("owner/repository must not be inspected as a path")
         },
       ),
+    )
+
+    expect(result).toEqual(repository)
+    expect(inspected).toBe(false)
+  })
+
+  test("resolves repository id without inspecting a path", async () => {
+    let inspected = false
+
+    const result = await Effect.runPromise(
+      resolveRepositoryTarget(repository.id, [repository], () => {
+        inspected = true
+        return Effect.die("repository id must not be inspected as a path")
+      }),
     )
 
     expect(result).toEqual(repository)

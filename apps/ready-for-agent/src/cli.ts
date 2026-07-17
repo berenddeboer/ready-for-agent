@@ -1,46 +1,16 @@
 import { Console, Effect, Schema } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
-import type { LocalRepository } from "./domain.ts"
-import { GraphqlApi, type RepositorySummary } from "./services/graphql-api.ts"
+import {
+  isRepositoryId,
+  resolveRepositoryTarget,
+} from "./resolve-repository-target.ts"
+import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
+import { StartHarness } from "./services/start-harness.ts"
 
 const pathArg = Argument.string("path").pipe(
   Argument.withDescription("Path to a local git repository"),
 )
-
-const repositoryIdPattern = /^repo-[0-9A-HJKMNP-TV-Z]{26}$/
-const githubRepositoryPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[^/]+$/
-
-export const resolveRepositoryTarget = <E>(
-  target: string,
-  repositories: readonly RepositorySummary[],
-  inspect: (path: string) => Effect.Effect<LocalRepository, E>,
-): Effect.Effect<RepositorySummary | undefined, E> => {
-  if (repositoryIdPattern.test(target)) {
-    return Effect.succeed(repositories.find(({ id }) => id === target))
-  }
-
-  if (githubRepositoryPattern.test(target)) {
-    const [owner, name] = target.split("/", 2)
-    return Effect.succeed(
-      repositories.find(
-        ({ githubOwner, githubRepo }) =>
-          githubOwner.toLowerCase() === owner?.toLowerCase() &&
-          githubRepo.toLowerCase() === name?.toLowerCase(),
-      ),
-    )
-  }
-
-  return inspect(target).pipe(
-    Effect.map((inspected) =>
-      repositories.find(
-        (repository) =>
-          repository.githubOwner === inspected.githubOwner &&
-          repository.githubRepo === inspected.githubRepo,
-      ),
-    ),
-  )
-}
 
 class RepositoryNotRegistered extends Schema.TaggedErrorClass<RepositoryNotRegistered>()(
   "RepositoryNotRegistered",
@@ -50,6 +20,17 @@ class RepositoryNotRegistered extends Schema.TaggedErrorClass<RepositoryNotRegis
     return this.detail
   }
 }
+
+const startHarness = Effect.gen(function* () {
+  const startHarnessService = yield* StartHarness
+  yield* startHarnessService.start
+})
+
+const startCommand = Command.make("start", {}, () => startHarness).pipe(
+  Command.withDescription(
+    "Start the full Harness (UI + backend) on the monorepo dev path",
+  ),
+)
 
 const addCommand = Command.make("add", { path: pathArg }, ({ path }) =>
   Effect.gen(function* () {
@@ -90,7 +71,7 @@ const removeGitHubTokenCommand = Command.make(
 
       if (repository === undefined) {
         return yield* new RepositoryNotRegistered({
-          detail: repositoryIdPattern.test(target)
+          detail: isRepositoryId(target)
             ? `Repository not registered: ${target}`
             : `No registered repository matches ${target}`,
         })
@@ -111,7 +92,9 @@ const removeGitHubTokenCommand = Command.make(
   ),
 )
 
-export const cli = Command.make("harness-cli").pipe(
-  Command.withDescription("CLI for the ready-for-agent harness"),
-  Command.withSubcommands([addCommand, removeGitHubTokenCommand]),
+export const cli = Command.make("ready-for-agent", {}, () => startHarness).pipe(
+  Command.withDescription(
+    "Ready for Agent operator binary (start Harness, add repositories, manage tokens)",
+  ),
+  Command.withSubcommands([startCommand, addCommand, removeGitHubTokenCommand]),
 )
