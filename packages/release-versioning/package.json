@@ -16,7 +16,8 @@
     }
   },
   "bin": {
-    "compute-next-version": "./src/bin/compute-next-version.ts"
+    "compute-next-version": "./src/bin/compute-next-version.ts",
+    "apply-publish-versions": "./src/bin/apply-publish-versions.ts"
   },
   "dependencies": {
     "@conventional-changelog/git-client": "^3.1.0",

@@ -113,6 +113,29 @@ Platform packages for the published binary are described in
 Release process:
 [docs/adr/0024-manual-oidc-npm-release.md](docs/adr/0024-manual-oidc-npm-release.md).
 
+### Cutting a release
+
+Releases are **manual only** (`workflow_dispatch` on `.github/workflows/ci-cd.yml`).
+PR and `push` to `main` stay quality gates (lint, knip, test, typecheck) and never
+publish.
+
+1. One-time human setup on npm: configure Trusted Publishing (OIDC) for
+   `ready-for-agent` and each platform package, pointing at this repository and
+   workflow file.
+2. From GitHub Actions, run the **CI** workflow via **Run workflow**.
+3. The release job computes the next version from conventional commits (fails if
+   nothing to release), builds multi-platform binaries, publishes with OIDC +
+   provenance, tags `vX.Y.Z`, and creates a GitHub Release with notes and
+   binaries.
+
+Local helpers (no publish):
+
+```bash
+bunx nx run release-versioning:compute-next-version
+bun --conditions @ready-for-agent/source \
+  packages/release-versioning/src/bin/apply-publish-versions.ts 0.1.0 --for-publish
+```
+
 ## Live end-to-end fixture
 
 The private End-to-End Fixture Repository
