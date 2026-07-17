@@ -59,6 +59,7 @@ export interface GitHubPullRequestReference {
   readonly number: number
   readonly repository: string
   readonly state: GitHubPullRequestLifecycleState
+  readonly isDraft: boolean
 }
 
 export interface GitHubIssueParent extends GitHubIssueReference {
