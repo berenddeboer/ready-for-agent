@@ -63,4 +63,16 @@ describe("JobsCard live updates", () => {
     expect(source).toContain('lifecycleLabel.status === "NEEDS_HUMAN"')
     expect(source).toContain("PR #{prNumber}")
   })
+
+  test("shows copyable session id and worktree path without Session prefix", () => {
+    const { source, jobsCard } = jobsCardSource()
+    expect(source).toContain("worktreePath: true")
+    expect(source).toContain("sessionWorktreeLine")
+    expect(source).toContain('from "../copy.js"')
+    expect(jobsCard).toContain("sessionWorktree")
+    expect(jobsCard).toContain("<Copy")
+    expect(jobsCard).toContain("value={sessionWorktree}")
+    expect(jobsCard).not.toContain("Session {workItem.sessionId}")
+    expect(jobsCard).not.toContain("Session ")
+  })
 })
