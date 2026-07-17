@@ -74,8 +74,6 @@ jobs:
         with:
           bun-version: latest
 
-      # npm OIDC trusted publishing needs npm >= 11.5.1 (Node 22 ships npm 10.x).
-      # Node 26 includes npm 11.17+; bun is used for install/build, npm only for publish.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "26"
@@ -113,11 +111,7 @@ jobs:
       - name: Publish packages to npm (OIDC + provenance)
         run: |
           set -euo pipefail
-          # setup-node injects a placeholder NODE_AUTH_TOKEN when no secret is set;
-          # clear it so npm uses OIDC trusted publishing instead of a dummy token.
-          unset NODE_AUTH_TOKEN || true
           # Platform packages first so optionalDependencies resolve on install.
-          # Publish from each package directory (no long-lived NPM_TOKEN; OIDC only).
           for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
             (
               cd "packages/ready-for-agent-${platform}"
