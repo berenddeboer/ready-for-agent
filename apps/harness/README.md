@@ -1,11 +1,16 @@
 # Harness
 
+Operator install: [README.md](../../README.md). Monorepo workflow:
+[CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ## Development
 
 From the repository root, start the TanStack Start application server and its
-development-only Keymaxxer sidecar with:
+Keymaxxer sidecar with the unified operator binary or Nx:
 
 ```bash
+bun run ready-for-agent start
+# equivalent:
 bunx nx run harness:dev
 ```
 
@@ -16,14 +21,6 @@ The SPA and GraphQL endpoint are available on the same loopback server:
 
 The sidecar listens separately on `127.0.0.1:5032` only to preserve the
 Keymaxxer session across application-server reloads.
-
-Start the Harness (or use the unified operator binary):
-
-```bash
-bun run ready-for-agent start
-# equivalent monorepo path:
-bunx nx run harness:dev
-```
 
 When the harness uses a non-standard port, point operator commands at its
 GraphQL endpoint with `READY_FOR_AGENT_GRAPHQL_URL`:
@@ -70,7 +67,8 @@ started (or reused when `KEYMAXXER_SIDECAR_URL` is already set).
 One Gherkin operator journey (`e2e/features/add-and-refresh-repository.feature`)
 runs the production build against a fresh isolated Harness database, clones the
 private End-to-End Fixture Repository through Keymaxxer, adds it with the real
-CLI, and waits for credential activation's automatic first Refresh Job.
+operator binary, and waits for credential activation's automatic first Refresh
+Job.
 
 ```bash
 bunx nx run harness:e2e

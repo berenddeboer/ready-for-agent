@@ -3,6 +3,9 @@
 Unified operator binary for Ready for Agent: start the Harness and run operator
 commands against its GraphQL endpoint.
 
+Public install and operator docs: [README.md](../../README.md).
+Monorepo development: [CONTRIBUTING.md](../../CONTRIBUTING.md).
+
 ## Public package shape
 
 The publishable launcher is this package (`ready-for-agent`) with a Node-compatible
@@ -47,7 +50,8 @@ This boots the full Harness (UI + backend) on the existing monorepo dev path
 
 Before start, the binary checks that required host tools are on `PATH`: `git`,
 `gh`, and OpenCode. Missing tools fail immediately with install hints. Keymaxxer
-is optional; ambient GitHub auth still works without it.
+is optional (`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH); ambient GitHub auth
+still works without it.
 
 On successful start the default browser opens to the local UI
 (`http://127.0.0.1:4200/` by default). Disable with:
