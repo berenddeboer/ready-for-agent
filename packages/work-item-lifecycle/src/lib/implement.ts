@@ -15,17 +15,23 @@ import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 const persistSessionIdMidRun = (
   workItemId: string,
   sessionId: string,
-): Effect.Effect<void, never, SqlClient.SqlClient> =>
+  repositoryId: string,
+): Effect.Effect<void, never, SqlClient.SqlClient | DbService> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    const db = yield* DbService
     const now = Date.now()
-    yield* sql.unsafe(
+    const rows = (yield* sql.unsafe(
       `UPDATE work_item
        SET session_id = ?, updated_at = ?
        WHERE id = ?
-         AND (session_id IS NULL OR session_id = '' OR session_id = ?)`,
+         AND (session_id IS NULL OR session_id = '' OR session_id = ?)
+       RETURNING id`,
       [sessionId, now, workItemId, sessionId],
-    )
+    )) as readonly { readonly id: string }[]
+    if (rows[0]) {
+      yield* db.notifyWorkItemsChanged(repositoryId)
+    }
   }).pipe(
     Effect.catch((error) =>
       Effect.logWarning("Failed to persist OpenCode session id mid-implement", {
@@ -133,6 +139,7 @@ export const implement = (context: LifecycleStepContext) =>
 
     const opencode = yield* Opencode
     const sql = yield* SqlClient.SqlClient
+    const db = yield* DbService
     // Always start a fresh Session. Ignore any prior context.sessionId from
     // setup, dependency installation, or a previous failed Step Run.
     const result = yield* opencode
@@ -144,8 +151,13 @@ export const implement = (context: LifecycleStepContext) =>
         timeout:
           context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
         onSessionId: (sessionId) =>
-          persistSessionIdMidRun(context.workItemId, sessionId).pipe(
+          persistSessionIdMidRun(
+            context.workItemId,
+            sessionId,
+            context.repositoryId,
+          ).pipe(
             Effect.provideService(SqlClient.SqlClient, sql),
+            Effect.provideService(DbService, db),
           ),
       })
       .pipe(

@@ -7,6 +7,7 @@ import {
   Layer,
   Option,
   Result,
+  Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
 import { SqlClient } from "effect/unstable/sql"
@@ -4056,6 +4057,88 @@ describe("WorkItemLifecycle", () => {
 
           const startError = yield* Effect.flip(lifecycle.start(created.id))
           expect(startError).toBeInstanceOf(WorkItemTerminalError)
+        }),
+      ))
+  })
+
+  describe("Work Item change invalidation", () => {
+    it("publishes after successful Work Item persistence", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const changes = yield* db.workItemChanges.pipe(
+            Stream.take(1),
+            Stream.runCollect,
+            Effect.forkChild,
+          )
+          yield* Effect.yieldNow
+
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+
+          expect(yield* Fiber.join(changes)).toEqual([repository.id])
+        }),
+      ))
+
+    it("does not publish when create fails before persistence", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository } = yield* seedActionableIssue
+
+          const changes = db.workItemChanges.pipe(
+            Stream.take(1),
+            Stream.runCollect,
+          )
+
+          const error = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, 999_999),
+          )
+          expect(error).toBeInstanceOf(IssueNotFoundError)
+
+          const raced = yield* Effect.race(
+            changes.pipe(Effect.as("published" as const)),
+            Effect.sleep(Duration.millis(50)).pipe(
+              Effect.as("silent" as const),
+            ),
+          )
+          expect(raced).toBe("silent")
+
+          const workItems = yield* lifecycle.listWorkItemsForRepository(
+            repository.id,
+          )
+          expect(workItems).toEqual([])
+        }),
+      ))
+
+    it("publishes after a successful step transition", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = workItem.stepRuns[0]!.id
+
+          const changes = yield* db.workItemChanges.pipe(
+            Stream.take(2),
+            Stream.runCollect,
+            Effect.forkChild,
+          )
+          yield* Effect.yieldNow
+
+          yield* lifecycle.runStep(stepRunId)
+
+          const published = yield* Fiber.join(changes)
+          expect(published).toContain(repository.id)
+          expect(published.length).toBeGreaterThanOrEqual(1)
         }),
       ))
   })

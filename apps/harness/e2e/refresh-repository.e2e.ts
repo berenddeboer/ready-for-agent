@@ -111,6 +111,13 @@ test("Refresh returns after enqueueing and updates after worker invalidation", a
       })
       return
     }
+    if (operations[0]?.query.includes("repositoryWorkItemsChanged")) {
+      await route.fulfill({
+        contentType: "text/event-stream",
+        body: "event: complete\n\n",
+      })
+      return
+    }
 
     const responses = operations.map(({ query }) => jsonResponse(query))
     await fulfillJson(
