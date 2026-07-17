@@ -1,0 +1,33 @@
+{
+  "name": "@ready-for-agent/release-versioning",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@ready-for-agent/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "compute-next-version": "./src/bin/compute-next-version.ts"
+  },
+  "dependencies": {
+    "@conventional-changelog/git-client": "^3.1.0",
+    "conventional-changelog-conventionalcommits": "^10.2.1",
+    "conventional-commits-filter": "^6.0.1",
+    "conventional-commits-parser": "^7.1.0",
+    "semver": "^7.8.5",
+    "tslib": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/semver": "^7.7.1",
+    "vitest": "^4.1.10"
+  }
+}

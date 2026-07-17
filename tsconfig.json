@@ -53,6 +53,9 @@
     },
     {
       "path": "./packages/work-item-lifecycle"
+    },
+    {
+      "path": "./packages/release-versioning"
     }
   ]
 }

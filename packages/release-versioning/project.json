@@ -1,0 +1,25 @@
+{
+  "name": "release-versioning",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/release-versioning/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "vitest run"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true
+    },
+    "compute-next-version": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "bun --conditions @ready-for-agent/source packages/release-versioning/src/bin/compute-next-version.ts"
+      }
+    }
+  }
+}
