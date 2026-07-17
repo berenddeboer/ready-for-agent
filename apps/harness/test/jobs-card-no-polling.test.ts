@@ -39,4 +39,13 @@ describe("JobsCard live updates", () => {
     expect(pauseIndex).toBeGreaterThan(-1)
     expect(stateLabelIndex).toBeGreaterThan(pauseIndex)
   })
+
+  test("links issue identity to the Issue store URL when available", () => {
+    const { jobsCard } = jobsCardSource()
+    expect(jobsCard).toContain("issue.url")
+    expect(jobsCard).toContain("href={issueUrl}")
+    expect(jobsCard).toContain("text-blue-600 hover:underline")
+    expect(jobsCard).not.toContain("hover:text-blue-700")
+    expect(jobsCard).toContain('issueUrl !== undefined && issueUrl !== ""')
+  })
 })
