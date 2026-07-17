@@ -32,8 +32,14 @@
       "project": ["src/**/*.ts", "test/**/*.ts"]
     },
     "apps/ready-for-agent": {
-      "entry": ["src/**/*.test.ts", "src/main.ts"],
-      "project": ["src/**/*.ts"]
+      "entry": [
+        "src/**/*.test.ts",
+        "src/main.ts",
+        "bin/ready-for-agent.js",
+        "bin/select-platform.js",
+        "scripts/compile-platform-binary.ts"
+      ],
+      "project": ["src/**/*.ts", "bin/**/*.{js,ts}", "scripts/**/*.ts"]
     },
     "packages/github-service": {
       "entry": [

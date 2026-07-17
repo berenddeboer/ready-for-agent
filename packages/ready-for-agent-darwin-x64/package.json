@@ -1,0 +1,16 @@
+{
+  "name": "ready-for-agent-darwin-x64",
+  "version": "0.0.0",
+  "description": "The macOS x64 binary for ready-for-agent",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "bin/ready-for-agent"
+  ],
+  "preferUnplugged": true
+}

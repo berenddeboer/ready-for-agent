@@ -1,13 +1,24 @@
 {
   "name": "ready-for-agent",
   "version": "0.0.0",
-  "private": true,
+  "description": "Ready for Agent: local Harness UI + backend and operator CLI",
+  "license": "MIT",
   "type": "module",
   "bin": {
-    "ready-for-agent": "./src/main.ts"
+    "ready-for-agent": "./bin/ready-for-agent.js"
   },
+  "files": [
+    "bin/ready-for-agent.js",
+    "bin/select-platform.js"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
+  },
+  "optionalDependencies": {
+    "ready-for-agent-darwin-arm64": "0.0.0",
+    "ready-for-agent-darwin-x64": "0.0.0",
+    "ready-for-agent-linux-arm64": "0.0.0",
+    "ready-for-agent-linux-x64": "0.0.0"
   },
   "dependencies": {
     "@effect/platform-bun": "^4.0.0-beta.97",
@@ -16,5 +27,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
