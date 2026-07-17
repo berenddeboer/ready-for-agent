@@ -19,6 +19,10 @@ import {
   type RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
+  formatUserFacingError,
+  sanitizeUserFacingText,
+} from "@ready-for-agent/github-service"
+import {
   type AcknowledgeError,
   EnqueueError,
   InvalidQueueNameError,
@@ -115,34 +119,15 @@ const isActiveStepRunUniqueViolation = (error: SqlError): boolean => {
   )
 }
 
-const conciseMessage = (value: unknown, fallback: string): string => {
-  if (typeof value === "string" && value.trim().length > 0) {
-    return value.trim().slice(0, 500)
-  }
-  if (value instanceof Error && value.message.trim().length > 0) {
-    return value.message.trim().slice(0, 500)
-  }
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    "message" in value &&
-    typeof (value as { message: unknown }).message === "string" &&
-    (value as { message: string }).message.trim().length > 0
-  ) {
-    return (value as { message: string }).message.trim().slice(0, 500)
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value)
-  }
-  return fallback
-}
+const conciseMessage = (value: unknown, fallback: string): string =>
+  formatUserFacingError(value, fallback, 500)
 
 const handlerFailureMessage = (error: unknown): string => {
   if (
     error instanceof PreCommitHookFailedError ||
     error instanceof PreCommitStageError
   ) {
-    return `${error.message}\n${error.output}`
+    return sanitizeUserFacingText(`${error.message}\n${error.output}`)
   }
   return conciseMessage(error, "Lifecycle Step handler failed")
 }

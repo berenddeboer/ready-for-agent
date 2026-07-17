@@ -14,6 +14,7 @@ import {
   RepositoryId,
   RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
+import { formatUserFacingError } from "@ready-for-agent/github-service"
 import {
   ISSUE_POLL_QUEUE,
   ISSUE_REFRESH_QUEUE,
@@ -73,24 +74,8 @@ const currentWorkerGeneration = (): number => {
   return globalState[workerGenerationKey] ?? 0
 }
 
-const formatLogError = (error: unknown): string => {
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error.trim()
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message.trim()
-  }
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof (error as { message: unknown }).message === "string" &&
-    (error as { message: string }).message.trim().length > 0
-  ) {
-    return (error as { message: string }).message.trim()
-  }
-  return String(error)
-}
+const formatLogError = (error: unknown): string =>
+  formatUserFacingError(error, "Unknown error")
 
 const RefreshRepositoryJob = Schema.TaggedStruct("refresh-repository", {
   repositoryId: RepositoryId,
