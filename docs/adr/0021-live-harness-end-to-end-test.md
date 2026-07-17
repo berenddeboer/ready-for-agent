@@ -1,0 +1,5 @@
+# Validate Harness end to end against a controlled GitHub Repository
+
+Harness end-to-end validation runs the production-built application, worker, Keymaxxer Sidecar, command-line client, and browser against the private End-to-End Fixture Repository `berenddeboer/test-ready-for-agent`, without GraphQL or GitHub mocks. Executable Gherkin via `playwright-bdd` adds the Repository from a fresh local checkout through the real CLI and waits for credential activation's automatic first Refresh Job to make sentinel Issue `#22`, `E2E fixture: Ready-labeled Issue refresh`, visible in the UI.
+
+Each run starts with an empty, isolated Harness database. CI copies a checked-in encrypted Keymaxxer vault containing only the read-only `GITHUB_TOKEN_BERENDDEBOER_TEST_READY_FOR_AGENT` credential into a temporary home and unlocks it with the GitHub Actions secret `E2E_KEYMAXXER_MASTER_KEY`; `KEYMAXXER_APPROVE=deny` prevents headless prompts and fails closed. Local runs instead leave `~/.keymaxxer` untouched and may prompt normally. The live scenario has no automatic retry, runs only after the existing checks on trusted pushes to `main`, and retains Playwright diagnostics on failure.

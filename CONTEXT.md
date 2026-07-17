@@ -8,6 +8,10 @@ Opinionated agentic software engineering harness that works GitHub issues into P
 A GitHub repository the harness is configured to work on, identified by owner and name (case-insensitive identity; display casing preserved). One row per GitHub repo; the harness keeps a single local clone of it (bare or working). Displayed as `owner/name` — no separate display label.
 _Avoid_: Repo (in formal docs), target, project, checkout
 
+**End-to-End Fixture Repository**:
+A dedicated Repository whose stable GitHub state is controlled as a fixture for end-to-end validation. It contains a permanent open, Ready-labeled sentinel Issue with fixed identity and content, no hierarchy or blockers, and no Issue-closing PR; scenarios need not reject unrelated Issues.
+_Avoid_: Test repo, sandbox Repository, mutable fixture
+
 **Paused**:
 A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Keeping the Issue store current through scheduled polling continues while Paused. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused. Not the same as a paused Work Item (see Pause Work Item).
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
