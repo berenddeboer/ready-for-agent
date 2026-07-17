@@ -260,6 +260,10 @@ type Repository = {
 const activatePollingIfCredentialed = (repository: Repository) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
+    if (keymaxxer.enabled === false) {
+      yield* activateRepositoryPolling(repository.id)
+      return
+    }
     const credential = yield* keymaxxer.findSecret({
       provider: "github",
       account: `${repository.githubOwner}/${repository.githubRepo}`,
@@ -298,9 +302,10 @@ const githubTokenCreationUrl = (repository: Repository) => {
 const repositoryCredential = (
   repository: Repository,
   existingToken: string | null,
+  configured = existingToken !== null,
 ) => ({
   repositoryId: repository.id,
-  configured: existingToken !== null,
+  configured,
   githubTokenSecretName: existingToken ?? githubTokenSecretName(repository),
   githubTokenCreationUrl: githubTokenCreationUrl(repository),
 })
@@ -530,14 +535,21 @@ export const createGraphqlApi = (
                   const db = yield* DbService
                   const repositories = yield* db.listRepositories
                   const keymaxxer = yield* KeymaxxerService
-                  const tokenNames = yield* keymaxxer.findSecrets(
-                    repositories.map((repository) => ({
-                      provider: "github",
-                      account: `${repository.githubOwner}/${repository.githubRepo}`,
-                    })),
-                  )
+                  const ambientAuthentication = keymaxxer.enabled === false
+                  const tokenNames = ambientAuthentication
+                    ? repositories.map(() => null)
+                    : yield* keymaxxer.findSecrets(
+                        repositories.map((repository) => ({
+                          provider: "github",
+                          account: `${repository.githubOwner}/${repository.githubRepo}`,
+                        })),
+                      )
                   return repositories.map((repository, index) =>
-                    repositoryCredential(repository, tokenNames[index] ?? null),
+                    repositoryCredential(
+                      repository,
+                      tokenNames[index] ?? null,
+                      ambientAuthentication || tokenNames[index] != null,
+                    ),
                   )
                 }),
               ),
@@ -1029,14 +1041,16 @@ export const createGraphqlApi = (
                   }
 
                   const keymaxxer = yield* KeymaxxerService
-                  const credential = yield* keymaxxer.findSecret({
-                    provider: "github",
-                    account: `${repository.githubOwner}/${repository.githubRepo}`,
-                  })
-                  if (credential === null) {
-                    return yield* new RepositoryCredentialError({
-                      message: `GitHub credential is not configured for ${repository.githubOwner}/${repository.githubRepo}`,
+                  if (keymaxxer.enabled !== false) {
+                    const credential = yield* keymaxxer.findSecret({
+                      provider: "github",
+                      account: `${repository.githubOwner}/${repository.githubRepo}`,
                     })
+                    if (credential === null) {
+                      return yield* new RepositoryCredentialError({
+                        message: `GitHub credential is not configured for ${repository.githubOwner}/${repository.githubRepo}`,
+                      })
+                    }
                   }
 
                   const jobId = yield* enqueueRefreshRepositoryJob(

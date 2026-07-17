@@ -20,6 +20,7 @@ import {
   WorkItemLifecycleLive,
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../server-context.js"
+import { ambientGitHubLayer } from "./ambient-github-layer.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 
@@ -59,9 +60,12 @@ export const createApplication = async (
     sidecarUrl === undefined
       ? disabledKeymaxxerLayer
       : sidecarKeymaxxerLayer(sidecarUrl)
-  const githubLayer = keymaxxerGitHubLayer({ workspaceRoot }).pipe(
-    Layer.provide(keymaxxerLayer),
-  )
+  const githubLayer =
+    sidecarUrl === undefined
+      ? ambientGitHubLayer({ workspaceRoot })
+      : keymaxxerGitHubLayer({ workspaceRoot }).pipe(
+          Layer.provide(keymaxxerLayer),
+        )
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),

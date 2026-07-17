@@ -175,23 +175,15 @@ export const keymaxxerGitHubLayer = (options: {
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
       const ensureToken = (repository: { owner: string; name: string }) =>
-        keymaxxer.enabled === false
-          ? Effect.sync((): string | undefined => undefined)
-          : keymaxxer.findSecret({
-              provider: "github",
-              account: `${repository.owner}/${repository.name}`,
-            })
-      const runGitHubCommand = (
-        tokenName: string | undefined,
-        command: string,
-      ) =>
+        keymaxxer.findSecret({
+          provider: "github",
+          account: `${repository.owner}/${repository.name}`,
+        })
+      const runGitHubCommand = (tokenName: string, command: string) =>
         keymaxxer.runWithSecrets({
-          command:
-            tokenName === undefined
-              ? `GITHUB_TOKEN="\${GITHUB_TOKEN:-$(gh auth token)}" ${command}`
-              : `GITHUB_TOKEN="$${tokenName}" ${command}`,
+          command: `GITHUB_TOKEN="$${tokenName}" ${command}`,
           cwd: options.workspaceRoot,
-          secrets: tokenName === undefined ? [] : [tokenName],
+          secrets: [tokenName],
           timeoutMs: 60_000,
         })
 

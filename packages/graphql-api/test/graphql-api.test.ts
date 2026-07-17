@@ -349,6 +349,39 @@ describe("GraphQL API", () => {
     ])
   })
 
+  test("activates Issue Polling with ambient GitHub authentication", async () => {
+    let ensured = false
+    let enqueued = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        enabled: false,
+        findSecret: () => Effect.die("must not inspect the vault"),
+      },
+      {
+        ensureKeyed: () => {
+          ensured = true
+          return Effect.succeed({ jobId: makeJobId(), created: true })
+        },
+        enqueue: () => {
+          enqueued = true
+          return Effect.succeed(makeJobId())
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      addRepositoryRequest(),
+    )
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.addRepository.id).toBe(repository.id)
+    expect(ensured).toBe(true)
+    expect(enqueued).toBe(true)
+  })
+
   test("does not activate Issue Polling when adding a repository without a GitHub token", async () => {
     let ensured = false
     let enqueued = false
@@ -541,6 +574,34 @@ describe("GraphQL API", () => {
     expect(creationUrl.searchParams.get("actions")).toBe("read")
     expect(creationUrl.searchParams.get("statuses")).toBe("read")
     expect(creationUrl.searchParams.get("checks")).toBeNull()
+  })
+
+  test("reports ambient GitHub authentication as configured", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        enabled: false,
+        findSecrets: () => Effect.die("must not inspect the vault"),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials { repositoryId configured }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        repositoryCredentials: [
+          { repositoryId: repository.id, configured: true },
+        ],
+      },
+    })
   })
 
   test("opens Keymaxxer setup for a missing repository token", async () => {
@@ -1743,6 +1804,47 @@ describe("GraphQL API", () => {
       },
       retryLimit: 1,
     })
+  })
+
+  test("accepts a Refresh Job with ambient GitHub authentication", async () => {
+    const jobId = makeJobId()
+    let enqueued = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {
+        enabled: false,
+        findSecret: () => Effect.die("must not inspect the vault"),
+      },
+      {
+        enqueue: () => {
+          enqueued = true
+          return Effect.succeed(jobId)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          refreshRepository(repositoryId: "${repository.id}") {
+            id
+            repositoryId
+          }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        refreshRepository: {
+          id: jobId,
+          repositoryId: repository.id,
+        },
+      },
+    })
+    expect(enqueued).toBe(true)
   })
 
   test("rejects refresh for an unknown repository without enqueueing", async () => {
