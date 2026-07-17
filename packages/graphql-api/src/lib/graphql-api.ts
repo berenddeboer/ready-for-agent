@@ -298,7 +298,8 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("issues", "read")
   url.searchParams.set("contents", "write")
   url.searchParams.set("pull_requests", "write")
-  // Actions + commit statuses power individual PR status-check handoffs via GraphQL rollup.
+  // Actions + commit statuses help with CI visibility. Per-check CheckRun nodes
+  // need Checks API access, which fine-grained PATs cannot grant — see AGENTS.md.
   url.searchParams.set("actions", "read")
   url.searchParams.set("statuses", "read")
   return url.toString()
