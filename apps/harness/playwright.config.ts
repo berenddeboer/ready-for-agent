@@ -1,22 +1,39 @@
 import { defineConfig } from "@playwright/test"
+import { defineBddConfig } from "playwright-bdd"
+import {
+  E2E_BASE_URL,
+  HARNESS_START_TIMEOUT_MS,
+  SCENARIO_TIMEOUT_MS,
+  SENTINEL_EXPECT_TIMEOUT_MS,
+} from "./e2e/support/constants.ts"
+
+const testDir = defineBddConfig({
+  features: "e2e/features/**/*.feature",
+  steps: "e2e/steps/**/*.ts",
+})
 
 export default defineConfig({
-  testDir: "./e2e",
-  testMatch: "**/*.e2e.ts",
-  use: {
-    baseURL: "http://127.0.0.1:4174",
+  testDir,
+  fullyParallel: false,
+  workers: 1,
+  retries: 0,
+  timeout: SCENARIO_TIMEOUT_MS,
+  expect: {
+    timeout: SENTINEL_EXPECT_TIMEOUT_MS,
   },
-  webServer: [
-    {
-      command: "bun e2e/keymaxxer-stub.ts",
-      url: "http://127.0.0.1:59999/",
-      reuseExistingServer: !process.env.CI,
-    },
-    {
-      command:
-        "SQLITE_DATABASE_PATH=/tmp/ready-for-agent-harness-e2e.db bun --conditions @ready-for-agent/source ../../packages/db/src/bin/migrate.ts && SQLITE_DATABASE_PATH=/tmp/ready-for-agent-harness-e2e.db KEYMAXXER_SIDECAR_URL=http://127.0.0.1:59999/e2e-test-capability/mcp bun run dev --host 127.0.0.1 --port 4174",
-      url: "http://127.0.0.1:4174",
-      reuseExistingServer: !process.env.CI,
-    },
-  ],
+  reporter: [["list"], ["html", { open: "never" }]],
+  use: {
+    baseURL: E2E_BASE_URL,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
+  webServer: {
+    command:
+      "bun --conditions @ready-for-agent/source e2e/support/start-live-harness.ts",
+    url: E2E_BASE_URL,
+    reuseExistingServer: false,
+    timeout: HARNESS_START_TIMEOUT_MS,
+    stdout: "pipe",
+    stderr: "pipe",
+  },
 })

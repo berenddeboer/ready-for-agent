@@ -19,8 +19,10 @@ export default defineConfig({
   },
   ssr: {
     noExternal: [/^@ready-for-agent\//],
+    // pkce-challenge (via MCP SDK) only publishes "node" / "browser" export
+    // conditions — include "node" so production SSR can resolve it.
     resolve: {
-      conditions: ["@ready-for-agent/source"],
+      conditions: ["@ready-for-agent/source", "node", "import"],
     },
   },
   server: {

@@ -51,9 +51,10 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "playwright test"
+        "command": "bddgen && playwright test"
       },
       "dependsOn": [
+        "build",
         {
           "projects": ["graphql-client"],
           "target": "generate"

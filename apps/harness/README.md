@@ -50,4 +50,21 @@ Build and start the custom Bun server with:
 bunx nx run harness:start
 ```
 
-Production initializes Keymaxxer in-process and does not start the sidecar.
+Production uses `run-with-keymaxxer-sidecar` so the real Keymaxxer Sidecar is
+started (or reused when `KEYMAXXER_SIDECAR_URL` is already set).
+
+## Live end-to-end
+
+One Gherkin operator journey (`e2e/features/add-and-refresh-repository.feature`)
+runs the production build against a fresh isolated Harness database, clones the
+private End-to-End Fixture Repository through Keymaxxer, adds it with the real
+CLI, and waits for credential activation's automatic first Refresh Job.
+
+```bash
+bunx nx run harness:e2e
+```
+
+Local runs leave `~/.keymaxxer` untouched and use your matching
+`provider=github` / `account=berenddeboer/test-ready-for-agent` credential
+(normal Keymaxxer prompts allowed). CI will unlock the checked-in fixture vault
+with `E2E_KEYMAXXER_MASTER_KEY` (see `docs/e2e-fixture.md` and ADR 0021).

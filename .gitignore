@@ -34,6 +34,7 @@ node_modules
 /coverage
 /apps/harness/playwright-report/
 /apps/harness/test-results/
+/apps/harness/.features-gen/
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
