@@ -35,12 +35,24 @@ READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4300/graphql \
 
 ## Database
 
-By default the harness stores application data in `tmp/ready-for-agent.db`
-(override with `SQLITE_DATABASE_PATH`). Fully stop the harness before opening
-that file with external write tooling. The harness uses single-process default
-WAL; concurrent writers are not supported. Stale `*.db-tshm` files from older
-multiprocess-WAL runs may remain; Turso rebuilds or ignores them after a clean
-mode switch, and no data migration is required.
+- **Operator binary / product default:** platform data dir
+  (`~/.local/share/ready-for-agent/` on Linux, Application Support on macOS),
+  database file `ready-for-agent.db`.
+- **Monorepo `nx run harness:dev` / `harness:start`:** `tmp/ready-for-agent.db`
+  when `SQLITE_DATABASE_PATH` is unset.
+- **Override:** `SQLITE_DATABASE_PATH` always wins.
+
+Fully stop the harness before opening that file with external write tooling.
+The harness uses single-process default WAL; concurrent writers are not
+supported. Stale `*.db-tshm` files from older multiprocess-WAL runs may remain;
+Turso rebuilds or ignores them after a clean mode switch, and no data migration
+is required.
+
+## Browser open
+
+Production `harness:start` opens the default browser to the local UI after
+listen unless `NO_BROWSER` is set. The operator binary also supports
+`--no-open`.
 
 ## Production
 

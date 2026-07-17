@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs"
+import { dirname } from "node:path"
 import { connect } from "@tursodatabase/database"
 import { Context, Effect, Layer, Scope, Semaphore, Stream } from "effect"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
@@ -42,8 +44,14 @@ const sqlError = (cause: unknown, operation: string) =>
     }),
   })
 
+const ensureLocalDatabaseParentDir = (path: string) => {
+  if (path === ":memory:") return
+  mkdirSync(dirname(path), { recursive: true })
+}
+
 const makeClient = (path: string, options?: TursoClientOptions) =>
   Effect.gen(function* () {
+    ensureLocalDatabaseParentDir(path)
     const databaseOptions: NonNullable<Parameters<typeof connect>[1]> = {}
     if (options?.defaultQueryTimeout !== undefined)
       databaseOptions.defaultQueryTimeout = options.defaultQueryTimeout

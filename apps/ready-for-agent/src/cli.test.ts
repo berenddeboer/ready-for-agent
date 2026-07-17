@@ -35,9 +35,10 @@ describe("operator binary CLI seam", () => {
   })
 
   const mockStart = Layer.succeed(StartHarness, {
-    start: Effect.sync(() => {
-      started += 1
-    }),
+    start: () =>
+      Effect.sync(() => {
+        started += 1
+      }),
   })
 
   const mockLocalGit = Layer.succeed(LocalGit, {
@@ -98,7 +99,7 @@ describe("operator binary CLI seam", () => {
     }
   })
 
-  test("binary help lists start, add, and remove-github-token", () => {
+  test("binary help lists start, add, remove-github-token, and --no-open", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -113,6 +114,27 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("start")
     expect(output).toContain("add")
     expect(output).toContain("remove-github-token")
+    expect(output).toContain("no-open")
+  })
+
+  test("default and start accept --no-open without starting GraphQL commands", async () => {
+    const layer = mockStart.pipe(
+      Layer.provideMerge(mockLocalGit),
+      Layer.provideMerge(
+        Layer.succeed(GraphqlApi, {
+          addRepository: () => Effect.die("graphql should not run for start"),
+          listRepositories: Effect.die("graphql should not run for start"),
+          removeRepositoryGitHubToken: () =>
+            Effect.die("graphql should not run for start"),
+        }),
+      ),
+    )
+
+    await Effect.runPromise(runOperator(["--no-open"], layer))
+    expect(started).toBe(1)
+
+    await Effect.runPromise(runOperator(["start", "--no-open"], layer))
+    expect(started).toBe(2)
   })
 
   test("binary add against unreachable GraphQL prints start hint", () => {

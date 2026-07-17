@@ -11,10 +11,13 @@ Opinionated agentic software engineering harness to massively increase landed PR
 ## Requirements
 1. git
 2. GitHub CLI tool [gh](https://cli.github.com/)
-3. [keymaxxer](https://github.com/glommer/keymaxxer) — workspace pins exact
-   `keymaxxer@0.2.1` in the root lockfile for live e2e vault tooling
+3. [OpenCode](https://opencode.ai) on `PATH`
+4. [keymaxxer](https://github.com/glommer/keymaxxer) — optional; workspace pins
+   exact `keymaxxer@0.2.1` in the root lockfile for live e2e vault tooling
 
-The backend starts Keymaxxer through its MCP server. It uses
+The operator binary fails fast at start if `git`, `gh`, or OpenCode is missing.
+
+The backend starts Keymaxxer through its MCP server when available. It uses
 `KEYMAXXER_ENTRYPOINT` when set to an existing path (run with `bun`), otherwise
 the installed `keymaxxer` command on PATH (including the workspace pin).
 
