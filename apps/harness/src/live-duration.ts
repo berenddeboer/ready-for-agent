@@ -34,17 +34,18 @@ export function formatDuration(ms: number): string {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`
 }
 
-/** Formats job start time as a relative phrase, e.g. "15 min ago". */
+/** Formats job start time as a relative phrase, e.g. "Started 15 min ago". */
 export function formatStartedAgo(iso: string, nowMs = Date.now()): string {
   const elapsedMs = Math.max(0, nowMs - new Date(iso).getTime())
   const seconds = Math.floor(elapsedMs / 1000)
-  if (seconds < 60) return "just now"
+  if (seconds < 60) return "Started just now"
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} min ago`
+  if (minutes < 60) return `Started ${minutes} min ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`
+  if (hours < 24)
+    return hours === 1 ? "Started 1 hour ago" : `Started ${hours} hours ago`
   const days = Math.floor(hours / 24)
-  return days === 1 ? "1 day ago" : `${days} days ago`
+  return days === 1 ? "Started 1 day ago" : `Started ${days} days ago`
 }
 
 /** Local wall-clock tick for animating live durations and relative ages. */

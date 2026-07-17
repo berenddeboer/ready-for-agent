@@ -1736,11 +1736,8 @@ function WorkItemLifecycleStatus({
       }
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-700">
-          {workItem.stateLabel}
-          <span className="ml-1.5 font-normal text-slate-500">
-            {formatStartedAgo(workItem.createdAt, nowMs)}
-          </span>
+        <span className="text-xs font-normal text-slate-500">
+          {formatStartedAgo(workItem.createdAt, nowMs)}
         </span>
         <span
           className={`rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase ${
