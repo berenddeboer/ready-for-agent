@@ -8,6 +8,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { Copy } from "../copy.js"
 import {
   formatDuration,
   formatStartedAgo,
@@ -18,6 +19,7 @@ import {
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
+import { sessionWorktreeLine } from "../session-worktree-line.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -198,6 +200,7 @@ type WorkItem = {
   canRetry: boolean
   isTerminal: boolean
   sessionId: string | null
+  worktreePath: string | null
   createdAt: string
   lifecycleLabels: readonly {
     phase: string
@@ -221,6 +224,7 @@ const workItemFields = {
   canRetry: true,
   isTerminal: true,
   sessionId: true,
+  worktreePath: true,
   createdAt: true,
   lifecycleLabels: {
     phase: true,
@@ -1533,6 +1537,10 @@ function JobsCard() {
               )}
             </>
           )
+          const sessionWorktree = sessionWorktreeLine(
+            workItem.sessionId,
+            workItem.worktreePath,
+          )
           return (
             <li
               className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
@@ -1567,12 +1575,13 @@ function JobsCard() {
                   </span>
                 </div>
               </div>
-              {workItem.sessionId !== null && workItem.sessionId !== "" && (
-                <p
-                  className="mt-1 mb-0 truncate font-mono text-[0.7rem] text-slate-500"
-                  title={workItem.sessionId}
-                >
-                  Session {workItem.sessionId}
+              {sessionWorktree !== null && (
+                <p className="mt-1 mb-0 min-w-0">
+                  <Copy
+                    value={sessionWorktree}
+                    className="w-full"
+                    textClassName="font-mono text-[0.7rem] text-slate-500"
+                  />
                 </p>
               )}
               <WorkItemLifecycleStatus
