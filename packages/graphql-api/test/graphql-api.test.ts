@@ -1611,6 +1611,56 @@ describe("GraphQL API", () => {
     expect(receivedRepositoryId).toBe(repository.id)
   })
 
+  test("exposes Work Item PR number when recorded", async () => {
+    const withPr = {
+      ...workItem,
+      githubPullRequestNumber: 212,
+    } as WorkItemRecord
+    const withoutPr = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubPullRequestNumber: null,
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () => Effect.succeed([withPr, withoutPr]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!) {
+          workItems(repositoryId: $repositoryId) {
+            id githubPullRequestNumber
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: withPr.id,
+            githubPullRequestNumber: 212,
+          },
+          {
+            id: withoutPr.id,
+            githubPullRequestNumber: null,
+          },
+        ],
+      },
+    })
+  })
+
   test("hides terminal Work Items whose Issue is no longer Relevant", async () => {
     const terminalOrphan = {
       ...workItem,
