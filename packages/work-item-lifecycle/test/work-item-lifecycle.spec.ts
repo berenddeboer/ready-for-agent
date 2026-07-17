@@ -1306,6 +1306,14 @@ describe("WorkItemLifecycle", () => {
             )
           }
 
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET finished_at = ?
+             WHERE work_item_id = ?
+               AND step = 'watch_pr_status_checks'
+               AND status = 'succeeded'`,
+            [watchStartedAt, created.id],
+          )
           yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
           const afterGrace = yield* claimAndRunPending
           expect(afterGrace._tag).toBe("processed")

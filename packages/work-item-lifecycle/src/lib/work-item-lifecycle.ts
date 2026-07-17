@@ -795,7 +795,7 @@ export const makeWorkItemLifecycleLive = (
              WHERE work_item_id = ?
                AND step = 'watch_pr_status_checks'
                AND status = 'succeeded'
-             ORDER BY finished_at DESC
+             ORDER BY finished_at DESC, rowid DESC
              LIMIT 1`,
               [workItemId],
             )
