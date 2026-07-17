@@ -2,13 +2,14 @@ import { Context, Effect, Layer } from "effect"
 import type {
   AddSecretInput,
   FindSecretInput,
-  KeymaxxerError,
   RunWithSecretsInput,
   RunWithSecretsResult,
   SecretName,
 } from "./models.js"
+import { KeymaxxerError } from "./models.js"
 
 export interface KeymaxxerServiceShape {
+  readonly enabled?: boolean
   readonly initialize: Effect.Effect<void, KeymaxxerError>
   readonly hasSecret: (
     name: SecretName,
@@ -56,4 +57,38 @@ export const testKeymaxxerLayer = (
       runWithSecrets: () =>
         Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
     }
+  })
+
+export const disabledKeymaxxerLayer: Layer.Layer<KeymaxxerService> =
+  Layer.succeed(KeymaxxerService, {
+    enabled: false,
+    initialize: Effect.void,
+    hasSecret: () => Effect.succeed(false),
+    findSecret: () => Effect.succeed(null),
+    findSecrets: (inputs) => Effect.succeed(inputs.map(() => null)),
+    addSecret: () => Effect.succeed(false),
+    removeSecret: () => Effect.succeed(false),
+    runWithSecrets: (input) =>
+      Effect.tryPromise({
+        try: async () => {
+          const child = Bun.spawn(["bash", "-c", input.command], {
+            cwd: input.cwd,
+            env: process.env,
+            stdout: "pipe",
+            stderr: "pipe",
+            timeout: input.timeoutMs,
+          })
+          const [exitCode, stdout, stderr] = await Promise.all([
+            child.exited,
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+          ])
+          return { exitCode, stdout, stderr }
+        },
+        catch: () =>
+          new KeymaxxerError({
+            operation: "run command",
+            message: "Failed to run command without Keymaxxer",
+          }),
+      }),
   })

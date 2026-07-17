@@ -44,7 +44,7 @@ const parseResult = (
     : { reason: needsHuman[1].trim().slice(0, 500) }
 }
 
-const workPrompt = (tokenName: string): string =>
+const workPrompt = (tokenName: string | undefined): string =>
   [
     "Resolve the merge conflict on the existing pull request for this worktree by rebasing its branch.",
     "Fetch origin and inspect the pull request to determine its current base branch (normally the repository default branch).",
@@ -53,7 +53,11 @@ const workPrompt = (tokenName: string): string =>
     "Push the rebased pull-request branch with --force-with-lease. Do not use an unconditional force push.",
     "If the lease is rejected, refetch, incorporate the updated remote PR branch, rebase onto the current remote base again, verify, and retry the --force-with-lease push exactly once. If that second push cannot safely succeed, stop and report that human intervention is needed in the follow-up verdict turn.",
     "Do not create or merge another pull request and do not do unrelated work.",
-    `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI, API, fetch, or push access; never put secret values in the environment.`,
+    ...(tokenName === undefined
+      ? []
+      : [
+          `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI, API, fetch, or push access; never put secret values in the environment.`,
+        ]),
     "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
   ].join("\n")
 
@@ -91,10 +95,13 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
       })
     }
     const keymaxxer = yield* KeymaxxerService
-    const tokenName = yield* keymaxxer.findSecret({
-      provider: "github",
-      account: `${repository.githubOwner}/${repository.githubRepo}`,
-    })
+    const tokenName =
+      keymaxxer.enabled === false
+        ? undefined
+        : yield* keymaxxer.findSecret({
+            provider: "github",
+            account: `${repository.githubOwner}/${repository.githubRepo}`,
+          })
     if (tokenName === null) {
       return yield* new ResolvePrMergeConflictContextError({
         message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,

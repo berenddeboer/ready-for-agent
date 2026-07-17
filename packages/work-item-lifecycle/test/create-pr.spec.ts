@@ -267,6 +267,29 @@ describe("createPr", () => {
       )
     }))
 
+  it("uses a generic prompt when Keymaxxer is disabled", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      const pullRequestNumber = await run(createPr(baseContext(root)), {
+        keymaxxer: stubKeymaxxer({
+          enabled: false,
+          findSecret: () => Effect.die("must not inspect the vault"),
+        }),
+        opencode: stubOpencode({
+          continue: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      })
+
+      expect(pullRequestNumber).toBe(321)
+      expect(prompt.toLowerCase()).not.toContain("keymaxxer")
+    }))
+
   it("maps Keymaxxer credential lookup failure", () =>
     withTemp(async (root) => {
       const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {

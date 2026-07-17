@@ -72,9 +72,32 @@ describe("makeOpencodeEnvironment", () => {
     expect(env.GITHUB_TOKEN_ACME_WIDGETS).toBeUndefined()
   })
 
-  it("fails closed when the capability URL is missing", () => {
-    expect(() =>
-      makeOpencodeEnvironment({ keymaxxerMcpUrl: "  ", environment: {} }),
-    ).toThrow("keymaxxerMcpUrl is required")
+  it("does not configure Keymaxxer when its capability URL is missing", () => {
+    expect(
+      JSON.parse(
+        makeOpencodeEnvironment({ environment: {} }).OPENCODE_CONFIG_CONTENT,
+      ),
+    ).toEqual({})
+  })
+
+  it("removes existing Keymaxxer configuration when disabled", () => {
+    const existingConfig = JSON.stringify({
+      model: "anthropic/claude-sonnet-4-5",
+      mcp: {
+        filesystem: { enabled: true },
+        keymaxxer: { enabled: true, type: "local" },
+      },
+    })
+
+    expect(
+      JSON.parse(
+        makeOpencodeEnvironment({
+          environment: { OPENCODE_CONFIG_CONTENT: existingConfig },
+        }).OPENCODE_CONFIG_CONTENT,
+      ),
+    ).toEqual({
+      model: "anthropic/claude-sonnet-4-5",
+      mcp: { filesystem: { enabled: true } },
+    })
   })
 })

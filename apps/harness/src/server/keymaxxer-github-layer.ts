@@ -175,9 +175,24 @@ export const keymaxxerGitHubLayer = (options: {
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
       const ensureToken = (repository: { owner: string; name: string }) =>
-        keymaxxer.findSecret({
-          provider: "github",
-          account: `${repository.owner}/${repository.name}`,
+        keymaxxer.enabled === false
+          ? Effect.sync((): string | undefined => undefined)
+          : keymaxxer.findSecret({
+              provider: "github",
+              account: `${repository.owner}/${repository.name}`,
+            })
+      const runGitHubCommand = (
+        tokenName: string | undefined,
+        command: string,
+      ) =>
+        keymaxxer.runWithSecrets({
+          command:
+            tokenName === undefined
+              ? `GITHUB_TOKEN="\${GITHUB_TOKEN:-$(gh auth token)}" ${command}`
+              : `GITHUB_TOKEN="$${tokenName}" ${command}`,
+          cwd: options.workspaceRoot,
+          secrets: tokenName === undefined ? [] : [tokenName],
+          timeoutMs: 60_000,
         })
 
       const service: GitHubServiceShape = {
@@ -193,12 +208,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* keymaxxer.runWithSecrets({
-              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-open-pr-number.ts ${owner} ${name} ${head}`,
-              cwd: options.workspaceRoot,
-              secrets: [tokenName],
-              timeoutMs: 60_000,
-            })
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-open-pr-number.ts ${owner} ${name} ${head}`,
+            )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -237,12 +250,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* keymaxxer.runWithSecrets({
-              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-check-status.ts ${owner} ${name} ${head}`,
-              cwd: options.workspaceRoot,
-              secrets: [tokenName],
-              timeoutMs: 60_000,
-            })
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-check-status.ts ${owner} ${name} ${head}`,
+            )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -283,12 +294,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* keymaxxer.runWithSecrets({
-              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-lifecycle-status.ts ${owner} ${name} ${head}`,
-              cwd: options.workspaceRoot,
-              secrets: [tokenName],
-              timeoutMs: 60_000,
-            })
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-lifecycle-status.ts ${owner} ${name} ${head}`,
+            )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -329,12 +338,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* keymaxxer.runWithSecrets({
-              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/mark-pr-ready-for-review.ts ${owner} ${name} ${head}`,
-              cwd: options.workspaceRoot,
-              secrets: [tokenName],
-              timeoutMs: 60_000,
-            })
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/mark-pr-ready-for-review.ts ${owner} ${name} ${head}`,
+            )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -361,12 +368,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* keymaxxer.runWithSecrets({
-              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/merge-pull-request.ts ${owner} ${name} ${head}`,
-              cwd: options.workspaceRoot,
-              secrets: [tokenName],
-              timeoutMs: 60_000,
-            })
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/merge-pull-request.ts ${owner} ${name} ${head}`,
+            )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
             }
@@ -394,12 +399,10 @@ export const keymaxxerGitHubLayer = (options: {
 
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
-            const result = yield* keymaxxer.runWithSecrets({
-              command: `GITHUB_TOKEN="$${tokenName}" bun --conditions @ready-for-agent/source packages/github-service/src/bin/list-ready-issues.ts ${owner} ${name}`,
-              cwd: options.workspaceRoot,
-              secrets: [tokenName],
-              timeoutMs: 60_000,
-            })
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/list-ready-issues.ts ${owner} ${name}`,
+            )
 
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)

@@ -18,6 +18,10 @@ The backend starts Keymaxxer through its MCP server. It uses
 at `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present,
 and finally falls back to the installed `keymaxxer` command.
 
+When no Keymaxxer entrypoint or executable is available, the harness starts
+without Keymaxxer and uses the user's ambient GitHub authentication. Set
+`KEYMAXXER_ENABLED=false` to select this mode explicitly.
+
 ## Get started
 
 1. Checkout a repo locally.

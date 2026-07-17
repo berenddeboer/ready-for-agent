@@ -249,7 +249,7 @@ export class Opencode extends Context.Service<
       }),
     )
 
-  /** Test/integration helper; production must pass keymaxxerMcpUrl explicitly. */
+  /** Test/integration helper with Keymaxxer enabled by default. */
   static layerForTests = (
     keymaxxerMcpUrl = "http://127.0.0.1:5032/test-cap/mcp",
   ) => Opencode.layer({ keymaxxerMcpUrl })

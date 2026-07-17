@@ -8,6 +8,38 @@ import { keymaxxerGitHubLayer } from "../src/server/keymaxxer-github-layer.js"
 import { describe, expect, test } from "bun:test"
 
 describe("Keymaxxer-backed GitHub layer", () => {
+  test("uses ambient GitHub authentication when Keymaxxer is disabled", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      enabled: false,
+      initialize: Effect.void,
+      findSecret: () => Effect.die("must not inspect the vault"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
+      },
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        yield* github.listReadyIssues({ owner: "acme", name: "widgets" })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(runs).toHaveLength(1)
+    expect(runs[0]?.secrets).toEqual([])
+    expect(runs[0]?.command).toContain("gh auth token")
+    expect(runs[0]?.command.toLowerCase()).not.toContain("keymaxxer")
+  })
+
   test("does not prompt Keymaxxer when a repository token is missing", async () => {
     let addCalled = false
     const runs: RunWithSecretsInput[] = []

@@ -65,7 +65,7 @@ const resolveSessionId = (context: LifecycleStepContext) => {
 const buildCreatePrPrompt = (
   githubIssueNumber: number,
   branch: string,
-  tokenName: string,
+  tokenName: string | undefined,
 ) =>
   [
     "Create a pull request for the committed implementation changes in this worktree.",
@@ -77,7 +77,11 @@ const buildCreatePrPrompt = (
     "Follow this repository's PR title and body conventions.",
     `If a suitable open PR whose head is exactly ${branch} already exists, succeed without creating a duplicate.`,
     "Do not merge the pull request.",
-    `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
+    ...(tokenName === undefined
+      ? []
+      : [
+          `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
+        ]),
   ].join("\n")
 
 /**
@@ -114,21 +118,25 @@ export const createPr = (context: LifecycleStepContext) =>
     }
 
     const keymaxxer = yield* KeymaxxerService
-    const tokenName = yield* keymaxxer
-      .findSecret({
-        provider: "github",
-        account: `${repository.githubOwner}/${repository.githubRepo}`,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CreatePrCredentialError({
-              repositoryId: context.repositoryId,
-              message: "Failed to resolve the repository GitHub credential",
-              cause,
-            }),
-        ),
-      )
+    const tokenName =
+      keymaxxer.enabled === false
+        ? undefined
+        : yield* keymaxxer
+            .findSecret({
+              provider: "github",
+              account: `${repository.githubOwner}/${repository.githubRepo}`,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new CreatePrCredentialError({
+                    repositoryId: context.repositoryId,
+                    message:
+                      "Failed to resolve the repository GitHub credential",
+                    cause,
+                  }),
+              ),
+            )
     if (tokenName === null) {
       return yield* new CreatePrCredentialError({
         repositoryId: context.repositoryId,
