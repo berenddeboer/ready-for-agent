@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs"
 import { unlink } from "node:fs/promises"
-import { Effect } from "effect"
+import { connect } from "@tursodatabase/database"
+import { ConfigProvider, Effect, Layer } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { makeTursoLive } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -9,15 +11,20 @@ const tempDbPath = () =>
 
 const sqlQuery = (sql: string) => Object.assign([sql], { raw: [sql] })
 
-const makeTestLayer = (dbPath: string) => {
-  process.env.SQLITE_DATABASE_PATH = dbPath
-  return makeTursoLive()
-}
+const makeTestLayer = (dbPath: string) =>
+  makeTursoLive().pipe(
+    Layer.provide(
+      ConfigProvider.layer(
+        ConfigProvider.fromUnknown({ SQLITE_DATABASE_PATH: dbPath }),
+      ),
+    ),
+  )
 
 const cleanupDb = async (dbPath: string) => {
   await unlink(dbPath).catch(() => {})
   await unlink(`${dbPath}-wal`).catch(() => {})
   await unlink(`${dbPath}-shm`).catch(() => {})
+  await unlink(`${dbPath}-tshm`).catch(() => {})
 }
 
 describe("makeTursoLive", () => {
@@ -252,6 +259,56 @@ describe("makeTursoLive", () => {
       )
 
       expect(rows).toEqual([[1, 1, "a", "b"]])
+    } finally {
+      await cleanupDb(dbPath)
+    }
+  })
+
+  it("can be reopened by a default Turso connection after close", async () => {
+    const dbPath = tempDbPath()
+    const TestLayer = makeTestLayer(dbPath)
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+
+          yield* sql(sqlQuery("CREATE TABLE reopen (value TEXT NOT NULL)"))
+          yield* sql(sqlQuery("INSERT INTO reopen (value) VALUES ('ok')"))
+        }).pipe(Effect.provide(TestLayer)),
+      )
+
+      const db = await connect(dbPath)
+      try {
+        const rows = await db.all("SELECT value FROM reopen")
+        expect(rows).toEqual([{ value: "ok" }])
+      } finally {
+        await db.close()
+      }
+    } finally {
+      await cleanupDb(dbPath)
+    }
+  })
+
+  it("does not create a .db-tshm multiprocess coordination file", async () => {
+    const dbPath = tempDbPath()
+    const TestLayer = makeTestLayer(dbPath)
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+
+          yield* sql(sqlQuery("CREATE TABLE no_tshm (value TEXT NOT NULL)"))
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              yield* sql(sqlQuery("INSERT INTO no_tshm (value) VALUES ('ok')"))
+            }),
+          )
+        }).pipe(Effect.provide(TestLayer)),
+      )
+
+      expect(existsSync(`${dbPath}-tshm`)).toBe(false)
     } finally {
       await cleanupDb(dbPath)
     }
