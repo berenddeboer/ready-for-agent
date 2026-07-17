@@ -41,6 +41,7 @@ import {
   ParentIssueError,
   ResetCleanupError,
   RetryNotEligibleError,
+  STEP_RUN_REASON,
   type StepRunRecord,
   UnfinishedWorkItemExistsError,
   WAITING_FOR_WORKER_SLOT_MESSAGE,
@@ -208,10 +209,20 @@ const statusLabel = (status: WorkItemStatus): string =>
 const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
   workItem.stepRuns.at(-1)
 
+/** Running Step Run blocked on maxConcurrentOpencodeSessions → operator Queued. */
+const isWaitingForOpencodeSession = (stepRun: StepRunRecord): boolean =>
+  stepRun.status === "running" &&
+  stepRun.reasonCode === STEP_RUN_REASON.waitingForOpencodeSession
+
+const stepRunDisplayStatus = (stepRun: StepRunRecord): WorkItemStatus =>
+  isWaitingForOpencodeSession(stepRun) ? "queued" : stepRun.status
+
 const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   if (workItem.waitingSince != null) return "waiting_for_worker_slot"
   if (isTerminalWorkItemState(workItem.state)) return workItem.state
-  return latestStepRun(workItem)?.status ?? "queued"
+  const latest = latestStepRun(workItem)
+  if (latest === undefined) return "queued"
+  return stepRunDisplayStatus(latest)
 }
 
 const lifecycleLabels = (workItem: WorkItemRecord) => {
@@ -227,7 +238,7 @@ const lifecycleLabels = (workItem: WorkItemRecord) => {
 
   return [...latestRuns].map(([phase, stepRun]) => {
     const status: WorkItemStatus =
-      phase === finalPhase ? "needs_human" : stepRun.status
+      phase === finalPhase ? "needs_human" : stepRunDisplayStatus(stepRun)
     const outcome =
       phase === "decide_pr_merge" && status === "needs_human"
         ? "Human review before merge"

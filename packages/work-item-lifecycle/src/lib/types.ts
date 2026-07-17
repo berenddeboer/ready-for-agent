@@ -100,6 +100,10 @@ export interface WorkItemRecord {
 export const WAITING_FOR_WORKER_SLOT_MESSAGE =
   "Waiting for a worker slot to become available"
 
+/** Operator-visible message while a running Step Run waits for an OpenCode session slot. */
+export const WAITING_FOR_OPENCODE_SESSION_MESSAGE =
+  "Waiting for an OpenCode session slot"
+
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
 export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
@@ -127,6 +131,8 @@ export const STEP_RUN_REASON = {
   abandoned: "abandoned",
   reset: "reset",
   paused: "paused",
+  /** Mid-run: Step Run is Running but blocked on maxConcurrentOpencodeSessions. */
+  waitingForOpencodeSession: "waiting_for_opencode_session",
 } as const
 
 export type StepRunReasonCode =

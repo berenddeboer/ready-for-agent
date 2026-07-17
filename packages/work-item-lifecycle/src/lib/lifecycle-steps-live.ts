@@ -41,9 +41,9 @@ export const LifecycleStepsLive = Layer.effect(
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const rawOpencode = yield* Opencode
-    const opencode = yield* limitOpencodeSessions(rawOpencode, db)
     const github = yield* GitHubService
     const sql = yield* SqlClient.SqlClient
+    const opencode = yield* limitOpencodeSessions(rawOpencode, db, sql)
 
     const withServices = <A, E>(
       effect: Effect.Effect<

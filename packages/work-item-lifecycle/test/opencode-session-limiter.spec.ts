@@ -1,8 +1,16 @@
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { Opencode } from "@ready-for-agent/opencode"
-import { limitOpencodeSessions } from "../src/lib/opencode-session-limiter.js"
+import {
+  CurrentStepRun,
+  limitOpencodeSessions,
+} from "../src/lib/opencode-session-limiter.js"
+import {
+  STEP_RUN_REASON,
+  WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+} from "../src/lib/types.js"
 import { describe, expect, it } from "bun:test"
 
 const TestLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
@@ -18,11 +26,46 @@ const startInput = {
   variant: "low",
 }
 
+const seedRunningStepRun = (input: {
+  readonly stepRunId: string
+  readonly workItemId: string
+  readonly repositoryId: string
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `INSERT INTO repository (
+         id, github_owner, github_repo, local_path, is_bare, paused,
+         issues_reconciled_at, created_at, updated_at
+       ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+      [input.repositoryId, `/tmp/${input.repositoryId}`, now, now],
+    )
+    yield* sql.unsafe(
+      `INSERT INTO work_item (
+         id, repository_id, github_issue_number, model, variant,
+         review_model, review_variant, state, state_ready_at, worktree_path,
+         session_id, failure_code, failure_message, created_at, updated_at
+       ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'implement', ?,
+         '/tmp/worktree', NULL, NULL, NULL, ?, ?)`,
+      [input.workItemId, input.repositoryId, now, now, now],
+    )
+    yield* sql.unsafe(
+      `INSERT INTO step_run (
+         id, work_item_id, step, status, queue_job_id, queued_at,
+         started_at, finished_at, reason_code, reason_message,
+         created_at, updated_at
+       ) VALUES (?, ?, 'implement', 'running', NULL, ?, ?, NULL, NULL, NULL, ?, ?)`,
+      [input.stepRunId, input.workItemId, now, now, now, now],
+    )
+  })
+
 describe("limitOpencodeSessions", () => {
   it("caps concurrent start/continue to Config max and queues the rest", () =>
     runTest(
       Effect.gen(function* () {
         const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultVariant: "low",
@@ -57,7 +100,7 @@ describe("limitOpencodeSessions", () => {
           continue: () => gatedRun(),
           listModels: () => Effect.succeed([]),
         })
-        const limited = yield* limitOpencodeSessions(inner, db)
+        const limited = yield* limitOpencodeSessions(inner, db, sql)
 
         const first = yield* limited.start(startInput).pipe(Effect.forkChild)
         const second = yield* limited.start(startInput).pipe(Effect.forkChild)
@@ -91,6 +134,7 @@ describe("limitOpencodeSessions", () => {
     runTest(
       Effect.gen(function* () {
         const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultVariant: "low",
@@ -122,7 +166,7 @@ describe("limitOpencodeSessions", () => {
               return ["model-a"]
             }),
         })
-        const limited = yield* limitOpencodeSessions(inner, db)
+        const limited = yield* limitOpencodeSessions(inner, db, sql)
 
         const startFiber = yield* limited
           .start(startInput)
@@ -142,6 +186,7 @@ describe("limitOpencodeSessions", () => {
     runTest(
       Effect.gen(function* () {
         const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultVariant: "low",
@@ -172,7 +217,7 @@ describe("limitOpencodeSessions", () => {
             Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
           listModels: () => Effect.succeed([]),
         })
-        const limited = yield* limitOpencodeSessions(inner, db)
+        const limited = yield* limitOpencodeSessions(inner, db, sql)
 
         const first = yield* limited.start(startInput).pipe(Effect.forkChild)
         yield* Deferred.await(firstStarted)
@@ -195,6 +240,102 @@ describe("limitOpencodeSessions", () => {
         yield* Deferred.succeed(releaseFirst, undefined)
         yield* Fiber.join(first)
         yield* Fiber.join(second)
+      }),
+    ))
+
+  it("marks the ambient Step Run waiting while blocked on a session slot", () =>
+    runTest(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const sql = yield* SqlClient.SqlClient
+        yield* db.updateConfig({
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultVariant: "low",
+          reviewModel: null,
+          reviewVariant: null,
+          maxConcurrentOpencodeSessions: 1,
+          maxConcurrentWorkItems: 5,
+        })
+
+        const repositoryId = "repo-limiter-wait"
+        const workItemId = "wi-01JLIMITERWAIT000000000001"
+        const stepRunId = "srun-01JLIMITERWAIT00000000001"
+        yield* seedRunningStepRun({
+          stepRunId,
+          workItemId,
+          repositoryId,
+        })
+
+        const releaseFirst = yield* Deferred.make<void>()
+        const firstStarted = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        let starts = 0
+
+        const inner = Opencode.of({
+          start: () =>
+            Effect.gen(function* () {
+              starts += 1
+              if (starts === 1) {
+                yield* Deferred.succeed(firstStarted, undefined)
+                yield* Deferred.await(releaseFirst)
+              } else {
+                yield* Deferred.succeed(secondStarted, undefined)
+              }
+              return { sessionId: `ses_${starts}`, assistantText: "" }
+            }),
+          continue: () =>
+            Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
+          listModels: () => Effect.succeed([]),
+        })
+        const limited = yield* limitOpencodeSessions(inner, db, sql)
+
+        const first = yield* limited.start(startInput).pipe(Effect.forkChild)
+        yield* Deferred.await(firstStarted)
+
+        const second = yield* limited.start(startInput).pipe(
+          Effect.provideService(CurrentStepRun, {
+            stepRunId,
+            repositoryId,
+          }),
+          Effect.forkChild,
+        )
+
+        yield* Effect.sleep("50 millis")
+        expect(starts).toBe(1)
+
+        const waitingRows = (yield* sql.unsafe(
+          `SELECT status, reason_code, reason_message FROM step_run WHERE id = ?`,
+          [stepRunId],
+        )) as readonly {
+          readonly status: string
+          readonly reason_code: string | null
+          readonly reason_message: string | null
+        }[]
+        expect(waitingRows[0]).toEqual({
+          status: "running",
+          reason_code: STEP_RUN_REASON.waitingForOpencodeSession,
+          reason_message: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+        })
+
+        yield* Deferred.succeed(releaseFirst, undefined)
+        yield* Deferred.await(secondStarted)
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+
+        const afterRows = (yield* sql.unsafe(
+          `SELECT status, reason_code, reason_message FROM step_run WHERE id = ?`,
+          [stepRunId],
+        )) as readonly {
+          readonly status: string
+          readonly reason_code: string | null
+          readonly reason_message: string | null
+        }[]
+        expect(afterRows[0]).toEqual({
+          status: "running",
+          reason_code: null,
+          reason_message: null,
+        })
+        expect(starts).toBe(2)
       }),
     ))
 })
