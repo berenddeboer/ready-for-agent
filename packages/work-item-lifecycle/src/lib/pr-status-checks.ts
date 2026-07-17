@@ -22,7 +22,10 @@ export class PrStatusChecksOpenCodeError extends Data.TaggedError(
 
 export type PrStatusCheckResult =
   | "pending"
-  | "no_checks"
+  | {
+      readonly _tag: "no_checks"
+      readonly headPushedAt: Date | null
+    }
   | "succeeded"
   | "failed"
   | "closed"
@@ -167,6 +170,12 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
     }
     if (unhandled.length > 0) {
       return "handoff_needed" satisfies PrStatusCheckResult
+    }
+    if (status._tag === "no_checks") {
+      return {
+        _tag: "no_checks",
+        headPushedAt: status.headPushedAt,
+      } satisfies PrStatusCheckResult
     }
     return status._tag satisfies PrStatusCheckResult
   })

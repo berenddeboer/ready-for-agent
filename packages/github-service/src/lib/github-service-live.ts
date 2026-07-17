@@ -105,12 +105,24 @@ interface GitHubApiStatusContext {
   readonly state?: unknown
 }
 
+interface GitHubApiCommit {
+  readonly oid?: unknown
+  readonly pushedDate?: unknown
+}
+
+interface GitHubApiPullRequestCommit {
+  readonly commit?: GitHubApiCommit | null
+}
+
 interface GitHubApiPullRequest {
   readonly state: unknown
   readonly merged: unknown
   readonly headRefOid?: unknown
   readonly baseRefName: unknown
   readonly mergeable: unknown
+  readonly commits?: {
+    readonly nodes?: readonly (GitHubApiPullRequestCommit | null)[] | null
+  } | null
   readonly statusCheckRollup: {
     readonly state: unknown
     readonly contexts?: {
@@ -139,6 +151,41 @@ const uniqueTerminalChecks = (
   )
 }
 
+/**
+ * Read the current PR head commit's push time. Invalid or mismatched API data
+ * yields null so callers keep the conservative no-check path.
+ */
+const parseHeadPushedAt = (pullRequest: GitHubApiPullRequest): Date | null => {
+  const headRefOid = pullRequest.headRefOid
+  if (typeof headRefOid !== "string" || headRefOid.trim() === "") {
+    return null
+  }
+  const nodes = pullRequest.commits?.nodes
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return null
+  }
+  const latest = nodes[nodes.length - 1]
+  const commit = latest?.commit
+  if (commit === null || commit === undefined) {
+    return null
+  }
+  if (typeof commit.oid !== "string" || commit.oid !== headRefOid) {
+    return null
+  }
+  const pushedDate = commit.pushedDate
+  if (pushedDate === null || pushedDate === undefined) {
+    return null
+  }
+  if (typeof pushedDate !== "string") {
+    return null
+  }
+  const parsed = new Date(pushedDate)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed
+}
+
 const toPullRequestCheckStatus = (
   pullRequest: GitHubApiPullRequest | null | undefined,
   terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks,
@@ -149,6 +196,7 @@ const toPullRequestCheckStatus = (
       terminalChecks: emptyTerminalChecks,
       mergeability: "unknown",
       baseRefName: null,
+      headPushedAt: null,
     }
   }
   if (
@@ -173,6 +221,7 @@ const toPullRequestCheckStatus = (
   const snapshot = {
     mergeability,
     baseRefName: pullRequest.baseRefName,
+    headPushedAt: parseHeadPushedAt(pullRequest),
   } as const
   if (pullRequest.merged === true) {
     return { _tag: "succeeded", terminalChecks, ...snapshot }
@@ -658,6 +707,15 @@ export const makeGitHubService = (
                   headRefOid: true,
                   baseRefName: true,
                   mergeable: true,
+                  commits: {
+                    __args: { last: 1 },
+                    nodes: {
+                      commit: {
+                        oid: true,
+                        pushedDate: true,
+                      },
+                    },
+                  },
                   statusCheckRollup: statusCheckRollupSelection(),
                 },
               },
@@ -677,6 +735,7 @@ export const makeGitHubService = (
         terminalChecks: emptyTerminalChecks,
         mergeability: "unknown",
         baseRefName: null,
+        headPushedAt: null,
       }
     }
 

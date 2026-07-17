@@ -49,31 +49,43 @@ const SerializedTerminalPrStatusCheck = Schema.Struct({
   outcome: Schema.Literals(["green", "red"]),
 })
 
+const SerializedPullRequestCheckStatusFields = {
+  mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+  baseRefName: Schema.NullOr(Schema.String),
+  headPushedAt: Schema.NullOr(Schema.String),
+} as const
+
 const SerializedPullRequestCheckStatus = Schema.Union([
   Schema.TaggedStruct("pending", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
-    baseRefName: Schema.NullOr(Schema.String),
+    ...SerializedPullRequestCheckStatusFields,
   }),
   Schema.TaggedStruct("no_checks", {
-    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
-    baseRefName: Schema.NullOr(Schema.String),
+    ...SerializedPullRequestCheckStatusFields,
   }),
   Schema.TaggedStruct("succeeded", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
-    baseRefName: Schema.NullOr(Schema.String),
+    ...SerializedPullRequestCheckStatusFields,
   }),
   Schema.TaggedStruct("failed", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
-    baseRefName: Schema.NullOr(Schema.String),
+    ...SerializedPullRequestCheckStatusFields,
   }),
   Schema.TaggedStruct("closed", {
-    mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
-    baseRefName: Schema.NullOr(Schema.String),
+    ...SerializedPullRequestCheckStatusFields,
   }),
 ])
+
+const decodeHeadPushedAt = (value: string | null): Date | null => {
+  if (value === null) {
+    return null
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed
+}
 
 const SerializedPullRequestLifecycleStatus = Schema.Union([
   Schema.TaggedStruct("open", {}),
@@ -260,6 +272,10 @@ export const keymaxxerGitHubLayer = (options: {
             return yield* Schema.decodeUnknownEffect(
               Schema.fromJsonString(SerializedPullRequestCheckStatus),
             )(result.stdout).pipe(
+              Effect.map((status) => ({
+                ...status,
+                headPushedAt: decodeHeadPushedAt(status.headPushedAt),
+              })),
               Effect.mapError(() =>
                 requestError(
                   repository,

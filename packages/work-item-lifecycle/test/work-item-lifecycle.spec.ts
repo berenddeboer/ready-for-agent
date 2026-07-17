@@ -1,5 +1,6 @@
 import {
   Cause,
+  Clock,
   Deferred,
   Duration,
   Effect,
@@ -1252,7 +1253,8 @@ describe("WorkItemLifecycle", () => {
     it("keeps no_checks pending for 60 seconds before treating as green", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("no_checks"),
+        watchPrStatusChecks: () =>
+          Effect.succeed({ _tag: "no_checks", headPushedAt: null }),
       }
 
       return runWithSteps(
@@ -1314,6 +1316,165 @@ describe("WorkItemLifecycle", () => {
             )
           }
         }),
+      )
+    })
+
+    it("advances stale no_checks immediately without grace or confirmation", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis
+            return {
+              _tag: "no_checks" as const,
+              headPushedAt: new Date(now - 120_000),
+            }
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 7; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.adjust(1_000)
+              const afterWatch = yield* claimAndRunPending
+              expect(afterWatch._tag).toBe("processed")
+              if (afterWatch._tag === "processed") {
+                expect(afterWatch.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("keeps the conservative no_checks path when the head is younger than two minutes", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis
+            return {
+              _tag: "no_checks" as const,
+              headPushedAt: new Date(now - 119_999),
+            }
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 7; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.adjust(1_000)
+              const early = yield* claimAndRunPending
+              expect(early._tag).toBe("processed")
+              if (early._tag === "processed") {
+                expect(early.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const delayed = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly {
+                readonly available_at: number
+                readonly created_at: number
+              }[]
+              expect(delayed).toHaveLength(1)
+              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
+                30_000,
+              )
+
+              yield* allowPrChecksToAppear(created.id)
+              yield* TestClock.adjust(1_000)
+              const confirming = yield* claimAndRunPending
+              expect(confirming._tag).toBe("processed")
+              if (confirming._tag === "processed") {
+                expect(confirming.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              yield* TestClock.adjust(1_000)
+              const ready = yield* claimAndRunPending
+              expect(ready._tag).toBe("processed")
+              if (ready._tag === "processed") {
+                expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("does not use a future headPushedAt for the stale no_checks shortcut", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis
+            return {
+              _tag: "no_checks" as const,
+              headPushedAt: new Date(now + 1),
+            }
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 7; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.adjust(1_000)
+              const early = yield* claimAndRunPending
+              expect(early._tag).toBe("processed")
+              if (early._tag === "processed") {
+                expect(early.workItem.state).toBe("watch_pr_status_checks")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
       )
     })
 

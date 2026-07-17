@@ -43,6 +43,7 @@ describe("mergePr", () => {
           terminalChecks: [],
           mergeability: "mergeable",
           baseRefName: "main",
+          headPushedAt: null,
         }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
@@ -69,6 +70,7 @@ describe("mergePr", () => {
           terminalChecks: [],
           mergeability: "mergeable",
           baseRefName: "main",
+          headPushedAt: null,
         }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),

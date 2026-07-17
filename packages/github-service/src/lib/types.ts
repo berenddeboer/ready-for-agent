@@ -34,6 +34,11 @@ export type PullRequestCheckStatus = (
 ) & {
   readonly mergeability: PullRequestMergeability
   readonly baseRefName: string | null
+  /**
+   * When the current PR head commit was pushed, or null when GitHub omitted a
+   * valid head-commit push time. Used only as a restart freshness signal.
+   */
+  readonly headPushedAt: Date | null
 }
 
 export type GitHubIssueState = "OPEN" | "CLOSED"

@@ -80,7 +80,21 @@ type PullRequest {
   baseRefName: String!
   mergeable: MergeableState!
   statusCheckRollup: StatusCheckRollup
+  commits(last: Int): PullRequestCommitConnection!
   repository: Repository!
+}
+
+type PullRequestCommitConnection {
+  nodes: [PullRequestCommit]
+}
+
+type PullRequestCommit {
+  commit: Commit!
+}
+
+type Commit {
+  oid: GitObjectID!
+  pushedDate: DateTime
 }
 
 type StatusCheckRollup {
