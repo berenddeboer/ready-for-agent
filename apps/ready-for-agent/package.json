@@ -4,6 +4,13 @@
   "description": "Ready for Agent: local Harness UI + backend and operator CLI",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/berenddeboer/ready-for-agent.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "ready-for-agent": "./bin/ready-for-agent.js"
   },
