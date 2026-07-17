@@ -42,6 +42,7 @@ const config = {
   defaultVariant: "low",
   reviewModel: null as string | null,
   reviewVariant: null as string | null,
+  maxConcurrentOpencodeSessions: 2,
 }
 
 const issue = {
@@ -859,7 +860,7 @@ describe("GraphQL API", () => {
   test("reads and updates config", async () => {
     const queryResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query { config { defaultModel defaultVariant reviewModel reviewVariant } }`,
+        query: `query { config { defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions } }`,
       }),
     )
     expect(await queryResponse.json()).toEqual({ data: { config } })
@@ -868,7 +869,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
           updateConfig(input: $input) {
-            defaultModel defaultVariant reviewModel reviewVariant
+            defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions
           }
         }`,
         variables: {
@@ -877,6 +878,7 @@ describe("GraphQL API", () => {
             defaultVariant: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
+            maxConcurrentOpencodeSessions: 3,
           },
         },
       }),
@@ -888,6 +890,7 @@ describe("GraphQL API", () => {
           defaultVariant: "high",
           reviewModel: "anthropic/claude-opus-4-6",
           reviewVariant: "max",
+          maxConcurrentOpencodeSessions: 3,
         },
       },
     })

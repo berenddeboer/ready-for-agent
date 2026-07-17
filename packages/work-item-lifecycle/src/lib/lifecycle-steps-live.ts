@@ -14,6 +14,7 @@ import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
 import { markPrReadyForReview } from "./mark-pr-ready-for-review.js"
 import { mergePr } from "./merge-pr.js"
+import { limitOpencodeSessions } from "./opencode-session-limiter.js"
 import {
   investigatePrStatusChecks,
   watchPrStatusChecks,
@@ -39,7 +40,8 @@ export const LifecycleStepsLive = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const opencode = yield* Opencode
+    const rawOpencode = yield* Opencode
+    const opencode = yield* limitOpencodeSessions(rawOpencode, db)
     const github = yield* GitHubService
     const sql = yield* SqlClient.SqlClient
 

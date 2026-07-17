@@ -46,6 +46,9 @@ export const config = snakeCase.table("config", {
   defaultVariant: text().notNull().default("low"),
   reviewModel: text(),
   reviewVariant: text(),
+  maxConcurrentOpencodeSessions: integer({ mode: "number" })
+    .notNull()
+    .default(2),
   createdAt: integer({ mode: "number" })
     .notNull()
     .$defaultFn(() => Date.now()),

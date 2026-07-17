@@ -38,6 +38,7 @@ const configQuery = {
         defaultVariant: true,
         reviewModel: true,
         reviewVariant: true,
+        maxConcurrentOpencodeSessions: true,
       },
     })
     return result.config
@@ -121,12 +122,17 @@ function SettingsButton() {
   const [defaultVariant, setDefaultVariant] = useState("low")
   const [reviewModel, setReviewModel] = useState("")
   const [reviewVariant, setReviewVariant] = useState("")
+  const [maxConcurrentOpencodeSessions, setMaxConcurrentOpencodeSessions] =
+    useState("2")
   useEffect(() => {
     if (dialogOpen && config.data) {
       setDefaultModel(config.data.defaultModel)
       setDefaultVariant(config.data.defaultVariant)
       setReviewModel(config.data.reviewModel ?? "")
       setReviewVariant(config.data.reviewVariant ?? "")
+      setMaxConcurrentOpencodeSessions(
+        String(config.data.maxConcurrentOpencodeSessions),
+      )
     }
   }, [config.data, dialogOpen])
   const updateConfig = useMutation({
@@ -135,6 +141,7 @@ function SettingsButton() {
       defaultVariant: string
       reviewModel: string | null
       reviewVariant: string | null
+      maxConcurrentOpencodeSessions: number
     }) =>
       graphql.mutation({
         updateConfig: {
@@ -143,6 +150,7 @@ function SettingsButton() {
           defaultVariant: true,
           reviewModel: true,
           reviewVariant: true,
+          maxConcurrentOpencodeSessions: true,
         },
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
@@ -165,6 +173,9 @@ function SettingsButton() {
       setDefaultVariant(config.data.defaultVariant)
       setReviewModel(config.data.reviewModel ?? "")
       setReviewVariant(config.data.reviewVariant ?? "")
+      setMaxConcurrentOpencodeSessions(
+        String(config.data.maxConcurrentOpencodeSessions),
+      )
     }
     updateConfig.reset()
     dialogRef.current?.showModal()
@@ -172,11 +183,13 @@ function SettingsButton() {
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const parsedMax = Number(maxConcurrentOpencodeSessions)
     updateConfig.mutate({
       defaultModel,
       defaultVariant,
       reviewModel: reviewModel.trim() === "" ? null : reviewModel,
       reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
+      maxConcurrentOpencodeSessions: parsedMax,
     })
   }
 
@@ -226,10 +239,10 @@ function SettingsButton() {
               Harness defaults
             </p>
             <h2 id="settings-title" className="mt-1 text-2xl font-bold">
-              Model settings
+              Harness settings
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Applied by default when the harness starts a new agent session.
+              Defaults for agent sessions and OpenCode concurrency.
             </p>
           </div>
 
@@ -331,6 +344,27 @@ function SettingsButton() {
                       </option>
                     ))}
                   </select>
+                </label>
+
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Max concurrent OpenCode sessions
+                  <input
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    name="maxConcurrentOpencodeSessions"
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={maxConcurrentOpencodeSessions}
+                    onChange={(event) =>
+                      setMaxConcurrentOpencodeSessions(event.target.value)
+                    }
+                  />
+                  <span className="text-xs font-normal text-slate-500">
+                    Caps how many OpenCode lifecycle processes run at once
+                    (default 2). Non-OpenCode steps and model listing are not
+                    counted.
+                  </span>
                 </label>
               </>
             )}

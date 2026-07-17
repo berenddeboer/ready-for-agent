@@ -83,6 +83,7 @@ type UpdateConfigArgs = {
     defaultVariant: string
     reviewModel?: string | null
     reviewVariant?: string | null
+    maxConcurrentOpencodeSessions: number
   }
 }
 
@@ -745,6 +746,8 @@ export const createGraphqlApi = (
                     defaultVariant: args.input.defaultVariant,
                     reviewModel: args.input.reviewModel ?? null,
                     reviewVariant: args.input.reviewVariant ?? null,
+                    maxConcurrentOpencodeSessions:
+                      args.input.maxConcurrentOpencodeSessions,
                   })
                 }),
               ),

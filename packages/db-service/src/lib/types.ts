@@ -43,6 +43,7 @@ export interface ConfigRecord {
   readonly defaultVariant: string
   readonly reviewModel: string | null
   readonly reviewVariant: string | null
+  readonly maxConcurrentOpencodeSessions: number
 }
 
 export interface UpdateConfigInput {
@@ -50,6 +51,7 @@ export interface UpdateConfigInput {
   readonly defaultVariant: string
   readonly reviewModel: string | null
   readonly reviewVariant: string | null
+  readonly maxConcurrentOpencodeSessions: number
 }
 
 export interface StoreIssueInput {

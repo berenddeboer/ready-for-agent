@@ -822,6 +822,64 @@ describe("Job worker", () => {
     )
   })
 
+  test("runs multiple lifecycle jobs concurrently up to Config capacity", async () => {
+    const firstStepRunId = makeStepRunId()
+    const secondStepRunId = makeStepRunId()
+    const jobs = [
+      rawJob(WorkItemStepJob.make({ stepRunId: firstStepRunId }), JOBS_QUEUE),
+      rawJob(WorkItemStepJob.make({ stepRunId: secondStepRunId }), JOBS_QUEUE),
+    ]
+    const firstStarted = await Effect.runPromise(Deferred.make<void>())
+    const secondStarted = await Effect.runPromise(Deferred.make<void>())
+    const release = await Effect.runPromise(Deferred.make<void>())
+    let active = 0
+    let maximumActive = 0
+    const seen = new Set<string>()
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        yield* Deferred.await(firstStarted)
+        yield* Deferred.await(secondStarted)
+        expect(maximumActive).toBe(2)
+        expect(seen).toEqual(new Set([firstStepRunId, secondStepRunId]))
+        yield* Deferred.succeed(release, undefined)
+      }),
+      Layer.mergeAll(
+        defaultGithubLayer,
+        queueLayer(jobs, undefined, undefined, undefined, (stepRunId) =>
+          Effect.gen(function* () {
+            seen.add(stepRunId)
+            active += 1
+            maximumActive = Math.max(maximumActive, active)
+            if (stepRunId === firstStepRunId) {
+              yield* Deferred.succeed(firstStarted, undefined)
+            } else {
+              yield* Deferred.succeed(secondStarted, undefined)
+            }
+            yield* Deferred.await(release)
+            active -= 1
+            return { _tag: "noop" as const }
+          }),
+        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Effect.succeed({
+              fetched: 0,
+              inserted: 0,
+              updated: 0,
+              deleted: 0,
+              unchanged: 0,
+            }),
+        } satisfies IssueReconcilerShape),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
   test("recovers after a queue infrastructure error", async () => {
     const job = rawJob(refreshPayload)
     const acknowledged = await Effect.runPromise(Deferred.make<void>())

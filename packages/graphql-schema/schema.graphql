@@ -13,6 +13,7 @@ type Config {
   defaultVariant: String!
   reviewModel: String
   reviewVariant: String
+  maxConcurrentOpencodeSessions: Int!
 }
 
 type Repository {
@@ -162,6 +163,7 @@ input UpdateConfigInput {
   defaultVariant: String!
   reviewModel: String
   reviewVariant: String
+  maxConcurrentOpencodeSessions: Int!
 }
 
 input UpdateRepositorySettingsInput {

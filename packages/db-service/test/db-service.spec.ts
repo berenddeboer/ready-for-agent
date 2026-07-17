@@ -51,6 +51,7 @@ describe("DbService", () => {
             defaultVariant: "low",
             reviewModel: null,
             reviewVariant: null,
+            maxConcurrentOpencodeSessions: 2,
           })
 
           expect(
@@ -59,18 +60,21 @@ describe("DbService", () => {
               defaultVariant: "  high  ",
               reviewModel: "  anthropic/claude-opus-4-6  ",
               reviewVariant: "  max  ",
+              maxConcurrentOpencodeSessions: 4,
             }),
           ).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
+            maxConcurrentOpencodeSessions: 4,
           })
           expect(yield* db.getConfig).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultVariant: "high",
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
+            maxConcurrentOpencodeSessions: 4,
           })
         }),
       ))
@@ -85,9 +89,32 @@ describe("DbService", () => {
               defaultVariant: "high",
               reviewModel: null,
               reviewVariant: null,
+              maxConcurrentOpencodeSessions: 2,
             }),
           )
           expect(error).toBeInstanceOf(InvalidConfigInputError)
+        }),
+      ))
+
+    it("rejects non-positive max concurrent OpenCode sessions", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          for (const value of [0, -1, 1.5, Number.NaN]) {
+            const error = yield* Effect.flip(
+              db.updateConfig({
+                defaultModel: "anthropic/claude-sonnet-4-5",
+                defaultVariant: "high",
+                reviewModel: null,
+                reviewVariant: null,
+                maxConcurrentOpencodeSessions: value,
+              }),
+            )
+            expect(error).toBeInstanceOf(InvalidConfigInputError)
+            expect(error).toMatchObject({
+              field: "maxConcurrentOpencodeSessions",
+            })
+          }
         }),
       ))
   })
