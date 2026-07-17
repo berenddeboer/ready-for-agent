@@ -3,6 +3,35 @@
 Unified operator binary for Ready for Agent: start the Harness and run operator
 commands against its GraphQL endpoint.
 
+## Public package shape
+
+The publishable launcher is this package (`ready-for-agent`) with a Node-compatible
+bin that selects the host platform binary from optional dependencies:
+
+- `ready-for-agent-linux-x64`
+- `ready-for-agent-linux-arm64`
+- `ready-for-agent-darwin-x64`
+- `ready-for-agent-darwin-arm64`
+
+Compile a host binary into the matching platform package:
+
+```bash
+bunx nx run ready-for-agent:compile
+# or a specific platform key:
+bunx nx run ready-for-agent:compile --platform=linux-x64
+```
+
+Then the launcher runs that binary without Bun on `PATH`:
+
+```bash
+node apps/ready-for-agent/bin/ready-for-agent.js --help
+```
+
+Unsupported platforms (including Windows in v1) exit with a clear error from the
+platform-selection seam (`bin/select-platform.js`).
+
+Internal `@ready-for-agent/*` workspace packages stay private and are not published.
+
 ## Usage (monorepo)
 
 From the repository root:

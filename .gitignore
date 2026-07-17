@@ -5,6 +5,9 @@ dist
 tmp
 out-tsc
 
+# platform package binaries (filled by ready-for-agent:compile / release)
+/packages/ready-for-agent-*/bin/
+
 # generated GraphQL clients
 /packages/graphql-client/src/generated/
 /packages/github-service/src/internal/generated/

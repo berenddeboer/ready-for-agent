@@ -18,6 +18,28 @@
         "command": "bun --conditions @ready-for-agent/source src/main.ts"
       }
     },
+    "compile": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["graphql-client"],
+          "target": "generate"
+        }
+      ],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/compile-platform-binary.ts {args.platform}",
+        "args": "--platform=host"
+      },
+      "inputs": ["default", "^production"],
+      "outputs": [
+        "{workspaceRoot}/packages/ready-for-agent-linux-x64/bin",
+        "{workspaceRoot}/packages/ready-for-agent-linux-arm64/bin",
+        "{workspaceRoot}/packages/ready-for-agent-darwin-x64/bin",
+        "{workspaceRoot}/packages/ready-for-agent-darwin-arm64/bin"
+      ],
+      "cache": false
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {

@@ -1,0 +1,16 @@
+{
+  "name": "ready-for-agent-linux-arm64",
+  "version": "0.0.0",
+  "description": "The Linux arm64 binary for ready-for-agent",
+  "license": "MIT",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/ready-for-agent"
+  ],
+  "preferUnplugged": true
+}
