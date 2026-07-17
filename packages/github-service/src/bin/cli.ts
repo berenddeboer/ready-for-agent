@@ -4,6 +4,7 @@ import {
   GitHubRepositoryUnavailableError,
   type GitHubService,
   GitHubServiceLive,
+  formatUserFacingError,
 } from "../index.js"
 
 class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
@@ -33,7 +34,9 @@ export const runGitHubCli = <A, E>(
           process.exitCode = 2
           return
         }
-        console.error(error)
+        process.stderr.write(
+          `${formatUserFacingError(error, "Command failed")}\n`,
+        )
         process.exitCode = 1
       }),
     ),

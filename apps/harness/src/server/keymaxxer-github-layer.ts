@@ -5,6 +5,7 @@ import {
   GitHubService,
   type GitHubServiceShape,
   type ReadyLabeledIssue,
+  sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 
@@ -98,13 +99,18 @@ const requestError = (
   repository: { owner: string; name: string },
   operation: string,
   detail?: string,
-) =>
-  new GitHubRequestError({
+) => {
+  const cleaned =
+    detail === undefined || detail.trim() === ""
+      ? ""
+      : sanitizeUserFacingText(detail, 300)
+  return new GitHubRequestError({
     message:
-      detail === undefined || detail.trim() === ""
+      cleaned === ""
         ? `Failed to ${operation} for ${repository.owner}/${repository.name}`
-        : `Failed to ${operation} for ${repository.owner}/${repository.name}: ${detail.trim().slice(0, 300)}`,
+        : `Failed to ${operation} for ${repository.owner}/${repository.name}: ${cleaned}`,
   })
+}
 
 const encodeArgument = (value: string) =>
   Buffer.from(value, "utf8").toString("base64url")

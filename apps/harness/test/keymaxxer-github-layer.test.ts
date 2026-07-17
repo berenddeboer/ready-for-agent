@@ -1,5 +1,8 @@
 import { Effect, Layer } from "effect"
-import { GitHubService } from "@ready-for-agent/github-service"
+import {
+  GitHubRequestError,
+  GitHubService,
+} from "@ready-for-agent/github-service"
 import {
   KeymaxxerService,
   type RunWithSecretsInput,
@@ -377,6 +380,47 @@ describe("Keymaxxer-backed GitHub layer", () => {
 
     expect(runs[0]?.command).toContain("mark-pr-ready-for-review.ts")
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+  })
+
+  test("sanitizes ANSI Effect dumps from CLI stderr into plain GitHubRequestError messages", async () => {
+    const esc = String.fromCharCode(0x1b)
+    const ansiDump = `{\n  ${esc}[0m_tag${esc}[2m:${esc}[0m ${esc}[32m"GitHubRequestError"${esc}[0m,\n  ${esc}[0mmessage${esc}[2m:${esc}[0m ${esc}[32m"HTTP 401: Bad credentials"${esc}[0m,\n}`
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      removeSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({
+          exitCode: 1,
+          stdout: "",
+          stderr: ansiDump,
+        }),
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github
+          .getPullRequestCheckStatus(
+            { owner: "processfocus", name: "monorepo" },
+            "branch",
+          )
+          .pipe(Effect.flip)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.message).toBe(
+      "Failed to get pull request check status for processfocus/monorepo: HTTP 401: Bad credentials",
+    )
+    expect(error.message.includes(`${esc}[`)).toBe(false)
+    expect(error.message).not.toContain("_tag")
   })
 
   test("merges a PR through the configured repository token", async () => {

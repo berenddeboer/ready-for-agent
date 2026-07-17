@@ -8,8 +8,11 @@ import {
   GitHubRequestError,
   GitHubService,
   type ReadyLabeledIssue,
+  formatUserFacingError,
   makeGitHubServiceFromToken,
   makeGitHubServiceTest,
+  sanitizeUserFacingText,
+  stripAnsi,
 } from "../src/index.js"
 import {
   type GitHubGraphqlClient,
@@ -1774,6 +1777,27 @@ describe("GitHubService live implementation", () => {
   })
 })
 
+describe("user-facing error formatting", () => {
+  const esc = String.fromCharCode(0x1b)
+  const csiOpen = `${esc}[`
+
+  it("strips ANSI CSI sequences from Effect-style dumps", () => {
+    const colored = `{\n  ${esc}[0m_tag${esc}[2m:${esc}[0m ${esc}[32m"GitHubRequestError"${esc}[0m,\n  ${esc}[0mmessage${esc}[2m:${esc}[0m ${esc}[32m"boom happened"${esc}[0m,\n}`
+    expect(stripAnsi(colored).includes(csiOpen)).toBe(false)
+    expect(sanitizeUserFacingText(colored)).toBe("boom happened")
+    expect(formatUserFacingError(colored, "fallback")).toBe("boom happened")
+  })
+
+  it("prefers Error.message over inspect dumps", () => {
+    const error = new GitHubRequestError({
+      message: "Failed to get pull request check status for acme/widgets",
+    })
+    expect(formatUserFacingError(error, "fallback")).toBe(
+      "Failed to get pull request check status for acme/widgets",
+    )
+  })
+})
+
 describe("CLI arguments", () => {
   it.effect("reports a missing argument as a typed failure", () =>
     Effect.gen(function* () {
@@ -1800,6 +1824,8 @@ describe("CLI arguments", () => {
 
     expect(result.status).toBe(1)
     expect(result.stderr).toContain("Missing owner argument")
+    expect(result.stderr.includes(`${String.fromCharCode(0x1b)}[`)).toBe(false)
+    expect(result.stderr).not.toMatch(/_tag/)
   })
 })
 
