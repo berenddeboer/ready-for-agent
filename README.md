@@ -1,71 +1,132 @@
-# About
+# Ready for Agent
 
-Opinionated agentic software engineering harness to massively increase landed PRs.
+Opinionated agentic software engineering harness that works GitHub issues into
+PRs for configured repositories.
 
-## Assumes
-1. You are using GitHub.
-2. You have your local environment setup for development for all repos
-   you want to use with this tool.
-3. Ideally you have set up AI code reviews via GitHub Actions.
+## Install
+
+Requires a supported platform (Linux or macOS, x64 or arm64). Windows is not
+supported in v1.
+
+```bash
+npx ready-for-agent@latest
+```
+
+Or install the package and use the `ready-for-agent` command:
+
+```bash
+npm install -g ready-for-agent
+ready-for-agent
+```
+
+You do not need Bun on PATH; the package ships a compiled binary for your host.
+
+## Start
+
+Default command (and `start`) boots the full Harness (UI + backend) on loopback:
+
+```bash
+ready-for-agent
+# same as
+ready-for-agent start
+```
+
+- UI: `http://127.0.0.1:4200/`
+- GraphQL: `http://127.0.0.1:4200/graphql`
+
+On successful start the default browser opens to the UI. Disable with:
+
+```bash
+ready-for-agent --no-open
+# or
+NO_BROWSER=1 ready-for-agent
+```
+
+Override the listen port with `PORT` when needed.
+
+### Application data
+
+Product state defaults to the platform data directory:
+
+- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
+- macOS: `~/Library/Application Support/ready-for-agent/`
+
+The SQLite database is `ready-for-agent.db` in that directory. Set
+`SQLITE_DATABASE_PATH` to use another file. Stop the harness completely before
+opening the database with external write tooling (single-writer SQLite).
+
+## Add a repository
+
+With the Harness running, register a local checkout that has a GitHub remote:
+
+```bash
+ready-for-agent add /path/to/local/repo
+```
+
+New repositories start **paused**. Unpause in the UI when you want autonomous
+work. Issues labeled `ready-for-agent` appear after reconciliation.
+
+If GraphQL is unreachable, the command fails with a hint to start the Harness
+first. Point at a non-default endpoint with:
+
+```bash
+READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4300/graphql \
+  ready-for-agent add /path/to/local/repo
+```
+
+### Other commands
+
+```bash
+ready-for-agent remove-github-token /path/to/local/repo
+ready-for-agent remove-github-token owner/repository
+ready-for-agent remove-github-token repo-01H...
+
+ready-for-agent --help
+ready-for-agent start --help
+ready-for-agent add --help
+ready-for-agent remove-github-token --help
+```
 
 ## Requirements
-1. git
-2. GitHub CLI tool [gh](https://cli.github.com/)
-3. [OpenCode](https://opencode.ai) on `PATH`
-4. [keymaxxer](https://github.com/glommer/keymaxxer) — optional; workspace pins
-   exact `keymaxxer@0.2.1` in the root lockfile for live e2e vault tooling
 
-The operator binary fails fast at start if `git`, `gh`, or OpenCode is missing.
+**Required on PATH** (start fails fast if missing):
 
-The backend starts Keymaxxer through its MCP server when available. It uses
-`KEYMAXXER_ENTRYPOINT` when set to an existing path (run with `bun`), otherwise
-the installed `keymaxxer` command on PATH (including the workspace pin).
+1. [git](https://git-scm.com/)
+2. [GitHub CLI (`gh`)](https://cli.github.com/)
+3. [OpenCode](https://opencode.ai)
 
-When no Keymaxxer entrypoint or executable is available, the harness starts
-without Keymaxxer and uses the user's ambient GitHub authentication. Set
-`KEYMAXXER_ENABLED=false` to select this mode explicitly.
+**Optional:**
 
-## Get started
+4. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets.
+   Resolved as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise
+   the `keymaxxer` command on PATH. When neither is available, the harness uses
+   ambient GitHub authentication. Set `KEYMAXXER_ENABLED=false` to force that
+   mode.
 
-1. Checkout a repo locally.
-2. Add repo to harness.
-3. If a repo has issues with label `ready-for-agent` they wil show up.
-4. Start simple by implementing a single issue.
+Also assume:
 
-# How it works
+- You use GitHub.
+- Local checkouts for repositories you add are set up for development.
+- Ideally AI code review runs via GitHub Actions on those repositories.
 
-The harness creates a new worktree for the issue, comes up with a
-branch name, implements the issue, runs a local review, and then
-creates a PR. The harness expects another agent to do a PR review, and
-will respond to any PR review comments, until it is satisified the PR
-review comments have been adequately addressed.
+## How it works
 
-The PR review is merged if it seems low risk else a human is asked to
-review it.
+1. You install and start the Harness, then `ready-for-agent add` a local repo.
+2. Ready-labeled issues (`ready-for-agent`) show up after reconciliation.
+3. You implement a single issue from the UI to start.
 
-## Live end-to-end fixture
+For each Work Item the harness creates a worktree and branch, implements the
+issue, runs a local review, and opens a draft PR. It watches status checks,
+addresses review comments, marks the PR ready for review, then either
+auto-merges low-risk changes or asks a human.
 
-The private End-to-End Fixture Repository `berenddeboer/test-ready-for-agent`
-and the checked-in encrypted Keymaxxer vault under `e2e/fixtures/keymaxxer/`
-are maintained for live Harness e2e runs. See [docs/e2e-fixture.md](docs/e2e-fixture.md)
-for the sentinel Issue contract, 90-day token rotation, and vault regeneration
-(`scripts/regenerate-e2e-keymaxxer-vault.sh`). The master key is never committed;
-CI uses the Actions secret `E2E_KEYMAXXER_MASTER_KEY`.
+GitHub issues remain the source of truth; the local database is book-keeping.
+Style and guidelines come from the target repository—this harness steers an
+agent swarm on Ready-labeled work.
 
-# Architecture
+## Contributing
 
-- Centred around GitHub issues.
-- GitHub issues are source of truth, local db is just for book-keeping.
-- Only works on issues with label `ready-for-agent`.
-- Assume user uses something like the Matt Pocock grill me (with
-  docs), create PRD and split PRD into issues skills to create the
-  issues.
-- Creates a draft PR, watches for all checks to become green, then marks the PR ready for review.
-- Assumes target repo has an AI reviewer (different model ideally) commenting.
-- Addresses the PR review comments until AI is satisfied there's no
-  purpose addressing more reviewer comments.
-- Then converts PR to "Ready for review" and makes a decision whether
-  to auto-merge, or HITL.
-- Target repo defines everything around style and guidelines.
-- This is just a harness to employ an agent swam to work on issues for a given repo.
-- Very much allows human in the loop.
+Monorepo setup, Nx targets, and development workflow live in
+[CONTRIBUTING.md](CONTRIBUTING.md). Architecture notes are in
+[ARCHITECTURE.md](ARCHITECTURE.md) and domain language in
+[CONTEXT.md](CONTEXT.md).
