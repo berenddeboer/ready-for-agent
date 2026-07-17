@@ -1438,10 +1438,22 @@ function JobsCard() {
   const workItemQueries = useQueries({
     queries: repositories.map((repository) => workItemsQuery(repository.id)),
   })
+  const issueQueries = useQueries({
+    queries: repositories.map((repository) => issuesQuery(repository.id)),
+  })
 
   const repositoryById = new Map(
     repositories.map((repository) => [repository.id, repository] as const),
   )
+  const issueTitleByRepoAndNumber = new Map<string, string>()
+  for (const query of issueQueries) {
+    for (const issue of query.data ?? []) {
+      issueTitleByRepoAndNumber.set(
+        `${issue.repositoryId}:${issue.githubIssueNumber}`,
+        issue.title,
+      )
+    }
+  }
   const workItems = workItemQueries
     .flatMap((query) => query.data ?? [])
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
@@ -1489,26 +1501,41 @@ function JobsCard() {
             repository === undefined
               ? workItem.repositoryId
               : `${repository.githubOwner}/${repository.githubRepo}`
+          const issueTitle = issueTitleByRepoAndNumber.get(
+            `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
+          )
+          const issueIdentity =
+            issueTitle === undefined
+              ? `#${workItem.githubIssueNumber}`
+              : `#${workItem.githubIssueNumber} · ${issueTitle}`
           return (
             <li
               className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
               key={workItem.id}
             >
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="m-0 truncate text-xs font-semibold text-slate-700">
                     {repositoryLabel}
                   </p>
-                  <div className="flex items-center gap-1">
-                    <span className="font-mono text-xs font-semibold text-blue-600">
-                      Issue #{workItem.githubIssueNumber}
+                  <p
+                    className="m-0 truncate text-xs font-semibold text-blue-600"
+                    title={issueIdentity}
+                  >
+                    <span className="font-mono">
+                      #{workItem.githubIssueNumber}
                     </span>
-                    <WorkItemPauseButton workItem={workItem} />
-                  </div>
+                    {issueTitle !== undefined && (
+                      <span className="font-sans"> · {issueTitle}</span>
+                    )}
+                  </p>
                 </div>
-                <span className="shrink-0 text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
-                  {workItem.stateLabel}
-                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <WorkItemPauseButton workItem={workItem} />
+                  <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
+                    {workItem.stateLabel}
+                  </span>
+                </div>
               </div>
               {workItem.sessionId !== null && workItem.sessionId !== "" && (
                 <p
