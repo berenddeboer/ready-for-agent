@@ -3,6 +3,13 @@
   "version": "0.0.0",
   "description": "The Linux arm64 binary for ready-for-agent",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/berenddeboer/ready-for-agent.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "os": [
     "linux"
   ],
