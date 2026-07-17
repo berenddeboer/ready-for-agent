@@ -8,6 +8,13 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import {
+  formatDuration,
+  formatStartedAgo,
+  isLiveDurationStatus,
+  liveDurationMs,
+  useNowMs,
+} from "../live-duration.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
@@ -218,33 +225,6 @@ const workItemFields = {
     durationMs: true,
   },
 } as const
-
-/** Formats a duration for step labels, e.g. "3s" or "4m 15s". */
-function formatDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000))
-  if (totalSeconds < 60) return `${totalSeconds}s`
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes < 60) {
-    return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`
-  }
-  const hours = Math.floor(minutes / 60)
-  const remainingMinutes = minutes % 60
-  return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`
-}
-
-/** Formats job start time as a relative phrase, e.g. "15 min ago". */
-function formatStartedAgo(iso: string, nowMs = Date.now()): string {
-  const elapsedMs = Math.max(0, nowMs - new Date(iso).getTime())
-  const seconds = Math.floor(elapsedMs / 1000)
-  if (seconds < 60) return "just now"
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} min ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return hours === 1 ? "1 hour ago" : `${hours} hours ago`
-  const days = Math.floor(hours / 24)
-  return days === 1 ? "1 day ago" : `${days} days ago`
-}
 
 const workItemsQuery = (repositoryId: string) => ({
   queryKey: ["work-items", repositoryId],
@@ -1677,6 +1657,10 @@ function WorkItemLifecycleStatus({
   const status = workItem.status
   const canRetry = compact && workItem.canRetry
   const canReset = compact
+  const dataUpdatedAt =
+    queryClient.getQueryState(workItemsQuery(workItem.repositoryId).queryKey)
+      ?.dataUpdatedAt ?? 0
+  const nowMs = useNowMs(true)
   const patchWorkItem = (updated: WorkItem) => {
     queryClient.setQueryData<readonly WorkItem[]>(
       workItemsQuery(workItem.repositoryId).queryKey,
@@ -1728,7 +1712,7 @@ function WorkItemLifecycleStatus({
         <span className="text-xs font-semibold text-slate-700">
           {workItem.stateLabel}
           <span className="ml-1.5 font-normal text-slate-500">
-            {formatStartedAgo(workItem.createdAt)}
+            {formatStartedAgo(workItem.createdAt, nowMs)}
           </span>
         </span>
         <span
@@ -1752,19 +1736,27 @@ function WorkItemLifecycleStatus({
           className="mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
           aria-label="Lifecycle steps"
         >
-          {workItem.lifecycleLabels.map((lifecycleLabel) => (
-            <li
-              className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
-              key={lifecycleLabel.phase}
-            >
-              {lifecycleLabel.label}
-              {lifecycleLabel.durationMs !== null && (
-                <span className="ml-1 text-slate-400">
-                  {formatDuration(lifecycleLabel.durationMs)}
-                </span>
-              )}
-            </li>
-          ))}
+          {workItem.lifecycleLabels.map((lifecycleLabel) => {
+            const displayDurationMs = liveDurationMs(
+              lifecycleLabel.durationMs,
+              isLiveDurationStatus(lifecycleLabel.status),
+              dataUpdatedAt,
+              nowMs,
+            )
+            return (
+              <li
+                className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
+                key={lifecycleLabel.phase}
+              >
+                {lifecycleLabel.label}
+                {displayDurationMs !== null && (
+                  <span className="ml-1 text-slate-400">
+                    {formatDuration(displayDurationMs)}
+                  </span>
+                )}
+              </li>
+            )
+          })}
         </ol>
       )}
       {workItem.statusMessage !== null && (
