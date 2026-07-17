@@ -184,6 +184,7 @@ type WorkItemStatus =
   | "COMPLETE"
   | "ABANDONED"
   | "NEEDS_HUMAN"
+  | "NEEDS_HUMAN_REVIEW"
   | "WAITING_FOR_WORKER_SLOT"
 
 type WorkItem = {
@@ -1787,7 +1788,7 @@ function WorkItemLifecycleStatus({
         ? "bg-green-100 text-green-700"
         : status === "ABANDONED" || status === "CANCELLED"
           ? "bg-slate-200 text-slate-600"
-          : status === "NEEDS_HUMAN"
+          : status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"
             ? "bg-amber-100 text-amber-800"
             : status === "WAITING_FOR_WORKER_SLOT"
               ? "bg-violet-100 text-violet-800"
