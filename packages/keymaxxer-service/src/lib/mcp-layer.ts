@@ -251,11 +251,9 @@ export const keymaxxerMcpCommand = (
   environment: Partial<Record<string, string | undefined>> = process.env,
   pathExists: (path: string) => boolean = existsSync,
 ) => {
-  const entrypoint =
-    environment.KEYMAXXER_ENTRYPOINT ??
-    "/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts"
+  const entrypoint = environment.KEYMAXXER_ENTRYPOINT?.trim()
 
-  return pathExists(entrypoint)
+  return entrypoint && pathExists(entrypoint)
     ? { command: "bun", args: [entrypoint, "serve"] }
     : { command: "keymaxxer", args: ["serve"] }
 }

@@ -459,9 +459,42 @@ describe("MCP process configuration", () => {
   })
 
   test("uses an existing explicit Keymaxxer entrypoint", () => {
-    expect(keymaxxerMcpCommand({ KEYMAXXER_ENTRYPOINT: "/bin/true" })).toEqual({
+    expect(
+      keymaxxerMcpCommand(
+        { KEYMAXXER_ENTRYPOINT: "/custom/keymaxxer/index.ts" },
+        (path) => path === "/custom/keymaxxer/index.ts",
+      ),
+    ).toEqual({
       command: "bun",
-      args: ["/bin/true", "serve"],
+      args: ["/custom/keymaxxer/index.ts", "serve"],
+    })
+  })
+
+  test("uses keymaxxer on PATH when entrypoint is unset", () => {
+    expect(keymaxxerMcpCommand({}, () => true)).toEqual({
+      command: "keymaxxer",
+      args: ["serve"],
+    })
+  })
+
+  test("never selects a hardcoded contrib filesystem path", () => {
+    const contrib =
+      "/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts"
+    expect(keymaxxerMcpCommand({}, (path) => path === contrib)).toEqual({
+      command: "keymaxxer",
+      args: ["serve"],
+    })
+  })
+
+  test("falls back to PATH when entrypoint is set but missing", () => {
+    expect(
+      keymaxxerMcpCommand(
+        { KEYMAXXER_ENTRYPOINT: "/missing/keymaxxer" },
+        () => false,
+      ),
+    ).toEqual({
+      command: "keymaxxer",
+      args: ["serve"],
     })
   })
 
@@ -478,7 +511,7 @@ describe("MCP process configuration", () => {
   test("reports Keymaxxer available from either source", () => {
     expect(
       isKeymaxxerAvailable(
-        {},
+        { KEYMAXXER_ENTRYPOINT: "/custom/keymaxxer/index.ts" },
         () => true,
         () => false,
       ),

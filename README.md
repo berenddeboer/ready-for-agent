@@ -15,10 +15,8 @@ Opinionated agentic software engineering harness to massively increase landed PR
    `keymaxxer@0.2.1` in the root lockfile for live e2e vault tooling
 
 The backend starts Keymaxxer through its MCP server. It uses
-`KEYMAXXER_ENTRYPOINT` when set, otherwise prefers the unreleased local source
-at `/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts` when present,
-and finally falls back to the installed `keymaxxer` command (including the
-workspace pin).
+`KEYMAXXER_ENTRYPOINT` when set to an existing path (run with `bun`), otherwise
+the installed `keymaxxer` command on PATH (including the workspace pin).
 
 When no Keymaxxer entrypoint or executable is available, the harness starts
 without Keymaxxer and uses the user's ambient GitHub authentication. Set

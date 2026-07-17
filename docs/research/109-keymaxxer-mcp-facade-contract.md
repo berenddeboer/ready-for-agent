@@ -206,7 +206,7 @@ Sidecar process
 │         └── McpServer.registerTool(keymaxxer_*) → forward
 └── Shared upstream (lazy, once)
     └── Client + StdioClientTransport → keymaxxer serve
-        (KEYMAXXER_ENTRYPOINT / local path / keymaxxer CLI precedence unchanged)
+        (KEYMAXXER_ENTRYPOINT, then keymaxxer on PATH)
 ```
 
 Concurrency notes (detail belongs in multi-client concurrency research):
