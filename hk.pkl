@@ -32,11 +32,21 @@ esac
         depends = "bun-lockfile"
         glob = List("*.ts", "*.tsx", "*.js", "*.jsx", "*.json", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.json")
         exclude = "**/generated/**"
-        fix = "unset $(git rev-parse --local-env-vars); bunx nx affected -t lint --fix --batch --excludeTaskDependencies"
+        // Strip git local-env-vars and NX_* so hooks under `nx run harness:dev`
+        // are not treated as nested Nx invocations (false recursive-task errors).
+        fix = #"""
+unset $(git rev-parse --local-env-vars)
+for v in $(printenv | cut -d= -f1 | grep '^NX_'); do unset "$v"; done
+bunx nx affected -t lint --fix --batch --excludeTaskDependencies
+"""#
       }
       ["nx-affected"] {
         depends = List("biome-json", "nx-lint-fix")
-        check = "unset $(git rev-parse --local-env-vars); bunx nx affected -t lint,typecheck,test --batch"
+        check = #"""
+unset $(git rev-parse --local-env-vars)
+for v in $(printenv | cut -d= -f1 | grep '^NX_'); do unset "$v"; done
+bunx nx affected -t lint,typecheck,test --batch
+"""#
       }
     }
   }

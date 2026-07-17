@@ -1,5 +1,5 @@
 import { Console, Effect, Schema } from "effect"
-import { Argument, Command } from "effect/unstable/cli"
+import { Argument, Command, Flag } from "effect/unstable/cli"
 import {
   isRepositoryId,
   resolveRepositoryTarget,
@@ -12,6 +12,12 @@ const pathArg = Argument.string("path").pipe(
   Argument.withDescription("Path to a local git repository"),
 )
 
+const noOpenFlag = Flag.boolean("no-open").pipe(
+  Flag.withDescription(
+    "Do not open the default browser after a successful start (also: NO_BROWSER)",
+  ),
+)
+
 class RepositoryNotRegistered extends Schema.TaggedErrorClass<RepositoryNotRegistered>()(
   "RepositoryNotRegistered",
   { detail: Schema.String },
@@ -21,14 +27,19 @@ class RepositoryNotRegistered extends Schema.TaggedErrorClass<RepositoryNotRegis
   }
 }
 
-const startHarness = Effect.gen(function* () {
-  const startHarnessService = yield* StartHarness
-  yield* startHarnessService.start
-})
+const startHarness = (noOpen: boolean) =>
+  Effect.gen(function* () {
+    const startHarnessService = yield* StartHarness
+    yield* startHarnessService.start({ noOpen })
+  })
 
-const startCommand = Command.make("start", {}, () => startHarness).pipe(
+const startCommand = Command.make(
+  "start",
+  { noOpen: noOpenFlag },
+  ({ noOpen }) => startHarness(noOpen),
+).pipe(
   Command.withDescription(
-    "Start the full Harness (UI + backend) on the monorepo dev path",
+    "Start the full Harness (UI + backend); opens the browser unless --no-open / NO_BROWSER",
   ),
 )
 
@@ -92,7 +103,11 @@ const removeGitHubTokenCommand = Command.make(
   ),
 )
 
-export const cli = Command.make("ready-for-agent", {}, () => startHarness).pipe(
+export const cli = Command.make(
+  "ready-for-agent",
+  { noOpen: noOpenFlag },
+  ({ noOpen }) => startHarness(noOpen),
+).pipe(
   Command.withDescription(
     "Ready for Agent operator binary (start Harness, add repositories, manage tokens)",
   ),
