@@ -8,6 +8,7 @@ import {
   GitHubRequestError,
   GitHubService,
   type ReadyLabeledIssue,
+  makeGitHubServiceFromToken,
   makeGitHubServiceTest,
 } from "../src/index.js"
 import {
@@ -36,6 +37,25 @@ const issue = (
 })
 
 describe("GitHubService live implementation", () => {
+  it.effect("preserves an HTTP authentication status", () =>
+    Effect.gen(function* () {
+      let requests = 0
+      const service = makeGitHubServiceFromToken("expired-token", async () => {
+        requests += 1
+        return new Response("Bad credentials", {
+          status: 401,
+          statusText: "Unauthorized",
+        })
+      })
+
+      const error = yield* service.listReadyIssues(repository).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(GitHubRequestError)
+      expect((error as GitHubRequestError).statusCode).toBe(401)
+      expect(requests).toBe(1)
+    }),
+  )
+
   it.effect("aborts an in-flight request when interrupted", () =>
     Effect.gen(function* () {
       let requestSignal: AbortSignal | undefined

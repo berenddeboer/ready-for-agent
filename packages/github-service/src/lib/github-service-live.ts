@@ -29,6 +29,15 @@ const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
 const REQUEST_TIMEOUT = "30 seconds"
 
+class GitHubHttpError extends Error {
+  constructor(
+    readonly statusCode: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
 export interface GitHubGraphqlClient {
   readonly query: <R extends QueryGenqlSelection>(
     request: R & { readonly __name?: string },
@@ -40,13 +49,25 @@ export interface GitHubGraphqlClient {
   ) => Promise<FieldsSelection<Mutation, R>>
 }
 
+type GitHubFetch = (
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+) => Promise<Response>
+
 const githubRequest = <A>(
   message: string,
   request: (signal: AbortSignal) => Promise<A>,
 ): Effect.Effect<A, GitHubRequestError> =>
   Effect.tryPromise({
     try: request,
-    catch: (cause) => new GitHubRequestError({ message, cause }),
+    catch: (cause) =>
+      new GitHubRequestError({
+        message,
+        cause,
+        ...(cause instanceof GitHubHttpError
+          ? { statusCode: cause.statusCode }
+          : {}),
+      }),
   }).pipe(
     Effect.timeout(REQUEST_TIMEOUT),
     Effect.catchTag("TimeoutError", (cause) =>
@@ -65,6 +86,7 @@ const githubQuery = <A>(
       schedule: Schedule.addDelay(Schedule.recurs(2), () =>
         Effect.succeed(Duration.millis(500)),
       ),
+      while: (error) => error.statusCode !== 401,
     }),
   )
 
@@ -1410,11 +1432,24 @@ export const makeGitHubService = (
   ),
 })
 
-const makeGitHubGraphqlClient = (token: string): GitHubGraphqlClient => {
+const makeGitHubGraphqlClient = (
+  token: string,
+  fetchImpl: GitHubFetch = fetch,
+): GitHubGraphqlClient => {
   const client = (signal?: AbortSignal) =>
     createClient({
       url: GITHUB_GRAPHQL_URL,
       signal,
+      fetch: async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const response = await fetchImpl(input, init)
+        if (!response.ok) {
+          throw new GitHubHttpError(
+            response.status,
+            `${response.statusText}: ${await response.text()}`,
+          )
+        }
+        return response
+      },
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -1426,11 +1461,15 @@ const makeGitHubGraphqlClient = (token: string): GitHubGraphqlClient => {
   }
 }
 
+export const makeGitHubServiceFromToken = (
+  token: string,
+  fetchImpl?: GitHubFetch,
+): GitHubServiceShape =>
+  makeGitHubService(makeGitHubGraphqlClient(token, fetchImpl))
+
 export const GitHubServiceLive = Layer.effect(
   GitHubService,
   Config.redacted("GITHUB_TOKEN").pipe(
-    Effect.map((token) =>
-      makeGitHubService(makeGitHubGraphqlClient(Redacted.value(token))),
-    ),
+    Effect.map((token) => makeGitHubServiceFromToken(Redacted.value(token))),
   ),
 )

@@ -13,5 +13,6 @@ export class GitHubRequestError extends Schema.TaggedErrorClass<GitHubRequestErr
   {
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
+    statusCode: Schema.optional(Schema.Finite),
   },
 ) {}

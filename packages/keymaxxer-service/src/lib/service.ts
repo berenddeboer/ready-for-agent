@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process"
 import { Context, Effect, Layer } from "effect"
 import type {
   AddSecretInput,
@@ -70,21 +71,28 @@ export const disabledKeymaxxerLayer: Layer.Layer<KeymaxxerService> =
     removeSecret: () => Effect.succeed(false),
     runWithSecrets: (input) =>
       Effect.tryPromise({
-        try: async () => {
-          const child = Bun.spawn(["bash", "-c", input.command], {
-            cwd: input.cwd,
-            env: process.env,
-            stdout: "pipe",
-            stderr: "pipe",
-            timeout: input.timeoutMs,
-          })
-          const [exitCode, stdout, stderr] = await Promise.all([
-            child.exited,
-            new Response(child.stdout).text(),
-            new Response(child.stderr).text(),
-          ])
-          return { exitCode, stdout, stderr }
-        },
+        try: () =>
+          new Promise<RunWithSecretsResult>((resolve, reject) => {
+            const child = spawn("bash", ["-c", input.command], {
+              cwd: input.cwd,
+              env: process.env,
+              timeout: input.timeoutMs,
+            })
+            let stdout = ""
+            let stderr = ""
+            child.stdout.setEncoding("utf8")
+            child.stderr.setEncoding("utf8")
+            child.stdout.on("data", (chunk: string) => {
+              stdout += chunk
+            })
+            child.stderr.on("data", (chunk: string) => {
+              stderr += chunk
+            })
+            child.once("error", reject)
+            child.once("close", (exitCode) => {
+              resolve({ exitCode: exitCode ?? 1, stdout, stderr })
+            })
+          }),
         catch: () =>
           new KeymaxxerError({
             operation: "run command",
