@@ -15,6 +15,12 @@ plus the development-only Keymaxxer sidecar. By default, application data is
 stored in `tmp/ready-for-agent.db`. Set `SQLITE_DATABASE_PATH` to use another
 SQLite/Turso database.
 
+Stop the harness completely before opening that database with external write
+tooling (CLI, GUI, or a second process). The harness uses single-process default
+WAL; concurrent writers are not supported. Stale `*.db-tshm` files from older
+multiprocess-WAL runs may remain; Turso rebuilds or ignores them after a clean
+mode switch, and no data migration is required.
+
 Then add a local repository:
 
 ```bash

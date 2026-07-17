@@ -25,6 +25,15 @@ READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4300/graphql \
   bun run harness-cli add /path/to/local/repo
 ```
 
+## Database
+
+By default the harness stores application data in `tmp/ready-for-agent.db`
+(override with `SQLITE_DATABASE_PATH`). Fully stop the harness before opening
+that file with external write tooling. The harness uses single-process default
+WAL; concurrent writers are not supported. Stale `*.db-tshm` files from older
+multiprocess-WAL runs may remain; Turso rebuilds or ignores them after a clean
+mode switch, and no data migration is required.
+
 ## Production
 
 Build and start the custom Bun server with:

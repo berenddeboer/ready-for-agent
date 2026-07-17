@@ -44,9 +44,7 @@ const sqlError = (cause: unknown, operation: string) =>
 
 const makeClient = (path: string, options?: TursoClientOptions) =>
   Effect.gen(function* () {
-    const databaseOptions: NonNullable<Parameters<typeof connect>[1]> = {
-      experimental: ["multiprocess_wal"],
-    }
+    const databaseOptions: NonNullable<Parameters<typeof connect>[1]> = {}
     if (options?.defaultQueryTimeout !== undefined)
       databaseOptions.defaultQueryTimeout = options.defaultQueryTimeout
     const db = yield* Effect.tryPromise({
