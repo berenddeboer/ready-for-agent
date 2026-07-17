@@ -96,10 +96,14 @@ describe("liveDurationMs", () => {
 describe("formatStartedAgo", () => {
   test("advances relative age as wall clock moves without refetch", () => {
     const createdAt = new Date(1_000_000).toISOString()
-    expect(formatStartedAgo(createdAt, 1_000_000 + 30_000)).toBe("just now")
-    expect(formatStartedAgo(createdAt, 1_000_000 + 90_000)).toBe("1 min ago")
+    expect(formatStartedAgo(createdAt, 1_000_000 + 30_000)).toBe(
+      "Started just now",
+    )
+    expect(formatStartedAgo(createdAt, 1_000_000 + 90_000)).toBe(
+      "Started 1 min ago",
+    )
     expect(formatStartedAgo(createdAt, 1_000_000 + 15 * 60_000)).toBe(
-      "15 min ago",
+      "Started 15 min ago",
     )
   })
 })
