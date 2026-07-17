@@ -48,4 +48,18 @@ describe("JobsCard live updates", () => {
     expect(jobsCard).not.toContain("hover:text-blue-700")
     expect(jobsCard).toContain('issueUrl !== undefined && issueUrl !== ""')
   })
+
+  test("links status badge and Decide PR merge handoff to Work Item PR", () => {
+    const { source, jobsCard } = jobsCardSource()
+    expect(source).toContain("githubPullRequestNumber: true")
+    expect(source).toContain("workItemPullRequestUrl")
+    expect(jobsCard).toContain("workItemPullRequestUrl(")
+    expect(jobsCard).toContain("workItem.githubPullRequestNumber")
+    expect(source).toContain('target="_blank"')
+    expect(source).toContain('rel="noopener noreferrer"')
+    expect(source).toContain("Open pull request #")
+    expect(source).toContain('lifecycleLabel.phase === "DECIDE_PR_MERGE"')
+    expect(source).toContain('lifecycleLabel.status === "NEEDS_HUMAN"')
+    expect(source).toContain("PR #{prNumber}")
+  })
 })

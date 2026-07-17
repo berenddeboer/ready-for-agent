@@ -18,6 +18,7 @@ import {
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
+import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
 
@@ -187,6 +188,7 @@ type WorkItem = {
   id: string
   repositoryId: string
   githubIssueNumber: number
+  githubPullRequestNumber: number | null
   state: WorkItemState
   stateLabel: string
   status: WorkItemStatus
@@ -209,6 +211,7 @@ const workItemFields = {
   id: true,
   repositoryId: true,
   githubIssueNumber: true,
+  githubPullRequestNumber: true,
   state: true,
   stateLabel: true,
   status: true,
@@ -1130,7 +1133,7 @@ function RepositoryCard({
         ) : (
           <Suspense fallback={<RepositoryIssuesSkeleton />}>
             <RepositoryIssues
-              repositoryId={repository.id}
+              repository={repository}
               workItems={workItems}
               workItemsLoading={workItemsLoading}
             />
@@ -1147,15 +1150,15 @@ function RepositoryCard({
 }
 
 function RepositoryIssues({
-  repositoryId,
+  repository,
   workItems,
   workItemsLoading,
 }: {
-  repositoryId: string
+  repository: Repository
   workItems: readonly WorkItem[]
   workItemsLoading: boolean
 }) {
-  const { data: issues } = useSuspenseQuery(issuesQuery(repositoryId))
+  const { data: issues } = useSuspenseQuery(issuesQuery(repository.id))
 
   if (issues.length === 0) {
     return (
@@ -1182,6 +1185,7 @@ function RepositoryIssues({
             <RepositoryIssueRow
               issue={issue}
               key={issue.id}
+              repository={repository}
               workItems={workItems}
               workItemsLoading={workItemsLoading}
             />
@@ -1230,6 +1234,7 @@ function RepositoryIssues({
                   <RepositoryIssueRow
                     issue={child}
                     key={child.id}
+                    repository={repository}
                     workItems={workItems}
                     workItemsLoading={workItemsLoading}
                   />
@@ -1245,10 +1250,12 @@ function RepositoryIssues({
 
 function RepositoryIssueRow({
   issue,
+  repository,
   workItems,
   workItemsLoading,
 }: {
   issue: RepositoryIssue
+  repository: Repository
   workItems: readonly WorkItem[]
   workItemsLoading: boolean
 }) {
@@ -1407,7 +1414,14 @@ function RepositoryIssueRow({
         </span>
       </div>
       {latestWorkItem !== undefined && (
-        <WorkItemLifecycleStatus workItem={latestWorkItem} />
+        <WorkItemLifecycleStatus
+          workItem={latestWorkItem}
+          pullRequestUrl={workItemPullRequestUrl(
+            repository.githubOwner,
+            repository.githubRepo,
+            latestWorkItem.githubPullRequestNumber,
+          )}
+        />
       )}
       {(implementNow.isError || implementLocally.isError) && (
         <p className="mt-1.5 mb-0 pl-11 text-xs text-red-700" role="alert">
@@ -1561,7 +1575,19 @@ function JobsCard() {
                   Session {workItem.sessionId}
                 </p>
               )}
-              <WorkItemLifecycleStatus workItem={workItem} compact />
+              <WorkItemLifecycleStatus
+                workItem={workItem}
+                compact
+                pullRequestUrl={
+                  repository === undefined
+                    ? null
+                    : workItemPullRequestUrl(
+                        repository.githubOwner,
+                        repository.githubRepo,
+                        workItem.githubPullRequestNumber,
+                      )
+                }
+              />
             </li>
           )
         })}
@@ -1692,9 +1718,11 @@ function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
 function WorkItemLifecycleStatus({
   workItem,
   compact = false,
+  pullRequestUrl = null,
 }: {
   workItem: WorkItem
   compact?: boolean
+  pullRequestUrl?: string | null
 }) {
   const queryClient = useQueryClient()
   const status = workItem.status
@@ -1742,6 +1770,22 @@ function WorkItemLifecycleStatus({
     },
   })
   const actionsPending = retry.isPending || reset.isPending
+  const prNumber = workItem.githubPullRequestNumber
+  const statusBadgeClassName = `rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase ${
+    status === "FAILED" || status === "INTERRUPTED"
+      ? "bg-red-100 text-red-700"
+      : status === "COMPLETE" || status === "SUCCEEDED"
+        ? "bg-green-100 text-green-700"
+        : status === "ABANDONED" || status === "CANCELLED"
+          ? "bg-slate-200 text-slate-600"
+          : status === "NEEDS_HUMAN"
+            ? "bg-amber-100 text-amber-800"
+            : status === "WAITING_FOR_WORKER_SLOT"
+              ? "bg-violet-100 text-violet-800"
+              : "bg-blue-100 text-blue-700"
+  }`
+  const openPullRequestLabel =
+    prNumber === null ? null : `Open pull request #${prNumber}`
 
   return (
     <div
@@ -1755,22 +1799,31 @@ function WorkItemLifecycleStatus({
         <span className="text-xs font-normal text-slate-500">
           {formatStartedAgo(workItem.createdAt, nowMs)}
         </span>
-        <span
-          className={`rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase ${
-            status === "FAILED" || status === "INTERRUPTED"
-              ? "bg-red-100 text-red-700"
-              : status === "COMPLETE" || status === "SUCCEEDED"
-                ? "bg-green-100 text-green-700"
-                : status === "ABANDONED" || status === "CANCELLED"
-                  ? "bg-slate-200 text-slate-600"
-                  : status === "NEEDS_HUMAN"
-                    ? "bg-amber-100 text-amber-800"
-                    : status === "WAITING_FOR_WORKER_SLOT"
-                      ? "bg-violet-100 text-violet-800"
-                      : "bg-blue-100 text-blue-700"
-          }`}
-        >
-          {workItem.statusLabel}
+        <span className="flex flex-wrap items-center justify-end gap-1">
+          {pullRequestUrl !== null && prNumber !== null && (
+            <a
+              className="rounded-full bg-slate-200 px-2 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-700 uppercase hover:bg-slate-300 hover:underline"
+              href={pullRequestUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={openPullRequestLabel ?? undefined}
+            >
+              PR #{prNumber}
+            </a>
+          )}
+          {pullRequestUrl !== null && openPullRequestLabel !== null ? (
+            <a
+              className={`${statusBadgeClassName} hover:underline`}
+              href={pullRequestUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`${openPullRequestLabel}: ${workItem.statusLabel}`}
+            >
+              {workItem.statusLabel}
+            </a>
+          ) : (
+            <span className={statusBadgeClassName}>{workItem.statusLabel}</span>
+          )}
         </span>
       </div>
       {workItem.lifecycleLabels.length > 0 && (
@@ -1785,15 +1838,35 @@ function WorkItemLifecycleStatus({
               dataUpdatedAt,
               nowMs,
             )
+            const linkToPullRequest =
+              pullRequestUrl !== null &&
+              openPullRequestLabel !== null &&
+              lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
+              lifecycleLabel.status === "NEEDS_HUMAN"
+            const chipClassName =
+              "rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
+            const duration = displayDurationMs !== null && (
+              <span className="ml-1 text-slate-400">
+                {formatDuration(displayDurationMs)}
+              </span>
+            )
             return (
-              <li
-                className="rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
-                key={lifecycleLabel.phase}
-              >
-                {lifecycleLabel.label}
-                {displayDurationMs !== null && (
-                  <span className="ml-1 text-slate-400">
-                    {formatDuration(displayDurationMs)}
+              <li key={lifecycleLabel.phase}>
+                {linkToPullRequest ? (
+                  <a
+                    className={`${chipClassName} hover:underline`}
+                    href={pullRequestUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${openPullRequestLabel}: ${lifecycleLabel.label}`}
+                  >
+                    {lifecycleLabel.label}
+                    {duration}
+                  </a>
+                ) : (
+                  <span className={chipClassName}>
+                    {lifecycleLabel.label}
+                    {duration}
                   </span>
                 )}
               </li>
