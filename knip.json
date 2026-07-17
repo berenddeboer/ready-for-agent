@@ -15,9 +15,17 @@
         "src/router.tsx",
         "src/server.ts",
         "src/styles.css",
-        "test/**/*.test.ts"
+        "test/**/*.test.ts",
+        "playwright.config.ts",
+        "e2e/steps/**/*.ts",
+        "e2e/support/**/*.ts"
       ],
-      "project": ["src/**/*.{ts,tsx}", "test/**/*.ts"]
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "test/**/*.ts",
+        "e2e/**/*.{ts,tsx}",
+        "playwright.config.ts"
+      ]
     },
     "apps/keymaxxer-sidecar": {
       "entry": ["test/**/*.test.ts"],
