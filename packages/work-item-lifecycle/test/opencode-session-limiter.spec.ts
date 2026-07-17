@@ -29,6 +29,7 @@ describe("limitOpencodeSessions", () => {
           reviewModel: null,
           reviewVariant: null,
           maxConcurrentOpencodeSessions: 2,
+          maxConcurrentWorkItems: 5,
         })
 
         const release = yield* Deferred.make<void>()
@@ -96,6 +97,7 @@ describe("limitOpencodeSessions", () => {
           reviewModel: null,
           reviewVariant: null,
           maxConcurrentOpencodeSessions: 1,
+          maxConcurrentWorkItems: 5,
         })
 
         const releaseStart = yield* Deferred.make<void>()
@@ -146,6 +148,7 @@ describe("limitOpencodeSessions", () => {
           reviewModel: null,
           reviewVariant: null,
           maxConcurrentOpencodeSessions: 1,
+          maxConcurrentWorkItems: 5,
         })
 
         const releaseFirst = yield* Deferred.make<void>()
@@ -184,6 +187,7 @@ describe("limitOpencodeSessions", () => {
           reviewModel: null,
           reviewVariant: null,
           maxConcurrentOpencodeSessions: 2,
+          maxConcurrentWorkItems: 5,
         })
         yield* Deferred.await(secondStarted)
         expect(starts).toBe(2)

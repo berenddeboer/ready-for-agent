@@ -217,6 +217,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             maxConcurrentOpencodeSessions: 2,
+            maxConcurrentWorkItems: 5,
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -244,6 +245,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: null,
             reviewVariant: null,
             maxConcurrentOpencodeSessions: 2,
+            maxConcurrentWorkItems: 5,
           })
           yield* db.updateRepositorySettings({
             repositoryId: repository.id,
@@ -280,6 +282,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: null,
             reviewVariant: null,
             maxConcurrentOpencodeSessions: 2,
+            maxConcurrentWorkItems: 5,
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -1946,6 +1949,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: null,
             reviewVariant: null,
             maxConcurrentOpencodeSessions: 2,
+            maxConcurrentWorkItems: 5,
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
@@ -4312,6 +4316,227 @@ describe("WorkItemLifecycle", () => {
           const published = yield* Fiber.join(changes)
           expect(published).toContain(repository.id)
           expect(published.length).toBeGreaterThanOrEqual(1)
+        }),
+      ))
+  })
+
+  describe("Worker Slots", () => {
+    const seedIssue = (githubIssueNumber: number) =>
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const repository = yield* db.addRepository({
+          ...sampleRepository,
+          localPath: `/repos/acme/widgets-${githubIssueNumber}.git`,
+          githubRepo: `widgets-${githubIssueNumber}`,
+        })
+        const issue = yield* db.storeIssue({
+          repositoryId: repository.id,
+          githubIssueNumber,
+          ...sampleIssueFields,
+          url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+        })
+        return { repository, issue }
+      })
+
+    const setMaxWorkItems = (maxConcurrentWorkItems: number) =>
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const config = yield* db.getConfig
+        yield* db.updateConfig({
+          ...config,
+          maxConcurrentWorkItems,
+        })
+      })
+
+    it("admits up to the limit and queues extras as Waiting for Worker Slot", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          yield* setMaxWorkItems(2)
+
+          const a = yield* seedIssue(101)
+          const b = yield* seedIssue(102)
+          const c = yield* seedIssue(103)
+
+          const first = yield* lifecycle.implementNow(
+            a.repository.id,
+            a.issue.githubIssueNumber,
+          )
+          const second = yield* lifecycle.implementNow(
+            b.repository.id,
+            b.issue.githubIssueNumber,
+          )
+          const third = yield* lifecycle.implementNow(
+            c.repository.id,
+            c.issue.githubIssueNumber,
+          )
+
+          expect(first.holdsWorkerSlot).toBe(true)
+          expect(first.waitingSince).toBeNull()
+          expect(first.stepRuns).toHaveLength(1)
+
+          expect(second.holdsWorkerSlot).toBe(true)
+          expect(second.waitingSince).toBeNull()
+          expect(second.stepRuns).toHaveLength(1)
+
+          expect(third.holdsWorkerSlot).toBe(false)
+          expect(third.waitingSince).not.toBeNull()
+          expect(third.stepRuns).toHaveLength(0)
+          expect(third.state).toBe("create_worktree")
+        }),
+      ))
+
+    it("admits waiters FIFO when a slot is released by abandon", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          yield* setMaxWorkItems(1)
+
+          const a = yield* seedIssue(201)
+          const b = yield* seedIssue(202)
+          const c = yield* seedIssue(203)
+
+          const first = yield* lifecycle.implementNow(
+            a.repository.id,
+            a.issue.githubIssueNumber,
+          )
+          const second = yield* lifecycle.implementNow(
+            b.repository.id,
+            b.issue.githubIssueNumber,
+          )
+          const third = yield* lifecycle.implementNow(
+            c.repository.id,
+            c.issue.githubIssueNumber,
+          )
+
+          expect(first.holdsWorkerSlot).toBe(true)
+          expect(second.waitingSince).not.toBeNull()
+          expect(third.waitingSince).not.toBeNull()
+
+          yield* lifecycle.abandon(first.id)
+
+          const admittedSecond = yield* lifecycle.getWorkItem(second.id)
+          const stillWaitingThird = yield* lifecycle.getWorkItem(third.id)
+
+          expect(admittedSecond.holdsWorkerSlot).toBe(true)
+          expect(admittedSecond.waitingSince).toBeNull()
+          expect(admittedSecond.stepRuns).toHaveLength(1)
+          expect(stillWaitingThird.holdsWorkerSlot).toBe(false)
+          expect(stillWaitingThird.waitingSince).not.toBeNull()
+          expect(stillWaitingThird.stepRuns).toHaveLength(0)
+        }),
+      ))
+
+    it("releases a slot on Pause when idle and re-acquires on Start", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          yield* setMaxWorkItems(1)
+
+          const a = yield* seedIssue(301)
+          const b = yield* seedIssue(302)
+
+          const first = yield* lifecycle.implementNow(
+            a.repository.id,
+            a.issue.githubIssueNumber,
+          )
+          const waiter = yield* lifecycle.implementNow(
+            b.repository.id,
+            b.issue.githubIssueNumber,
+          )
+          expect(waiter.waitingSince).not.toBeNull()
+
+          const paused = yield* lifecycle.pause(first.id)
+          expect(paused.paused).toBe(true)
+          expect(paused.holdsWorkerSlot).toBe(false)
+
+          const admittedWaiter = yield* lifecycle.getWorkItem(waiter.id)
+          expect(admittedWaiter.holdsWorkerSlot).toBe(true)
+          expect(admittedWaiter.waitingSince).toBeNull()
+          expect(admittedWaiter.stepRuns).toHaveLength(1)
+
+          const started = yield* lifecycle.start(first.id)
+          expect(started.paused).toBe(false)
+          expect(started.holdsWorkerSlot).toBe(false)
+          expect(started.waitingSince).not.toBeNull()
+        }),
+      ))
+
+    it("releases a slot on non-terminal failure; Retry re-acquires or waits", () =>
+      runWithSteps(
+        {
+          ...successfulSteps,
+          createWorktree: () => Effect.fail(new Error("boom")),
+        },
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          yield* setMaxWorkItems(1)
+
+          const a = yield* seedIssue(401)
+          const b = yield* seedIssue(402)
+
+          const first = yield* lifecycle.implementNow(
+            a.repository.id,
+            a.issue.githubIssueNumber,
+          )
+          const waiter = yield* lifecycle.implementNow(
+            b.repository.id,
+            b.issue.githubIssueNumber,
+          )
+
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isSome(claimed)) {
+            yield* lifecycle.runStep(
+              (claimed.value.payload as { stepRunId: string }).stepRunId,
+            )
+          }
+
+          const failed = yield* lifecycle.getWorkItem(first.id)
+          expect(failed.holdsWorkerSlot).toBe(false)
+          expect(failed.waitingSince).toBeNull()
+          expect(failed.stepRuns[0]!.status).toBe("failed")
+
+          const admittedWaiter = yield* lifecycle.getWorkItem(waiter.id)
+          expect(admittedWaiter.holdsWorkerSlot).toBe(true)
+
+          const retried = yield* lifecycle.retry(first.id)
+          expect(retried.holdsWorkerSlot).toBe(false)
+          expect(retried.waitingSince).not.toBeNull()
+          expect(
+            retried.stepRuns.filter((r) => r.status === "queued"),
+          ).toHaveLength(0)
+        }),
+      ))
+
+    it("admits waiters immediately when the config limit is raised", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          yield* setMaxWorkItems(1)
+
+          const a = yield* seedIssue(501)
+          const b = yield* seedIssue(502)
+
+          yield* lifecycle.implementNow(
+            a.repository.id,
+            a.issue.githubIssueNumber,
+          )
+          const waiter = yield* lifecycle.implementNow(
+            b.repository.id,
+            b.issue.githubIssueNumber,
+          )
+          expect(waiter.waitingSince).not.toBeNull()
+
+          yield* setMaxWorkItems(2)
+          const admitted = yield* lifecycle.admitWaitingWorkItems
+          expect(admitted).toBe(1)
+
+          const after = yield* lifecycle.getWorkItem(waiter.id)
+          expect(after.holdsWorkerSlot).toBe(true)
+          expect(after.waitingSince).toBeNull()
+          expect(after.stepRuns).toHaveLength(1)
         }),
       ))
   })

@@ -43,6 +43,7 @@ import {
   RetryNotEligibleError,
   type StepRunRecord,
   UnfinishedWorkItemExistsError,
+  WAITING_FOR_WORKER_SLOT_MESSAGE,
   WorkItemLifecycle,
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
@@ -84,6 +85,7 @@ type UpdateConfigArgs = {
     reviewModel?: string | null
     reviewVariant?: string | null
     maxConcurrentOpencodeSessions: number
+    maxConcurrentWorkItems: number
   }
 }
 
@@ -160,6 +162,7 @@ type WorkItemStatus =
   | "complete"
   | "abandoned"
   | "needs_human"
+  | "waiting_for_worker_slot"
 
 type LifecyclePhase =
   | Exclude<
@@ -206,6 +209,7 @@ const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
   workItem.stepRuns.at(-1)
 
 const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
+  if (workItem.waitingSince != null) return "waiting_for_worker_slot"
   if (isTerminalWorkItemState(workItem.state)) return workItem.state
   return latestStepRun(workItem)?.status ?? "queued"
 }
@@ -677,11 +681,15 @@ export const createGraphqlApi = (
           statusLabel: (workItem: WorkItemRecord) =>
             statusLabel(workItemStatus(workItem)),
           statusMessage: (workItem: WorkItemRecord) =>
-            workItem.failureMessage ?? latestStepRun(workItem)?.reasonMessage,
+            workItem.waitingSince != null
+              ? WAITING_FOR_WORKER_SLOT_MESSAGE
+              : (workItem.failureMessage ??
+                latestStepRun(workItem)?.reasonMessage),
           paused: (workItem: WorkItemRecord) => workItem.paused,
           canRetry: (workItem: WorkItemRecord) => {
             const latestStatus = latestStepRun(workItem)?.status
             return (
+              workItem.waitingSince == null &&
               !workItem.paused &&
               !isTerminalWorkItemState(workItem.state) &&
               (latestStatus === "failed" || latestStatus === "interrupted")
@@ -753,14 +761,25 @@ export const createGraphqlApi = (
               Effect.result(
                 Effect.gen(function* () {
                   const db = yield* DbService
-                  return yield* db.updateConfig({
+                  const updated = yield* db.updateConfig({
                     defaultModel: args.input.defaultModel,
                     defaultVariant: args.input.defaultVariant,
                     reviewModel: args.input.reviewModel ?? null,
                     reviewVariant: args.input.reviewVariant ?? null,
                     maxConcurrentOpencodeSessions:
                       args.input.maxConcurrentOpencodeSessions,
+                    maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
                   })
+                  const lifecycle = yield* WorkItemLifecycle
+                  yield* lifecycle.admitWaitingWorkItems.pipe(
+                    Effect.catch((error) =>
+                      Effect.logError(
+                        "Failed to admit waiters after config update",
+                        { error: String(error) },
+                      ),
+                    ),
+                  )
+                  return updated
                 }),
               ),
             )

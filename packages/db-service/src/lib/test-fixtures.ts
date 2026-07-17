@@ -36,6 +36,7 @@ export const stubDbService = (
     reviewModel: null,
     reviewVariant: null,
     maxConcurrentOpencodeSessions: 2,
+    maxConcurrentWorkItems: 5,
   }),
   updateConfig: unused,
   addRepository: unused,

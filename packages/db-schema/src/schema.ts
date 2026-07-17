@@ -49,6 +49,7 @@ export const config = snakeCase.table("config", {
   maxConcurrentOpencodeSessions: integer({ mode: "number" })
     .notNull()
     .default(2),
+  maxConcurrentWorkItems: integer({ mode: "number" }).notNull().default(5),
   createdAt: integer({ mode: "number" })
     .notNull()
     .$defaultFn(() => Date.now()),
@@ -224,6 +225,15 @@ export const workItem = snakeCase.table(
     }).notNull(),
     stateReadyAt: integer({ mode: "number" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * When set, the Work Item is Waiting for Worker Slot (FIFO by this timestamp).
+     * Null when not waiting.
+     */
+    waitingSince: integer({ mode: "number" }),
+    /**
+     * Whether this Work Item currently occupies a Worker Slot (Admitted).
+     */
+    holdsWorkerSlot: integer({ mode: "boolean" }).notNull().default(false),
     /**
      * When set, successful advancement into this Lifecycle Step pauses the Work
      * Item (no Step Run enqueued) so the operator can inspect local work.

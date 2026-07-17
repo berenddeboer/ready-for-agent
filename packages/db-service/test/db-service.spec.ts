@@ -52,6 +52,7 @@ describe("DbService", () => {
             reviewModel: null,
             reviewVariant: null,
             maxConcurrentOpencodeSessions: 2,
+            maxConcurrentWorkItems: 5,
           })
 
           expect(
@@ -61,6 +62,7 @@ describe("DbService", () => {
               reviewModel: "  anthropic/claude-opus-4-6  ",
               reviewVariant: "  max  ",
               maxConcurrentOpencodeSessions: 4,
+              maxConcurrentWorkItems: 5,
             }),
           ).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
@@ -68,6 +70,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             maxConcurrentOpencodeSessions: 4,
+            maxConcurrentWorkItems: 5,
           })
           expect(yield* db.getConfig).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
@@ -75,6 +78,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             maxConcurrentOpencodeSessions: 4,
+            maxConcurrentWorkItems: 5,
           })
         }),
       ))
@@ -90,6 +94,7 @@ describe("DbService", () => {
               reviewModel: null,
               reviewVariant: null,
               maxConcurrentOpencodeSessions: 2,
+              maxConcurrentWorkItems: 5,
             }),
           )
           expect(error).toBeInstanceOf(InvalidConfigInputError)
@@ -108,11 +113,35 @@ describe("DbService", () => {
                 reviewModel: null,
                 reviewVariant: null,
                 maxConcurrentOpencodeSessions: value,
+                maxConcurrentWorkItems: 5,
               }),
             )
             expect(error).toBeInstanceOf(InvalidConfigInputError)
             expect(error).toMatchObject({
               field: "maxConcurrentOpencodeSessions",
+            })
+          }
+        }),
+      ))
+
+    it("rejects non-positive max concurrent Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          for (const value of [0, -1, 1.5, Number.NaN]) {
+            const error = yield* Effect.flip(
+              db.updateConfig({
+                defaultModel: "anthropic/claude-sonnet-4-5",
+                defaultVariant: "high",
+                reviewModel: null,
+                reviewVariant: null,
+                maxConcurrentOpencodeSessions: 2,
+                maxConcurrentWorkItems: value,
+              }),
+            )
+            expect(error).toBeInstanceOf(InvalidConfigInputError)
+            expect(error).toMatchObject({
+              field: "maxConcurrentWorkItems",
             })
           }
         }),

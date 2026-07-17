@@ -67,6 +67,8 @@ import {
   makeWorkItemId,
 } from "./types.js"
 
+export { WAITING_FOR_WORKER_SLOT_MESSAGE } from "./types.js"
+
 const formatSqlError = (error: SqlError): string => {
   const parts: string[] = [error.message]
   let current: unknown = error.cause
@@ -209,6 +211,8 @@ type WorkItemRow = {
   readonly state: WorkItemState
   readonly state_ready_at: number
   readonly paused: boolean | number
+  readonly waiting_since: number | null
+  readonly holds_worker_slot: boolean | number
   readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
   readonly session_id: string | null
@@ -278,6 +282,11 @@ const toWorkItemRecord = (
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
   paused: Boolean(row.paused),
+  waitingSince:
+    row.waiting_since === null || row.waiting_since === undefined
+      ? null
+      : new Date(row.waiting_since),
+  holdsWorkerSlot: Boolean(row.holds_worker_slot),
   pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
   sessionId: row.session_id,
@@ -290,7 +299,8 @@ const toWorkItemRecord = (
 })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, model, variant, review_model,
-                   review_variant, state, state_ready_at, paused, pause_before_step, worktree_path, session_id,
+                   review_variant, state, state_ready_at, paused, waiting_since, holds_worker_slot,
+                   pause_before_step, worktree_path, session_id,
                    github_pull_request_number, failure_code,
                    failure_message, created_at, updated_at`
 
@@ -490,6 +500,14 @@ export interface WorkItemLifecycleShape {
     workItemId: string,
     outcome: HumanPrOutcome,
   ) => Effect.Effect<WorkItemRecord, ContinueAfterHumanPrOutcomeError>
+  /** Admit FIFO waiters up to the current maxConcurrentWorkItems bound. */
+  readonly admitWaitingWorkItems: Effect.Effect<
+    number,
+    | WorkItemLifecycleDatabaseError
+    | EnqueueError
+    | InvalidQueueNameError
+    | DatabaseError
+  >
 }
 
 export class WorkItemLifecycle extends Context.Service<
@@ -718,6 +736,255 @@ export const makeWorkItemLifecycleLive = (
           return rows[0] ?? null
         })
 
+      const countOccupiedWorkerSlots = (): Effect.Effect<
+        number,
+        WorkItemLifecycleDatabaseError
+      > =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT COUNT(*) AS occupied
+               FROM work_item
+               WHERE holds_worker_slot = 1`,
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly occupied: number
+          }[]
+          return Number(rows[0]?.occupied ?? 0)
+        })
+
+      const maxWorkerSlots = (): Effect.Effect<
+        number,
+        WorkItemLifecycleDatabaseError | DatabaseError
+      > =>
+        db.getConfig.pipe(
+          Effect.map((config) => Math.max(1, config.maxConcurrentWorkItems)),
+        )
+
+      const encodeStepJob = (stepRunId: string) =>
+        Schema.decodeUnknownEffect(WorkItemStepJob)({
+          _tag: "work-item-step",
+          stepRunId,
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Failed to encode work-item-step payload: ${String(error)}`,
+                cause: error,
+              }),
+          ),
+        )
+
+      const enqueueStepRunForWorkItem = (
+        workItemId: string,
+        step: OperationalLifecycleStep,
+        now: number,
+        delay?: Duration.Duration,
+      ): Effect.Effect<
+        void,
+        WorkItemLifecycleDatabaseError | EnqueueError | InvalidQueueNameError
+      > =>
+        Effect.gen(function* () {
+          const nextStepRunId = makeStepRunId()
+          yield* sql
+            .unsafe(
+              `INSERT INTO step_run (
+               id, work_item_id, step, status, queue_job_id, queued_at,
+               started_at, finished_at, reason_code, reason_message,
+               created_at, updated_at
+             ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+              [nextStepRunId, workItemId, step, now, now, now],
+            )
+            .pipe(Effect.mapError(toDatabaseError))
+          const payload = yield* encodeStepJob(nextStepRunId)
+          const enqueue =
+            delay === undefined
+              ? queue.enqueue(WORK_ITEM_LIFECYCLE_QUEUE, payload, {
+                  retryLimit: 1,
+                })
+              : queue.enqueueWithDelay(
+                  WORK_ITEM_LIFECYCLE_QUEUE,
+                  payload,
+                  delay,
+                  { retryLimit: 1 },
+                )
+          const jobId = yield* enqueue
+          yield* sql
+            .unsafe(
+              `UPDATE step_run
+             SET queue_job_id = ?, updated_at = ?
+             WHERE id = ?`,
+              [jobId, now, nextStepRunId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))
+        })
+
+      /**
+       * Try to claim a free Worker Slot for this Work Item (must run in a txn).
+       * Returns true if admitted (or already holding), false if marked waiting.
+       */
+      const tryAcquireWorkerSlot = (
+        workItemId: string,
+        now: number,
+      ): Effect.Effect<
+        boolean,
+        WorkItemLifecycleDatabaseError | DatabaseError
+      > =>
+        Effect.gen(function* () {
+          const current = yield* loadWorkItemRow(workItemId)
+          if (!current) {
+            return false
+          }
+          if (current.holds_worker_slot) {
+            yield* sql
+              .unsafe(
+                `UPDATE work_item
+               SET waiting_since = NULL, updated_at = ?
+               WHERE id = ?`,
+                [now, workItemId],
+              )
+              .pipe(Effect.mapError(toDatabaseError))
+            return true
+          }
+          const limit = yield* maxWorkerSlots()
+          const occupied = yield* countOccupiedWorkerSlots()
+          if (occupied < limit) {
+            yield* sql
+              .unsafe(
+                `UPDATE work_item
+               SET holds_worker_slot = 1,
+                   waiting_since = NULL,
+                   updated_at = ?
+               WHERE id = ?`,
+                [now, workItemId],
+              )
+              .pipe(Effect.mapError(toDatabaseError))
+            return true
+          }
+          yield* sql
+            .unsafe(
+              `UPDATE work_item
+             SET holds_worker_slot = 0,
+                 waiting_since = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+              [now, now, workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))
+          return false
+        })
+
+      const admitWaitingWorkItems = Effect.gen(function* () {
+        let admitted = 0
+        // Loop: re-read config and occupancy each admission.
+        for (;;) {
+          const limit = yield* maxWorkerSlots()
+          const occupied = yield* countOccupiedWorkerSlots()
+          if (occupied >= limit) {
+            break
+          }
+          const free = limit - occupied
+          const waiters = (yield* sql
+            .unsafe(
+              `SELECT id, state FROM work_item
+               WHERE waiting_since IS NOT NULL
+                 AND holds_worker_slot = 0
+                 AND paused = 0
+                 AND state NOT IN ('complete', 'failed', 'abandoned')
+               ORDER BY waiting_since ASC, created_at ASC, rowid ASC
+               LIMIT ?`,
+              [free],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly id: string
+            readonly state: WorkItemState
+          }[]
+          if (waiters.length === 0) {
+            break
+          }
+
+          const now = yield* Clock.currentTimeMillis
+          for (const waiter of waiters) {
+            const stillFree =
+              (yield* countOccupiedWorkerSlots()) < (yield* maxWorkerSlots())
+            if (!stillFree) {
+              break
+            }
+            if (
+              isTerminalWorkItemState(waiter.state) &&
+              waiter.state !== "needs_human"
+            ) {
+              continue
+            }
+
+            // Needs Human waiters re-acquire for abandon cleanup via abandon()
+            // / Refresh; only operational waiters get a Step Run here.
+            if (waiter.state === "needs_human") {
+              continue
+            }
+
+            const pendingStep = waiter.state as OperationalLifecycleStep
+            const didAdmit = yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  const acquired = yield* tryAcquireWorkerSlot(waiter.id, now)
+                  if (!acquired) {
+                    return false
+                  }
+                  const activeRows = (yield* sql.unsafe(
+                    `SELECT id FROM step_run
+                     WHERE work_item_id = ?
+                       AND status IN ('queued', 'running')
+                     LIMIT 1`,
+                    [waiter.id],
+                  )) as readonly { readonly id: string }[]
+                  if (activeRows[0]) {
+                    return true
+                  }
+                  yield* enqueueStepRunForWorkItem(waiter.id, pendingStep, now)
+                  return true
+                }),
+              )
+              .pipe(
+                Effect.catch((error) => {
+                  if (
+                    error instanceof WorkItemLifecycleDatabaseError ||
+                    error instanceof EnqueueError ||
+                    error instanceof InvalidQueueNameError
+                  ) {
+                    return Effect.fail(error)
+                  }
+                  if (
+                    typeof error === "object" &&
+                    error !== null &&
+                    "_tag" in error &&
+                    (error as { _tag: string })._tag === "SqlError"
+                  ) {
+                    return Effect.fail(toDatabaseError(error as SqlError))
+                  }
+                  return Effect.fail(
+                    new WorkItemLifecycleDatabaseError({
+                      message: `Failed admitting waiter: ${String(error)}`,
+                      cause: error,
+                    }),
+                  )
+                }),
+              )
+            if (didAdmit) {
+              admitted += 1
+              const row = yield* loadWorkItemRow(waiter.id)
+              if (row) {
+                yield* notifyWorkItemsChanged(row.repository_id)
+              }
+            }
+          }
+          if (waiters.length < free) {
+            break
+          }
+        }
+        return admitted
+      })
+
       const revalidateIssue = (
         repositoryId: string,
         githubIssueNumber: number,
@@ -770,20 +1037,6 @@ export const makeWorkItemLifecycleLive = (
 
           return { ok: true as const }
         })
-
-      const encodeStepJob = (stepRunId: string) =>
-        Schema.decodeUnknownEffect(WorkItemStepJob)({
-          _tag: "work-item-step",
-          stepRunId,
-        }).pipe(
-          Effect.mapError(
-            (error) =>
-              new WorkItemLifecycleDatabaseError({
-                message: `Failed to encode work-item-step payload: ${String(error)}`,
-                cause: error,
-              }),
-          ),
-        )
 
       const previousWatchPollNote = (
         workItemId: string,
@@ -1106,6 +1359,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
+                        holds_worker_slot = 0,
+                        waiting_since = NULL,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -1127,6 +1382,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
+                        holds_worker_slot = 0,
+                        waiting_since = NULL,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -1148,6 +1405,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
+                        holds_worker_slot = 0,
+                        waiting_since = NULL,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -1186,6 +1445,31 @@ export const makeWorkItemLifecycleLive = (
                    SET state = ?,
                        state_ready_at = ?,
                        paused = 1,
+                       holds_worker_slot = 0,
+                       waiting_since = NULL,
+                        worktree_path = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        updated_at = ?
+                   WHERE id = ?`,
+                      [
+                        nextStep,
+                        stateReadyAt,
+                        worktreePath,
+                        sessionId,
+                        githubPullRequestNumber,
+                        now,
+                        workItem.id,
+                      ],
+                    )
+                  } else if (stayPaused) {
+                    // Operator Pause while Step Run was draining: release slot.
+                    yield* sql.unsafe(
+                      `UPDATE work_item
+                   SET state = ?,
+                       state_ready_at = ?,
+                       holds_worker_slot = 0,
+                       waiting_since = NULL,
                         worktree_path = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
@@ -1224,36 +1508,11 @@ export const makeWorkItemLifecycleLive = (
                   }
 
                   if (!stayPaused) {
-                    const nextStepRunId = makeStepRunId()
-
-                    yield* sql.unsafe(
-                      `INSERT INTO step_run (
-                     id, work_item_id, step, status, queue_job_id, queued_at,
-                     started_at, finished_at, reason_code, reason_message,
-                     created_at, updated_at
-                   ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                      [nextStepRunId, workItem.id, nextStep, now, now, now],
-                    )
-
-                    const payload = yield* encodeStepJob(nextStepRunId)
-                    const enqueue =
-                      transition?.delay === undefined
-                        ? queue.enqueue(WORK_ITEM_LIFECYCLE_QUEUE, payload, {
-                            retryLimit: 1,
-                          })
-                        : queue.enqueueWithDelay(
-                            WORK_ITEM_LIFECYCLE_QUEUE,
-                            payload,
-                            transition.delay,
-                            { retryLimit: 1 },
-                          )
-                    const jobId = yield* enqueue
-
-                    yield* sql.unsafe(
-                      `UPDATE step_run
-                   SET queue_job_id = ?, updated_at = ?
-                   WHERE id = ?`,
-                      [jobId, now, nextStepRunId],
+                    yield* enqueueStepRunForWorkItem(
+                      workItem.id,
+                      nextStep,
+                      now,
+                      transition?.delay,
                     )
                   }
                 }
@@ -1276,6 +1535,18 @@ export const makeWorkItemLifecycleLive = (
             ),
           )
           yield* notifyWorkItemsChanged(workItem.repository_id)
+          if (!completed.holdsWorkerSlot) {
+            yield* admitWaitingWorkItems.pipe(
+              Effect.catch((error) =>
+                Effect.logError(
+                  "Failed to admit waiters after step completion",
+                  {
+                    error: String(error),
+                  },
+                ),
+              ),
+            )
+          }
           return completed
         })
 
@@ -1312,6 +1583,16 @@ export const makeWorkItemLifecycleLive = (
                   [now, reasonCode, reasonMessage, now, stepRun.id],
                 )
 
+                // Non-terminal failure releases the Worker Slot (no auto-wait).
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, workItem.id],
+                )
+
                 if (stepRun.queue_job_id !== null) {
                   yield* queue.fail(stepRun.queue_job_id, {
                     retryable: false,
@@ -1332,6 +1613,13 @@ export const makeWorkItemLifecycleLive = (
             ),
           )
           yield* notifyWorkItemsChanged(workItem.repository_id)
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError("Failed to admit waiters after step failure", {
+                error: String(error),
+              }),
+            ),
+          )
           return failed
         })
 
@@ -1371,6 +1659,15 @@ export const makeWorkItemLifecycleLive = (
                   ],
                 )
 
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, stepRun.work_item_id],
+                )
+
                 if (stepRun.queue_job_id !== null) {
                   yield* queue
                     .acknowledge(stepRun.queue_job_id)
@@ -1381,6 +1678,14 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
             .pipe(Effect.catch(catchTransactionError))
+
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError("Failed to admit waiters after interrupt", {
+                error: String(error),
+              }),
+            ),
+          )
 
           const workItem = yield* loadWorkItemRow(stepRun.work_item_id)
           if (workItem) {
@@ -1737,6 +2042,24 @@ export const makeWorkItemLifecycleLive = (
                     )
                 }
               }
+
+              // Release immediately when no Step Run is running; hold while running.
+              const runningRows = (yield* sql.unsafe(
+                `SELECT id FROM step_run
+                 WHERE work_item_id = ? AND status = 'running'
+                 LIMIT 1`,
+                [workItemId],
+              )) as readonly { readonly id: string }[]
+              if (!runningRows[0]) {
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, workItemId],
+                )
+              }
             }),
           )
           .pipe(
@@ -1789,6 +2112,15 @@ export const makeWorkItemLifecycleLive = (
           ),
         )
         yield* notifyWorkItemsChanged(paused.repositoryId)
+        if (!paused.holdsWorkerSlot) {
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError("Failed to admit waiters after pause", {
+                error: String(error),
+              }),
+            ),
+          )
+        }
         return paused
       })
 
@@ -1853,6 +2185,7 @@ export const makeWorkItemLifecycleLive = (
                 [workItemId],
               )) as readonly { readonly id: string }[]
               if (activeRows[0]) {
+                // Running Step Run still holds the slot from Pause-while-running.
                 return
               }
 
@@ -1869,29 +2202,12 @@ export const makeWorkItemLifecycleLive = (
                 return
               }
 
-              const nextStepRunId = makeStepRunId()
-              yield* sql.unsafe(
-                `INSERT INTO step_run (
-                 id, work_item_id, step, status, queue_job_id, queued_at,
-                 started_at, finished_at, reason_code, reason_message,
-                 created_at, updated_at
-               ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                [nextStepRunId, workItemId, pendingStep, now, now, now],
-              )
+              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+              if (!acquired) {
+                return
+              }
 
-              const payload = yield* encodeStepJob(nextStepRunId)
-              const jobId = yield* queue.enqueue(
-                WORK_ITEM_LIFECYCLE_QUEUE,
-                payload,
-                { retryLimit: 1 },
-              )
-
-              yield* sql.unsafe(
-                `UPDATE step_run
-               SET queue_job_id = ?, updated_at = ?
-               WHERE id = ?`,
-                [jobId, now, nextStepRunId],
-              )
+              yield* enqueueStepRunForWorkItem(workItemId, pendingStep, now)
             }),
           )
           .pipe(
@@ -2019,7 +2335,47 @@ export const makeWorkItemLifecycleLive = (
         }
 
         if (workItem.state === "needs_human") {
-          yield* cleanupNeedsHumanWorktree(workItem)
+          const nowAcquire = yield* Clock.currentTimeMillis
+          const acquired = yield* sql
+            .withTransaction(tryAcquireWorkerSlot(workItemId, nowAcquire))
+            .pipe(
+              Effect.mapError((error): WorkItemLifecycleDatabaseError => {
+                if (error instanceof WorkItemLifecycleDatabaseError) {
+                  return error
+                }
+                if (
+                  typeof error === "object" &&
+                  error !== null &&
+                  "_tag" in error &&
+                  (error as { _tag: string })._tag === "SqlError"
+                ) {
+                  return toDatabaseError(error as SqlError)
+                }
+                return new WorkItemLifecycleDatabaseError({
+                  message: `Failed to acquire Worker Slot for abandon: ${String(error)}`,
+                  cause: error,
+                })
+              }),
+            )
+          if (!acquired) {
+            const waiting = yield* getWorkItem(workItemId).pipe(
+              Effect.catchTag(
+                "WorkItemNotFoundError",
+                (error) =>
+                  new WorkItemLifecycleDatabaseError({
+                    message: `Work Item missing after waiting for abandon: ${error.workItemId}`,
+                    cause: error,
+                  }),
+              ),
+            )
+            yield* notifyWorkItemsChanged(waiting.repositoryId)
+            return waiting
+          }
+          const current = yield* loadWorkItemRow(workItemId)
+          if (!current) {
+            return yield* new WorkItemNotFoundError({ workItemId })
+          }
+          yield* cleanupNeedsHumanWorktree(current)
         } else if (isTerminalWorkItemState(workItem.state)) {
           return yield* new WorkItemTerminalError({
             workItemId,
@@ -2041,6 +2397,8 @@ export const makeWorkItemLifecycleLive = (
                       failure_code = NULL,
                       failure_message = NULL,
                       worktree_path = NULL,
+                      holds_worker_slot = 0,
+                      waiting_since = NULL,
                       updated_at = ?
                   WHERE id = ?
                     AND state = 'needs_human'
@@ -2053,6 +2411,8 @@ export const makeWorkItemLifecycleLive = (
                   : `UPDATE work_item
                   SET state = 'abandoned',
                       state_ready_at = ?,
+                      holds_worker_slot = 0,
+                      waiting_since = NULL,
                       updated_at = ?
                   WHERE id = ?
                     AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
@@ -2178,6 +2538,13 @@ export const makeWorkItemLifecycleLive = (
           ),
         )
         yield* notifyWorkItemsChanged(abandoned.repositoryId)
+        yield* admitWaitingWorkItems.pipe(
+          Effect.catch((error) =>
+            Effect.logError("Failed to admit waiters after abandon", {
+              error: String(error),
+            }),
+          ),
+        )
         return abandoned
       })
 
@@ -2217,7 +2584,6 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const now = yield* Clock.currentTimeMillis
-        const nextStepRunId = makeStepRunId()
 
         yield* sql
           .withTransaction(
@@ -2242,25 +2608,12 @@ export const makeWorkItemLifecycleLive = (
                 })
               }
 
-              yield* sql.unsafe(
-                `INSERT INTO step_run (
-                   id, work_item_id, step, status, queue_job_id, queued_at,
-                   started_at, finished_at, reason_code, reason_message,
-                   created_at, updated_at
-                 ) VALUES (?, ?, 'local_cleanup', 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                [nextStepRunId, workItemId, now, now, now],
-              )
+              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+              if (!acquired) {
+                return
+              }
 
-              const payload = yield* encodeStepJob(nextStepRunId)
-              const jobId = yield* queue.enqueue(
-                WORK_ITEM_LIFECYCLE_QUEUE,
-                payload,
-                { retryLimit: 1 },
-              )
-              yield* sql.unsafe(
-                `UPDATE step_run SET queue_job_id = ?, updated_at = ? WHERE id = ?`,
-                [jobId, now, nextStepRunId],
-              )
+              yield* enqueueStepRunForWorkItem(workItemId, "local_cleanup", now)
             }),
           )
           .pipe(
@@ -2472,6 +2825,13 @@ export const makeWorkItemLifecycleLive = (
             )
 
           yield* notifyWorkItemsChanged(workItem.repository_id)
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError("Failed to admit waiters after reset", {
+                error: String(error),
+              }),
+            ),
+          )
           return workItem.id as WorkItemId
         }).pipe(
           Effect.ensuring(
@@ -2555,33 +2915,16 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const now = yield* Clock.currentTimeMillis
-        const nextStepRunId = makeStepRunId()
 
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql.unsafe(
-                `INSERT INTO step_run (
-                 id, work_item_id, step, status, queue_job_id, queued_at,
-                 started_at, finished_at, reason_code, reason_message,
-                 created_at, updated_at
-               ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                [nextStepRunId, workItemId, pendingStep, now, now, now],
-              )
+              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+              if (!acquired) {
+                return
+              }
 
-              const payload = yield* encodeStepJob(nextStepRunId)
-              const jobId = yield* queue.enqueue(
-                WORK_ITEM_LIFECYCLE_QUEUE,
-                payload,
-                { retryLimit: 1 },
-              )
-
-              yield* sql.unsafe(
-                `UPDATE step_run
-               SET queue_job_id = ?, updated_at = ?
-               WHERE id = ?`,
-                [jobId, now, nextStepRunId],
-              )
+              yield* enqueueStepRunForWorkItem(workItemId, pendingStep, now)
 
               yield* sql.unsafe(
                 `UPDATE work_item
@@ -2728,20 +3071,24 @@ export const makeWorkItemLifecycleLive = (
           const reviewVariant =
             repository?.reviewVariant ?? config.reviewVariant ?? variant
           const workItemId = makeWorkItemId()
-          const stepRunId = makeStepRunId()
           const now = yield* Clock.currentTimeMillis
           const step: OperationalLifecycleStep = "create_worktree"
 
           const createdId = yield* sql
             .withTransaction(
               Effect.gen(function* () {
+                const limit = yield* maxWorkerSlots()
+                const occupied = yield* countOccupiedWorkerSlots()
+                const admit = occupied < limit
+
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
                  id, repository_id, github_issue_number, model, variant,
                  review_model, review_variant, state, state_ready_at, paused,
+                 waiting_since, holds_worker_slot,
                  pause_before_step, worktree_path, session_id, failure_code,
                  failure_message, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
@@ -2752,35 +3099,17 @@ export const makeWorkItemLifecycleLive = (
                     reviewVariant,
                     step,
                     now,
+                    admit ? null : now,
+                    admit ? 1 : 0,
                     options.pauseBeforeStep,
                     now,
                     now,
                   ],
                 )
 
-                yield* sql.unsafe(
-                  `INSERT INTO step_run (
-                 id, work_item_id, step, status, queue_job_id, queued_at,
-                 started_at, finished_at, reason_code, reason_message,
-                 created_at, updated_at
-               ) VALUES (?, ?, ?, 'queued', NULL, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                  [stepRunId, workItemId, step, now, now, now],
-                )
-
-                const payload = yield* encodeStepJob(stepRunId)
-
-                const jobId = yield* queue.enqueue(
-                  WORK_ITEM_LIFECYCLE_QUEUE,
-                  payload,
-                  { retryLimit: 1 },
-                )
-
-                yield* sql.unsafe(
-                  `UPDATE step_run
-               SET queue_job_id = ?, updated_at = ?
-               WHERE id = ?`,
-                  [jobId, now, stepRunId],
-                )
+                if (admit) {
+                  yield* enqueueStepRunForWorkItem(workItemId, step, now)
+                }
 
                 return workItemId
               }),
@@ -2865,6 +3194,7 @@ export const makeWorkItemLifecycleLive = (
         listWorkItemsForIssue,
         listWorkItemsForRepository,
         continueAfterHumanPrOutcome,
+        admitWaitingWorkItems,
       })
     }),
   )
