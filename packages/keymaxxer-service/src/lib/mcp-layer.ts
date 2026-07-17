@@ -249,14 +249,25 @@ export const keymaxxerEnvironment = (
 
 export const keymaxxerMcpCommand = (
   environment: Partial<Record<string, string | undefined>> = process.env,
+  pathExists: (path: string) => boolean = existsSync,
 ) => {
   const entrypoint =
     environment.KEYMAXXER_ENTRYPOINT ??
     "/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts"
 
-  return existsSync(entrypoint)
+  return pathExists(entrypoint)
     ? { command: "bun", args: [entrypoint, "serve"] }
     : { command: "keymaxxer", args: ["serve"] }
+}
+
+export const isKeymaxxerAvailable = (
+  environment: Partial<Record<string, string | undefined>> = process.env,
+  pathExists: (path: string) => boolean = existsSync,
+  commandExists: (command: string) => boolean = (command) =>
+    Bun.which(command) !== null,
+) => {
+  const command = keymaxxerMcpCommand(environment, pathExists)
+  return command.command === "bun" || commandExists(command.command)
 }
 
 const toolResultText = (result: ToolResult) =>

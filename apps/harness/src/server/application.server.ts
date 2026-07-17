@@ -10,6 +10,7 @@ import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
   KeymaxxerService,
+  disabledKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
@@ -27,6 +28,9 @@ const workspaceRoot = fileURLToPath(new URL("../../../..", import.meta.url))
 const keymaxxerSidecarUrlFromEnvironment = (
   environment: Partial<Record<string, string | undefined>>,
 ) => {
+  if (environment.KEYMAXXER_ENABLED?.trim().toLowerCase() === "false") {
+    return undefined
+  }
   const sidecarUrl = environment.KEYMAXXER_SIDECAR_URL?.trim()
   if (sidecarUrl === undefined || sidecarUrl === "") {
     throw new Error(
@@ -51,7 +55,10 @@ export const createApplication = async (
 ): Promise<Application> => {
   const sidecarUrl = keymaxxerSidecarUrlFromEnvironment(environment)
   const databaseLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
-  const keymaxxerLayer = sidecarKeymaxxerLayer(sidecarUrl)
+  const keymaxxerLayer =
+    sidecarUrl === undefined
+      ? disabledKeymaxxerLayer
+      : sidecarKeymaxxerLayer(sidecarUrl)
   const githubLayer = keymaxxerGitHubLayer({ workspaceRoot }).pipe(
     Layer.provide(keymaxxerLayer),
   )
@@ -65,9 +72,9 @@ export const createApplication = async (
   const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
-  const opencodeLayer = Opencode.layer({ keymaxxerMcpUrl: sidecarUrl }).pipe(
-    Layer.provide(opencodePlatformLayer),
-  )
+  const opencodeLayer = Opencode.layer({
+    ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
+  }).pipe(Layer.provide(opencodePlatformLayer))
   const lifecycleLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),

@@ -5,6 +5,7 @@
 import { type ChildProcess, spawn } from "node:child_process"
 import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
+import { isKeymaxxerAvailable } from "../packages/keymaxxer-service/src/index.js"
 
 const KEYMAXXER_SIDECAR_URL_PREFIX = "KEYMAXXER_SIDECAR_URL="
 const workspaceRoot = fileURLToPath(new URL("..", import.meta.url))
@@ -19,16 +20,27 @@ if (command === undefined) {
 }
 
 const existingUrl = process.env.KEYMAXXER_SIDECAR_URL?.trim()
-if (existingUrl) {
+const keymaxxerAvailable = isKeymaxxerAvailable(process.env)
+const keymaxxerEnabled =
+  process.env.KEYMAXXER_ENABLED?.trim().toLowerCase() !== "false" &&
+  ((existingUrl !== undefined && existingUrl !== "") || keymaxxerAvailable)
+
+const spawnWrappedCommand = (environment: NodeJS.ProcessEnv) => {
   const child = spawn(command, commandArgs, {
     cwd: process.env.RUN_CWD ?? process.cwd(),
-    env: process.env,
+    env: environment,
     stdio: "inherit",
   })
   child.on("exit", (code, signal) => {
     if (signal) process.kill(process.pid, signal)
     process.exit(code ?? 1)
   })
+}
+
+if (!keymaxxerEnabled) {
+  spawnWrappedCommand({ ...process.env, KEYMAXXER_ENABLED: "false" })
+} else if (existingUrl) {
+  spawnWrappedCommand(process.env)
 } else {
   const sidecar = spawn(
     process.execPath,

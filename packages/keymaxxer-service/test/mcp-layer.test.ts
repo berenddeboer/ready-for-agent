@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import {
   KeymaxxerService,
   type KeymaxxerToolClient,
+  isKeymaxxerAvailable,
   keymaxxerEnvironment,
   keymaxxerMcpCommand,
   mcpKeymaxxerLayer,
@@ -462,5 +463,32 @@ describe("MCP process configuration", () => {
       command: "bun",
       args: ["/bin/true", "serve"],
     })
+  })
+
+  test("reports Keymaxxer unavailable when no entrypoint or binary exists", () => {
+    expect(
+      isKeymaxxerAvailable(
+        {},
+        () => false,
+        () => false,
+      ),
+    ).toBe(false)
+  })
+
+  test("reports Keymaxxer available from either source", () => {
+    expect(
+      isKeymaxxerAvailable(
+        {},
+        () => true,
+        () => false,
+      ),
+    ).toBe(true)
+    expect(
+      isKeymaxxerAvailable(
+        {},
+        () => false,
+        () => true,
+      ),
+    ).toBe(true)
   })
 })

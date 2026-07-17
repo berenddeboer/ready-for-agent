@@ -126,6 +126,7 @@ const repositoryHasGitHubCredential = (
 ) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
+    if (keymaxxer.enabled === false) return true
     const credential = yield* keymaxxer.findSecret({
       provider: "github",
       account: `${githubOwner}/${githubRepo}`,

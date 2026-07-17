@@ -9,17 +9,14 @@ const isGitHubTokenEnvName = (name: string) =>
   name.startsWith("GITHUB_TOKEN_")
 
 export type MakeOpencodeEnvironmentOptions = {
-  readonly keymaxxerMcpUrl: string
+  readonly keymaxxerMcpUrl?: string
   readonly environment?: Readonly<Record<string, string | undefined>>
 }
 
 export const makeOpencodeEnvironment = (
   options: MakeOpencodeEnvironmentOptions,
 ): Record<string, string> => {
-  const keymaxxerMcpUrl = options.keymaxxerMcpUrl.trim()
-  if (keymaxxerMcpUrl === "") {
-    throw new TypeError("keymaxxerMcpUrl is required to spawn OpenCode")
-  }
+  const keymaxxerMcpUrl = options.keymaxxerMcpUrl?.trim()
 
   const environment = options.environment ?? process.env
   const existingConfigContent = environment.OPENCODE_CONFIG_CONTENT
@@ -36,6 +33,27 @@ export const makeOpencodeEnvironment = (
           return parsed
         })()
   const mcp = isObject(config.mcp) ? config.mcp : {}
+  const { keymaxxer: _keymaxxer, ...mcpWithoutKeymaxxer } = mcp
+
+  const opencodeConfig =
+    keymaxxerMcpUrl === undefined || keymaxxerMcpUrl === ""
+      ? {
+          ...config,
+          ...(config.mcp === undefined ? {} : { mcp: mcpWithoutKeymaxxer }),
+        }
+      : {
+          ...config,
+          mcp: {
+            ...mcp,
+            keymaxxer: {
+              type: "remote",
+              url: keymaxxerMcpUrl,
+              enabled: true,
+              oauth: false,
+              timeout: DEFAULT_MCP_TIMEOUT_MS,
+            },
+          },
+        }
 
   return {
     ...Object.fromEntries(
@@ -44,18 +62,6 @@ export const makeOpencodeEnvironment = (
           entry[1] !== undefined && !isGitHubTokenEnvName(entry[0]),
       ),
     ),
-    OPENCODE_CONFIG_CONTENT: JSON.stringify({
-      ...config,
-      mcp: {
-        ...mcp,
-        keymaxxer: {
-          type: "remote",
-          url: keymaxxerMcpUrl,
-          enabled: true,
-          oauth: false,
-          timeout: DEFAULT_MCP_TIMEOUT_MS,
-        },
-      },
-    }),
+    OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
   }
 }

@@ -91,10 +91,13 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
       }
     }
     const keymaxxer = yield* KeymaxxerService
-    const tokenName = yield* keymaxxer.findSecret({
-      provider: "github",
-      account: `${repository.githubOwner}/${repository.githubRepo}`,
-    })
+    const tokenName =
+      keymaxxer.enabled === false
+        ? undefined
+        : yield* keymaxxer.findSecret({
+            provider: "github",
+            account: `${repository.githubOwner}/${repository.githubRepo}`,
+          })
     if (tokenName === null) {
       return yield* new DecidePrMergeContextError({
         message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
@@ -104,7 +107,11 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
       "Assess whether this pull request is low enough risk for an automated agent (clanker) to merge, or whether a human must merge it.",
       "Base the decision on risk: blast radius, security or auth changes, data migrations, irreversible operations, ambiguous requirements, incomplete verification, or anything that needs human judgment.",
       "Inspect the PR and its checks if needed. Do not merge the pull request.",
-      `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
+      ...(tokenName === undefined
+        ? []
+        : [
+            `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
+          ]),
       "End your final response with exactly one machine-readable result line:",
       "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
       "or, only when a human must merge:",

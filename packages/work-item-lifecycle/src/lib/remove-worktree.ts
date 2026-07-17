@@ -66,16 +66,21 @@ const removeDirectoryIfPresent = (path: string) =>
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
 
-const credentialedCommand = (tokenName: string, parts: ReadonlyArray<string>) =>
+const credentialedCommand = (
+  tokenName: string | null,
+  parts: ReadonlyArray<string>,
+) =>
   [
-    `GH_TOKEN="$${tokenName}"`,
-    `GITHUB_TOKEN="$${tokenName}"`,
+    ...(tokenName === null
+      ? []
+      : [`GH_TOKEN="$${tokenName}"`, `GITHUB_TOKEN="$${tokenName}"`]),
     ...parts.map(shellQuote),
   ].join(" ")
 
 const resolveGithubCredential = (repository: RepositoryRecord) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
+    if (keymaxxer.enabled === false) return null
     const account = `${repository.githubOwner}/${repository.githubRepo}`
     const tokenName = yield* keymaxxer
       .findSecret({
@@ -102,7 +107,7 @@ const resolveGithubCredential = (repository: RepositoryRecord) =>
   })
 
 const runRemoteCommand = (input: {
-  readonly tokenName: string
+  readonly tokenName: string | null
   readonly cwd: string
   readonly parts: ReadonlyArray<string>
   readonly branchName: string
@@ -114,7 +119,7 @@ const runRemoteCommand = (input: {
       .runWithSecrets({
         command: credentialedCommand(input.tokenName, input.parts),
         cwd: input.cwd,
-        secrets: [input.tokenName],
+        secrets: input.tokenName === null ? [] : [input.tokenName],
         timeoutMs: Duration.toMillis(REMOTE_CLEANUP_TIMEOUT),
       })
       .pipe(
@@ -139,7 +144,7 @@ const runRemoteCommand = (input: {
 const closeOpenPullRequests = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
-  readonly tokenName: string
+  readonly tokenName: string | null
   readonly cwd: string
 }) =>
   Effect.gen(function* () {
@@ -196,7 +201,7 @@ const closeOpenPullRequests = (input: {
 const deleteRemoteBranch = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
-  readonly tokenName: string
+  readonly tokenName: string | null
   readonly cwd: string
 }) =>
   Effect.gen(function* () {

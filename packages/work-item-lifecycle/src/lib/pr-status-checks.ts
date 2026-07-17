@@ -253,10 +253,13 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       } satisfies PrStatusCheckInvestigationResult
     }
     const keymaxxer = yield* KeymaxxerService
-    const tokenName = yield* keymaxxer.findSecret({
-      provider: "github",
-      account: `${repository.githubOwner}/${repository.githubRepo}`,
-    })
+    const tokenName =
+      keymaxxer.enabled === false
+        ? undefined
+        : yield* keymaxxer.findSecret({
+            provider: "github",
+            account: `${repository.githubOwner}/${repository.githubRepo}`,
+          })
     if (tokenName === null) {
       return yield* new PrStatusChecksContextError({
         message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
@@ -268,7 +271,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         sessionId,
         prompt: [
           buildInvestigationWorkPrompt(unhandled),
-          `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI, API, commit, or push access; never put secret values in the environment.`,
+          ...(tokenName === undefined
+            ? []
+            : [
+                `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI, API, commit, or push access; never put secret values in the environment.`,
+              ]),
         ].join("\n"),
         cwd: worktreePath,
         model: context.model,

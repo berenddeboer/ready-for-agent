@@ -41,5 +41,5 @@ export interface ContinueInput {
 export interface OpencodeLayerOptions {
   readonly binary?: string
   readonly defaultTimeout?: Duration.Input
-  readonly keymaxxerMcpUrl: string
+  readonly keymaxxerMcpUrl?: string
 }
