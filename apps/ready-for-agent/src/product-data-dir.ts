@@ -1,6 +1,6 @@
 import { join } from "node:path"
 
-export type ProductPathEnv = Partial<
+type ProductPathEnv = Partial<
   Record<"HOME" | "XDG_DATA_HOME" | "SQLITE_DATABASE_PATH", string | undefined>
 >
 

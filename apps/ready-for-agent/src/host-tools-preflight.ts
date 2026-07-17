@@ -1,10 +1,10 @@
-export type HostTool = {
+type HostTool = {
   readonly name: string
   readonly installHint: string
   readonly required: boolean
 }
 
-export const HOST_TOOLS: ReadonlyArray<HostTool> = [
+const HOST_TOOLS: ReadonlyArray<HostTool> = [
   {
     name: "git",
     installHint: "Install Git: https://git-scm.com/downloads",
