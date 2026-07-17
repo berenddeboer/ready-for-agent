@@ -1446,12 +1446,12 @@ function JobsCard() {
   const repositoryById = new Map(
     repositories.map((repository) => [repository.id, repository] as const),
   )
-  const issueTitleByRepoAndNumber = new Map<string, string>()
+  const issueByRepoAndNumber = new Map<string, { title: string; url: string }>()
   for (const query of issueQueries) {
     for (const issue of query.data ?? []) {
-      issueTitleByRepoAndNumber.set(
+      issueByRepoAndNumber.set(
         `${issue.repositoryId}:${issue.githubIssueNumber}`,
-        issue.title,
+        { title: issue.title, url: issue.url },
       )
     }
   }
@@ -1502,13 +1502,23 @@ function JobsCard() {
             repository === undefined
               ? workItem.repositoryId
               : `${repository.githubOwner}/${repository.githubRepo}`
-          const issueTitle = issueTitleByRepoAndNumber.get(
+          const issue = issueByRepoAndNumber.get(
             `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
           )
+          const issueTitle = issue?.title
+          const issueUrl = issue?.url
           const issueIdentity =
             issueTitle === undefined
               ? `#${workItem.githubIssueNumber}`
               : `#${workItem.githubIssueNumber} · ${issueTitle}`
+          const issueIdentityContent = (
+            <>
+              <span className="font-mono">#{workItem.githubIssueNumber}</span>
+              {issueTitle !== undefined && (
+                <span className="font-sans"> · {issueTitle}</span>
+              )}
+            </>
+          )
           return (
             <li
               className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
@@ -1519,17 +1529,22 @@ function JobsCard() {
                   <p className="m-0 truncate text-xs font-semibold text-slate-700">
                     {repositoryLabel}
                   </p>
-                  <p
-                    className="m-0 truncate text-xs font-semibold text-blue-600"
-                    title={issueIdentity}
-                  >
-                    <span className="font-mono">
-                      #{workItem.githubIssueNumber}
-                    </span>
-                    {issueTitle !== undefined && (
-                      <span className="font-sans"> · {issueTitle}</span>
-                    )}
-                  </p>
+                  {issueUrl !== undefined && issueUrl !== "" ? (
+                    <a
+                      className="m-0 block truncate text-xs font-semibold text-blue-600 hover:underline"
+                      href={issueUrl}
+                      title={issueIdentity}
+                    >
+                      {issueIdentityContent}
+                    </a>
+                  ) : (
+                    <p
+                      className="m-0 truncate text-xs font-semibold text-blue-600"
+                      title={issueIdentity}
+                    >
+                      {issueIdentityContent}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <WorkItemPauseButton workItem={workItem} />
