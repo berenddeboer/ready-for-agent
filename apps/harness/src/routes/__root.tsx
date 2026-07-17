@@ -39,6 +39,7 @@ const configQuery = {
         reviewModel: true,
         reviewVariant: true,
         maxConcurrentOpencodeSessions: true,
+        maxConcurrentWorkItems: true,
       },
     })
     return result.config
@@ -124,6 +125,7 @@ function SettingsButton() {
   const [reviewVariant, setReviewVariant] = useState("")
   const [maxConcurrentOpencodeSessions, setMaxConcurrentOpencodeSessions] =
     useState("2")
+  const [maxConcurrentWorkItems, setMaxConcurrentWorkItems] = useState("5")
   useEffect(() => {
     if (dialogOpen && config.data) {
       setDefaultModel(config.data.defaultModel)
@@ -133,6 +135,7 @@ function SettingsButton() {
       setMaxConcurrentOpencodeSessions(
         String(config.data.maxConcurrentOpencodeSessions),
       )
+      setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     }
   }, [config.data, dialogOpen])
   const updateConfig = useMutation({
@@ -142,6 +145,7 @@ function SettingsButton() {
       reviewModel: string | null
       reviewVariant: string | null
       maxConcurrentOpencodeSessions: number
+      maxConcurrentWorkItems: number
     }) =>
       graphql.mutation({
         updateConfig: {
@@ -151,6 +155,7 @@ function SettingsButton() {
           reviewModel: true,
           reviewVariant: true,
           maxConcurrentOpencodeSessions: true,
+          maxConcurrentWorkItems: true,
         },
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
@@ -176,6 +181,7 @@ function SettingsButton() {
       setMaxConcurrentOpencodeSessions(
         String(config.data.maxConcurrentOpencodeSessions),
       )
+      setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     }
     updateConfig.reset()
     dialogRef.current?.showModal()
@@ -183,13 +189,15 @@ function SettingsButton() {
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const parsedMax = Number(maxConcurrentOpencodeSessions)
+    const parsedMaxSessions = Number(maxConcurrentOpencodeSessions)
+    const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
     updateConfig.mutate({
       defaultModel,
       defaultVariant,
       reviewModel: reviewModel.trim() === "" ? null : reviewModel,
       reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
-      maxConcurrentOpencodeSessions: parsedMax,
+      maxConcurrentOpencodeSessions: parsedMaxSessions,
+      maxConcurrentWorkItems: parsedMaxWorkItems,
     })
   }
 
@@ -364,6 +372,27 @@ function SettingsButton() {
                     Caps how many OpenCode lifecycle processes run at once
                     (default 2). Non-OpenCode steps and model listing are not
                     counted.
+                  </span>
+                </label>
+
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Max concurrent Work Items
+                  <input
+                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    name="maxConcurrentWorkItems"
+                    type="number"
+                    min={1}
+                    step={1}
+                    required
+                    value={maxConcurrentWorkItems}
+                    onChange={(event) =>
+                      setMaxConcurrentWorkItems(event.target.value)
+                    }
+                  />
+                  <span className="text-xs font-normal text-slate-500">
+                    Caps how many Work Items may be Admitted at once (Worker
+                    Slots, default 5). Extra Implement requests wait for a free
+                    slot.
                   </span>
                 </label>
               </>

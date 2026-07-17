@@ -58,6 +58,7 @@ export class InvalidConfigInputError extends Data.TaggedError(
     | "reviewModel"
     | "reviewVariant"
     | "maxConcurrentOpencodeSessions"
+    | "maxConcurrentWorkItems"
   readonly message: string
 }> {}
 

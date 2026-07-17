@@ -77,6 +77,12 @@ export interface WorkItemRecord {
   readonly state: WorkItemState
   readonly stateReadyAt: Date
   readonly paused: boolean
+  /**
+   * When set, the Work Item is Waiting for Worker Slot (FIFO by this timestamp).
+   */
+  readonly waitingSince: Date | null
+  /** Whether this Work Item currently occupies a Worker Slot (Admitted). */
+  readonly holdsWorkerSlot: boolean
   /** When set, advancement into this step auto-pauses (no Step Run enqueued). */
   readonly pauseBeforeStep: OperationalLifecycleStep | null
   readonly worktreePath: string | null
@@ -89,6 +95,10 @@ export interface WorkItemRecord {
   readonly stateResidenceMs: number
   readonly stepRuns: readonly StepRunRecord[]
 }
+
+/** Operator-visible message while Waiting for Worker Slot. */
+export const WAITING_FOR_WORKER_SLOT_MESSAGE =
+  "Waiting for a worker slot to become available"
 
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 

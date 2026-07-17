@@ -481,14 +481,15 @@ const runLifecycleClaimLoop = (
         nextOrphanRecoveryAt = now + Duration.toMillis(orphanRecoveryInterval)
       }
 
-      const maxSessions = yield* db.getConfig.pipe(
-        Effect.map((config) =>
-          Math.max(1, config.maxConcurrentOpencodeSessions),
-        ),
-        Effect.orElseSucceed(() => 2),
+      const maxConcurrentStepRuns = yield* db.getConfig.pipe(
+        Effect.map((config) => {
+          const maxWorkItems = Math.max(1, config.maxConcurrentWorkItems)
+          const maxSessions = Math.max(1, config.maxConcurrentOpencodeSessions)
+          // Fiber budget so Worker Slot admission and non-OpenCode steps are not undercut.
+          return Math.max(maxWorkItems, maxSessions * 2)
+        }),
+        Effect.orElseSucceed(() => 5),
       )
-      // Headroom so non-OpenCode steps are not fully starved when OpenCode is saturated.
-      const maxConcurrentStepRuns = maxSessions * 2
       const active = yield* Ref.get(activeRuns)
       if (active >= maxConcurrentStepRuns) {
         yield* sleepBusy(undefined).pipe(Effect.asVoid)

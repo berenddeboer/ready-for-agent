@@ -43,6 +43,7 @@ const config = {
   reviewModel: null as string | null,
   reviewVariant: null as string | null,
   maxConcurrentOpencodeSessions: 2,
+  maxConcurrentWorkItems: 5,
 }
 
 const issue = {
@@ -199,6 +200,7 @@ const makeRuntime = (
     listWorkItemsForIssue: unused,
     listWorkItemsForRepository: unused,
     continueAfterHumanPrOutcome: unused,
+    admitWaitingWorkItems: Effect.succeed(0),
     ...lifecycleOverrides,
   }
   return ManagedRuntime.make(
@@ -921,7 +923,7 @@ describe("GraphQL API", () => {
   test("reads and updates config", async () => {
     const queryResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query { config { defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions } }`,
+        query: `query { config { defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions maxConcurrentWorkItems } }`,
       }),
     )
     expect(await queryResponse.json()).toEqual({ data: { config } })
@@ -930,7 +932,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
           updateConfig(input: $input) {
-            defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions
+            defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions maxConcurrentWorkItems
           }
         }`,
         variables: {
@@ -940,6 +942,7 @@ describe("GraphQL API", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             maxConcurrentOpencodeSessions: 3,
+            maxConcurrentWorkItems: 7,
           },
         },
       }),
@@ -952,6 +955,7 @@ describe("GraphQL API", () => {
           reviewModel: "anthropic/claude-opus-4-6",
           reviewVariant: "max",
           maxConcurrentOpencodeSessions: 3,
+          maxConcurrentWorkItems: 7,
         },
       },
     })

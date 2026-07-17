@@ -181,6 +181,7 @@ type WorkItemStatus =
   | "COMPLETE"
   | "ABANDONED"
   | "NEEDS_HUMAN"
+  | "WAITING_FOR_WORKER_SLOT"
 
 type WorkItem = {
   id: string
@@ -1752,7 +1753,9 @@ function WorkItemLifecycleStatus({
                   ? "bg-slate-200 text-slate-600"
                   : status === "NEEDS_HUMAN"
                     ? "bg-amber-100 text-amber-800"
-                    : "bg-blue-100 text-blue-700"
+                    : status === "WAITING_FOR_WORKER_SLOT"
+                      ? "bg-violet-100 text-violet-800"
+                      : "bg-blue-100 text-blue-700"
           }`}
         >
           {workItem.statusLabel}
@@ -1787,7 +1790,13 @@ function WorkItemLifecycleStatus({
         </ol>
       )}
       {workItem.statusMessage !== null && (
-        <p className="mt-1.5 mb-0 text-xs text-red-700">
+        <p
+          className={`mt-1.5 mb-0 text-xs ${
+            status === "WAITING_FOR_WORKER_SLOT"
+              ? "text-violet-800"
+              : "text-red-700"
+          }`}
+        >
           {workItem.statusMessage}
         </p>
       )}

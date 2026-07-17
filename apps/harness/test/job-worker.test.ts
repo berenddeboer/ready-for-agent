@@ -230,6 +230,7 @@ const queueLayer = (
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
       continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
     }),
   )
 
@@ -1415,6 +1416,7 @@ describe("Job worker", () => {
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
       continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -1509,6 +1511,7 @@ describe("Job worker", () => {
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
       continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
     })
     // Block Keymaxxer so auto-heal cannot finish during startup.
     const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
@@ -1637,6 +1640,7 @@ describe("Job worker", () => {
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
       continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -1821,6 +1825,7 @@ describe("Job worker", () => {
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
       continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -1926,6 +1931,7 @@ describe("Job worker", () => {
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
       continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
     })
 
     await Effect.runPromise(

@@ -14,6 +14,7 @@ type Config {
   reviewModel: String
   reviewVariant: String
   maxConcurrentOpencodeSessions: Int!
+  maxConcurrentWorkItems: Int!
 }
 
 type Repository {
@@ -98,6 +99,7 @@ enum WorkItemStatus {
   COMPLETE
   ABANDONED
   NEEDS_HUMAN
+  WAITING_FOR_WORKER_SLOT
 }
 
 enum LifecyclePhase {
@@ -164,6 +166,7 @@ input UpdateConfigInput {
   reviewModel: String
   reviewVariant: String
   maxConcurrentOpencodeSessions: Int!
+  maxConcurrentWorkItems: Int!
 }
 
 input UpdateRepositorySettingsInput {
