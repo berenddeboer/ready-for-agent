@@ -163,6 +163,7 @@ type WorkItemStatus =
   | "complete"
   | "abandoned"
   | "needs_human"
+  | "needs_human_review"
   | "waiting_for_worker_slot"
 
 type LifecyclePhase =
@@ -220,6 +221,7 @@ const stepRunDisplayStatus = (stepRun: StepRunRecord): WorkItemStatus =>
 const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   if (workItem.waitingSince != null) return "waiting_for_worker_slot"
   if (isTerminalWorkItemState(workItem.state)) return workItem.state
+  if (workItem.paused) return "needs_human_review"
   const latest = latestStepRun(workItem)
   if (latest === undefined) return "queued"
   return stepRunDisplayStatus(latest)

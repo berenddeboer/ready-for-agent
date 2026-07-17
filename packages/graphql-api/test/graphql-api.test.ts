@@ -1506,6 +1506,199 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects paused Implement Locally work item as Needs human review", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const pausedAtCommit = {
+      ...workItem,
+      state: "commit",
+      paused: true,
+      pauseBeforeStep: "commit",
+      stepRuns: [
+        { ...baseRun, step: "create_worktree", status: "succeeded" },
+        { ...baseRun, step: "install_dependencies", status: "succeeded" },
+        { ...baseRun, step: "implement", status: "succeeded" },
+        { ...baseRun, step: "pre_commit", status: "succeeded" },
+        { ...baseRun, step: "review", status: "succeeded" },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([pausedAtCommit]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            state stateLabel status statusLabel paused isTerminal
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "COMMIT",
+            stateLabel: "Commit",
+            status: "NEEDS_HUMAN_REVIEW",
+            statusLabel: "Needs human review",
+            paused: true,
+            isTerminal: false,
+            lifecycleLabels: [
+              {
+                phase: "CREATE_WORKTREE",
+                label: "Create worktree: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "INSTALL_DEPENDENCIES",
+                label: "Install dependencies: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "IMPLEMENT",
+                label: "Build: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "PRE_COMMIT",
+                label: "Pre commit: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "REVIEW",
+                label: "Review: Succeeded",
+                status: "SUCCEEDED",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  test("projects operator-paused unfinished work item as Needs human review", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const operatorPaused = {
+      ...workItem,
+      state: "implement",
+      paused: true,
+      pauseBeforeStep: null,
+      stepRuns: [
+        { ...baseRun, step: "create_worktree", status: "succeeded" },
+        { ...baseRun, step: "install_dependencies", status: "succeeded" },
+        { ...baseRun, step: "implement", status: "succeeded" },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([operatorPaused]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            state status statusLabel paused isTerminal
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "IMPLEMENT",
+            status: "NEEDS_HUMAN_REVIEW",
+            statusLabel: "Needs human review",
+            paused: true,
+            isTerminal: false,
+          },
+        ],
+      },
+    })
+  })
+
+  test("keeps terminal Needs human distinct from paused Needs human review", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const needsHuman = {
+      ...workItem,
+      state: "needs_human",
+      paused: false,
+      failureMessage: "Human must approve merge",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "decide_pr_merge",
+          status: "succeeded",
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([needsHuman]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            state status statusLabel statusMessage paused isTerminal
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "NEEDS_HUMAN",
+            status: "NEEDS_HUMAN",
+            statusLabel: "Needs human",
+            statusMessage: "Human must approve merge",
+            paused: false,
+            isTerminal: true,
+          },
+        ],
+      },
+    })
+  })
+
   test("projects running Step Run waiting for OpenCode session as Queued", async () => {
     const baseRun = workItem.stepRuns[0]!
     const waiting = {
