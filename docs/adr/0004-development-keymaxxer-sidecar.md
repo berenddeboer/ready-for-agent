@@ -5,7 +5,7 @@ Ready for Agent uses a shared backend Keymaxxer Service that never exposes raw s
 ## Topology
 
 - Development and production use the same sidecar process model (not in-process Keymaxxer in the Harness).
-- Development uses `scripts/run-with-keymaxxer-sidecar.ts` so the sidecar survives Vite reloads. Production uses one lifecycle owner (`apps/harness/src/server/production-lifecycle.ts`) that starts the sidecar as a lifecycle-owned child, captures the stdout bootstrap line `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:<port>/<capability>/mcp`, and keeps that URL in memory only.
+- Development uses `scripts/run-with-keymaxxer-sidecar.ts` so the sidecar survives Vite reloads. Production uses one lifecycle owner (`apps/harness/src/server/production-lifecycle.ts`) that starts the sidecar as a lifecycle-owned child by re-executing the same program in an internal non-product mode (`--ready-for-agent-internal-keymaxxer-sidecar`), captures the stdout bootstrap line `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:<port>/<capability>/mcp` through a private pipe, and keeps that URL in memory only. Compiled binaries need no external Bun runtime and no workspace TypeScript Sidecar entrypoint.
 - There is no unauthenticated `/health` route. Readiness is TCP listen; auth is the unguessable path capability (#113).
 
 ## Security
@@ -23,7 +23,7 @@ The GraphQL credential query and mutation use Keymaxxer metadata only; they neve
 
 ## Keyholder
 
-The MCP launcher resolves Keymaxxer as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise the installed `keymaxxer` command on PATH. There is no hardcoded developer contrib path. The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values.
+The MCP launcher resolves Keymaxxer as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise the installed `keymaxxer` command on PATH. An existing executable entrypoint is executed directly with `serve`; a source entrypoint (for example `.ts`) is run via Bun for development only. There is no hardcoded developer contrib path. The Keymaxxer child inherits the backend environment except repository-scoped `GITHUB_TOKEN_<OWNER>_<REPO>` values.
 
 ## Startup
 

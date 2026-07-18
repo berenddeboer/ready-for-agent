@@ -6,7 +6,9 @@ import { Effect } from "effect"
 import { DatabaseLive, runConfiguredMigrations } from "@ready-for-agent/db"
 import {
   KEYMAXXER_SIDECAR_URL_PREFIX,
+  type SidecarChildSpawn,
   isKeymaxxerAvailable,
+  resolveKeymaxxerSidecarChildSpawn,
 } from "@ready-for-agent/keymaxxer-service"
 import type { ApplicationRequestContext } from "../server-context.js"
 import { type Application, createApplication } from "./application.server.js"
@@ -58,8 +60,8 @@ export type ProductionLifecycleOptions = {
   readonly port?: number
   readonly clientDirectory?: string
   readonly serverEntryPath?: string
-  readonly sidecarEntryPath?: string
-  readonly workspaceRoot?: string
+  /** Override how the owned Sidecar child is spawned (tests / custom hosts). */
+  readonly sidecarSpawn?: SidecarChildSpawn
   readonly sidecarBootstrapTimeoutMs?: number
   readonly applyMigrations?: (environment: NodeJS.ProcessEnv) => Promise<void>
   readonly resolveKeymaxxerMode?: (
@@ -97,14 +99,6 @@ export type ProductionLifecycleHandle = {
   readonly dispose: () => Promise<void>
 }
 
-const defaultWorkspaceRoot = fileURLToPath(
-  new URL("../../../..", import.meta.url),
-)
-
-const defaultSidecarEntryPath = fileURLToPath(
-  new URL("../../../keymaxxer-sidecar/src/main.ts", import.meta.url),
-)
-
 const defaultClientDirectory = resolve(
   fileURLToPath(new URL("../../dist/client", import.meta.url)),
 )
@@ -115,14 +109,17 @@ const defaultServerEntryPath = fileURLToPath(
 
 export const resolveKeymaxxerMode = (
   environment: NodeJS.ProcessEnv,
+  keymaxxerAvailable: (
+    environment: NodeJS.ProcessEnv,
+  ) => boolean = isKeymaxxerAvailable,
 ): KeymaxxerMode => {
   const existingUrl = environment.KEYMAXXER_SIDECAR_URL?.trim()
-  const keymaxxerAvailable = isKeymaxxerAvailable(environment)
+  const available = keymaxxerAvailable(environment)
   const explicitlyDisabled =
     environment.KEYMAXXER_ENABLED?.trim().toLowerCase() === "false"
   const keymaxxerEnabled =
     !explicitlyDisabled &&
-    ((existingUrl !== undefined && existingUrl !== "") || keymaxxerAvailable)
+    ((existingUrl !== undefined && existingUrl !== "") || available)
 
   if (!keymaxxerEnabled) {
     return { kind: "disabled" }
@@ -150,8 +147,7 @@ const applyProductionMigrations = async (
 
 const startOwnedSidecar = (input: {
   readonly environment: NodeJS.ProcessEnv
-  readonly sidecarEntryPath: string
-  readonly workspaceRoot: string
+  readonly spawn: SidecarChildSpawn
   readonly bootstrapTimeoutMs: number
   readonly logError?: (message: string) => void
 }): Promise<{
@@ -159,15 +155,10 @@ const startOwnedSidecar = (input: {
   readonly child: OwnedChildProcess
 }> =>
   new Promise((resolvePromise, reject) => {
-    const sidecar = spawn(
-      process.execPath,
-      ["--conditions", "@ready-for-agent/source", input.sidecarEntryPath],
-      {
-        cwd: input.workspaceRoot,
-        env: input.environment,
-        stdio: ["ignore", "pipe", "inherit"],
-      },
-    )
+    const sidecar = spawn(input.spawn.command, [...input.spawn.args], {
+      env: input.environment,
+      stdio: ["ignore", "pipe", "inherit"],
+    })
 
     let settled = false
     const fail = (message: string) => {
@@ -320,8 +311,8 @@ export const startProductionLifecycle = async (
   const port = options.port ?? Number(environment.PORT ?? 4200)
   const clientDirectory = options.clientDirectory ?? defaultClientDirectory
   const serverEntryPath = options.serverEntryPath ?? defaultServerEntryPath
-  const sidecarEntryPath = options.sidecarEntryPath ?? defaultSidecarEntryPath
-  const workspaceRoot = options.workspaceRoot ?? defaultWorkspaceRoot
+  const sidecarSpawn =
+    options.sidecarSpawn ?? resolveKeymaxxerSidecarChildSpawn()
   const bootstrapTimeoutMs = options.sidecarBootstrapTimeoutMs ?? 15_000
   const onEvent = options.onEvent ?? (() => {})
   const logInfo = options.logInfo ?? ((message) => console.info(message))
@@ -340,8 +331,7 @@ export const startProductionLifecycle = async (
     ((env) =>
       startOwnedSidecar({
         environment: env,
-        sidecarEntryPath,
-        workspaceRoot,
+        spawn: sidecarSpawn,
         bootstrapTimeoutMs,
         logError,
       }))

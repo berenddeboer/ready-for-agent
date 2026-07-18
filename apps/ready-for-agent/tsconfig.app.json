@@ -17,6 +17,9 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     {
+      "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/graphql-client/tsconfig.lib.json"
     }
   ]

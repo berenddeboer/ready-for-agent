@@ -1,3 +1,13 @@
-import { startProductionLifecycle } from "./src/server/production-lifecycle.js"
+import {
+  isInternalKeymaxxerSidecarMode,
+  runKeymaxxerSidecarProcess,
+} from "@ready-for-agent/keymaxxer-service"
 
-await startProductionLifecycle()
+if (isInternalKeymaxxerSidecarMode(process.argv)) {
+  await runKeymaxxerSidecarProcess()
+} else {
+  const { startProductionLifecycle } = await import(
+    "./src/server/production-lifecycle.js"
+  )
+  await startProductionLifecycle()
+}

@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs"
+import { accessSync, constants, existsSync } from "node:fs"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { Effect, Layer } from "effect"
@@ -247,15 +247,37 @@ export const keymaxxerEnvironment = (
     ),
   ) as Record<string, string>
 
+const sourceEntrypointPattern = /\.(m?[jt]sx?|cjs|mts|cts)$/i
+
+/** True when ENTRYPOINT should be exec'd directly (not via Bun as source). */
+export const isExecutableKeymaxxerEntrypoint = (
+  path: string,
+  access: (path: string, mode: number) => void = accessSync,
+): boolean => {
+  if (sourceEntrypointPattern.test(path)) return false
+  try {
+    access(path, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const keymaxxerMcpCommand = (
   environment: Partial<Record<string, string | undefined>> = process.env,
   pathExists: (path: string) => boolean = existsSync,
+  isExecutable: (path: string) => boolean = isExecutableKeymaxxerEntrypoint,
 ) => {
   const entrypoint = environment.KEYMAXXER_ENTRYPOINT?.trim()
 
-  return entrypoint && pathExists(entrypoint)
-    ? { command: "bun", args: [entrypoint, "serve"] }
-    : { command: "keymaxxer", args: ["serve"] }
+  if (entrypoint && pathExists(entrypoint)) {
+    if (isExecutable(entrypoint)) {
+      return { command: entrypoint, args: ["serve"] }
+    }
+    return { command: "bun", args: [entrypoint, "serve"] }
+  }
+
+  return { command: "keymaxxer", args: ["serve"] }
 }
 
 export const isKeymaxxerAvailable = (
@@ -263,9 +285,12 @@ export const isKeymaxxerAvailable = (
   pathExists: (path: string) => boolean = existsSync,
   commandExists: (command: string) => boolean = (command) =>
     Bun.which(command) !== null,
+  isExecutable: (path: string) => boolean = isExecutableKeymaxxerEntrypoint,
 ) => {
-  const command = keymaxxerMcpCommand(environment, pathExists)
-  return command.command === "bun" || commandExists(command.command)
+  const entrypoint = environment.KEYMAXXER_ENTRYPOINT?.trim()
+  if (entrypoint && pathExists(entrypoint)) return true
+  const command = keymaxxerMcpCommand(environment, pathExists, isExecutable)
+  return commandExists(command.command)
 }
 
 const toolResultText = (result: ToolResult) =>
