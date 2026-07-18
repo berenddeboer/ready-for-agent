@@ -45,16 +45,39 @@ export const followRepositoryWorkItemsLive = async ({
     return queryClient.fetchQuery({ ...query, staleTime: 0 })
   }
 
+  /**
+   * Refetch every work-items cache for the repository (default list plus any
+   * Jobs Working/Completed listKind variants already in the query cache).
+   */
   const refresh = async (repositoryId: string) => {
-    await fetchFresh(queries.workItems(repositoryId))
+    const defaultQuery = queries.workItems(repositoryId)
+    await queryClient.cancelQueries({
+      queryKey: ["work-items", repositoryId],
+    })
+    const cached = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ["work-items", repositoryId] })
+    if (cached.length === 0) {
+      await fetchFresh(defaultQuery)
+      return
+    }
+    await Promise.all(
+      cached.map(async (query) => {
+        const queryFn = query.options.queryFn
+        if (typeof queryFn !== "function") return
+        await queryClient.fetchQuery({
+          queryKey: query.queryKey,
+          queryFn: queryFn as (context: unknown) => Promise<unknown>,
+          staleTime: 0,
+        })
+      }),
+    )
   }
 
   const refreshAll = async () => {
     const repositoryIds = getRepositoryIds()
     await Promise.all(
-      repositoryIds.map((repositoryId) =>
-        fetchFresh(queries.workItems(repositoryId)),
-      ),
+      repositoryIds.map((repositoryId) => refresh(repositoryId)),
     )
   }
 

@@ -25,6 +25,27 @@ describe("JobsCard live updates", () => {
     expect(source).toContain("followRepositoryWorkItemsLive")
   })
 
+  test("splits Jobs into Working and Completed tabs with listKind queries", () => {
+    const { source, jobsCard } = jobsCardSource()
+    expect(jobsCard).toContain('role="tablist"')
+    expect(jobsCard).toContain('aria-label="Jobs"')
+    expect(jobsCard).toContain('role="tab"')
+    expect(jobsCard).toContain('role="tabpanel"')
+    expect(jobsCard).toContain("Working")
+    expect(jobsCard).toContain("Completed")
+    expect(jobsCard).toContain('useState<JobsTab>("working")')
+    expect(jobsCard).toContain("jobsWorkingWorkItemsQuery")
+    expect(jobsCard).toContain("jobsCompletedWorkItemsQuery")
+    expect(jobsCard).toContain("No working jobs.")
+    expect(jobsCard).toContain("No completed jobs.")
+    expect(jobsCard).toContain("Working jobs")
+    expect(jobsCard).toContain("Completed jobs")
+    expect(jobsCard).not.toContain('aria-label="All jobs"')
+    expect(source).toContain('listKind: "WORKING"')
+    expect(source).toContain('listKind: "COMPLETED"')
+    expect(source).toContain("JOBS_COMPLETED_LIMIT = 15")
+  })
+
   test("shows issue number with title and top-right pause control", () => {
     const { jobsCard } = jobsCardSource()
     expect(jobsCard).not.toContain("Issue #")

@@ -55,12 +55,37 @@ export const followRepositoryIssuesLive = async ({
     return queryClient.fetchQuery({ ...query, staleTime: 0 })
   }
 
+  const refreshWorkItems = async (repositoryId: string) => {
+    const defaultQuery = queries.workItems(repositoryId)
+    await queryClient.cancelQueries({
+      queryKey: ["work-items", repositoryId],
+    })
+    const cached = queryClient
+      .getQueryCache()
+      .findAll({ queryKey: ["work-items", repositoryId] })
+    if (cached.length === 0) {
+      await fetchFresh(defaultQuery)
+      return
+    }
+    await Promise.all(
+      cached.map(async (query) => {
+        const queryFn = query.options.queryFn
+        if (typeof queryFn !== "function") return
+        await queryClient.fetchQuery({
+          queryKey: query.queryKey,
+          queryFn: queryFn as (context: unknown) => Promise<unknown>,
+          staleTime: 0,
+        })
+      }),
+    )
+  }
+
   const refresh = async (repositoryId: string) => {
     onRepositoryChanged?.(repositoryId)
     await Promise.all([
       fetchFresh(queries.repositories),
       fetchFresh(queries.issues(repositoryId)),
-      fetchFresh(queries.workItems(repositoryId)),
+      refreshWorkItems(repositoryId),
     ])
   }
 
@@ -71,9 +96,7 @@ export const followRepositoryIssuesLive = async ({
       ...repositoryIds.map((repositoryId) =>
         fetchFresh(queries.issues(repositoryId)),
       ),
-      ...repositoryIds.map((repositoryId) =>
-        fetchFresh(queries.workItems(repositoryId)),
-      ),
+      ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
     ])
   }
 

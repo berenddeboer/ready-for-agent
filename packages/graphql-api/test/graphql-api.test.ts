@@ -1854,6 +1854,133 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("filters Working Work Items including Needs Human", async () => {
+    const needsHuman = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "needs_human" as const,
+      stepRuns: [],
+    }
+    const complete = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "complete" as const,
+      stepRuns: [],
+    }
+    const implementing = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "implement" as const,
+      stepRuns: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([needsHuman, complete, implementing]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
+          workItems(repositoryId: $repositoryId, listKind: $listKind) {
+            id state
+          }
+        }`,
+        variables: { repositoryId: repository.id, listKind: "WORKING" },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: needsHuman.id,
+            state: "NEEDS_HUMAN",
+          },
+          {
+            id: implementing.id,
+            state: "IMPLEMENT",
+          },
+        ],
+      },
+    })
+  })
+
+  test("filters Completed Work Items newest-first with limit", async () => {
+    const baseTime = Date.parse("2026-01-01T00:00:00.000Z")
+    const completed = Array.from({ length: 18 }, (_, index) => ({
+      ...workItem,
+      id: makeWorkItemId(),
+      state: (index % 3 === 0
+        ? "complete"
+        : index % 3 === 1
+          ? "failed"
+          : "abandoned") as "complete" | "failed" | "abandoned",
+      createdAt: new Date(baseTime + index * 1000),
+      stepRuns: [],
+    }))
+    const needsHuman = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "needs_human" as const,
+      createdAt: new Date(baseTime + 50_000),
+      stepRuns: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([...completed, needsHuman]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind, $limit: Int) {
+          workItems(repositoryId: $repositoryId, listKind: $listKind, limit: $limit) {
+            id state
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          listKind: "COMPLETED",
+          limit: 15,
+        },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      data: { workItems: readonly { id: string; state: string }[] }
+    }
+    expect(body.data.workItems).toHaveLength(15)
+    expect(
+      body.data.workItems.every((item) => item.state !== "NEEDS_HUMAN"),
+    ).toBe(true)
+    expect(body.data.workItems.map((item) => item.id)).toEqual(
+      completed
+        .slice()
+        .sort(
+          (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+        )
+        .slice(0, 15)
+        .map((item) => item.id),
+    )
+  })
+
   test("hides terminal Work Items whose Issue is no longer Relevant", async () => {
     const terminalOrphan = {
       ...workItem,
