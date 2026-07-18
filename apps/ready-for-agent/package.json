@@ -16,7 +16,8 @@
   },
   "files": [
     "bin/ready-for-agent.js",
-    "bin/select-platform.js"
+    "bin/select-platform.js",
+    "README.md"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.app.json"

@@ -1,9 +1,13 @@
-# ready-for-agent
+# ready-for-agent (monorepo)
 
 Unified operator binary for Ready for Agent: start the Harness and run operator
 commands against its GraphQL endpoint.
 
-Public install and operator docs: [README.md](../../README.md).
+**npm package README:** the published `ready-for-agent` package ships the
+repository root [README.md](../../README.md) (install and usage). Release
+staging (`apply-publish-versions --for-publish`) copies that file over this one
+for the npm tarball. Keep monorepo / package-shape notes here for contributors.
+
 Monorepo development: [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Public package shape

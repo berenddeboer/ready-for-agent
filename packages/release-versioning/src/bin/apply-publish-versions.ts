@@ -7,6 +7,7 @@ import {
   applyVersionToPlatformPackageJson,
   assertPublishVersion,
   launcherManifestForNpmPublish,
+  preparePublishPackageReadmes,
 } from "../lib/publish-packages.js"
 
 const args = process.argv.slice(2)
@@ -23,6 +24,14 @@ if (versionArg === undefined || versionArg === "") {
 } else {
   try {
     const version = assertPublishVersion(versionArg)
+
+    if (forPublish) {
+      const staged = preparePublishPackageReadmes(cwd)
+      process.stdout.write(`staged npm README → ${staged.launcherReadmePath}\n`)
+      for (const path of staged.platformReadmePaths) {
+        process.stdout.write(`staged npm README → ${path}\n`)
+      }
+    }
 
     for (const entry of PUBLISH_PACKAGE_PATHS) {
       const path = join(cwd, entry.packageJsonRelativePath)

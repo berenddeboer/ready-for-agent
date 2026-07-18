@@ -136,6 +136,11 @@ bun --conditions @ready-for-agent/source \
   packages/release-versioning/src/bin/apply-publish-versions.ts 0.1.0 --for-publish
 ```
 
+`--for-publish` also stages npm READMEs: the root product [README.md](README.md)
+into `apps/ready-for-agent/` (so the npm page is install/usage, not monorepo
+architecture notes), and a shared platform-binary stub into each
+`packages/ready-for-agent-*` package.
+
 ## Live end-to-end fixture
 
 The private End-to-End Fixture Repository
