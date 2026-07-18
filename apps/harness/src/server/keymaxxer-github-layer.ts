@@ -5,6 +5,7 @@ import {
   GitHubService,
   type GitHubServiceShape,
   type ReadyLabeledIssue,
+  githubServiceBinScriptPath,
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -227,6 +228,21 @@ export const keymaxxerGitHubLayer = (options: {
           secrets: [tokenName],
           timeoutMs: 60_000,
         })
+      const runGitHubBin = (
+        tokenName: string,
+        scriptFileName: string,
+        args: readonly string[],
+      ) =>
+        runGitHubCommand(
+          tokenName,
+          [
+            "bun",
+            "--conditions",
+            "@ready-for-agent/source",
+            JSON.stringify(githubServiceBinScriptPath(scriptFileName)),
+            ...args,
+          ].join(" "),
+        )
 
       const service: GitHubServiceShape = {
         getOpenPullRequestNumber: (repository, headRefName) =>
@@ -241,9 +257,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-open-pr-number.ts ${owner} ${name} ${head}`,
+              "get-open-pr-number.ts",
+              [owner, name, head],
             )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
@@ -283,9 +300,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-check-status.ts ${owner} ${name} ${head}`,
+              "get-pr-check-status.ts",
+              [owner, name, head],
             )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
@@ -343,9 +361,12 @@ export const keymaxxerGitHubLayer = (options: {
               options.logDirectory.trim() !== ""
                 ? encodeArgument(options.logDirectory)
                 : ""
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-status-check-diagnostics.ts ${owner} ${name} ${checksArg}${logDirectory === "" ? "" : ` ${logDirectory}`}`,
+              "get-pr-status-check-diagnostics.ts",
+              logDirectory === ""
+                ? [owner, name, checksArg]
+                : [owner, name, checksArg, logDirectory],
             )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
@@ -387,9 +408,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-lifecycle-status.ts ${owner} ${name} ${head}`,
+              "get-pr-lifecycle-status.ts",
+              [owner, name, head],
             )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
@@ -431,9 +453,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/mark-pr-ready-for-review.ts ${owner} ${name} ${head}`,
+              "mark-pr-ready-for-review.ts",
+              [owner, name, head],
             )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
@@ -461,9 +484,10 @@ export const keymaxxerGitHubLayer = (options: {
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
             const head = encodeArgument(headRefName)
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/merge-pull-request.ts ${owner} ${name} ${head}`,
+              "merge-pull-request.ts",
+              [owner, name, head],
             )
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
@@ -492,9 +516,10 @@ export const keymaxxerGitHubLayer = (options: {
 
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
-            const result = yield* runGitHubCommand(
+            const result = yield* runGitHubBin(
               tokenName,
-              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/list-ready-issues.ts ${owner} ${name}`,
+              "list-ready-issues.ts",
+              [owner, name],
             )
 
             if (result.exitCode === 2) {

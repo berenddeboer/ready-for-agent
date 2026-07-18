@@ -171,6 +171,13 @@ describe("Keymaxxer-backed GitHub layer", () => {
       'GITHUB_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS" ',
     )
     expect(runs[0]?.command).toContain("list-ready-issues.ts")
+    expect(runs[0]?.command).toMatch(
+      /bun --conditions @ready-for-agent\/source "\/.*list-ready-issues\.ts"/,
+    )
+    expect(runs[0]?.command).not.toContain(
+      "packages/github-service/src/bin/list-ready-issues.ts",
+    )
+    expect(runs[0]?.cwd).toBe("/workspace")
     expect(runs[0]?.command).not.toContain("Ready issue")
   })
 
