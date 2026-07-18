@@ -206,6 +206,7 @@ export const workItem = snakeCase.table(
         "create_worktree",
         "install_dependencies",
         "implement",
+        "assess_changes",
         "pre_commit",
         "review",
         "commit",
@@ -243,6 +244,7 @@ export const workItem = snakeCase.table(
         "create_worktree",
         "install_dependencies",
         "implement",
+        "assess_changes",
         "pre_commit",
         "review",
         "commit",
@@ -257,6 +259,10 @@ export const workItem = snakeCase.table(
       ],
     }),
     worktreePath: text(),
+    /**
+     * Exact commit OID at Create Worktree success; Assess Changes baseline.
+     */
+    startingCommitOid: text(),
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),
@@ -299,6 +305,7 @@ export const stepRun = snakeCase.table(
         "create_worktree",
         "install_dependencies",
         "implement",
+        "assess_changes",
         "pre_commit",
         "review",
         "commit",

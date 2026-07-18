@@ -159,6 +159,7 @@ type WorkItemState =
   | "CREATE_WORKTREE"
   | "INSTALL_DEPENDENCIES"
   | "IMPLEMENT"
+  | "ASSESS_CHANGES"
   | "PRE_COMMIT"
   | "REVIEW"
   | "COMMIT"

@@ -118,10 +118,12 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           } as const
 
-          const path = yield* createWorktree(context)
+          const created = yield* createWorktree(context)
+          const path = created.worktreePath
           yield* localCleanup({ ...context, worktreePath: path })
           return {
             path,
@@ -174,13 +176,14 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           } as const
 
           const created = yield* createWorktree(context)
           yield* removeWorktree(context)
           return {
-            path: created,
+            path: created.worktreePath,
             branch: workItemBranchName({
               githubOwner: "acme",
               githubRepo: "widgets",
@@ -228,6 +231,7 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           })
         }),
@@ -272,15 +276,16 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           } as const
 
           const created = yield* createWorktree(context)
           yield* removeWorktree({
             ...context,
-            worktreePath: created,
+            worktreePath: created.worktreePath,
           })
-          return created
+          return created.worktreePath
         }),
       )
 
@@ -322,6 +327,7 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           } as const
 
@@ -386,6 +392,7 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           })
         }),
@@ -444,6 +451,7 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -484,6 +492,7 @@ describe("removeWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),

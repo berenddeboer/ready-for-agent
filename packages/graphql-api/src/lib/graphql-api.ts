@@ -215,6 +215,8 @@ const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
   switch (phase) {
     case "implement":
       return "Build"
+    case "assess_changes":
+      return "Assess changes"
     case "resolve_pr_merge_conflict":
       return "Resolve PR merge conflict"
     case "github_status_checks":

@@ -100,6 +100,7 @@ enum WorkItemState {
   CREATE_WORKTREE
   INSTALL_DEPENDENCIES
   IMPLEMENT
+  ASSESS_CHANGES
   PRE_COMMIT
   REVIEW
   COMMIT
@@ -135,6 +136,7 @@ enum LifecyclePhase {
   CREATE_WORKTREE
   INSTALL_DEPENDENCIES
   IMPLEMENT
+  ASSESS_CHANGES
   PRE_COMMIT
   REVIEW
   COMMIT
@@ -174,6 +176,7 @@ type WorkItem {
   isTerminal: Boolean!
   stateReadyAt: String!
   worktreePath: String
+  startingCommitOid: String
   sessionId: String
   failureCode: String
   createdAt: String!

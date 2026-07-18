@@ -55,9 +55,14 @@ import { describe, expect, it } from "bun:test"
 
 describe("WorkItemLifecycle", () => {
   const successfulSteps: LifecycleStepsShape = {
-    createWorktree: () => Effect.succeed("/tmp/worktrees/acme-widgets-42"),
+    createWorktree: () =>
+      Effect.succeed({
+        worktreePath: "/tmp/worktrees/acme-widgets-42",
+        startingCommitOid: "abc123",
+      }),
     installDependencies: () => Effect.void,
     implement: () => Effect.succeed("ses_test_implement_session"),
+    assessChanges: () => Effect.void,
     preCommit: () => Effect.void,
     review: () => Effect.void,
     commit: () => Effect.void,
@@ -644,10 +649,11 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          // create_worktree → install → implement → pre_commit → review
+          // create_worktree → install → implement → assess_changes → pre_commit → review
           for (const expectedNext of [
             "install_dependencies",
             "implement",
+            "assess_changes",
             "pre_commit",
             "review",
             "commit",
@@ -770,7 +776,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 13; i++) {
+          for (let i = 0; i < 14; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -831,7 +837,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 13; i++) {
+          for (let i = 0; i < 14; i++) {
             const sql = yield* SqlClient.SqlClient
             yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -1122,6 +1128,7 @@ describe("WorkItemLifecycle", () => {
             expect(afterCreate.workItem.worktreePath).toBe(
               "/tmp/worktrees/acme-widgets-42",
             )
+            expect(afterCreate.workItem.startingCommitOid).toBe("abc123")
             expect(afterCreate.workItem.sessionId).toBeNull()
             expect(
               afterCreate.workItem.stepRuns.map((run) => run.status),
@@ -1146,10 +1153,21 @@ describe("WorkItemLifecycle", () => {
           const afterImplement = yield* claimAndRunPending
           expect(afterImplement._tag).toBe("processed")
           if (afterImplement._tag === "processed") {
-            expect(afterImplement.workItem.state).toBe("pre_commit")
+            expect(afterImplement.workItem.state).toBe("assess_changes")
             expect(afterImplement.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
+            expect(afterImplement.workItem.startingCommitOid).toBe("abc123")
+          }
+
+          const afterAssess = yield* claimAndRunPending
+          expect(afterAssess._tag).toBe("processed")
+          if (afterAssess._tag === "processed") {
+            expect(afterAssess.workItem.state).toBe("pre_commit")
+            expect(afterAssess.workItem.sessionId).toBe(
+              "ses_test_implement_session",
+            )
+            expect(afterAssess.workItem.startingCommitOid).toBe("abc123")
           }
 
           const afterPreCommit = yield* claimAndRunPending
@@ -1246,6 +1264,7 @@ describe("WorkItemLifecycle", () => {
               ["create_worktree", "succeeded"],
               ["install_dependencies", "succeeded"],
               ["implement", "succeeded"],
+              ["assess_changes", "succeeded"],
               ["pre_commit", "succeeded"],
               ["review", "succeeded"],
               ["commit", "succeeded"],
@@ -1265,7 +1284,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(13)
+          expect(final.stepRuns).toHaveLength(14)
         }),
       ))
 
@@ -1292,7 +1311,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 13; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1346,7 +1365,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          for (let index = 0; index < 7; index += 1) {
+          for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
 
@@ -1430,7 +1449,7 @@ describe("WorkItemLifecycle", () => {
                 issue.githubIssueNumber,
               )
 
-              for (let index = 0; index < 7; index += 1) {
+              for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
@@ -1476,7 +1495,7 @@ describe("WorkItemLifecycle", () => {
                 issue.githubIssueNumber,
               )
 
-              for (let index = 0; index < 7; index += 1) {
+              for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
@@ -1546,7 +1565,7 @@ describe("WorkItemLifecycle", () => {
                 issue.githubIssueNumber,
               )
 
-              for (let index = 0; index < 7; index += 1) {
+              for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
@@ -1590,7 +1609,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          for (let index = 0; index < 7; index += 1) {
+          for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
           const pending = yield* claimAndRunPending
@@ -1656,7 +1675,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 7; index += 1) {
+          for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
           const now = Date.now()
@@ -1668,6 +1687,7 @@ describe("WorkItemLifecycle", () => {
             [checkId, created.id, now, now, now],
           )
 
+          // 8 steps reach Create PR; this claim runs Watch → conflict.
           const watched = yield* claimAndRunPending
           expect(watched._tag).toBe("processed")
           if (watched._tag === "processed") {
@@ -1714,7 +1734,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 8; index += 1) {
+          for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
           }
           const resolved = yield* claimAndRunPending
@@ -1754,7 +1774,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          for (let index = 0; index < 8; index += 1) {
+          for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
           }
 
@@ -1826,7 +1846,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
 
-          for (let index = 0; index < 7; index += 1) {
+          for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
 
@@ -1903,7 +1923,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
 
-          for (let index = 0; index < 7; index += 1) {
+          for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
 
@@ -1941,7 +1961,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 8; index += 1) {
+          for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
           }
 
@@ -1959,7 +1979,10 @@ describe("WorkItemLifecycle", () => {
       const recordingSteps: LifecycleStepsShape = {
         createWorktree: (context) => {
           seen.push(context)
-          return Effect.succeed("/tmp/worktrees/recorded")
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/recorded",
+            startingCommitOid: "abc123",
+          })
         },
         installDependencies: (context) => {
           seen.push(context)
@@ -1968,6 +1991,10 @@ describe("WorkItemLifecycle", () => {
         implement: (context) => {
           seen.push(context)
           return Effect.succeed("ses_recorded")
+        },
+        assessChanges: (context) => {
+          seen.push(context)
+          return Effect.void
         },
         preCommit: (context) => {
           seen.push(context)
@@ -2028,12 +2055,12 @@ describe("WorkItemLifecycle", () => {
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 13; index += 1) {
+          for (let index = 0; index < 14; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
-          expect(seen).toHaveLength(13)
+          expect(seen).toHaveLength(14)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -2048,6 +2075,7 @@ describe("WorkItemLifecycle", () => {
           expect(seen[2]!.variant).toBe("high")
 
           expect(seen[3]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[3]!.startingCommitOid).toBe("abc123")
           expect(seen[3]!.sessionId).toBe("ses_recorded")
           expect(seen[3]!.model).toBe("anthropic/claude-sonnet-4-5")
           expect(seen[3]!.variant).toBe("high")
@@ -2078,6 +2106,8 @@ describe("WorkItemLifecycle", () => {
           expect(seen[11]!.sessionId).toBe("ses_recorded")
           expect(seen[12]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[12]!.sessionId).toBe("ses_recorded")
+          expect(seen[13]!.worktreePath).toBe("/tmp/worktrees/recorded")
+          expect(seen[13]!.sessionId).toBe("ses_recorded")
         }),
       )
     })
@@ -2102,7 +2132,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2136,7 +2166,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2198,7 +2228,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2235,7 +2265,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2270,7 +2300,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2307,7 +2337,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2337,6 +2367,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -2376,6 +2407,7 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
           const result = yield* claimAndRunPending
 
           expect(result._tag).toBe("processed")
@@ -2410,6 +2442,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -2455,6 +2488,7 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
+          yield* claimAndRunPending
           const result = yield* claimAndRunPending
 
           expect(result._tag).toBe("processed")
@@ -2476,7 +2510,10 @@ describe("WorkItemLifecycle", () => {
         ...successfulSteps,
         createWorktree: () => {
           createCalls += 1
-          return Effect.succeed("/tmp/worktrees/deleted-issue")
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/deleted-issue",
+            startingCommitOid: "abc123",
+          })
         },
       }
 
@@ -2657,7 +2694,10 @@ describe("WorkItemLifecycle", () => {
           Effect.gen(function* () {
             createCalls += 1
             yield* Effect.sleep("20 millis")
-            return "/tmp/worktrees/concurrent"
+            return {
+              worktreePath: "/tmp/worktrees/concurrent",
+              startingCommitOid: "abc123",
+            }
           }),
       }
 
@@ -2892,7 +2932,10 @@ describe("WorkItemLifecycle", () => {
         createWorktree: () =>
           Effect.gen(function* () {
             yield* Effect.sleep("200 millis")
-            return "/tmp/worktrees/too-slow"
+            return {
+              worktreePath: "/tmp/worktrees/too-slow",
+              startingCommitOid: "abc123",
+            }
           }),
       }
 
@@ -2901,6 +2944,7 @@ describe("WorkItemLifecycle", () => {
           create_worktree: Duration.millis(20),
           install_dependencies: Duration.minutes(15),
           implement: Duration.hours(2),
+          assess_changes: Duration.minutes(5),
           pre_commit: Duration.hours(2),
           review: Duration.hours(1),
           commit: Duration.minutes(5),
@@ -2911,6 +2955,7 @@ describe("WorkItemLifecycle", () => {
           mark_pr_ready_for_review: Duration.minutes(5),
           decide_pr_merge: Duration.minutes(15),
           merge_pr: Duration.minutes(5),
+          local_cleanup: Duration.minutes(5),
         },
       }).pipe(
         Layer.provideMerge(
@@ -2991,7 +3036,10 @@ describe("WorkItemLifecycle", () => {
           if (attempts === 1) {
             return Effect.fail(new Error("first attempt failed"))
           }
-          return Effect.succeed("/tmp/worktrees/retry-success")
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/retry-success",
+            startingCommitOid: "abc123",
+          })
         },
       }
 
@@ -3356,7 +3404,10 @@ describe("WorkItemLifecycle", () => {
         ...successfulSteps,
         createWorktree: () => {
           createCalls += 1
-          return Effect.succeed("/tmp/worktrees/stale-delivery")
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/stale-delivery",
+            startingCommitOid: "abc123",
+          })
         },
       }
 
@@ -3403,7 +3454,10 @@ describe("WorkItemLifecycle", () => {
         ...successfulSteps,
         createWorktree: () => {
           createCalls += 1
-          return Effect.succeed("/tmp/worktrees/should-not-rerun")
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/should-not-rerun",
+            startingCommitOid: "abc123",
+          })
         },
       }
 
@@ -3477,7 +3531,10 @@ describe("WorkItemLifecycle", () => {
         createWorktree: () =>
           Effect.gen(function* () {
             yield* Effect.sleep("10 seconds")
-            return "/tmp/worktrees/never"
+            return {
+              worktreePath: "/tmp/worktrees/never",
+              startingCommitOid: "abc123",
+            }
           }),
       }
 
@@ -3713,7 +3770,10 @@ describe("WorkItemLifecycle", () => {
         createWorktree: () =>
           Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(release)),
-            Effect.as("/tmp/worktrees/concurrent-abandon"),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/concurrent-abandon",
+              startingCommitOid: "abc123",
+            }),
           ),
       }
 
@@ -4064,7 +4124,11 @@ describe("WorkItemLifecycle", () => {
       const seen: LifecycleStepContext[] = []
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.succeed("/tmp/worktrees/reset-me"),
+        createWorktree: () =>
+          Effect.succeed({
+            worktreePath: "/tmp/worktrees/reset-me",
+            startingCommitOid: "abc123",
+          }),
         removeWorktree: (context) => {
           seen.push(context)
           return Effect.void
@@ -4106,6 +4170,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: afterCreate.reviewModel,
             reviewVariant: afterCreate.reviewVariant,
             worktreePath: "/tmp/worktrees/reset-me",
+            startingCommitOid: "abc123",
             sessionId: null,
           })
         }),
@@ -4200,7 +4265,10 @@ describe("WorkItemLifecycle", () => {
         createWorktree: () =>
           Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(release)),
-            Effect.as("/tmp/worktrees/paused-drain"),
+            Effect.as({
+              worktreePath: "/tmp/worktrees/paused-drain",
+              startingCommitOid: "abc123",
+            }),
           ),
       }
 

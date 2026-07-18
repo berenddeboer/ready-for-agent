@@ -39,6 +39,7 @@ const baseContext = (
   reviewModel: "opencode/test-model",
   reviewVariant: "high",
   worktreePath,
+  startingCommitOid: null,
   sessionId: null,
   ...overrides,
 })
