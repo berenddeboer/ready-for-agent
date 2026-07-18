@@ -123,6 +123,59 @@ export const isTerminalWorkItemState = (
 ): state is (typeof TERMINAL_WORK_ITEM_STATES)[number] =>
   (TERMINAL_WORK_ITEM_STATES as readonly string[]).includes(state)
 
+/**
+ * Jobs card Completed tab: finished outcomes only.
+ * Needs Human is domain-terminal for admission but stays on Working as active handoff.
+ */
+export const JOBS_COMPLETED_WORK_ITEM_STATES = [
+  "complete",
+  "failed",
+  "abandoned",
+] as const satisfies readonly WorkItemState[]
+
+export type JobsCompletedWorkItemState =
+  (typeof JOBS_COMPLETED_WORK_ITEM_STATES)[number]
+
+export const isJobsCompletedWorkItemState = (
+  state: WorkItemState,
+): state is JobsCompletedWorkItemState =>
+  (JOBS_COMPLETED_WORK_ITEM_STATES as readonly string[]).includes(state)
+
+/** Jobs card Working tab: unfinished lifecycle work plus Needs Human handoffs. */
+export const isJobsWorkingWorkItemState = (state: WorkItemState): boolean =>
+  !isJobsCompletedWorkItemState(state)
+
+/** GraphQL / Jobs list partition: working vs completed membership. */
+export type WorkItemsListKind = "working" | "completed"
+
+/**
+ * Filter Work Items for Jobs Working / Completed lists.
+ * Completed is ordered by createdAt newest-first (recency for the last-N window).
+ * Working preserves input order. Omitting listKind returns the input unchanged.
+ */
+export const filterWorkItemsByListKind = <
+  T extends { readonly state: WorkItemState; readonly createdAt: Date },
+>(
+  workItems: readonly T[],
+  listKind: WorkItemsListKind | undefined,
+  limit?: number,
+): readonly T[] => {
+  if (listKind === undefined) {
+    return workItems
+  }
+  if (listKind === "working") {
+    const working = workItems.filter((item) =>
+      isJobsWorkingWorkItemState(item.state),
+    )
+    return limit === undefined ? working : working.slice(0, limit)
+  }
+  const completed = workItems
+    .filter((item) => isJobsCompletedWorkItemState(item.state))
+    .slice()
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+  return limit === undefined ? completed : completed.slice(0, limit)
+}
+
 export const STEP_RUN_REASON = {
   handlerFailed: "handler_failed",
   handlerDefect: "handler_defect",

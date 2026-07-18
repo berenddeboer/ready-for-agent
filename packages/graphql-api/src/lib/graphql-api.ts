@@ -51,6 +51,8 @@ import {
   WorkItemNotFoundError,
   type WorkItemRecord,
   WorkItemTerminalError,
+  type WorkItemsListKind,
+  filterWorkItemsByListKind,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
@@ -109,6 +111,16 @@ type IssuesArgs = {
 
 type WorkItemsArgs = IssuesArgs & {
   githubIssueNumber?: number
+  listKind?: "WORKING" | "COMPLETED"
+  limit?: number
+}
+
+const toWorkItemsListKind = (
+  listKind: WorkItemsArgs["listKind"],
+): WorkItemsListKind | undefined => {
+  if (listKind === "WORKING") return "working"
+  if (listKind === "COMPLETED") return "completed"
+  return undefined
 }
 
 type ImplementNowArgs = IssuesArgs & {
@@ -651,11 +663,14 @@ export const createGraphqlApi = (
               Effect.result(
                 Effect.gen(function* () {
                   const lifecycle = yield* WorkItemLifecycle
+                  const listKind = toWorkItemsListKind(args.listKind)
+                  const limit = args.limit
                   if (args.githubIssueNumber !== undefined) {
-                    return yield* lifecycle.listWorkItemsForIssue(
+                    const workItems = yield* lifecycle.listWorkItemsForIssue(
                       args.repositoryId,
                       args.githubIssueNumber,
                     )
+                    return filterWorkItemsByListKind(workItems, listKind, limit)
                   }
                   const db = yield* DbService
                   const [workItems, issues] = yield* Effect.all([
@@ -665,11 +680,12 @@ export const createGraphqlApi = (
                   const relevantIssueNumbers = new Set(
                     issues.map((issue) => issue.githubIssueNumber),
                   )
-                  return workItems.filter(
+                  const visible = workItems.filter(
                     (workItem) =>
                       !isTerminalWorkItemState(workItem.state) ||
                       relevantIssueNumbers.has(workItem.githubIssueNumber),
                   )
+                  return filterWorkItemsByListKind(visible, listKind, limit)
                 }),
               ),
             )

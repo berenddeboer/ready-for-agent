@@ -235,18 +235,66 @@ const workItemFields = {
   },
 } as const
 
-const workItemsQuery = (repositoryId: string) => ({
-  queryKey: ["work-items", repositoryId],
-  queryFn: async (): Promise<readonly WorkItem[]> => {
-    const result = await graphql.query({
-      workItems: {
-        __args: { repositoryId },
-        ...workItemFields,
-      },
-    })
-    return result.workItems
-  },
-})
+type WorkItemsListKindArg = "WORKING" | "COMPLETED"
+
+type WorkItemsQueryOptions = {
+  readonly listKind?: WorkItemsListKindArg
+  readonly limit?: number
+}
+
+const JOBS_COMPLETED_LIMIT = 15
+
+const workItemsQuery = (
+  repositoryId: string,
+  options: WorkItemsQueryOptions = {},
+) => {
+  const listKind = options.listKind
+  const limit = options.limit
+  return {
+    queryKey: [
+      "work-items",
+      repositoryId,
+      listKind ?? null,
+      limit ?? null,
+    ] as const,
+    queryFn: async (): Promise<readonly WorkItem[]> => {
+      const result = await graphql.query({
+        workItems: {
+          __args: {
+            repositoryId,
+            ...(listKind === undefined ? {} : { listKind }),
+            ...(limit === undefined ? {} : { limit }),
+          },
+          ...workItemFields,
+        },
+      })
+      return result.workItems
+    },
+  }
+}
+
+const jobsWorkingWorkItemsQuery = (repositoryId: string) =>
+  workItemsQuery(repositoryId, { listKind: "WORKING" })
+
+const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
+  workItemsQuery(repositoryId, {
+    listKind: "COMPLETED",
+    limit: JOBS_COMPLETED_LIMIT,
+  })
+
+const patchWorkItemsCaches = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  repositoryId: string,
+  update: (
+    current: readonly WorkItem[] | undefined,
+  ) => readonly WorkItem[] | undefined,
+) => {
+  for (const [queryKey] of queryClient.getQueriesData<readonly WorkItem[]>({
+    queryKey: ["work-items", repositoryId],
+  })) {
+    queryClient.setQueryData<readonly WorkItem[]>(queryKey, update)
+  }
+}
 
 export const Route = createFileRoute("/")({
   component: HomePage,
@@ -1455,10 +1503,20 @@ function RepositoryIssueRow({
   )
 }
 
+type JobsTab = "working" | "completed"
+
 function JobsCard() {
+  const [selectedTab, setSelectedTab] = useState<JobsTab>("working")
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
-  const workItemQueries = useQueries({
-    queries: repositories.map((repository) => workItemsQuery(repository.id)),
+  const workingQueries = useQueries({
+    queries: repositories.map((repository) =>
+      jobsWorkingWorkItemsQuery(repository.id),
+    ),
+  })
+  const completedQueries = useQueries({
+    queries: repositories.map((repository) =>
+      jobsCompletedWorkItemsQuery(repository.id),
+    ),
   })
   const issueQueries = useQueries({
     queries: repositories.map((repository) => issuesQuery(repository.id)),
@@ -1476,11 +1534,25 @@ function JobsCard() {
       )
     }
   }
-  const workItems = workItemQueries
-    .flatMap((query) => query.data ?? [])
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-  const loading = workItemQueries.some((query) => query.isLoading)
-  const failed = workItemQueries.some((query) => query.isError)
+  const sortNewestFirst = (items: readonly WorkItem[]) =>
+    items
+      .slice()
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  const workingItems = sortNewestFirst(
+    workingQueries.flatMap((query) => query.data ?? []),
+  )
+  const completedItems = sortNewestFirst(
+    completedQueries.flatMap((query) => query.data ?? []),
+  ).slice(0, JOBS_COMPLETED_LIMIT)
+  const activeItems = selectedTab === "working" ? workingItems : completedItems
+  const activeQueries =
+    selectedTab === "working" ? workingQueries : completedQueries
+  const loading = activeQueries.some((query) => query.isLoading)
+  const failed = activeQueries.some((query) => query.isError)
+  const emptyMessage =
+    selectedTab === "working" ? "No working jobs." : "No completed jobs."
+  const listAriaLabel =
+    selectedTab === "working" ? "Working jobs" : "Completed jobs"
 
   if (repositories.length === 0) {
     return (
@@ -1492,7 +1564,7 @@ function JobsCard() {
     )
   }
 
-  if (loading && workItems.length === 0) {
+  if (loading && activeItems.length === 0) {
     return <JobsCardSkeleton />
   }
 
@@ -1506,118 +1578,166 @@ function JobsCard() {
     )
   }
 
-  if (workItems.length === 0) {
-    return (
-      <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-        <p className="m-0 text-sm text-slate-500">No jobs yet.</p>
-      </article>
-    )
-  }
-
   return (
     <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-      <ul className="m-0 grid list-none gap-2 p-0" aria-label="All jobs">
-        {workItems.map((workItem) => {
-          const repository = repositoryById.get(workItem.repositoryId)
-          const repositoryLabel =
-            repository === undefined
-              ? workItem.repositoryId
-              : `${repository.githubOwner}/${repository.githubRepo}`
-          const issue = issueByRepoAndNumber.get(
-            `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
-          )
-          const issueTitle = issue?.title
-          const issueUrl = issue?.url
-          const issueIdentity =
-            issueTitle === undefined
-              ? `#${workItem.githubIssueNumber}`
-              : `#${workItem.githubIssueNumber} · ${issueTitle}`
-          const issueIdentityContent = (
-            <>
-              <span className="font-mono">#{workItem.githubIssueNumber}</span>
-              {issueTitle !== undefined && (
-                <span className="font-sans"> · {issueTitle}</span>
-              )}
-            </>
-          )
-          const { sessionId, worktreePath } = sessionWorktreeParts(
-            workItem.sessionId,
-            workItem.worktreePath,
-          )
+      <div
+        className="mb-3 flex gap-1 border-b border-slate-200"
+        role="tablist"
+        aria-label="Jobs"
+      >
+        {(
+          [
+            { id: "working", label: "Working" },
+            { id: "completed", label: "Completed" },
+          ] as const
+        ).map((tab) => {
+          const selected = selectedTab === tab.id
           return (
-            <li
-              className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
-              key={workItem.id}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="m-0 truncate text-xs font-semibold text-slate-700">
-                    {repositoryLabel}
-                  </p>
-                  {issueUrl !== undefined && issueUrl !== "" ? (
-                    <a
-                      className="m-0 block truncate text-xs font-semibold text-blue-600 hover:underline"
-                      href={issueUrl}
-                      title={issueIdentity}
-                    >
-                      {issueIdentityContent}
-                    </a>
-                  ) : (
-                    <p
-                      className="m-0 truncate text-xs font-semibold text-blue-600"
-                      title={issueIdentity}
-                    >
-                      {issueIdentityContent}
-                    </p>
-                  )}
-                </div>
-                <div className="flex shrink-0 items-center gap-1">
-                  <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
-                    {workItem.stateLabel}
-                  </span>
-                  <WorkItemPauseButton workItem={workItem} />
-                </div>
-              </div>
-              {(sessionId !== null || worktreePath !== null) && (
-                <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
-                  {sessionId !== null && (
-                    <Copy
-                      value={sessionId}
-                      className="min-w-0 max-w-full"
-                      textClassName="font-mono text-[0.7rem] text-slate-500"
-                    />
-                  )}
-                  {sessionId !== null && worktreePath !== null && (
-                    <span className="shrink-0 font-mono text-[0.7rem] text-slate-500">
-                      -
-                    </span>
-                  )}
-                  {worktreePath !== null && (
-                    <Copy
-                      value={worktreePath}
-                      className="min-w-0 max-w-full"
-                      textClassName="font-mono text-[0.7rem] text-slate-500"
-                    />
-                  )}
-                </p>
-              )}
-              <WorkItemLifecycleStatus
-                workItem={workItem}
-                compact
-                pullRequestUrl={
-                  repository === undefined
-                    ? null
-                    : workItemPullRequestUrl(
-                        repository.githubOwner,
-                        repository.githubRepo,
-                        workItem.githubPullRequestNumber,
-                      )
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              id={`jobs-tab-${tab.id}`}
+              aria-selected={selected}
+              aria-controls={`jobs-panel-${tab.id}`}
+              tabIndex={selected ? 0 : -1}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-semibold transition ${
+                selected
+                  ? "border-blue-600 text-blue-700"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+              onClick={() => setSelectedTab(tab.id)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                  event.preventDefault()
+                  const nextTab = tab.id === "working" ? "completed" : "working"
+                  setSelectedTab(nextTab)
+                  document.getElementById(`jobs-tab-${nextTab}`)?.focus()
                 }
-              />
-            </li>
+              }}
+            >
+              {tab.label}
+            </button>
           )
         })}
-      </ul>
+      </div>
+      <div
+        role="tabpanel"
+        id={`jobs-panel-${selectedTab}`}
+        aria-labelledby={`jobs-tab-${selectedTab}`}
+      >
+        {activeItems.length === 0 ? (
+          <p className="m-0 text-sm text-slate-500">{emptyMessage}</p>
+        ) : (
+          <ul
+            className="m-0 grid list-none gap-2 p-0"
+            aria-label={listAriaLabel}
+          >
+            {activeItems.map((workItem) => {
+              const repository = repositoryById.get(workItem.repositoryId)
+              const repositoryLabel =
+                repository === undefined
+                  ? workItem.repositoryId
+                  : `${repository.githubOwner}/${repository.githubRepo}`
+              const issue = issueByRepoAndNumber.get(
+                `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
+              )
+              const issueTitle = issue?.title
+              const issueUrl = issue?.url
+              const issueIdentity =
+                issueTitle === undefined
+                  ? `#${workItem.githubIssueNumber}`
+                  : `#${workItem.githubIssueNumber} · ${issueTitle}`
+              const issueIdentityContent = (
+                <>
+                  <span className="font-mono">
+                    #{workItem.githubIssueNumber}
+                  </span>
+                  {issueTitle !== undefined && (
+                    <span className="font-sans"> · {issueTitle}</span>
+                  )}
+                </>
+              )
+              const { sessionId, worktreePath } = sessionWorktreeParts(
+                workItem.sessionId,
+                workItem.worktreePath,
+              )
+              return (
+                <li
+                  className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
+                  key={workItem.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="m-0 truncate text-xs font-semibold text-slate-700">
+                        {repositoryLabel}
+                      </p>
+                      {issueUrl !== undefined && issueUrl !== "" ? (
+                        <a
+                          className="m-0 block truncate text-xs font-semibold text-blue-600 hover:underline"
+                          href={issueUrl}
+                          title={issueIdentity}
+                        >
+                          {issueIdentityContent}
+                        </a>
+                      ) : (
+                        <p
+                          className="m-0 truncate text-xs font-semibold text-blue-600"
+                          title={issueIdentity}
+                        >
+                          {issueIdentityContent}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
+                        {workItem.stateLabel}
+                      </span>
+                      <WorkItemPauseButton workItem={workItem} />
+                    </div>
+                  </div>
+                  {(sessionId !== null || worktreePath !== null) && (
+                    <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
+                      {sessionId !== null && (
+                        <Copy
+                          value={sessionId}
+                          className="min-w-0 max-w-full"
+                          textClassName="font-mono text-[0.7rem] text-slate-500"
+                        />
+                      )}
+                      {sessionId !== null && worktreePath !== null && (
+                        <span className="shrink-0 font-mono text-[0.7rem] text-slate-500">
+                          -
+                        </span>
+                      )}
+                      {worktreePath !== null && (
+                        <Copy
+                          value={worktreePath}
+                          className="min-w-0 max-w-full"
+                          textClassName="font-mono text-[0.7rem] text-slate-500"
+                        />
+                      )}
+                    </p>
+                  )}
+                  <WorkItemLifecycleStatus
+                    workItem={workItem}
+                    compact
+                    pullRequestUrl={
+                      repository === undefined
+                        ? null
+                        : workItemPullRequestUrl(
+                            repository.githubOwner,
+                            repository.githubRepo,
+                            workItem.githubPullRequestNumber,
+                          )
+                    }
+                  />
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
     </article>
   )
 }
@@ -1641,12 +1761,10 @@ function JobsCardSkeleton() {
 function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   const queryClient = useQueryClient()
   const updateWorkItem = (updated: WorkItem) => {
-    queryClient.setQueryData<readonly WorkItem[]>(
-      workItemsQuery(workItem.repositoryId).queryKey,
-      (current) =>
-        current?.map((candidate) =>
-          candidate.id === updated.id ? updated : candidate,
-        ),
+    patchWorkItemsCaches(queryClient, workItem.repositoryId, (current) =>
+      current?.map((candidate) =>
+        candidate.id === updated.id ? updated : candidate,
+      ),
     )
   }
   const pause = useMutation({
@@ -1754,17 +1872,22 @@ function WorkItemLifecycleStatus({
   const status = workItem.status
   const canRetry = compact && workItem.canRetry
   const canReset = compact
-  const dataUpdatedAt =
-    queryClient.getQueryState(workItemsQuery(workItem.repositoryId).queryKey)
-      ?.dataUpdatedAt ?? 0
+  const dataUpdatedAt = queryClient
+    .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })
+    .reduce(
+      (latest, [queryKey]) =>
+        Math.max(
+          latest,
+          queryClient.getQueryState(queryKey)?.dataUpdatedAt ?? 0,
+        ),
+      0,
+    )
   const nowMs = useNowMs(true)
   const patchWorkItem = (updated: WorkItem) => {
-    queryClient.setQueryData<readonly WorkItem[]>(
-      workItemsQuery(workItem.repositoryId).queryKey,
-      (current) =>
-        current?.map((candidate) =>
-          candidate.id === updated.id ? updated : candidate,
-        ),
+    patchWorkItemsCaches(queryClient, workItem.repositoryId, (current) =>
+      current?.map((candidate) =>
+        candidate.id === updated.id ? updated : candidate,
+      ),
     )
   }
   const retry = useMutation({
@@ -1789,9 +1912,8 @@ function WorkItemLifecycleStatus({
       return result.resetWorkItem
     },
     onSuccess: (deletedId) => {
-      queryClient.setQueryData<readonly WorkItem[]>(
-        workItemsQuery(workItem.repositoryId).queryKey,
-        (current) => current?.filter((candidate) => candidate.id !== deletedId),
+      patchWorkItemsCaches(queryClient, workItem.repositoryId, (current) =>
+        current?.filter((candidate) => candidate.id !== deletedId),
       )
     },
   })
