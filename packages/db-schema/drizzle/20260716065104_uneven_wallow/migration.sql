@@ -1,1 +1,0 @@
-ALTER TABLE `work_item` ADD `pause_before_step` text;

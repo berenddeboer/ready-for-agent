@@ -1,2 +1,0 @@
-DROP INDEX IF EXISTS `work_item_one_unfinished_uidx`;--> statement-breakpoint
-CREATE UNIQUE INDEX `work_item_one_unfinished_v2_uidx` ON `work_item` (`repository_id`,`github_issue_number`) WHERE "work_item"."state" NOT IN ('complete', 'failed', 'abandoned', 'needs_human');

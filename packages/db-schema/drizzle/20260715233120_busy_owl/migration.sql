@@ -1,1 +1,0 @@
-ALTER TABLE `work_item` ADD `github_pull_request_number` integer;

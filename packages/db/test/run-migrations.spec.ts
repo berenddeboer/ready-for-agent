@@ -4,7 +4,10 @@ import { join } from "node:path"
 import { Effect } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { SqliteTest } from "../src/lib/database-test.js"
-import { runMigrations } from "../src/lib/run-migrations.js"
+import {
+  defaultMigrationsFolder,
+  runMigrations,
+} from "../src/lib/run-migrations.js"
 import { afterEach, describe, expect, it } from "bun:test"
 
 const temporaryDirectories: Array<string> = []
@@ -52,13 +55,47 @@ describe("runMigrations", () => {
     )
   })
 
-  it("preserves historical Needs Human conflicts while rejecting new ones", async () => {
+  it("adopts the idempotent baseline on an existing schema", async () => {
     const migrationSql = await readFile(
       join(
         import.meta.dir,
-        "../../db-schema/drizzle/20260717120000_needs_human_unfinished/migration.sql",
+        "../../db-schema/drizzle/20260718055957_baseline/migration.sql",
       ),
       "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const migration = yield* Effect.exit(
+          runMigrations(defaultMigrationsFolder),
+        )
+        expect(migration._tag).toBe("Success")
+
+        const applied = yield* sql`SELECT name FROM __drizzle_migrations`
+        expect(applied).toEqual([{ name: "20260718055957_baseline" }])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("preserves historical Needs Human conflicts while rejecting new ones", async () => {
+    const baselineSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260718055957_baseline/migration.sql",
+      ),
+      "utf8",
+    )
+    const migrationSql = baselineSql.slice(
+      baselineSql.indexOf("CREATE TRIGGER"),
     )
     const folder = await migrationFolder(
       "20260717120000_needs_human_unfinished",

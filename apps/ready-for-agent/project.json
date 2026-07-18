@@ -42,6 +42,9 @@
       "outputs": ["{projectRoot}/src/generated"],
       "cache": true
     },
+    "typecheck": {
+      "dependsOn": ["generate-embed"]
+    },
     "compile": {
       "executor": "nx:run-commands",
       "dependsOn": [

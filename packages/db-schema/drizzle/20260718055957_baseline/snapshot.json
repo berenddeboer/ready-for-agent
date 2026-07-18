@@ -1,9 +1,9 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "8e401db9-6c91-4164-a5cb-79849ea380a5",
+  "id": "41cb0253-c4e3-493f-acf7-0bdb0a07952a",
   "prevIds": [
-    "4561d405-00ee-4e9e-9da0-89eb2ab7e3c6"
+    "00000000-0000-0000-0000-000000000000"
   ],
   "ddl": [
     {
@@ -104,9 +104,9 @@
     },
     {
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
-      "default": "'opencode/deepseek-v4-flash-free'",
+      "default": null,
       "generated": null,
       "name": "default_model",
       "entityType": "columns",
@@ -114,11 +114,51 @@
     },
     {
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
-      "default": "'low'",
+      "default": null,
       "generated": null,
       "name": "default_variant",
+      "entityType": "columns",
+      "table": "config"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "review_model",
+      "entityType": "columns",
+      "table": "config"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "review_variant",
+      "entityType": "columns",
+      "table": "config"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "2",
+      "generated": null,
+      "name": "max_concurrent_opencode_sessions",
+      "entityType": "columns",
+      "table": "config"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "5",
+      "generated": null,
+      "name": "max_concurrent_work_items",
       "entityType": "columns",
       "table": "config"
     },
@@ -349,6 +389,16 @@
       "default": null,
       "generated": null,
       "name": "queue",
+      "entityType": "columns",
+      "table": "job_queue"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "key",
       "entityType": "columns",
       "table": "job_queue"
     },
@@ -593,6 +643,26 @@
       "table": "repository"
     },
     {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "review_model",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "review_variant",
+      "entityType": "columns",
+      "table": "repository"
+    },
+    {
       "type": "integer",
       "notNull": true,
       "autoincrement": false,
@@ -783,6 +853,16 @@
       "table": "work_item"
     },
     {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "github_pull_request_number",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
       "type": "text",
       "notNull": true,
       "autoincrement": false,
@@ -808,6 +888,26 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "review_model",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "review_variant",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "state",
       "entityType": "columns",
       "table": "work_item"
@@ -823,12 +923,62 @@
       "table": "work_item"
     },
     {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "paused",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "waiting_since",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "holds_worker_slot",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pause_before_step",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
       "type": "text",
       "notNull": false,
       "autoincrement": false,
       "default": null,
       "generated": null,
       "name": "worktree_path",
+      "entityType": "columns",
+      "table": "work_item"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "starting_commit_oid",
       "entityType": "columns",
       "table": "work_item"
     },
@@ -1115,6 +1265,24 @@
       "where": null,
       "origin": "manual",
       "name": "job_queue_ready_idx",
+      "entityType": "indexes",
+      "table": "job_queue"
+    },
+    {
+      "columns": [
+        {
+          "value": "queue",
+          "isExpression": false
+        },
+        {
+          "value": "key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"job_queue\".\"key\" IS NOT NULL",
+      "origin": "manual",
+      "name": "job_queue_queue_key_uidx",
       "entityType": "indexes",
       "table": "job_queue"
     },
