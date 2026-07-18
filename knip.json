@@ -7,7 +7,7 @@
     "nx",
     "tslib"
   ],
-  "ignoreBinaries": ["skills"],
+  "ignoreBinaries": ["skills", "pgrep", "ps"],
   "ignoreFiles": [".opencode/plugin/**"],
   "workspaces": {
     "apps/harness": {
@@ -38,7 +38,8 @@
         "bin/ready-for-agent.js",
         "bin/select-platform.js",
         "scripts/compile-platform-binary.ts",
-        "scripts/generate-standalone-embed.ts"
+        "scripts/generate-standalone-embed.ts",
+        "scripts/packed-install-smoke.ts"
       ],
       "project": ["src/**/*.ts", "bin/**/*.{js,ts}", "scripts/**/*.ts"]
     },

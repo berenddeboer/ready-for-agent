@@ -106,13 +106,66 @@ jobs:
       # - run: bun nx fix-ci
       #   if: always()
 
+  # Distribution-boundary gate: pack launcher + host platform package, install
+  # outside the checkout, run without Bun/Nx. Complementary to live Gherkin e2e.
+  packed-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          filter: tree:0
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "26"
+
+      # Required host tool for product preflight (ambient-auth smoke).
+      - name: Install OpenCode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          test -n "$VERSION"
+          curl -fsSL https://opencode.ai/install | bash -s -- --version "$VERSION" --no-modify-path
+      - name: Add OpenCode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
+
+      - name: Packed-install Harness smoke
+        id: packed-install
+        env:
+          PACKED_INSTALL_DIAGNOSTICS_DIR: ${{ runner.temp }}/packed-install-diagnostics
+        run: bunx nx run ready-for-agent:packed-install-smoke
+
+      - name: Upload packed-install diagnostics
+        if: failure() && steps.packed-install.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: packed-install-diagnostics
+          path: ${{ runner.temp }}/packed-install-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14
+
   release:
     # Manual release only, from main (never on PR/push).
+    # Requires quality gates + packed-install distribution smoke before publish.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: main
+    needs: [main, packed-install]
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       contents: write
       id-token: write
     steps:
@@ -154,11 +207,45 @@ jobs:
           for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
             bunx nx run ready-for-agent:compile --platform="${platform}"
           done
+          # Cross-compiled packages: structural validation only (file + executable).
+          # Full runtime smoke runs on the host platform via packed-install-smoke.
           for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
             binary="packages/ready-for-agent-${platform}/bin/ready-for-agent"
             test -f "${binary}"
             test -x "${binary}"
           done
+
+      # Re-run distribution smoke against versioned release binaries before publish.
+      - name: Install OpenCode
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          test -n "$VERSION"
+          curl -fsSL https://opencode.ai/install | bash -s -- --version "$VERSION" --no-modify-path
+      - name: Add OpenCode to PATH
+        run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
+
+      - name: Host packed-install smoke (release artifacts)
+        id: release-packed-install
+        env:
+          PACKED_INSTALL_DIAGNOSTICS_DIR: ${{ runner.temp }}/packed-install-diagnostics
+        run: bunx nx run ready-for-agent:packed-install-smoke --args=--skip-compile
+
+      - name: Upload release packed-install diagnostics
+        if: failure() && steps.release-packed-install.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-packed-install-diagnostics
+          path: ${{ runner.temp }}/packed-install-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Publish packages to npm (OIDC + provenance)
         run: |
