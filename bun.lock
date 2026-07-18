@@ -87,6 +87,7 @@
         "effect": "^4.0.0-beta.97",
       },
       "devDependencies": {
+        "@ready-for-agent/release-versioning": "workspace:*",
         "@types/bun": "^1.3.0",
       },
       "optionalDependencies": {
@@ -261,6 +262,7 @@
       "version": "0.0.1",
       "bin": {
         "compute-next-version": "./src/bin/compute-next-version.ts",
+        "apply-publish-versions": "./src/bin/apply-publish-versions.ts",
       },
       "dependencies": {
         "@conventional-changelog/git-client": "^3.1.0",

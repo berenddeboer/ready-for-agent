@@ -123,10 +123,12 @@ publish.
    `ready-for-agent` and each platform package, pointing at this repository and
    workflow file.
 2. From GitHub Actions, run the **CI/CD** workflow via **Run workflow**.
-3. The release job computes the next version from conventional commits (fails if
-   nothing to release), builds multi-platform binaries, publishes with OIDC +
-   provenance, tags `vX.Y.Z`, and creates a GitHub Release with notes and
-   binaries.
+3. The release job requires the host **packed-install** smoke (pack + install
+   outside the checkout, no Bun/Nx on product PATH) plus main quality gates,
+   computes the next version from conventional commits (fails if nothing to
+   release), builds multi-platform binaries, re-runs packed-install against the
+   versioned host binary, publishes with OIDC + provenance, tags `vX.Y.Z`, and
+   creates a GitHub Release with notes and binaries.
 
 Local helpers (no publish):
 
