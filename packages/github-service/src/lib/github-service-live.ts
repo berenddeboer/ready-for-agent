@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises"
+import { join } from "node:path"
 import { Config, Duration, Effect, Layer, Redacted, Schedule } from "effect"
 import {
   type FieldsSelection,
@@ -19,6 +21,10 @@ import type {
   GitHubIssueState,
   GitHubPullRequestLifecycleState,
   GitHubPullRequestReference,
+  PrStatusCheckDiagnostic,
+  PrStatusCheckDiagnosticSource,
+  PrStatusCheckDiagnosticsOptions,
+  PrStatusCheckDiagnosticsRequest,
   PullRequestCheckStatus,
   ReadyLabeledIssue,
   TerminalPrStatusCheck,
@@ -29,6 +35,7 @@ const GITHUB_API_URL = "https://api.github.com"
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
 const REQUEST_TIMEOUT = "30 seconds"
+const DEFAULT_MAX_EXCERPT_CHARS = 12_000
 
 class GitHubHttpError extends Error {
   constructor(
@@ -145,6 +152,14 @@ export type ListTerminalChecksForCommit = (
   headSha: string,
   signal?: AbortSignal,
 ) => Promise<readonly TerminalPrStatusCheck[]>
+
+/** Load harness diagnostics for red PR Status Checks (Actions job logs). */
+export type LoadPrStatusCheckDiagnostics = (
+  repository: { owner: string; name: string },
+  checks: readonly PrStatusCheckDiagnosticsRequest[],
+  options: PrStatusCheckDiagnosticsOptions,
+  signal?: AbortSignal,
+) => Promise<readonly PrStatusCheckDiagnostic[]>
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
 
@@ -634,9 +649,40 @@ const sortDependencies = (
       left.number - right.number || left.url.localeCompare(right.url),
   )
 
+const parseDiagnosticSource = (
+  externalId: string,
+): {
+  readonly source: PrStatusCheckDiagnosticSource
+  readonly actionsJobId: number | null
+} => {
+  if (externalId.startsWith("actions-job:")) {
+    const raw = externalId.slice("actions-job:".length)
+    const actionsJobId = Number(raw)
+    if (Number.isSafeInteger(actionsJobId) && actionsJobId > 0) {
+      return { source: "actions-job", actionsJobId }
+    }
+    return { source: "actions-job", actionsJobId: null }
+  }
+  if (externalId.startsWith("status:")) {
+    return { source: "status", actionsJobId: null }
+  }
+  return { source: "unknown", actionsJobId: null }
+}
+
+const boundLogExcerpt = (logText: string, maxExcerptChars: number): string => {
+  if (logText.length <= maxExcerptChars) {
+    return logText
+  }
+  return logText.slice(logText.length - maxExcerptChars)
+}
+
+const safeLogFileName = (externalId: string): string =>
+  `${externalId.replace(/[^a-zA-Z0-9._-]+/g, "-")}.log`
+
 export const makeGitHubService = (
   client: GitHubGraphqlClient,
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
+  loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
 ): GitHubServiceShape => ({
   getPullRequestCheckStatus: Effect.fn(
     "GitHubService.getPullRequestCheckStatus",
@@ -715,6 +761,33 @@ export const makeGitHubService = (
           cause,
         }),
     })
+  }),
+  getPrStatusCheckDiagnostics: Effect.fn(
+    "GitHubService.getPrStatusCheckDiagnostics",
+  )(function* (repository, checks, options = {}) {
+    if (checks.length === 0) {
+      return []
+    }
+    if (loadPrStatusCheckDiagnostics === undefined) {
+      return checks.map((check) => {
+        const { source } = parseDiagnosticSource(check.externalId)
+        return {
+          externalId: check.externalId,
+          name: check.name,
+          source,
+          htmlUrl: null,
+          logFetch: {
+            _tag: "unavailable" as const,
+            reason: "PR Status Check diagnostics loader is not configured",
+          },
+        }
+      })
+    }
+    return yield* githubRequest(
+      `Failed to load PR Status Check diagnostics for ${repository.owner}/${repository.name}`,
+      (signal) =>
+        loadPrStatusCheckDiagnostics(repository, checks, options, signal),
+    )
   }),
   getPullRequestLifecycleStatus: Effect.fn(
     "GitHubService.getPullRequestLifecycleStatus",
@@ -1621,6 +1694,144 @@ const makeListTerminalChecksForCommit =
     return uniqueTerminalChecks([...checkRuns, ...statuses])
   }
 
+const fetchActionsJobDiagnostic = async (
+  token: string,
+  repository: { owner: string; name: string },
+  jobId: number,
+  fetchImpl: GitHubFetch,
+  signal?: AbortSignal,
+): Promise<{ readonly htmlUrl: string | null; readonly logText: string }> => {
+  const jobResponse = await fetchImpl(
+    `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/jobs/${jobId}`,
+    {
+      headers: githubRestHeaders(token),
+      signal,
+    },
+  )
+  const job = await readGitHubJson<{
+    readonly html_url?: unknown
+    readonly name?: unknown
+  }>(
+    jobResponse,
+    `Failed to load Actions job ${jobId} for ${repository.owner}/${repository.name}`,
+  )
+  const htmlUrl =
+    typeof job.html_url === "string" && job.html_url.trim() !== ""
+      ? job.html_url
+      : null
+
+  const logsResponse = await fetchImpl(
+    `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/jobs/${jobId}/logs`,
+    {
+      headers: githubRestHeaders(token),
+      signal,
+      redirect: "follow",
+    },
+  )
+  if (!logsResponse.ok) {
+    throw new GitHubHttpError(
+      logsResponse.status,
+      `Failed to download Actions job logs for ${repository.owner}/${repository.name} job ${jobId}: ${logsResponse.statusText}: ${await logsResponse.text()}`,
+    )
+  }
+  const logText = await logsResponse.text()
+  return { htmlUrl, logText }
+}
+
+const makeLoadPrStatusCheckDiagnostics =
+  (token: string, fetchImpl: GitHubFetch): LoadPrStatusCheckDiagnostics =>
+  async (repository, checks, options, signal) => {
+    const maxExcerptChars =
+      typeof options.maxExcerptChars === "number" &&
+      Number.isSafeInteger(options.maxExcerptChars) &&
+      options.maxExcerptChars > 0
+        ? options.maxExcerptChars
+        : DEFAULT_MAX_EXCERPT_CHARS
+    const logDirectory =
+      typeof options.logDirectory === "string" &&
+      options.logDirectory.trim() !== ""
+        ? options.logDirectory
+        : undefined
+    if (logDirectory !== undefined) {
+      await mkdir(logDirectory, { recursive: true })
+    }
+
+    const diagnostics: PrStatusCheckDiagnostic[] = []
+    for (const check of checks) {
+      const { source, actionsJobId } = parseDiagnosticSource(check.externalId)
+      if (source === "status") {
+        diagnostics.push({
+          externalId: check.externalId,
+          name: check.name,
+          source,
+          htmlUrl: null,
+          logFetch: {
+            _tag: "unavailable",
+            reason:
+              "Commit status contexts do not expose Actions job logs; inspect the status target URL if present",
+          },
+        })
+        continue
+      }
+      if (source !== "actions-job" || actionsJobId === null) {
+        diagnostics.push({
+          externalId: check.externalId,
+          name: check.name,
+          source,
+          htmlUrl: null,
+          logFetch: {
+            _tag: "unavailable",
+            reason: `No Actions job id available for external id ${check.externalId}`,
+          },
+        })
+        continue
+      }
+      try {
+        const { htmlUrl, logText } = await fetchActionsJobDiagnostic(
+          token,
+          repository,
+          actionsJobId,
+          fetchImpl,
+          signal,
+        )
+        let localPath: string | null = null
+        if (logDirectory !== undefined) {
+          localPath = join(logDirectory, safeLogFileName(check.externalId))
+          await writeFile(localPath, logText, "utf8")
+        }
+        diagnostics.push({
+          externalId: check.externalId,
+          name: check.name,
+          source,
+          htmlUrl,
+          logFetch: {
+            _tag: "ok",
+            excerpt: boundLogExcerpt(logText, maxExcerptChars),
+            localPath,
+          },
+        })
+      } catch (cause) {
+        const reason =
+          cause instanceof GitHubHttpError
+            ? cause.message
+            : cause instanceof Error
+              ? cause.message
+              : "Failed to load Actions job logs"
+        diagnostics.push({
+          externalId: check.externalId,
+          name: check.name,
+          source,
+          htmlUrl: null,
+          logFetch: {
+            _tag: "unavailable",
+            reason,
+          },
+        })
+      }
+    }
+    return diagnostics
+  }
+
 const makeGitHubGraphqlClient = (
   token: string,
   fetchImpl: GitHubFetch = fetch,
@@ -1657,6 +1868,7 @@ export const makeGitHubServiceFromToken = (
   makeGitHubService(
     makeGitHubGraphqlClient(token, fetchImpl),
     makeListTerminalChecksForCommit(token, fetchImpl),
+    makeLoadPrStatusCheckDiagnostics(token, fetchImpl),
   )
 
 export const GitHubServiceLive = Layer.effect(

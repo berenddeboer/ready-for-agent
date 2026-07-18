@@ -46,6 +46,7 @@
         "src/bin/get-open-pr-number.ts",
         "src/bin/get-pr-check-status.ts",
         "src/bin/get-pr-lifecycle-status.ts",
+        "src/bin/get-pr-status-check-diagnostics.ts",
         "src/bin/list-ready-issues.ts",
         "src/bin/mark-pr-ready-for-review.ts",
         "src/bin/merge-pull-request.ts",

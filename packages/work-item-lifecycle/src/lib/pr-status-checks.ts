@@ -4,6 +4,7 @@ import { ulid } from "ulidx"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   GitHubService,
+  type PrStatusCheckDiagnostic,
   type TerminalPrStatusCheck,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -208,21 +209,71 @@ const parseInvestigationResult = (
   return null
 }
 
+const sourceLabel = (externalId: string): string => {
+  if (externalId.startsWith("actions-job:")) {
+    return "Actions job"
+  }
+  if (externalId.startsWith("status:")) {
+    return "commit status"
+  }
+  return "unknown source"
+}
+
+const formatRedCheckLine = (check: ObservedPrStatusCheckRow): string =>
+  `- ${check.name} (external id: ${check.external_id}, source: ${sourceLabel(check.external_id)})`
+
+const formatDiagnosticBlock = (diagnostic: PrStatusCheckDiagnostic): string => {
+  const header = `### ${diagnostic.name} (${diagnostic.externalId}, source: ${diagnostic.source})`
+  const urlLine =
+    diagnostic.htmlUrl === null
+      ? "HTML URL: none"
+      : `HTML URL: ${diagnostic.htmlUrl}`
+  if (diagnostic.logFetch._tag === "ok") {
+    const pathLine =
+      diagnostic.logFetch.localPath === null
+        ? "Local log path: none"
+        : `Local log path: ${diagnostic.logFetch.localPath}`
+    return [
+      header,
+      urlLine,
+      pathLine,
+      "Log excerpt (use this evidence first):",
+      "```",
+      diagnostic.logFetch.excerpt,
+      "```",
+    ].join("\n")
+  }
+  return [
+    header,
+    urlLine,
+    `Log fetch unavailable: ${diagnostic.logFetch.reason}`,
+  ].join("\n")
+}
+
 const buildInvestigationWorkPrompt = (
   checks: readonly ObservedPrStatusCheckRow[],
+  diagnostics: readonly PrStatusCheckDiagnostic[],
 ): string => {
-  const redNames = checks
-    .filter((check) => check.outcome === "red")
-    .map((check) => check.name)
+  const redChecks = checks.filter((check) => check.outcome === "red")
   const hasGreen = checks.some((check) => check.outcome === "green")
   const lines = [
     "Process the following PR Status Check results for the pull request on this worktree.",
   ]
-  if (redNames.length > 0) {
+  if (redChecks.length > 0) {
     lines.push(
       "Diagnose and fix these failing checks when possible:",
-      ...redNames.map((name) => `- ${name}`),
-      "Use GitHub to inspect the failing checks and their logs. Fix the underlying problem when possible, verify the fix, commit it, and push it to the existing PR branch.",
+      ...redChecks.map(formatRedCheckLine),
+      "Fine-grained GitHub PATs often cannot use the Checks API; HTTP 403 on Checks endpoints is expected and is not a credential failure by itself. Prefer Actions job logs for external ids of the form actions-job:<id>.",
+      "When calling `gh api` with query parameters on GET endpoints, pass `--method GET` with `-f` (or use a GET-safe invocation). Bare `-f` defaults to POST and can produce misleading 404 responses.",
+    )
+    if (diagnostics.length > 0) {
+      lines.push(
+        "Harness diagnostics for the red checks follow. Use these artifacts first; only call GitHub for additional detail if needed.",
+        ...diagnostics.map(formatDiagnosticBlock),
+      )
+    }
+    lines.push(
+      "Fix the underlying problem when possible, verify the fix, commit it, and push it to the existing PR branch.",
     )
   }
   if (hasGreen) {
@@ -274,12 +325,40 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
       })
     }
+    const redChecks = unhandled.filter((check) => check.outcome === "red")
+    let diagnostics: readonly PrStatusCheckDiagnostic[] = []
+    if (redChecks.length > 0) {
+      const github = yield* GitHubService
+      const logDirectory = `${worktreePath}/.ready-for-agent/status-check-logs`
+      diagnostics = yield* github
+        .getPrStatusCheckDiagnostics(
+          { owner: repository.githubOwner, name: repository.githubRepo },
+          redChecks.map((check) => ({
+            externalId: check.external_id,
+            name: check.name,
+          })),
+          { logDirectory },
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new PrStatusChecksContextError({
+                message:
+                  "message" in cause &&
+                  typeof cause.message === "string" &&
+                  cause.message.trim() !== ""
+                    ? `Failed to load PR Status Check diagnostics: ${cause.message}`
+                    : "Failed to load PR Status Check diagnostics for red PR Status Checks",
+              }),
+          ),
+        )
+    }
     const opencode = yield* Opencode
     yield* opencode
       .continue({
         sessionId,
         prompt: [
-          buildInvestigationWorkPrompt(unhandled),
+          buildInvestigationWorkPrompt(unhandled, diagnostics),
           ...(tokenName === undefined
             ? []
             : [

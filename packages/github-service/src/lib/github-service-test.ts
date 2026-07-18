@@ -46,6 +46,7 @@ export const makeGitHubServiceTest = (
         baseRefName: "main",
         headPushedAt: null,
       }),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
     getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "open" }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,

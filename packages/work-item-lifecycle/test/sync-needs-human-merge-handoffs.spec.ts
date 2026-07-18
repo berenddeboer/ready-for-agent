@@ -55,6 +55,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           baseRefName: "main",
           headPushedAt: null,
         }),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () => Effect.succeed(status),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,

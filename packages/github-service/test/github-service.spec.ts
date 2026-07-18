@@ -698,6 +698,81 @@ describe("GitHubService live implementation", () => {
     })
   })
 
+  it("loads Actions job log diagnostics for actions-job external ids", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("/actions/jobs/200/logs")) {
+        return new Response(
+          "line 1\nerror TS6305: Output file has not been built\nline 3\n",
+          {
+            status: 200,
+            headers: { "content-type": "text/plain" },
+          },
+        )
+      }
+      if (url.includes("/actions/jobs/200")) {
+        return new Response(
+          JSON.stringify({
+            id: 200,
+            name: "lint",
+            html_url: "https://github.com/acme/widgets/actions/runs/55/job/200",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const diagnostics = await Effect.runPromise(
+      service.getPrStatusCheckDiagnostics(
+        repository,
+        [{ externalId: "actions-job:200", name: "lint" }],
+        { maxExcerptChars: 80 },
+      ),
+    )
+
+    expect(diagnostics).toEqual([
+      {
+        externalId: "actions-job:200",
+        name: "lint",
+        source: "actions-job",
+        htmlUrl: "https://github.com/acme/widgets/actions/runs/55/job/200",
+        logFetch: {
+          _tag: "ok",
+          excerpt:
+            "line 1\nerror TS6305: Output file has not been built\nline 3\n",
+          localPath: null,
+        },
+      },
+    ])
+  })
+
+  it("marks commit-status diagnostics unavailable without treating them as hard failure", async () => {
+    const service = makeGitHubServiceFromToken("token", async () => {
+      throw new Error("should not call GitHub for status diagnostics")
+    })
+
+    const diagnostics = await Effect.runPromise(
+      service.getPrStatusCheckDiagnostics(repository, [
+        { externalId: "status:ci/travis", name: "ci/travis" },
+      ]),
+    )
+
+    expect(diagnostics).toEqual([
+      {
+        externalId: "status:ci/travis",
+        name: "ci/travis",
+        source: "status",
+        htmlUrl: null,
+        logFetch: {
+          _tag: "unavailable",
+          reason:
+            "Commit status contexts do not expose Actions job logs; inspect the status target URL if present",
+        },
+      },
+    ])
+  })
+
   it("loads only the latest commit status for each context", async () => {
     const service = makeGitHubServiceFromToken("token", async (input) => {
       const url = String(input)

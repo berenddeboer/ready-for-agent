@@ -50,6 +50,28 @@ const SerializedTerminalPrStatusCheck = Schema.Struct({
   outcome: Schema.Literals(["green", "red"]),
 })
 
+const SerializedPrStatusCheckLogFetch = Schema.Union([
+  Schema.TaggedStruct("ok", {
+    excerpt: Schema.String,
+    localPath: Schema.NullOr(Schema.String),
+  }),
+  Schema.TaggedStruct("unavailable", {
+    reason: Schema.String,
+  }),
+])
+
+const SerializedPrStatusCheckDiagnostic = Schema.Struct({
+  externalId: Schema.String,
+  name: Schema.String,
+  source: Schema.Literals(["actions-job", "status", "unknown"]),
+  htmlUrl: Schema.NullOr(Schema.String),
+  logFetch: SerializedPrStatusCheckLogFetch,
+})
+
+const SerializedPrStatusCheckDiagnostics = Schema.Array(
+  SerializedPrStatusCheckDiagnostic,
+)
+
 const SerializedPullRequestCheckStatusFields = {
   mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
   baseRefName: Schema.NullOr(Schema.String),
@@ -294,6 +316,62 @@ export const keymaxxerGitHubLayer = (options: {
             Effect.catchTag("KeymaxxerError", () =>
               Effect.fail(
                 requestError(repository, "get pull request check status"),
+              ),
+            ),
+          ),
+        getPrStatusCheckDiagnostics: (repository, checks, options = {}) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "get PR Status Check diagnostics",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const checksArg = encodeArgument(
+              JSON.stringify(
+                checks.map((check) => ({
+                  externalId: check.externalId,
+                  name: check.name,
+                })),
+              ),
+            )
+            const logDirectory =
+              typeof options.logDirectory === "string" &&
+              options.logDirectory.trim() !== ""
+                ? encodeArgument(options.logDirectory)
+                : ""
+            const result = yield* runGitHubCommand(
+              tokenName,
+              `bun --conditions @ready-for-agent/source packages/github-service/src/bin/get-pr-status-check-diagnostics.ts ${owner} ${name} ${checksArg}${logDirectory === "" ? "" : ` ${logDirectory}`}`,
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "get PR Status Check diagnostics",
+                result.stderr || result.stdout,
+              )
+            }
+            return yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(SerializedPrStatusCheckDiagnostics),
+            )(result.stdout).pipe(
+              Effect.mapError(() =>
+                requestError(
+                  repository,
+                  "decode PR Status Check diagnostics",
+                  result.stdout,
+                ),
+              ),
+            )
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "get PR Status Check diagnostics"),
               ),
             ),
           ),

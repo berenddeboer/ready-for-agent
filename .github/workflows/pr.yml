@@ -20,10 +20,23 @@ jobs:
         with:
           bun-version: latest
 
-      # Keep this in sync with anomalyco/opencode/github's setup steps.
       # Required when affected packages run OpenCode integration tests.
+      # Resolve the release via authenticated GitHub API then pin the installer
+      # --version flag: bare `opencode.ai/install` hits unauthenticated
+      # /releases/latest and fails under Actions rate limits.
       - name: Install OpenCode
-        run: curl -fsSL https://opencode.ai/install | bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/anomalyco/opencode/releases/latest \
+            | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+          test -n "$VERSION"
+          curl -fsSL https://opencode.ai/install | bash -s -- --version "$VERSION" --no-modify-path
       - name: Add OpenCode to PATH
         run: echo "$HOME/.opencode/bin" >> "$GITHUB_PATH"
 

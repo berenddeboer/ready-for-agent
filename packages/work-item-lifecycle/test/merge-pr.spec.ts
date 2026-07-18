@@ -37,6 +37,7 @@ describe("mergePr", () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed({
           _tag: "succeeded",
@@ -45,6 +46,7 @@ describe("mergePr", () => {
           baseRefName: "main",
           headPushedAt: null,
         }),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -64,6 +66,7 @@ describe("mergePr", () => {
   it("requires a worktree path", async () => {
     const github = Layer.succeed(GitHubService, {
       listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed({
           _tag: "succeeded",
@@ -72,6 +75,7 @@ describe("mergePr", () => {
           baseRefName: "main",
           headPushedAt: null,
         }),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,

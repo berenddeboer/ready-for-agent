@@ -7,7 +7,7 @@ import {
   formatUserFacingError,
 } from "../index.js"
 
-class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
+export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
   "CliArgumentError",
   { message: Schema.String },
 ) {}

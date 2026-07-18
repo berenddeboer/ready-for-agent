@@ -140,7 +140,7 @@ An individual GitHub check run or commit status context associated with a pull r
 _Avoid_: Aggregate status-check rollup, workflow run
 
 **Status Check Handoff**:
-A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks. The prompt names red checks to diagnose and fix; when any check is green, it also asks OpenCode to inspect the latest pull-request review comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback. If processing the handoff produces a commit, OpenCode pushes it and comments on the existing pull request with the commit, verification, feedback addressed, and feedback declined with reasons.
+A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks. The prompt names each red check by display name and external id (and source when known), includes harness-loaded log diagnostics when available, and instructs Actions-job log fallback when Checks is forbidden; when any check is green, it also asks OpenCode to inspect the latest pull-request review comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback. If processing the handoff produces a commit, OpenCode pushes it and comments on the existing pull request with the commit, verification, feedback addressed, and feedback declined with reasons.
 _Avoid_: Check classification, one prompt per check
 
 **Merge Conflict Handoff**:

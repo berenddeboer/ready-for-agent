@@ -13,6 +13,7 @@ const serviceWithList = (
   listReadyIssues,
   getOpenPullRequestNumber: () => Effect.die("not used"),
   getPullRequestCheckStatus: () => Effect.die("not used"),
+  getPrStatusCheckDiagnostics: () => Effect.die("not used"),
   getPullRequestLifecycleStatus: () => Effect.die("not used"),
   markPullRequestReadyForReview: () => Effect.die("not used"),
   mergePullRequest: () => Effect.die("not used"),
