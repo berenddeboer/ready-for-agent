@@ -353,7 +353,7 @@ export const DbServiceLive = Layer.effect(
                id, default_model, default_variant, review_model, review_variant,
                max_concurrent_opencode_sessions, max_concurrent_work_items,
                created_at, updated_at
-             ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', NULL, NULL, 2, 5, ?, ?)`,
+             ) VALUES ('default', NULL, NULL, NULL, NULL, 2, 5, ?, ?)`,
             [now, now],
           )
           .pipe(Effect.mapError(toDatabaseError))
@@ -367,8 +367,8 @@ export const DbServiceLive = Layer.effect(
           .pipe(Effect.mapError(toDatabaseError))
         const row = rows[0] as
           | {
-              default_model: string
-              default_variant: string
+              default_model: string | null
+              default_variant: string | null
               review_model: string | null
               review_variant: string | null
               max_concurrent_opencode_sessions: number
@@ -469,8 +469,8 @@ export const DbServiceLive = Layer.effect(
           .pipe(Effect.mapError(toDatabaseError))
         const row = rows[0] as
           | {
-              default_model: string
-              default_variant: string
+              default_model: string | null
+              default_variant: string | null
               review_model: string | null
               review_variant: string | null
               max_concurrent_opencode_sessions: number

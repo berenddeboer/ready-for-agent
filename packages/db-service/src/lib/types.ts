@@ -39,8 +39,8 @@ export interface UpdateRepositorySettingsInput {
 }
 
 export interface ConfigRecord {
-  readonly defaultModel: string
-  readonly defaultVariant: string
+  readonly defaultModel: string | null
+  readonly defaultVariant: string | null
   readonly reviewModel: string | null
   readonly reviewVariant: string | null
   readonly maxConcurrentOpencodeSessions: number

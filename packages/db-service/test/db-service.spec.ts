@@ -42,13 +42,13 @@ describe("DbService", () => {
   }
 
   describe("config", () => {
-    it("returns defaults and persists updates", () =>
+    it("returns null build model on empty DB and persists updates", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
           expect(yield* db.getConfig).toEqual({
-            defaultModel: "opencode/deepseek-v4-flash-free",
-            defaultVariant: "low",
+            defaultModel: null,
+            defaultVariant: null,
             reviewModel: null,
             reviewVariant: null,
             maxConcurrentOpencodeSessions: 2,

@@ -32,6 +32,7 @@ import {
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
+  BuildModelNotConfiguredError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -359,6 +360,7 @@ export type ImplementNowError =
   | ParentIssueError
   | IssueBlockedError
   | UnfinishedWorkItemExistsError
+  | BuildModelNotConfiguredError
   | WorkItemLifecycleDatabaseError
   | RepositoryNotFoundError
   | DatabaseError
@@ -3058,6 +3060,11 @@ export const makeWorkItemLifecycleLive = (
           const repository = repositories.find(({ id }) => id === repositoryId)
           const model = repository?.defaultModel ?? config.defaultModel
           const variant = repository?.defaultVariant ?? config.defaultVariant
+          if (model === null || variant === null) {
+            return yield* new BuildModelNotConfiguredError({
+              message: "Select a default build model first",
+            })
+          }
           const reviewModel =
             repository?.reviewModel ?? config.reviewModel ?? model
           const reviewVariant =

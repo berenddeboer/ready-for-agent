@@ -42,8 +42,8 @@ export const repository = snakeCase.table(
 
 export const config = snakeCase.table("config", {
   id: text().primaryKey().default("default"),
-  defaultModel: text().notNull().default("opencode/deepseek-v4-flash-free"),
-  defaultVariant: text().notNull().default("low"),
+  defaultModel: text(),
+  defaultVariant: text(),
   reviewModel: text(),
   reviewVariant: text(),
   maxConcurrentOpencodeSessions: integer({ mode: "number" })
