@@ -749,8 +749,8 @@ function RepositoryCard({
     ? "Unpause repository"
     : "Pause repository"
   const pauseButtonClass = repository.paused
-    ? "text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
-    : "text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+    ? "border-blue-300 text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
+    : "border-amber-300 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
 
   return (
     <article className="relative min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
@@ -766,7 +766,7 @@ function RepositoryCard({
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className={`inline-flex size-8 items-center justify-center rounded-md transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : pauseButtonClass}`}
+            className={`inline-flex size-8 items-center justify-center rounded-full border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "border-red-300 text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : pauseButtonClass}`}
             disabled={pausePending}
             onClick={() =>
               repository.paused
