@@ -19,10 +19,31 @@
       "cache": true
     },
     "build": {
-      "dependsOn": ["generate", "^build"]
+      "dependsOn": ["generate", "^build"],
+      "options": {
+        "command": "tsc --build tsconfig.lib.json --force"
+      },
+      "inputs": [
+        "default",
+        "^production",
+        "{projectRoot}/schema.graphql",
+        {
+          "dependentTasksOutputFiles": "**/*",
+          "transitive": false
+        }
+      ]
     },
     "typecheck": {
-      "dependsOn": ["generate", "^build"]
+      "dependsOn": ["generate", "^build"],
+      "inputs": [
+        "default",
+        "^production",
+        "{projectRoot}/schema.graphql",
+        {
+          "dependentTasksOutputFiles": "**/*",
+          "transitive": false
+        }
+      ]
     }
   }
 }
