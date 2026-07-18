@@ -66,6 +66,20 @@
           "target": "generate"
         }
       ]
+    },
+    "smoke": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/dev-smoke.ts"
+      },
+      "dependsOn": [
+        "db:migrate",
+        {
+          "projects": ["graphql-client", "github-service", "graphql-schema"],
+          "target": "generate"
+        }
+      ]
     }
   }
 }

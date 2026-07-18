@@ -47,6 +47,34 @@ describe("single application server topology", () => {
     expect(harness.targets.start?.dependsOn).not.toContain("db:migrate")
   })
 
+  test("harness:smoke boots the Bun-vite dev path and generates GraphQL deps", async () => {
+    const harness = await readJson<{ targets: Record<string, Target> }>(
+      "../project.json",
+    )
+
+    expect(harness.targets.smoke?.dependsOn).toContain("db:migrate")
+    expect(harness.targets.smoke?.dependsOn).toContainEqual({
+      projects: ["graphql-client", "github-service", "graphql-schema"],
+      target: "generate",
+    })
+    expect(harness.targets.smoke?.options?.command).toContain("dev-smoke.ts")
+    expect(harness.targets.smoke?.options?.command).not.toContain(
+      "node_modules/vite/bin/vite.js",
+    )
+
+    const smokeScript = await readFile(
+      new URL("../scripts/dev-smoke.ts", import.meta.url),
+      "utf8",
+    )
+    expect(smokeScript).toContain("KEYMAXXER_ENABLED")
+    expect(smokeScript).toContain("run-with-keymaxxer-sidecar")
+    expect(smokeScript).toContain(
+      "bun --conditions @ready-for-agent/source ./node_modules/vite/bin/vite.js",
+    )
+    expect(smokeScript).toContain("{ health }")
+    expect(smokeScript).not.toContain("E2E_KEYMAXXER_MASTER_KEY")
+  })
+
   test("uses TanStack Start SPA mode without the old API proxy", async () => {
     const viteConfig = await readFile(
       new URL("../vite.config.ts", import.meta.url),
