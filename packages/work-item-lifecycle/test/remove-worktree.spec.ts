@@ -119,6 +119,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           } as const
 
@@ -177,6 +178,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           } as const
 
@@ -232,6 +234,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           })
         }),
@@ -277,6 +280,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           } as const
 
@@ -328,6 +332,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           } as const
 
@@ -393,6 +398,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           })
         }),
@@ -452,6 +458,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -493,6 +500,7 @@ describe("removeWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),

@@ -1,0 +1,1 @@
+ALTER TABLE `work_item` ADD `completion_summary` text;

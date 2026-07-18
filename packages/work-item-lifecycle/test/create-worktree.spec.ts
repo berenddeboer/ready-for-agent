@@ -128,6 +128,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -198,6 +199,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -243,6 +245,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -291,6 +294,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -339,6 +343,7 @@ describe("createWorktree", () => {
               reviewVariant: "low",
               worktreePath: null,
               startingCommitOid: null,
+              completionSummary: null,
               sessionId: null,
             },
             { tmpDir },
@@ -390,6 +395,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           } as const
 
@@ -445,6 +451,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -489,6 +496,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -527,6 +535,7 @@ describe("createWorktree", () => {
             reviewVariant: "low",
             worktreePath: null,
             startingCommitOid: null,
+            completionSummary: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),

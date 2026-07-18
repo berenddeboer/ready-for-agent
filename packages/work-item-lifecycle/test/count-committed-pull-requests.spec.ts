@@ -19,7 +19,7 @@ const successfulSteps: LifecycleStepsShape = {
     }),
   installDependencies: () => Effect.void,
   implement: () => Effect.succeed("ses_test"),
-  assessChanges: () => Effect.void,
+  assessChanges: () => Effect.succeed({ _tag: "changes" }),
   preCommit: () => Effect.void,
   review: () => Effect.void,
   commit: () => Effect.void,
@@ -31,6 +31,7 @@ const successfulSteps: LifecycleStepsShape = {
   markPrReadyForReview: () => Effect.void,
   decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
   mergePr: () => Effect.void,
+  closeIssue: () => Effect.void,
   localCleanup: () => Effect.void,
   removeWorktree: () => Effect.void,
 }

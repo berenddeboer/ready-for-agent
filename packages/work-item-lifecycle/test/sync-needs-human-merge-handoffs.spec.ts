@@ -28,7 +28,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       }),
     installDependencies: () => Effect.void,
     implement: () => Effect.succeed("ses_test_implement_session"),
-    assessChanges: () => Effect.void,
+    assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
     review: () => Effect.void,
     commit: () => Effect.void,

@@ -6,6 +6,7 @@ import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import { assessChanges } from "./assess-changes.js"
+import { closeIssue } from "./close-issue.js"
 import { commit } from "./commit.js"
 import { createPr } from "./create-pr.js"
 import { createWorktree } from "./create-worktree.js"
@@ -26,12 +27,10 @@ import { resolvePrMergeConflict } from "./resolve-pr-merge-conflict.js"
 import { review } from "./review.js"
 
 /**
- * Production LifecycleSteps: Create Worktree, Install Dependencies, Implement,
- * Assess Changes, Pre-Commit, Review, Commit, and Create PR (OpenCode continues
- * the Implement Session for Pre-Commit fix loops, Review, Commit, and Create PR;
- * Assess Changes is git-only; Pre-Commit still runs harness git validation first).
- * Captures platform, database, Keymaxxer, and OpenCode services so handlers remain
- * `Effect<A>` with no requirements.
+ * Production LifecycleSteps: Create Worktree through local cleanup, including
+ * Assess Changes (git then optional OpenCode confirm) and Close Issue for
+ * No-Change Outcomes. Captures platform, database, Keymaxxer, GitHub, and
+ * OpenCode services so handlers remain `Effect<A>` with no requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,
@@ -91,6 +90,7 @@ export const LifecycleStepsLive = Layer.effect(
         withServices(markPrReadyForReview(context)),
       decidePrMerge: (context) => withServices(decidePrMerge(context)),
       mergePr: (context) => withServices(mergePr(context)),
+      closeIssue: (context) => withServices(closeIssue(context)),
       localCleanup: (context) => withServices(localCleanup(context)),
       removeWorktree: (context) => withServices(removeWorktree(context)),
     })

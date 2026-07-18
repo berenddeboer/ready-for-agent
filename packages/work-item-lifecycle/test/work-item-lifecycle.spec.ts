@@ -62,7 +62,7 @@ describe("WorkItemLifecycle", () => {
       }),
     installDependencies: () => Effect.void,
     implement: () => Effect.succeed("ses_test_implement_session"),
-    assessChanges: () => Effect.void,
+    assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
     review: () => Effect.void,
     commit: () => Effect.void,
@@ -74,6 +74,7 @@ describe("WorkItemLifecycle", () => {
     markPrReadyForReview: () => Effect.void,
     decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
     mergePr: () => Effect.void,
+    closeIssue: () => Effect.void,
     localCleanup: () => Effect.void,
     removeWorktree: () => Effect.void,
   }
@@ -1994,7 +1995,7 @@ describe("WorkItemLifecycle", () => {
         },
         assessChanges: (context) => {
           seen.push(context)
-          return Effect.void
+          return Effect.succeed({ _tag: "changes" as const })
         },
         preCommit: (context) => {
           seen.push(context)
@@ -2031,6 +2032,7 @@ describe("WorkItemLifecycle", () => {
           seen.push(context)
           return Effect.void
         },
+        closeIssue: () => Effect.void,
         localCleanup: (context) => {
           seen.push(context)
           return Effect.void
@@ -2955,6 +2957,7 @@ describe("WorkItemLifecycle", () => {
           mark_pr_ready_for_review: Duration.minutes(5),
           decide_pr_merge: Duration.minutes(15),
           merge_pr: Duration.minutes(5),
+          close_issue: Duration.minutes(5),
           local_cleanup: Duration.minutes(5),
         },
       }).pipe(
@@ -4171,6 +4174,7 @@ describe("WorkItemLifecycle", () => {
             reviewVariant: afterCreate.reviewVariant,
             worktreePath: "/tmp/worktrees/reset-me",
             startingCommitOid: "abc123",
+            completionSummary: null,
             sessionId: null,
           })
         }),

@@ -43,6 +43,7 @@ const baseContext = (
   reviewVariant: "high",
   worktreePath,
   startingCommitOid: null,
+  completionSummary: null,
   sessionId: "ses_pre_commit",
   ...overrides,
 })

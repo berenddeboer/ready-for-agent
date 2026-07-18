@@ -42,6 +42,7 @@ const context: LifecycleStepContext = {
   reviewVariant: "high",
   worktreePath: "/tmp/worktree",
   startingCommitOid: null,
+  completionSummary: null,
   sessionId: "ses_implement",
 }
 

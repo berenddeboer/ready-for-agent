@@ -26,6 +26,7 @@ const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
   reviewVariant: "high",
   worktreePath,
   startingCommitOid: null,
+  completionSummary: null,
   sessionId: null,
 })
 
