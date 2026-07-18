@@ -28,16 +28,6 @@ const contentTypeForPathname = (pathname: string): string | undefined => {
   return undefined
 }
 
-const normalizeGraphqlResponse = (response: unknown): Response => {
-  if (response instanceof Response) return response
-  const compatible = response as Response
-  return new Response(compatible.body, {
-    headers: compatible.headers,
-    status: compatible.status,
-    statusText: compatible.statusText,
-  })
-}
-
 export const serveStaticAssetFromDirectory = async (
   request: Request,
   clientDirectory: string,
@@ -99,26 +89,3 @@ export const serveStaticAssetFromEmbed = async (
 
   return new Response(file, { headers })
 }
-
-/**
- * Production SPA handler: GraphQL via application context, shell HTML otherwise.
- * Used by the compiled host binary so the Vite SSR bundle is not required at runtime.
- */
-export const createEmbeddedSpaStartHandler = (input: {
-  readonly shellHtmlPath: string
-}): StartHandler => ({
-  fetch: async (request, { context }) => {
-    const url = new URL(request.url)
-    if (url.pathname === "/graphql") {
-      return normalizeGraphqlResponse(await context.graphqlApi.fetch(request))
-    }
-
-    const shell = Bun.file(input.shellHtmlPath)
-    return new Response(shell, {
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-cache",
-      },
-    })
-  },
-})

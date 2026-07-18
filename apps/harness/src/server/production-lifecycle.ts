@@ -24,8 +24,6 @@ import {
   serveStaticAssetFromEmbed,
 } from "./production-static.js"
 
-export type { EmbeddedClientAssets, StartHandler }
-
 export type ProductionLifecycleEvent =
   | "database-ready"
   | "sidecar-ready"

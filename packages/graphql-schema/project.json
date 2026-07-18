@@ -17,6 +17,12 @@
       ],
       "outputs": ["{projectRoot}/src/type-defs.gen.ts"],
       "cache": true
+    },
+    "build": {
+      "dependsOn": ["generate", "^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["generate", "^build"]
     }
   }
 }
