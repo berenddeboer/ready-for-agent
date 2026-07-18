@@ -17,7 +17,8 @@
     "x64"
   ],
   "files": [
-    "bin/ready-for-agent"
+    "bin/ready-for-agent",
+    "README.md"
   ],
   "preferUnplugged": true
 }

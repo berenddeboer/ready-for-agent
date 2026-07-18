@@ -1,10 +1,15 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   PLATFORM_PACKAGE_NAMES,
+  PLATFORM_PACKAGE_README,
   applyVersionToLauncherPackageJson,
   applyVersionToPlatformPackageJson,
   assertPublishVersion,
   launcherManifestForNpmPublish,
+  preparePublishPackageReadmes,
 } from "../src/lib/publish-packages.js"
 
 describe("assertPublishVersion", () => {
@@ -78,7 +83,11 @@ describe("launcherManifestForNpmPublish", () => {
         license: "MIT",
         type: "module",
         bin: { "ready-for-agent": "./bin/ready-for-agent.js" },
-        files: ["bin/ready-for-agent.js", "bin/select-platform.js"],
+        files: [
+          "bin/ready-for-agent.js",
+          "bin/select-platform.js",
+          "README.md",
+        ],
         scripts: { typecheck: "tsc" },
         dependencies: {
           "@ready-for-agent/graphql-client": "workspace:*",
@@ -100,7 +109,7 @@ describe("launcherManifestForNpmPublish", () => {
       license: "MIT",
       type: "module",
       bin: { "ready-for-agent": "./bin/ready-for-agent.js" },
-      files: ["bin/ready-for-agent.js", "bin/select-platform.js"],
+      files: ["bin/ready-for-agent.js", "bin/select-platform.js", "README.md"],
       optionalDependencies: Object.fromEntries(
         PLATFORM_PACKAGE_NAMES.map((name) => [name, "0.1.0"]),
       ),
@@ -109,5 +118,32 @@ describe("launcherManifestForNpmPublish", () => {
     expect(next).not.toHaveProperty("dependencies")
     expect(next).not.toHaveProperty("devDependencies")
     expect(next).not.toHaveProperty("scripts")
+  })
+})
+
+describe("preparePublishPackageReadmes", () => {
+  it("copies root product README to launcher and writes platform stubs", () => {
+    const root = mkdtempSync(join(tmpdir(), "rfa-publish-readme-"))
+    const productReadme = "# Ready for Agent\n\nInstall with npx.\n"
+    writeFileSync(join(root, "README.md"), productReadme)
+
+    mkdirSync(join(root, "apps", "ready-for-agent"), { recursive: true })
+    writeFileSync(
+      join(root, "apps", "ready-for-agent", "README.md"),
+      "# monorepo architecture only\n",
+    )
+    for (const name of PLATFORM_PACKAGE_NAMES) {
+      mkdirSync(join(root, "packages", name), { recursive: true })
+    }
+
+    const staged = preparePublishPackageReadmes(root)
+
+    expect(readFileSync(staged.launcherReadmePath, "utf8")).toBe(productReadme)
+    expect(staged.platformReadmePaths).toHaveLength(
+      PLATFORM_PACKAGE_NAMES.length,
+    )
+    for (const path of staged.platformReadmePaths) {
+      expect(readFileSync(path, "utf8")).toBe(PLATFORM_PACKAGE_README)
+    }
   })
 })
