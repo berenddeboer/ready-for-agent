@@ -25,6 +25,7 @@ const context: LifecycleStepContext = {
   reviewModel: "opencode/test-model",
   reviewVariant: "high",
   worktreePath: "/tmp/worktree",
+  startingCommitOid: null,
   sessionId: "ses_implement",
 }
 

@@ -12,9 +12,14 @@ import {
 import { describe, expect, it } from "bun:test"
 
 const successfulSteps: LifecycleStepsShape = {
-  createWorktree: () => Effect.succeed("/tmp/worktrees/acme-widgets-42"),
+  createWorktree: () =>
+    Effect.succeed({
+      worktreePath: "/tmp/worktrees/acme-widgets-42",
+      startingCommitOid: "abc123",
+    }),
   installDependencies: () => Effect.void,
   implement: () => Effect.succeed("ses_test"),
+  assessChanges: () => Effect.void,
   preCommit: () => Effect.void,
   review: () => Effect.void,
   commit: () => Effect.void,

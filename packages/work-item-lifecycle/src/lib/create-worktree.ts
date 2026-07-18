@@ -151,6 +151,28 @@ const realPath = (path: string) =>
     return yield* fs.realPath(path)
   })
 
+const resolveStartingCommitOid = (worktreePath: string) =>
+  runGit({ localPath: worktreePath, isBare: false }, [
+    "rev-parse",
+    "HEAD",
+  ]).pipe(
+    Effect.map((stdout) => stdout.trim()),
+    Effect.flatMap((oid) => {
+      if (oid === "") {
+        return Effect.fail(
+          new GitCommandError({
+            message: "Unable to resolve starting commit OID for worktree",
+            command: "git",
+            args: ["-C", worktreePath, "rev-parse", "HEAD"],
+            exitCode: 1,
+            stderr: "Empty rev-parse output",
+          }),
+        )
+      }
+      return Effect.succeed(oid)
+    }),
+  )
+
 export const createWorktree = (
   context: LifecycleStepContext,
   options: { readonly tmpDir?: string } = {},
@@ -230,7 +252,9 @@ export const createWorktree = (
         })
       }
 
-      return absoluteExisting
+      const startingCommitOid =
+        yield* resolveStartingCommitOid(absoluteExisting)
+      return { worktreePath: absoluteExisting, startingCommitOid }
     }
 
     if (hasBranch) {
@@ -253,5 +277,7 @@ export const createWorktree = (
       startPoint,
     ])
 
-    return yield* realPath(worktreePath)
+    const absolutePath = yield* realPath(worktreePath)
+    const startingCommitOid = yield* resolveStartingCommitOid(absolutePath)
+    return { worktreePath: absolutePath, startingCommitOid }
   })

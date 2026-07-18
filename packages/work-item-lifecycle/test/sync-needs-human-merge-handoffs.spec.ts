@@ -21,9 +21,14 @@ import { describe, expect, it } from "bun:test"
 
 describe("syncNeedsHumanMergeHandoffs", () => {
   const successfulSteps: LifecycleStepsShape = {
-    createWorktree: () => Effect.succeed("/tmp/worktrees/acme-widgets-42"),
+    createWorktree: () =>
+      Effect.succeed({
+        worktreePath: "/tmp/worktrees/acme-widgets-42",
+        startingCommitOid: "abc123",
+      }),
     installDependencies: () => Effect.void,
     implement: () => Effect.succeed("ses_test_implement_session"),
+    assessChanges: () => Effect.void,
     preCommit: () => Effect.void,
     review: () => Effect.void,
     commit: () => Effect.void,
@@ -120,7 +125,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       blockedBy: [],
     })
     const created = yield* lifecycle.implementNow(repository.id, 42)
-    for (let index = 0; index < 11; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       yield* makeQueuedJobsAvailable
       yield* claimAndRunPending
     }

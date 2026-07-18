@@ -21,6 +21,7 @@ export type OperationalLifecycleStep =
   | "create_worktree"
   | "install_dependencies"
   | "implement"
+  | "assess_changes"
   | "pre_commit"
   | "review"
   | "commit"
@@ -86,6 +87,8 @@ export interface WorkItemRecord {
   /** When set, advancement into this step auto-pauses (no Step Run enqueued). */
   readonly pauseBeforeStep: OperationalLifecycleStep | null
   readonly worktreePath: string | null
+  /** Exact commit OID recorded by Create Worktree for Assess Changes. */
+  readonly startingCommitOid: string | null
   readonly sessionId: string | null
   readonly failureCode: string | null
   readonly failureMessage: string | null
@@ -200,6 +203,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   create_worktree: Duration.minutes(5),
   install_dependencies: Duration.minutes(15),
   implement: Duration.hours(2),
+  assess_changes: Duration.minutes(5),
   pre_commit: Duration.hours(2),
   review: Duration.hours(1),
   commit: Duration.minutes(5),

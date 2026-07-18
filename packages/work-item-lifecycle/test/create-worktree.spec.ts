@@ -118,7 +118,7 @@ describe("createWorktree", () => {
             isBare: true,
           })
 
-          return yield* createWorktree({
+          return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
             githubIssueNumber: 42,
@@ -127,8 +127,9 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
-          })
+          })).worktreePath
         }),
       )
 
@@ -187,7 +188,7 @@ describe("createWorktree", () => {
             isBare: true,
           })
 
-          return yield* createWorktree({
+          return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
             githubIssueNumber: 99,
@@ -196,8 +197,9 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
-          })
+          })).worktreePath
         }),
       )
 
@@ -231,7 +233,7 @@ describe("createWorktree", () => {
             isBare: true,
           })
 
-          return yield* createWorktree({
+          return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
             githubIssueNumber: 2039,
@@ -240,8 +242,9 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
-          })
+          })).worktreePath
         }),
       )
 
@@ -278,7 +281,7 @@ describe("createWorktree", () => {
             isBare: true,
           })
 
-          return yield* createWorktree({
+          return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
             githubIssueNumber: 2039,
@@ -287,8 +290,9 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
-          })
+          })).worktreePath
         }),
       )
 
@@ -324,7 +328,7 @@ describe("createWorktree", () => {
             isBare: false,
           })
 
-          return yield* createWorktree(
+          return (yield* createWorktree(
             {
               workItemId,
               repositoryId: repository.id,
@@ -334,10 +338,11 @@ describe("createWorktree", () => {
               reviewModel: "opencode/test",
               reviewVariant: "low",
               worktreePath: null,
+              startingCommitOid: null,
               sessionId: null,
             },
             { tmpDir },
-          )
+          )).worktreePath
         }),
       )
 
@@ -384,6 +389,7 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           } as const
 
@@ -393,7 +399,11 @@ describe("createWorktree", () => {
         }),
       )
 
-      expect(first.again).toBe(first.created)
+      expect(first.again.worktreePath).toBe(first.created.worktreePath)
+      expect(first.again.startingCommitOid).toBe(
+        first.created.startingCommitOid,
+      )
+      expect(first.created.startingCommitOid).toMatch(/^[0-9a-f]{40}$/)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -434,6 +444,7 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -477,6 +488,7 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -514,6 +526,7 @@ describe("createWorktree", () => {
             reviewModel: "opencode/test",
             reviewVariant: "low",
             worktreePath: null,
+            startingCommitOid: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),

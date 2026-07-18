@@ -20,8 +20,15 @@ export interface LifecycleStepContext {
   readonly reviewModel: string
   readonly reviewVariant: string
   readonly worktreePath: string | null
+  readonly startingCommitOid: string | null
   readonly sessionId: string | null
   readonly maxDuration?: Duration.Duration
+}
+
+/** Result of a successful Create Worktree Step Run. */
+export type CreateWorktreeResult = {
+  readonly worktreePath: string
+  readonly startingCommitOid: string
 }
 
 /**
@@ -31,13 +38,16 @@ export interface LifecycleStepContext {
 export interface LifecycleStepsShape {
   readonly createWorktree: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<string, unknown>
+  ) => Effect.Effect<CreateWorktreeResult, unknown>
   readonly installDependencies: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
   readonly implement: (
     context: LifecycleStepContext,
   ) => Effect.Effect<string, unknown>
+  readonly assessChanges: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
   readonly preCommit: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
