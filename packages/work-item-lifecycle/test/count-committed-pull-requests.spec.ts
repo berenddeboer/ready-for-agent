@@ -238,6 +238,44 @@ describe("countCommittedPullRequests", () => {
       }),
     ))
 
+  it("does not count Complete No-Change Outcomes as committed pull requests", () =>
+    runTest(
+      Effect.gen(function* () {
+        const lifecycle = yield* WorkItemLifecycle
+        const sql = yield* SqlClient.SqlClient
+        yield* seedRepository("repo-a", now)
+        yield* sql.unsafe(
+          `INSERT INTO work_item (
+             id, repository_id, github_issue_number, github_pull_request_number,
+             model, variant, review_model, review_variant, state, state_ready_at,
+             worktree_path, session_id, failure_code, failure_message,
+             completion_summary, created_at, updated_at
+           ) VALUES (
+             'wi-no-change', 'repo-a', 7, NULL,
+             'm', 'v', 'm', 'v', 'complete', ?,
+             NULL, NULL, NULL, NULL,
+             'Findings posted on the Issue.', ?, ?
+           )`,
+          [now, now, now],
+        )
+        yield* sql.unsafe(
+          `INSERT INTO step_run (
+             id, work_item_id, step, status, queue_job_id, queued_at,
+             started_at, finished_at, reason_code, reason_message,
+             created_at, updated_at
+           ) VALUES (
+             'wi-no-change-close', 'wi-no-change', 'close_issue', 'succeeded',
+             NULL, ?, ?, ?, NULL, NULL, ?, ?
+           )`,
+          [now, midDay, midDay, now, now],
+        )
+
+        expect(
+          yield* lifecycle.countCommittedPullRequests(dayStart, dayEnd),
+        ).toBe(0)
+      }),
+    ))
+
   it("counts each Work Item at most once per day even with retry commits", () =>
     runTest(
       Effect.gen(function* () {

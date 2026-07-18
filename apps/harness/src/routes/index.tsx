@@ -21,6 +21,8 @@ import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
+import { workItemIssueUrl } from "../work-item-issue-url.js"
+import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -1555,6 +1557,15 @@ function RepositoryIssueRow({
       {latestWorkItem !== undefined && (
         <WorkItemLifecycleStatus
           workItem={latestWorkItem}
+          issueUrl={
+            issue.url !== ""
+              ? issue.url
+              : workItemIssueUrl(
+                  repository.githubOwner,
+                  repository.githubRepo,
+                  latestWorkItem.githubIssueNumber,
+                )
+          }
           pullRequestUrl={workItemPullRequestUrl(
             repository.githubOwner,
             repository.githubRepo,
@@ -1727,7 +1738,16 @@ function JobsCard() {
                 `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
               )
               const issueTitle = issue?.title
-              const issueUrl = issue?.url
+              const issueUrl =
+                issue?.url !== undefined && issue.url !== ""
+                  ? issue.url
+                  : repository === undefined
+                    ? null
+                    : workItemIssueUrl(
+                        repository.githubOwner,
+                        repository.githubRepo,
+                        workItem.githubIssueNumber,
+                      )
               const issueIdentity =
                 issueTitle === undefined
                   ? `#${workItem.githubIssueNumber}`
@@ -1756,7 +1776,7 @@ function JobsCard() {
                       <p className="m-0 truncate text-xs font-semibold text-slate-700">
                         {repositoryLabel}
                       </p>
-                      {issueUrl !== undefined && issueUrl !== "" ? (
+                      {issueUrl !== null && issueUrl !== "" ? (
                         <a
                           className="m-0 block truncate text-xs font-semibold text-blue-600 hover:underline"
                           href={issueUrl}
@@ -1806,6 +1826,7 @@ function JobsCard() {
                   <WorkItemLifecycleStatus
                     workItem={workItem}
                     compact
+                    issueUrl={issueUrl}
                     pullRequestUrl={
                       repository === undefined
                         ? null
@@ -1947,10 +1968,12 @@ function WorkItemLifecycleStatus({
   workItem,
   compact = false,
   pullRequestUrl = null,
+  issueUrl = null,
 }: {
   workItem: WorkItem
   compact?: boolean
   pullRequestUrl?: string | null
+  issueUrl?: string | null
 }) {
   const queryClient = useQueryClient()
   const status = workItem.status
@@ -2018,6 +2041,11 @@ function WorkItemLifecycleStatus({
   }`
   const openPullRequestLabel =
     prNumber === null ? null : `Open pull request #${prNumber}`
+  const isNoChangeComplete =
+    workItem.state === "COMPLETE" &&
+    prNumber === null &&
+    workItem.completionSummary !== null &&
+    workItem.completionSummary.trim() !== ""
 
   return (
     <div
@@ -2031,32 +2059,15 @@ function WorkItemLifecycleStatus({
         <span className="text-xs font-normal text-slate-500">
           {formatStartedAgo(workItem.createdAt, nowMs)}
         </span>
-        <span className="flex flex-wrap items-center justify-end gap-1">
-          {pullRequestUrl !== null && prNumber !== null && (
-            <a
-              className="rounded-full bg-slate-200 px-2 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-700 uppercase hover:bg-slate-300 hover:underline"
-              href={pullRequestUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={openPullRequestLabel ?? undefined}
-            >
-              PR #{prNumber}
-            </a>
-          )}
-          {pullRequestUrl !== null && openPullRequestLabel !== null ? (
-            <a
-              className={`${statusBadgeClassName} hover:underline`}
-              href={pullRequestUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`${openPullRequestLabel}: ${workItem.statusLabel}`}
-            >
-              {workItem.statusLabel}
-            </a>
-          ) : (
-            <span className={statusBadgeClassName}>{workItem.statusLabel}</span>
-          )}
-        </span>
+        <WorkItemOutcomePresentation
+          state={workItem.state}
+          statusLabel={workItem.statusLabel}
+          statusBadgeClassName={statusBadgeClassName}
+          githubPullRequestNumber={workItem.githubPullRequestNumber}
+          pullRequestUrl={pullRequestUrl}
+          completionSummary={workItem.completionSummary}
+          issueUrl={issueUrl}
+        />
       </div>
       {workItem.lifecycleLabels.length > 0 && (
         <ol
@@ -2071,6 +2082,7 @@ function WorkItemLifecycleStatus({
               nowMs,
             )
             const linkToPullRequest =
+              !isNoChangeComplete &&
               pullRequestUrl !== null &&
               openPullRequestLabel !== null &&
               lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
