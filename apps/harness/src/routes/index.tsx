@@ -1666,13 +1666,13 @@ function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   const failed = pause.isError || start.isError
   const label = workItem.paused ? "Start job" : "Pause job"
   const buttonClass = workItem.paused
-    ? "text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
-    : "text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+    ? "border-blue-300 text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
+    : "border-amber-300 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
 
   return (
     <button
       type="button"
-      className={`inline-flex size-8 shrink-0 items-center justify-center rounded-md transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${failed ? "text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : buttonClass}`}
+      className={`inline-flex size-8 shrink-0 items-center justify-center rounded-full border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${failed ? "border-red-300 text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : buttonClass}`}
       disabled={pending}
       onClick={() => (workItem.paused ? start.mutate() : pause.mutate())}
       aria-label={pending ? `${label} in progress` : label}
