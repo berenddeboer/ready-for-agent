@@ -1,5 +1,5 @@
 import "@tanstack/react-start/server-only"
-import { fileURLToPath } from "node:url"
+import { homedir } from "node:os"
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
@@ -19,12 +19,16 @@ import {
   LifecycleStepsLive,
   WorkItemLifecycleLive,
 } from "@ready-for-agent/work-item-lifecycle"
-import type { ApplicationRequestContext } from "../server-context.js"
+import type { ApplicationRequestContext } from "../application-request-context.js"
 import { ambientGitHubLayer } from "./ambient-github-layer.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 
-const workspaceRoot = fileURLToPath(new URL("../../../..", import.meta.url))
+/**
+ * Directory for host tools that need a cwd but are not scoped to a Repository
+ * or Work Item. Never derived from compiled module locations.
+ */
+const hostToolCwd = () => process.env.HOME?.trim() || homedir()
 
 const keymaxxerSidecarUrlFromEnvironment = (
   environment: Partial<Record<string, string | undefined>>,
@@ -60,10 +64,11 @@ export const createApplication = async (
     sidecarUrl === undefined
       ? disabledKeymaxxerLayer
       : sidecarKeymaxxerLayer(sidecarUrl)
+  const toolCwd = hostToolCwd()
   const githubLayer =
     sidecarUrl === undefined
-      ? ambientGitHubLayer({ workspaceRoot })
-      : keymaxxerGitHubLayer({ workspaceRoot }).pipe(
+      ? ambientGitHubLayer({ workspaceRoot: toolCwd })
+      : keymaxxerGitHubLayer({ workspaceRoot: toolCwd }).pipe(
           Layer.provide(keymaxxerLayer),
         )
   const reconcilerLayer = IssueReconcilerLive.pipe(
@@ -130,7 +135,7 @@ export const createApplication = async (
 
   return {
     context: {
-      graphqlApi: createGraphqlApi(runtime, { opencodeCwd: workspaceRoot }),
+      graphqlApi: createGraphqlApi(runtime, { opencodeCwd: toolCwd }),
     },
     dispose: runtime.dispose,
   }

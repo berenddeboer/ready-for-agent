@@ -37,7 +37,8 @@
         "src/main.ts",
         "bin/ready-for-agent.js",
         "bin/select-platform.js",
-        "scripts/compile-platform-binary.ts"
+        "scripts/compile-platform-binary.ts",
+        "scripts/generate-standalone-embed.ts"
       ],
       "project": ["src/**/*.ts", "bin/**/*.{js,ts}", "scripts/**/*.ts"]
     },
@@ -59,11 +60,16 @@
       "project": ["src/**/*.ts"]
     },
     "packages/graphql-schema": {
-      "entry": [],
-      "project": ["src/**/*.ts"]
+      "entry": ["scripts/generate-type-defs.ts"],
+      "project": ["src/**/*.ts", "scripts/**/*.ts"]
     },
     "packages/db": {
-      "project": ["src/**/*.{ts,tsx}"]
+      "entry": [
+        "scripts/generate-embedded-migrations.ts",
+        "src/bin/migrate.ts",
+        "test/**/*.{test,spec}.ts"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "scripts/**/*.ts", "test/**/*.ts"]
     },
     "packages/release-versioning": {
       "entry": ["src/bin/**/*.ts", "src/index.ts", "test/**/*.{test,spec}.ts"],

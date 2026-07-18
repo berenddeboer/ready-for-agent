@@ -2,6 +2,25 @@
   "name": "db",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/generate-embedded-migrations.ts"
+      },
+      "inputs": [
+        "{workspaceRoot}/packages/db-schema/drizzle/**/migration.sql",
+        "{projectRoot}/scripts/generate-embedded-migrations.ts"
+      ],
+      "outputs": ["{projectRoot}/src/lib/embedded-migrations.gen.ts"],
+      "cache": true
+    },
+    "build": {
+      "dependsOn": ["generate", "^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["generate", "^build"]
+    },
     "test": {
       "executor": "nx:run-commands",
       "options": {
@@ -10,14 +29,15 @@
       },
       "inputs": ["default", "^production"],
       "cache": true,
-      "dependsOn": ["^build"]
+      "dependsOn": ["generate", "^build"]
     },
     "migrate": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
         "command": "ROOT=\"$(cd ../.. && pwd)\" && mkdir -p \"$ROOT/tmp\" && SQLITE_DATABASE_PATH=\"${SQLITE_DATABASE_PATH:-$ROOT/tmp/ready-for-agent.db}\" bun --conditions @ready-for-agent/source src/bin/migrate.ts"
-      }
+      },
+      "dependsOn": ["generate"]
     }
   }
 }

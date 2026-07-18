@@ -20,13 +20,18 @@ bin that selects the host platform binary from optional dependencies:
 - `ready-for-agent-darwin-x64`
 - `ready-for-agent-darwin-arm64`
 
-Compile a host binary into the matching platform package:
+Compile a host binary into the matching platform package (depends on
+`harness:build` and embeds UI assets, GraphQL schema, and migrations):
 
 ```bash
 bunx nx run ready-for-agent:compile
 # or a specific platform key:
-bunx nx run ready-for-agent:compile --platform=linux-x64
+bunx nx run ready-for-agent:compile --args=--platform=linux-x64
 ```
+
+The compiled binary boots the production Harness in-process (no monorepo, Nx,
+Vite, or external Bun). With Keymaxxer unavailable or `KEYMAXXER_ENABLED=false`,
+it uses ambient GitHub authentication.
 
 Then the launcher runs that binary without Bun on `PATH`:
 

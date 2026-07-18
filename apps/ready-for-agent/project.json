@@ -18,13 +18,38 @@
         "command": "bun --conditions @ready-for-agent/source src/main.ts"
       }
     },
+    "generate-embed": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        {
+          "projects": ["harness"],
+          "target": "build"
+        },
+        {
+          "projects": ["db", "graphql-schema"],
+          "target": "generate"
+        }
+      ],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/generate-standalone-embed.ts"
+      },
+      "inputs": [
+        "{workspaceRoot}/apps/harness/dist/client/**/*",
+        "{projectRoot}/package.json",
+        "{projectRoot}/scripts/generate-standalone-embed.ts"
+      ],
+      "outputs": ["{projectRoot}/src/generated"],
+      "cache": true
+    },
     "compile": {
       "executor": "nx:run-commands",
       "dependsOn": [
         {
           "projects": ["graphql-client"],
           "target": "generate"
-        }
+        },
+        "generate-embed"
       ],
       "options": {
         "cwd": "{projectRoot}",
@@ -52,7 +77,8 @@
         {
           "projects": ["graphql-client"],
           "target": "generate"
-        }
+        },
+        "generate-embed"
       ]
     }
   }

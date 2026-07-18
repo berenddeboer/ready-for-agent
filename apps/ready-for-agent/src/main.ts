@@ -3,6 +3,7 @@ import {
   isInternalKeymaxxerSidecarMode,
   runKeymaxxerSidecarProcess,
 } from "@ready-for-agent/keymaxxer-service"
+import { READY_FOR_AGENT_VERSION } from "./generated/version.ts"
 
 if (isInternalKeymaxxerSidecarMode(process.argv)) {
   await runKeymaxxerSidecarProcess()
@@ -21,9 +22,9 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
     Layer.provideMerge(BunServices.layer),
   )
 
-  const program = Command.run(cli, { version: "0.0.0" }).pipe(
-    Effect.provide(MainLive),
-  )
+  const program = Command.run(cli, {
+    version: READY_FOR_AGENT_VERSION,
+  }).pipe(Effect.provide(MainLive))
 
   BunRuntime.runMain(program)
 }

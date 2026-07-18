@@ -13,6 +13,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./database-path": {
+      "@ready-for-agent/source": "./src/lib/database-path.ts",
+      "types": "./dist/lib/database-path.d.ts",
+      "import": "./dist/lib/database-path.js",
+      "default": "./dist/lib/database-path.js"
     }
   },
   "nx": {

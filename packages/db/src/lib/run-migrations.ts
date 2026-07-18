@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Config, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { embeddedMigrationSources } from "./embedded-migrations.gen.js"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -27,12 +28,37 @@ type MigrationRow = {
   readonly hash: string
 }
 
+export type MigrationSource = {
+  readonly name: string
+  readonly sql: string
+}
+
+type MigrationRecord = {
+  readonly hash: string
+  readonly name: string
+  readonly folderMillis: number
+  readonly statements: ReadonlyArray<string>
+}
+
 export class MigrationReadError extends Schema.TaggedErrorClass<MigrationReadError>()(
   "MigrationReadError",
   { cause: Schema.Defect() },
 ) {}
 
-const readMigrations = (migrationsFolder: string) =>
+const toMigrationRecords = (
+  sources: ReadonlyArray<MigrationSource>,
+): ReadonlyArray<MigrationRecord> =>
+  sources
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((source) => ({
+      hash: createHash("sha256").update(source.sql).digest("hex"),
+      name: source.name,
+      folderMillis: Number(source.name.slice(0, 14)),
+      statements: source.sql.split("--> statement-breakpoint"),
+    }))
+
+const readMigrationSourcesFromFolder = (migrationsFolder: string) =>
   Effect.tryPromise({
     try: async () => {
       const entries = await readdir(migrationsFolder, { withFileTypes: true })
@@ -45,26 +71,16 @@ const readMigrations = (migrationsFolder: string) =>
               join(migrationsFolder, entry.name, "migration.sql"),
               "utf8",
             )
-            return {
-              hash: createHash("sha256").update(sql).digest("hex"),
-              name: entry.name,
-              folderMillis: Number(entry.name.slice(0, 14)),
-              sql: sql.split("--> statement-breakpoint"),
-            }
+            return { name: entry.name, sql }
           }),
       )
     },
     catch: (cause) => new MigrationReadError({ cause }),
   })
 
-/**
- * Apply Drizzle migration SQL files via the current SqlClient.
- * Skips migrations already recorded in __drizzle_migrations.
- */
-export const runMigrations = (migrationsFolder: string) =>
+const applyMigrationRecords = (migrations: ReadonlyArray<MigrationRecord>) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const migrations = yield* readMigrations(migrationsFolder)
 
     yield* sql`
       CREATE TABLE IF NOT EXISTS __drizzle_migrations (
@@ -88,7 +104,7 @@ export const runMigrations = (migrationsFolder: string) =>
 
       yield* sql.withTransaction(
         Effect.gen(function* () {
-          for (const query of migration.sql) {
+          for (const query of migration.statements) {
             if (query.trim().length > 0) {
               yield* sql(rawSql(query))
             }
@@ -109,9 +125,32 @@ export const runMigrations = (migrationsFolder: string) =>
   })
 
 /**
- * Run migrations using MIGRATIONS_FOLDER config (defaults to db-schema/drizzle).
+ * Apply Drizzle migration SQL sources via the current SqlClient.
+ * Skips migrations already recorded in __drizzle_migrations.
+ */
+export const runMigrationsFromSources = (
+  sources: ReadonlyArray<MigrationSource>,
+) => applyMigrationRecords(toMigrationRecords(sources))
+
+/**
+ * Apply Drizzle migration SQL files via the current SqlClient.
+ * Skips migrations already recorded in __drizzle_migrations.
+ */
+export const runMigrations = (migrationsFolder: string) =>
+  Effect.gen(function* () {
+    const sources = yield* readMigrationSourcesFromFolder(migrationsFolder)
+    yield* runMigrationsFromSources(sources)
+  })
+
+/**
+ * Run migrations using embedded SQL when present, otherwise MIGRATIONS_FOLDER
+ * (defaults to db-schema/drizzle on disk).
  */
 export const runConfiguredMigrations = Effect.gen(function* () {
+  if (embeddedMigrationSources.length > 0) {
+    yield* runMigrationsFromSources(embeddedMigrationSources)
+    return
+  }
   const migrationsFolder = yield* MigrationsFolderConfig
   yield* runMigrations(migrationsFolder)
 })
