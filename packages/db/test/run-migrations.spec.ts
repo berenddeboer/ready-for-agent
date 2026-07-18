@@ -81,7 +81,10 @@ describe("runMigrations", () => {
         expect(migration._tag).toBe("Success")
 
         const applied = yield* sql`SELECT name FROM __drizzle_migrations`
-        expect(applied).toEqual([{ name: "20260718055957_baseline" }])
+        expect(applied).toEqual([
+          { name: "20260718055957_baseline" },
+          { name: "20260718061640_right_black_bird" },
+        ])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })
