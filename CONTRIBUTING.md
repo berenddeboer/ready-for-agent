@@ -82,9 +82,9 @@ the file with external write tooling (single-process WAL).
 bunx nx run harness:start
 ```
 
-Uses `run-with-keymaxxer-sidecar` so the real Keymaxxer Sidecar starts (or is
-reused when `KEYMAXXER_SIDECAR_URL` is already set). Opens the browser unless
-`NO_BROWSER` is set.
+Production lifecycle in `apps/harness/server.ts` owns migrations, Keymaxxer
+Sidecar coordination, HTTP listen, and browser open. Opens the browser unless
+`NO_BROWSER` or `--no-open` is set.
 
 ## Quality checks
 

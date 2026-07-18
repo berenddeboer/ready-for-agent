@@ -5,7 +5,7 @@ Ready for Agent uses a shared backend Keymaxxer Service that never exposes raw s
 ## Topology
 
 - Development and production use the same sidecar process model (not in-process Keymaxxer in the Harness).
-- `scripts/run-with-keymaxxer-sidecar.ts` starts the sidecar, captures the stdout bootstrap line `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:<port>/<capability>/mcp`, and runs Harness with that URL in memory only.
+- Development uses `scripts/run-with-keymaxxer-sidecar.ts` so the sidecar survives Vite reloads. Production uses one lifecycle owner (`apps/harness/src/server/production-lifecycle.ts`) that starts the sidecar as a lifecycle-owned child, captures the stdout bootstrap line `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:<port>/<capability>/mcp`, and keeps that URL in memory only.
 - There is no unauthenticated `/health` route. Readiness is TCP listen; auth is the unguessable path capability (#113).
 
 ## Security

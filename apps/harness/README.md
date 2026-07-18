@@ -48,8 +48,8 @@ is required.
 ## Browser open
 
 Production `harness:start` opens the default browser to the local UI after
-listen unless `NO_BROWSER` is set. The operator binary also supports
-`--no-open`.
+listen unless `NO_BROWSER` or `--no-open` is set. The operator binary also
+supports `--no-open`.
 
 ## Production
 
@@ -59,8 +59,11 @@ Build and start the custom Bun server with:
 bunx nx run harness:start
 ```
 
-Production uses `run-with-keymaxxer-sidecar` so the real Keymaxxer Sidecar is
-started (or reused when `KEYMAXXER_SIDECAR_URL` is already set).
+Production startup is owned by one lifecycle in `server.ts`: database
+preparation and migrations, Keymaxxer Sidecar coordination, application
+runtime and HTTP listener, browser opening, and signal-driven cleanup. The
+Sidecar is started (or reused when `KEYMAXXER_SIDECAR_URL` is already set)
+without wrapping the Harness in a second coordinator process.
 
 ## Live end-to-end
 
