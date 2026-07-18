@@ -39,7 +39,7 @@ export type HttpServerHandle = {
   readonly stop: (closeActiveConnections?: boolean) => Promise<void> | void
 }
 
-export type StartHandler = {
+type StartHandler = {
   fetch: (
     request: Request,
     options: { context: ApplicationRequestContext },
@@ -133,7 +133,7 @@ export const resolveKeymaxxerMode = (
   return { kind: "spawn-sidecar" }
 }
 
-export const applyProductionMigrations = async (
+const applyProductionMigrations = async (
   _environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> => {
   await Effect.runPromise(
@@ -148,7 +148,7 @@ export const applyProductionMigrations = async (
   )
 }
 
-export const startOwnedSidecar = (input: {
+const startOwnedSidecar = (input: {
   readonly environment: NodeJS.ProcessEnv
   readonly sidecarEntryPath: string
   readonly workspaceRoot: string
