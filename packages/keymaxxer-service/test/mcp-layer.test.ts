@@ -458,11 +458,12 @@ describe("MCP process configuration", () => {
     ).toEqual({ HOME: "/home/test" })
   })
 
-  test("uses an existing explicit Keymaxxer entrypoint", () => {
+  test("uses Bun for an existing source Keymaxxer entrypoint", () => {
     expect(
       keymaxxerMcpCommand(
         { KEYMAXXER_ENTRYPOINT: "/custom/keymaxxer/index.ts" },
         (path) => path === "/custom/keymaxxer/index.ts",
+        () => false,
       ),
     ).toEqual({
       command: "bun",
@@ -470,8 +471,27 @@ describe("MCP process configuration", () => {
     })
   })
 
+  test("executes a valid executable KEYMAXXER_ENTRYPOINT directly", () => {
+    expect(
+      keymaxxerMcpCommand(
+        { KEYMAXXER_ENTRYPOINT: "/usr/local/bin/keymaxxer" },
+        (path) => path === "/usr/local/bin/keymaxxer",
+        (path) => path === "/usr/local/bin/keymaxxer",
+      ),
+    ).toEqual({
+      command: "/usr/local/bin/keymaxxer",
+      args: ["serve"],
+    })
+  })
+
   test("uses keymaxxer on PATH when entrypoint is unset", () => {
-    expect(keymaxxerMcpCommand({}, () => true)).toEqual({
+    expect(
+      keymaxxerMcpCommand(
+        {},
+        () => true,
+        () => false,
+      ),
+    ).toEqual({
       command: "keymaxxer",
       args: ["serve"],
     })
@@ -480,7 +500,13 @@ describe("MCP process configuration", () => {
   test("never selects a hardcoded contrib filesystem path", () => {
     const contrib =
       "/home/berend/src/contrib/keymaxxer/packages/cli/src/index.ts"
-    expect(keymaxxerMcpCommand({}, (path) => path === contrib)).toEqual({
+    expect(
+      keymaxxerMcpCommand(
+        {},
+        (path) => path === contrib,
+        () => false,
+      ),
+    ).toEqual({
       command: "keymaxxer",
       args: ["serve"],
     })
@@ -490,6 +516,7 @@ describe("MCP process configuration", () => {
     expect(
       keymaxxerMcpCommand(
         { KEYMAXXER_ENTRYPOINT: "/missing/keymaxxer" },
+        () => false,
         () => false,
       ),
     ).toEqual({

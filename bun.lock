@@ -82,6 +82,7 @@
       "dependencies": {
         "@effect/platform-bun": "^4.0.0-beta.97",
         "@ready-for-agent/graphql-client": "workspace:*",
+        "@ready-for-agent/keymaxxer-service": "workspace:*",
         "effect": "^4.0.0-beta.97",
       },
       "devDependencies": {

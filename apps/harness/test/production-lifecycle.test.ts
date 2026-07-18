@@ -1,4 +1,13 @@
+import { spawn } from "node:child_process"
 import { EventEmitter } from "node:events"
+import { createServer } from "node:net"
+import { createInterface } from "node:readline"
+import { fileURLToPath } from "node:url"
+import {
+  INTERNAL_KEYMAXXER_SIDECAR_ARG,
+  KEYMAXXER_SIDECAR_URL_PREFIX,
+  resolveKeymaxxerSidecarChildSpawn,
+} from "@ready-for-agent/keymaxxer-service"
 import {
   type Application,
   type HttpServerHandle,
@@ -107,6 +116,16 @@ describe("production lifecycle keymaxxer mode", () => {
     ).toEqual({
       kind: "existing-url",
       url: "http://127.0.0.1:5032/cap/mcp",
+    })
+  })
+
+  test("disables when Keymaxxer is absent (no entrypoint and not on PATH)", () => {
+    expect(resolveKeymaxxerMode({}, () => false)).toEqual({ kind: "disabled" })
+  })
+
+  test("spawns a Sidecar when Keymaxxer is available", () => {
+    expect(resolveKeymaxxerMode({}, () => true)).toEqual({
+      kind: "spawn-sidecar",
     })
   })
 })
@@ -376,5 +395,187 @@ describe("production lifecycle process behavior", () => {
     )
     expect(events).toContain("sidecar-ready")
     await handle.dispose()
+  })
+
+  test("default owned Sidecar spawn uses internal mode, not workspace main.ts", () => {
+    const spawnPlan = resolveKeymaxxerSidecarChildSpawn({
+      execPath: process.execPath,
+      argv: [
+        process.execPath,
+        fileURLToPath(new URL("../server.ts", import.meta.url)),
+      ],
+    })
+    expect(spawnPlan.args).toContain(INTERNAL_KEYMAXXER_SIDECAR_ARG)
+    expect(spawnPlan.args.join(" ")).not.toContain(
+      "keymaxxer-sidecar/src/main.ts",
+    )
+  })
+
+  test("captures capability URL from an owned internal-mode Sidecar process", async () => {
+    const freePort = async () => {
+      const server = createServer()
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject)
+        server.listen(0, "127.0.0.1", () => resolve())
+      })
+      const address = server.address()
+      if (address === null || typeof address === "string") {
+        server.close()
+        throw new Error("failed to allocate port")
+      }
+      const port = address.port
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+      return port
+    }
+
+    const port = await freePort()
+    const serverEntry = fileURLToPath(new URL("../server.ts", import.meta.url))
+    const spawnPlan = resolveKeymaxxerSidecarChildSpawn({
+      execPath: process.execPath,
+      argv: [process.execPath, serverEntry],
+    })
+
+    let capturedUrl: string | undefined
+    const logs: string[] = []
+
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+        KEYMAXXER_SIDECAR_PORT: String(port),
+      },
+      resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
+      sidecarSpawn: spawnPlan,
+      sidecarBootstrapTimeoutMs: 15_000,
+      applyMigrations: async () => {},
+      createApplication: async (environment) => {
+        capturedUrl = environment.KEYMAXXER_SIDECAR_URL
+        return fakeApplication()
+      },
+      logInfo: (message) => {
+        logs.push(message)
+      },
+      logError: (message) => {
+        errors.push(message)
+      },
+      onEvent: (event) => {
+        events.push(event)
+      },
+      argv: ["bun", "server.ts", "--no-open"],
+    })
+
+    expect(capturedUrl).toBeDefined()
+    expect(capturedUrl?.startsWith(`http://127.0.0.1:${port}/`)).toBe(true)
+    expect(capturedUrl?.endsWith("/mcp")).toBe(true)
+    expect(events).toContain("sidecar-ready")
+    expect(events.indexOf("sidecar-ready")).toBeLessThan(
+      events.indexOf("application-ready"),
+    )
+    // Full capability URL must not appear in parent logs
+    expect(logs.some((line) => line.includes(capturedUrl!))).toBe(false)
+    expect(errors.some((line) => line.includes(capturedUrl!))).toBe(false)
+
+    await handle.dispose()
+  })
+
+  test("absence of Keymaxxer selects ambient mode without spawning", async () => {
+    let startSidecarCalls = 0
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+      },
+      resolveKeymaxxerMode: (environment) =>
+        resolveKeymaxxerMode(environment, () => false),
+      startSidecar: async () => {
+        startSidecarCalls += 1
+        throw new Error("should not spawn when keymaxxer is absent")
+      },
+      applyMigrations: async () => {},
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
+
+    expect(startSidecarCalls).toBe(0)
+    expect(applicationEnvs[0]?.KEYMAXXER_ENABLED).toBe("false")
+    expect(applicationEnvs[0]?.KEYMAXXER_SIDECAR_URL).toBeUndefined()
+    expect(events).not.toContain("sidecar-ready")
+    await handle.dispose()
+  })
+})
+
+describe("internal Sidecar mode process entry", () => {
+  test("server.ts internal mode bootstraps without workspace sidecar main", async () => {
+    const freePort = async () => {
+      const server = createServer()
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject)
+        server.listen(0, "127.0.0.1", () => resolve())
+      })
+      const address = server.address()
+      if (address === null || typeof address === "string") {
+        server.close()
+        throw new Error("failed to allocate port")
+      }
+      const port = address.port
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+      return port
+    }
+
+    const port = await freePort()
+    const serverEntry = fileURLToPath(new URL("../server.ts", import.meta.url))
+    const child = spawn(
+      process.execPath,
+      [
+        "--conditions",
+        "@ready-for-agent/source",
+        serverEntry,
+        INTERNAL_KEYMAXXER_SIDECAR_ARG,
+      ],
+      {
+        env: {
+          ...process.env,
+          KEYMAXXER_SIDECAR_PORT: String(port),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    )
+
+    try {
+      const url = await new Promise<string>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("timed out waiting for internal mode bootstrap"))
+        }, 15_000)
+        if (child.stdout === null) {
+          clearTimeout(timeout)
+          reject(new Error("stdout missing"))
+          return
+        }
+        const lines = createInterface({ input: child.stdout })
+        lines.on("line", (line) => {
+          if (!line.startsWith(KEYMAXXER_SIDECAR_URL_PREFIX)) return
+          clearTimeout(timeout)
+          lines.close()
+          resolve(line.slice(KEYMAXXER_SIDECAR_URL_PREFIX.length).trim())
+        })
+        child.on("exit", (code) => {
+          clearTimeout(timeout)
+          reject(new Error(`exited early: ${code}`))
+        })
+      })
+
+      expect(url.startsWith(`http://127.0.0.1:${port}/`)).toBe(true)
+      child.kill("SIGTERM")
+      await new Promise<void>((resolve) => {
+        child.once("exit", () => resolve())
+      })
+    } finally {
+      child.kill("SIGTERM")
+    }
   })
 })
