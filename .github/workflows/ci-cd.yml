@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  actions: read
+  # actions: write — upload Playwright diagnostics on live e2e failure
+  actions: write
   contents: read
 
 jobs:
@@ -49,6 +50,39 @@ jobs:
           else
             bun nx affected -t lint knip test typecheck
           fi
+
+      # Live Gherkin e2e: trusted main only (this workflow). Never on PR (pr.yml).
+      - name: Require live e2e vault key
+        env:
+          E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+        run: |
+          if [ -z "${E2E_KEYMAXXER_MASTER_KEY}" ]; then
+            echo "error: repository secret E2E_KEYMAXXER_MASTER_KEY is required for the live Harness e2e step" >&2
+            exit 1
+          fi
+
+      - name: Install Playwright Chromium
+        working-directory: apps/harness
+        run: bunx playwright install --with-deps chromium
+
+      - name: Live Harness e2e
+        id: live-e2e
+        env:
+          E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+          KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+          KEYMAXXER_APPROVE: deny
+        run: bunx nx run harness:e2e
+
+      - name: Upload Playwright diagnostics
+        if: failure() && steps.live-e2e.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            apps/harness/playwright-report/
+            apps/harness/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Nx Cloud recommends fixes for failures to help you get CI green faster. Learn more: https://nx.dev/ci/features/self-healing-ci
       # - run: bun nx fix-ci
