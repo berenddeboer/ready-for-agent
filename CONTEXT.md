@@ -25,7 +25,7 @@ Harness-wide operator preferences stored as a single config row: optional defaul
 _Avoid_: Default model seed, product default model
 
 **Auto-merge**:
-A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge.
+A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge. It applies only when a Work Item has a pull request and does not gate Close Issue for a No-Change Outcome.
 _Avoid_: Automerge (GitHub product), auto-approve
 
 **Issue**:
@@ -96,8 +96,24 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to work a Leaf Issue through the implementation lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number without snapshotting its contents, and records the exact identity of its pull request when one is created. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for Implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number without snapshotting its contents, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
+
+**Implement**:
+The Lifecycle Step that asks OpenCode to complete the Issue's objective. Completion may change repository files, produce findings, create or update GitHub artifacts, or perform other work required by the Issue; repository changes are not required.
+_Avoid_: Edit code, generate code
+
+**No-Change Outcome**:
+A successful Work Item outcome that leaves no repository changes to commit because the Issue's objective was completed without changing repository files, such as by reporting findings or creating other Issues. Documentation, configuration, and other non-code repository changes are not a No-Change Outcome and follow the normal changed-work lifecycle.
+_Avoid_: No-code outcome, empty change, no-op
+
+**Assess Changes**:
+The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run. Observable repository changes advance directly to Pre-Commit without consulting OpenCode. When the worktree appears unchanged, Assess Changes asks the Work Item's Implement Session to confirm that the absence of changes is intentional and provide a concise completion summary. A confirmed No-Change Outcome skips Pre-Commit and Review and follows the lifecycle's no-change branch. Assess Changes does not review the work.
+_Avoid_: Review changes, empty-commit check
+
+**Close Issue**:
+The Lifecycle Step that publishes the No-Change Outcome's completion summary on the Work Item's GitHub Issue and closes that Issue after Assess Changes. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried.
+_Avoid_: Complete Work Item, local cleanup
 
 **Worker Slot**:
 One unit of harness capacity reserved by an Admitted Work Item. Only Admitted Work Items occupy a Worker Slot; Work Items waiting for a Worker Slot do not. The number of occupied Worker Slots is bounded by a harness-wide maximum concurrent Work Items Config setting (default five, positive integer), re-read on each admission decision. Raising the bound admits waiters immediately up to the new limit; lowering it does not demote already-Admitted Work Items, but blocks new admissions until occupancy is at or below the new bound. Distinct from the OpenCode session limit and from job-worker fiber budget.
@@ -116,7 +132,7 @@ An explicit operator request that creates a Work Item for a Leaf Issue. Work Ite
 _Avoid_: Auto-implement, enqueue Issue
 
 **Implement Locally**:
-An explicit operator request that creates a Work Item for a Leaf Issue like Implement Now, but records that the Work Item should pause before Commit. Subject to the same Worker Slot admission rules as Implement Now. Local steps (Create Worktree through Review) run only after admission; after Review succeeds the Work Item advances to Commit and is paused with no Commit Step Run enqueued, so the operator can inspect the worktree. Start resumes at Commit and continues the remote lifecycle.
+An explicit operator request that creates a Work Item for a Leaf Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle.
 _Avoid_: Local-only mode, dry run, Implement Now without PR
 
 **Not Implemented**:
@@ -132,7 +148,7 @@ An Implementable Issue with no unfinished Work Item, including no Needs Human Wo
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. Create Worktree records the exact starting commit OID; Assess Changes compares the worktree and branch to that OID and routes observable repository changes (staged, unstaged, untracked, or commits after the starting OID) to Pre-Commit without continuing the OpenCode Session. A successful step advances the Work Item; a failed step leaves the same action pending. A status watch prioritizes a known merge conflict over completed checks, otherwise batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while mergeability or checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled; a merely behind branch does not trigger conflict resolution. When the rollup is `no_checks` and the current PR head commit was pushed at least two minutes before the poll, the watch advances immediately without the normal 60-second no-check grace or second confirmation poll (a harness-restart shortcut for already-stale heads; missing or invalid head push times keep the conservative path). After the PR is ready for review, Decide PR Merge asks whether a clanker may merge or a human must (Auto-merge disabled always requires a human); clanker merge advances to Merge PR (squash via GitHub), then local cleanup, then Complete; human handoff is Needs Human without merging, until a Refresh Job sees the Work Item PR merged (local cleanup then Complete) or closed unmerged (Abandon after local cleanup).
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. A successful step advances the Work Item; a failed step leaves the same action pending. Create Worktree records the exact starting commit OID; Assess Changes compares the worktree and branch to that OID, sends observable repository changes (staged, unstaged, untracked, or commits after the starting OID) to Pre-Commit without continuing the OpenCode Session, and sends a confirmed No-Change Outcome to Close Issue, then local cleanup and Complete. A status watch prioritizes a known merge conflict over completed checks, otherwise batches unhandled green and red PR Status Checks into Investigate PR Status Checks, polls again after 30 seconds while mergeability or checks remain pending, and advances to Mark PR Ready for Review only after two consecutive green polls (30 seconds apart) with every observed terminal check handled; a merely behind branch does not trigger conflict resolution. When the rollup is `no_checks` and the current PR head commit was pushed at least two minutes before the poll, the watch advances immediately without the normal 60-second no-check grace or second confirmation poll (a harness-restart shortcut for already-stale heads; missing or invalid head push times keep the conservative path). After the PR is ready for review, Decide PR Merge asks whether a clanker may merge or a human must (Auto-merge disabled always requires a human); clanker merge advances to Merge PR (squash via GitHub), then local cleanup, then Complete; human handoff is Needs Human without merging, until a Refresh Job sees the Work Item PR merged (local cleanup then Complete) or closed unmerged (Abandon after local cleanup).
 _Avoid_: Last completed step, phase
 
 **PR Status Check**:
@@ -180,7 +196,7 @@ A Work Item that cannot continue autonomously: either a Status Check Handoff can
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item whose Work Item PR is merged and whose local cleanup has finished. Merge may be the harness Merge PR step after a clanker Decide PR Merge decision, or a human merge detected on a Refresh Job after a Decide PR Merge Needs Human handoff (local cleanup only; no Merge PR Step Run). Complete does not mean GitHub closed the Issue.
+A terminal Work Item whose remote outcome is finished and whose local cleanup has finished. For changed work, the Work Item PR is merged, either by the harness after a clanker Decide PR Merge decision or by a human before a Refresh Job resumes cleanup. For a No-Change Outcome, the GitHub Issue is closed without a pull request.
 _Avoid_: Approved, done Issue
 
 **Relevant Issue**:
