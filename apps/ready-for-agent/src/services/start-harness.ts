@@ -4,6 +4,7 @@ import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { Context, Effect, Layer, Schema } from "effect"
+import { isStandaloneExecutable } from "@ready-for-agent/keymaxxer-service"
 import {
   browserOpenCommand,
   resolveUiUrl,
@@ -11,6 +12,7 @@ import {
 } from "../browser-open.ts"
 import { checkHostTools } from "../host-tools-preflight.ts"
 import { resolveDefaultDatabasePath } from "../product-data-dir.ts"
+import { bootStandaloneProduction } from "../standalone-boot.ts"
 
 export class StartHarnessFailed extends Schema.TaggedErrorClass<StartHarnessFailed>()(
   "StartHarnessFailed",
@@ -88,6 +90,157 @@ const openBrowserWhenReady = (url: string) => {
   void tryOpen()
 }
 
+const resolveProductDatabasePath = () => {
+  const home = process.env.HOME?.trim() || homedir()
+  return resolveDefaultDatabasePath({
+    env: {
+      HOME: process.env.HOME,
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+      SQLITE_DATABASE_PATH: process.env.SQLITE_DATABASE_PATH,
+    },
+    platform: process.platform,
+    home,
+  })
+}
+
+const startStandaloneProduction = (options: StartHarnessOptions) =>
+  Effect.tryPromise({
+    try: async () => {
+      const preflight = checkHostTools(commandExists)
+      if (!preflight.ok) {
+        throw new StartHarnessFailed({ detail: preflight.message })
+      }
+
+      const databasePath = resolveProductDatabasePath()
+      try {
+        ensureDatabaseParentDir(databasePath)
+      } catch (error) {
+        throw new StartHarnessFailed({
+          detail:
+            error instanceof Error
+              ? error.message
+              : `Could not create database directory for ${databasePath}`,
+        })
+      }
+
+      process.env.SQLITE_DATABASE_PATH = databasePath
+      await bootStandaloneProduction({ noOpen: options.noOpen === true })
+    },
+    catch: (cause) => {
+      if (cause instanceof StartHarnessFailed) return cause
+      return new StartHarnessFailed({
+        detail: cause instanceof Error ? cause.message : String(cause),
+      })
+    },
+  })
+
+const startMonorepoDevelopment = (options: StartHarnessOptions) =>
+  Effect.callback<void, StartHarnessFailed>((resume) => {
+    const preflight = checkHostTools(commandExists)
+    if (!preflight.ok) {
+      resume(
+        Effect.fail(
+          new StartHarnessFailed({
+            detail: preflight.message,
+          }),
+        ),
+      )
+      return
+    }
+
+    const root = findMonorepoRoot()
+    if (root === undefined) {
+      resume(
+        Effect.fail(
+          new StartHarnessFailed({
+            detail:
+              "Could not find the ready-for-agent monorepo root (expected nx.json and apps/harness).",
+          }),
+        ),
+      )
+      return
+    }
+
+    const databasePath = resolveProductDatabasePath()
+    try {
+      ensureDatabaseParentDir(databasePath)
+    } catch (error) {
+      resume(
+        Effect.fail(
+          new StartHarnessFailed({
+            detail:
+              error instanceof Error
+                ? error.message
+                : `Could not create database directory for ${databasePath}`,
+          }),
+        ),
+      )
+      return
+    }
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      SQLITE_DATABASE_PATH: databasePath,
+    }
+
+    const child = spawn("bun", ["nx", "run", "harness:dev"], {
+      cwd: root,
+      env,
+      stdio: "inherit",
+    })
+
+    if (
+      shouldOpenBrowser({
+        noOpenFlag: options.noOpen === true,
+        env: {
+          NO_BROWSER: process.env.NO_BROWSER,
+          PORT: process.env.PORT,
+        },
+      })
+    ) {
+      openBrowserWhenReady(
+        resolveUiUrl({
+          NO_BROWSER: process.env.NO_BROWSER,
+          PORT: process.env.PORT,
+        }),
+      )
+    }
+
+    child.on("error", (error) => {
+      resume(
+        Effect.fail(
+          new StartHarnessFailed({
+            detail: error.message,
+          }),
+        ),
+      )
+    })
+
+    child.on("exit", (code, signal) => {
+      if (signal) {
+        resume(
+          Effect.fail(
+            new StartHarnessFailed({
+              detail: `Harness exited via signal ${signal}`,
+            }),
+          ),
+        )
+        return
+      }
+      if (code !== 0 && code !== null) {
+        resume(
+          Effect.fail(
+            new StartHarnessFailed({
+              detail: `Harness exited with code ${code}`,
+            }),
+          ),
+        )
+        return
+      }
+      resume(Effect.void)
+    })
+  })
+
 export class StartHarness extends Context.Service<
   StartHarness,
   {
@@ -98,119 +251,8 @@ export class StartHarness extends Context.Service<
 >()("ready-for-agent/StartHarness") {
   static readonly layer = Layer.succeed(StartHarness, {
     start: (options = {}) =>
-      Effect.callback<void, StartHarnessFailed>((resume) => {
-        const preflight = checkHostTools(commandExists)
-        if (!preflight.ok) {
-          resume(
-            Effect.fail(
-              new StartHarnessFailed({
-                detail: preflight.message,
-              }),
-            ),
-          )
-          return
-        }
-
-        const root = findMonorepoRoot()
-        if (root === undefined) {
-          resume(
-            Effect.fail(
-              new StartHarnessFailed({
-                detail:
-                  "Could not find the ready-for-agent monorepo root (expected nx.json and apps/harness).",
-              }),
-            ),
-          )
-          return
-        }
-
-        const home = process.env.HOME?.trim() || homedir()
-        const databasePath = resolveDefaultDatabasePath({
-          env: {
-            HOME: process.env.HOME,
-            XDG_DATA_HOME: process.env.XDG_DATA_HOME,
-            SQLITE_DATABASE_PATH: process.env.SQLITE_DATABASE_PATH,
-          },
-          platform: process.platform,
-          home,
-        })
-        try {
-          ensureDatabaseParentDir(databasePath)
-        } catch (error) {
-          resume(
-            Effect.fail(
-              new StartHarnessFailed({
-                detail:
-                  error instanceof Error
-                    ? error.message
-                    : `Could not create database directory for ${databasePath}`,
-              }),
-            ),
-          )
-          return
-        }
-
-        const env: NodeJS.ProcessEnv = {
-          ...process.env,
-          SQLITE_DATABASE_PATH: databasePath,
-        }
-
-        const child = spawn("bun", ["nx", "run", "harness:dev"], {
-          cwd: root,
-          env,
-          stdio: "inherit",
-        })
-
-        if (
-          shouldOpenBrowser({
-            noOpenFlag: options.noOpen === true,
-            env: {
-              NO_BROWSER: process.env.NO_BROWSER,
-              PORT: process.env.PORT,
-            },
-          })
-        ) {
-          openBrowserWhenReady(
-            resolveUiUrl({
-              NO_BROWSER: process.env.NO_BROWSER,
-              PORT: process.env.PORT,
-            }),
-          )
-        }
-
-        child.on("error", (error) => {
-          resume(
-            Effect.fail(
-              new StartHarnessFailed({
-                detail: error.message,
-              }),
-            ),
-          )
-        })
-
-        child.on("exit", (code, signal) => {
-          if (signal) {
-            resume(
-              Effect.fail(
-                new StartHarnessFailed({
-                  detail: `Harness exited via signal ${signal}`,
-                }),
-              ),
-            )
-            return
-          }
-          if (code !== 0 && code !== null) {
-            resume(
-              Effect.fail(
-                new StartHarnessFailed({
-                  detail: `Harness exited with code ${code}`,
-                }),
-              ),
-            )
-            return
-          }
-          resume(Effect.void)
-        })
-      }),
+      isStandaloneExecutable()
+        ? startStandaloneProduction(options)
+        : startMonorepoDevelopment(options),
   })
 }

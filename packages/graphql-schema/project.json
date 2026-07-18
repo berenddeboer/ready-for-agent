@@ -1,0 +1,22 @@
+{
+  "name": "graphql-schema",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/graphql-schema/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun scripts/generate-type-defs.ts"
+      },
+      "inputs": [
+        "{projectRoot}/schema.graphql",
+        "{projectRoot}/scripts/generate-type-defs.ts"
+      ],
+      "outputs": ["{projectRoot}/src/type-defs.gen.ts"],
+      "cache": true
+    }
+  }
+}

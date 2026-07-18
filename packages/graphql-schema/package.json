@@ -18,8 +18,5 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.lib.json"
-  },
-  "nx": {
-    "name": "graphql-schema"
   }
 }

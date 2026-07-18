@@ -8,7 +8,7 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
   "references": [
     {
       "path": "../layer-turso-local/tsconfig.lib.json"

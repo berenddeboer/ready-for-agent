@@ -9,11 +9,11 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "noEmit": true,
-    "rootDir": "src",
+    "skipLibCheck": true,
     "tsBuildInfoFile": "./out-tsc/app/tsconfig.app.tsbuildinfo",
-    "types": ["node"]
+    "types": ["node", "bun"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
   "exclude": ["src/**/*.test.ts"],
   "references": [
     {

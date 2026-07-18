@@ -1,8 +1,6 @@
-import type { GraphqlApi } from "@ready-for-agent/graphql-api"
+export type { ApplicationRequestContext } from "./application-request-context.ts"
 
-export interface ApplicationRequestContext {
-  readonly graphqlApi: GraphqlApi
-}
+import type { ApplicationRequestContext } from "./application-request-context.ts"
 
 declare module "@tanstack/react-router" {
   interface Register {

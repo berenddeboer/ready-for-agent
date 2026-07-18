@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process"
-import { resolve, sep } from "node:path"
+import { resolve } from "node:path"
 import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
 import { Effect } from "effect"
@@ -10,13 +10,21 @@ import {
   isKeymaxxerAvailable,
   resolveKeymaxxerSidecarChildSpawn,
 } from "@ready-for-agent/keymaxxer-service"
-import type { ApplicationRequestContext } from "../server-context.js"
+import type { ApplicationRequestContext } from "../application-request-context.js"
 import { type Application, createApplication } from "./application.server.js"
 import {
   browserOpenCommand,
   hasNoOpenFlag,
   shouldOpenBrowser,
 } from "./browser-open.js"
+import {
+  type EmbeddedClientAssets,
+  type StartHandler,
+  serveStaticAssetFromDirectory,
+  serveStaticAssetFromEmbed,
+} from "./production-static.js"
+
+export type { EmbeddedClientAssets, StartHandler }
 
 export type ProductionLifecycleEvent =
   | "database-ready"
@@ -41,13 +49,6 @@ export type HttpServerHandle = {
   readonly stop: (closeActiveConnections?: boolean) => Promise<void> | void
 }
 
-type StartHandler = {
-  fetch: (
-    request: Request,
-    options: { context: ApplicationRequestContext },
-  ) => Response | Promise<Response>
-}
-
 export type KeymaxxerMode =
   | { readonly kind: "disabled" }
   | { readonly kind: "existing-url"; readonly url: string }
@@ -60,6 +61,8 @@ export type ProductionLifecycleOptions = {
   readonly port?: number
   readonly clientDirectory?: string
   readonly serverEntryPath?: string
+  /** When set, static assets are served from embedded Bun file paths. */
+  readonly embeddedClientAssets?: EmbeddedClientAssets
   /** Override how the owned Sidecar child is spawned (tests / custom hosts). */
   readonly sidecarSpawn?: SidecarChildSpawn
   readonly sidecarBootstrapTimeoutMs?: number
@@ -79,6 +82,7 @@ export type ProductionLifecycleOptions = {
     readonly hostname: string
     readonly port: number
     readonly clientDirectory: string
+    readonly embeddedClientAssets?: EmbeddedClientAssets
     readonly handler: StartHandler
     readonly context: ApplicationRequestContext
   }) => Promise<HttpServerHandle>
@@ -220,36 +224,11 @@ const openDefaultBrowser = (url: string) => {
   }
 }
 
-const serveStaticAsset = async (request: Request, clientDirectory: string) => {
-  const url = new URL(request.url)
-  if (url.pathname === "/" || url.pathname.endsWith("/")) return undefined
-
-  let pathname: string
-  try {
-    pathname = decodeURIComponent(url.pathname)
-  } catch {
-    return undefined
-  }
-
-  const filePath = resolve(clientDirectory, `.${pathname}`)
-  if (!filePath.startsWith(`${clientDirectory}${sep}`)) return undefined
-
-  const file = Bun.file(filePath)
-  if (!(await file.exists())) return undefined
-
-  return new Response(file, {
-    headers: {
-      "cache-control": pathname.startsWith("/assets/")
-        ? "public, max-age=31536000, immutable"
-        : "no-cache",
-    },
-  })
-}
-
 const defaultServeHttp = async (input: {
   readonly hostname: string
   readonly port: number
   readonly clientDirectory: string
+  readonly embeddedClientAssets?: EmbeddedClientAssets
   readonly handler: StartHandler
   readonly context: ApplicationRequestContext
 }): Promise<HttpServerHandle> => {
@@ -261,10 +240,10 @@ const defaultServeHttp = async (input: {
         return new Response("Invalid Host", { status: 421 })
       }
 
-      const assetResponse = await serveStaticAsset(
-        request,
-        input.clientDirectory,
-      )
+      const assetResponse =
+        input.embeddedClientAssets !== undefined
+          ? await serveStaticAssetFromEmbed(request, input.embeddedClientAssets)
+          : await serveStaticAssetFromDirectory(request, input.clientDirectory)
       return (
         assetResponse ??
         input.handler.fetch(request, { context: input.context })
@@ -311,6 +290,7 @@ export const startProductionLifecycle = async (
   const port = options.port ?? Number(environment.PORT ?? 4200)
   const clientDirectory = options.clientDirectory ?? defaultClientDirectory
   const serverEntryPath = options.serverEntryPath ?? defaultServerEntryPath
+  const embeddedClientAssets = options.embeddedClientAssets
   const sidecarSpawn =
     options.sidecarSpawn ?? resolveKeymaxxerSidecarChildSpawn()
   const bootstrapTimeoutMs = options.sidecarBootstrapTimeoutMs ?? 15_000
@@ -405,6 +385,7 @@ export const startProductionLifecycle = async (
       hostname,
       port,
       clientDirectory,
+      embeddedClientAssets,
       handler,
       context: application.context,
     })

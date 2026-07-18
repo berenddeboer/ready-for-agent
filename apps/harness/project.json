@@ -3,7 +3,13 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "targets": {
     "build": {
-      "dependsOn": ["^build"]
+      "dependsOn": [
+        "^build",
+        {
+          "projects": ["graphql-schema", "db"],
+          "target": "generate"
+        }
+      ]
     },
     "dev": {
       "continuous": true,

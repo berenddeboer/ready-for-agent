@@ -12,6 +12,11 @@ out-tsc
 /packages/graphql-client/src/generated/
 /packages/github-service/src/internal/generated/
 
+# generated standalone / embed inputs
+/packages/db/src/lib/embedded-migrations.gen.ts
+/packages/graphql-schema/src/type-defs.gen.ts
+/apps/ready-for-agent/src/generated/client-assets.ts
+
 # dependencies
 node_modules
 

@@ -68,7 +68,10 @@ export const resolveProductDatabasePath = (
 
 const productDatabasePathFromProcess = (): string =>
   resolveProductDatabasePath({
-    env: process.env,
+    env: {
+      HOME: process.env.HOME,
+      XDG_DATA_HOME: process.env.XDG_DATA_HOME,
+    },
     platform: process.platform,
     home: process.env.HOME?.trim() || homedir(),
   })
