@@ -54,6 +54,7 @@ describe("markPrReadyForReview", () => {
         return Effect.void
       },
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     await Effect.runPromise(
@@ -82,6 +83,7 @@ describe("markPrReadyForReview", () => {
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const exit = await Effect.runPromise(

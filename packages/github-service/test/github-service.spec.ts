@@ -1116,6 +1116,552 @@ describe("GitHubService live implementation", () => {
     }
   })
 
+  it("posts a marked completion summary and closes an open Issue as COMPLETED", async () => {
+    const mutations: unknown[] = []
+    const workItemId = "wi-01HXSQK2KG72RRYVWEQH4S83FK"
+    const summary = "## Findings\n\nNo repository changes were required."
+    const service = makeGitHubService({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: { issue?: { comments?: unknown } }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: [{ body: "unrelated comment" }],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: {
+              id: "I_kwDOOpen",
+              state: "OPEN",
+            },
+          },
+        }) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        if ((request as { addComment?: unknown }).addComment !== undefined) {
+          const body = (
+            request as {
+              addComment: { __args: { input: { body: string } } }
+            }
+          ).addComment.__args.input.body
+          return Promise.resolve({
+            addComment: {
+              commentEdge: { node: { body } },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          closeIssue: {
+            issue: { state: "CLOSED" },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(
+        repository,
+        42,
+        workItemId,
+        summary,
+      ),
+    )
+
+    expect(mutations).toHaveLength(2)
+    expect(mutations[0]).toMatchObject({
+      addComment: {
+        __args: {
+          input: {
+            subjectId: "I_kwDOOpen",
+            body: expect.stringContaining(summary),
+          },
+        },
+      },
+    })
+    const postedBody = (
+      mutations[0] as {
+        addComment: { __args: { input: { body: string } } }
+      }
+    ).addComment.__args.input.body
+    expect(postedBody).toContain(
+      `<!-- ready-for-agent:work-item:${workItemId} -->`,
+    )
+    expect(mutations[1]).toMatchObject({
+      closeIssue: {
+        __args: {
+          input: {
+            issueId: "I_kwDOOpen",
+            stateReason: "COMPLETED",
+          },
+        },
+      },
+    })
+  })
+
+  it("reuses an existing marked comment without posting a duplicate", async () => {
+    const mutations: unknown[] = []
+    const workItemId = "wi-01HXSQK2KG72RRYVWEQH4S83FK"
+    const marker = `<!-- ready-for-agent:work-item:${workItemId} -->`
+    const service = makeGitHubService({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: { issue?: { comments?: unknown } }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: [{ body: "noise" }, { body: `## Done\n\n${marker}` }],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: {
+              id: "I_kwDOOpen",
+              state: "OPEN",
+            },
+          },
+        }) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          closeIssue: {
+            issue: { state: "CLOSED" },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(
+        repository,
+        42,
+        workItemId,
+        "## Summary",
+      ),
+    )
+
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]).toMatchObject({
+      closeIssue: {
+        __args: {
+          input: {
+            issueId: "I_kwDOOpen",
+            stateReason: "COMPLETED",
+          },
+        },
+      },
+    })
+  })
+
+  it("finds a marked comment beyond the first comments page", async () => {
+    const mutations: unknown[] = []
+    const workItemId = "wi-01HXSQK2KG72RRYVWEQH4S83FK"
+    const marker = `<!-- ready-for-agent:work-item:${workItemId} -->`
+    let commentPages = 0
+    const service = makeGitHubService({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: {
+              issue?: {
+                comments?: { __args?: { after?: string } }
+              }
+            }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          commentPages += 1
+          const after = issueSelection.comments.__args?.after
+          if (after === null || after === undefined) {
+            return Promise.resolve({
+              repository: {
+                issue: {
+                  comments: {
+                    nodes: [{ body: "page one only" }],
+                    pageInfo: { endCursor: "cursor-1", hasNextPage: true },
+                  },
+                },
+              },
+            }) as never
+          }
+          expect(after).toBe("cursor-1")
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: [{ body: `found on page two ${marker}` }],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: {
+              id: "I_kwDOOpen",
+              state: "OPEN",
+            },
+          },
+        }) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          closeIssue: {
+            issue: { state: "CLOSED" },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(
+        repository,
+        42,
+        workItemId,
+        "## Summary",
+      ),
+    )
+
+    expect(commentPages).toBe(2)
+    expect(mutations).toHaveLength(1)
+    expect(
+      (mutations[0] as { addComment?: unknown }).addComment,
+    ).toBeUndefined()
+  })
+
+  it("succeeds for an already-closed Issue after ensuring the summary", async () => {
+    const mutations: unknown[] = []
+    const workItemId = "wi-01HXSQK2KG72RRYVWEQH4S83FK"
+    const marker = `<!-- ready-for-agent:work-item:${workItemId} -->`
+    const service = makeGitHubService({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: { issue?: { comments?: unknown } }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: [{ body: `## Already done\n\n${marker}` }],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: {
+              id: "I_kwDOClosed",
+              state: "CLOSED",
+            },
+          },
+        }) as never
+      },
+      mutation: () => {
+        throw new Error("mutation should not run for an already-closed Issue")
+      },
+    })
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(
+        repository,
+        42,
+        workItemId,
+        "## Summary",
+      ),
+    )
+    expect(mutations).toHaveLength(0)
+  })
+
+  it("posts a missing marked summary on an already-closed Issue without re-closing", async () => {
+    const mutations: unknown[] = []
+    const workItemId = "wi-01HXSQK2KG72RRYVWEQH4S83FK"
+    const service = makeGitHubService({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: { issue?: { comments?: unknown } }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: {
+              id: "I_kwDOClosed",
+              state: "CLOSED",
+            },
+          },
+        }) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        const body = (
+          request as {
+            addComment: { __args: { input: { body: string } } }
+          }
+        ).addComment.__args.input.body
+        return Promise.resolve({
+          addComment: {
+            commentEdge: { node: { body } },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.ensureIssueCompletedWithSummary(
+        repository,
+        42,
+        workItemId,
+        "## Late summary",
+      ),
+    )
+
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]).toMatchObject({
+      addComment: {
+        __args: {
+          input: {
+            subjectId: "I_kwDOClosed",
+          },
+        },
+      },
+    })
+  })
+
+  it("retries after comment creation without posting a duplicate comment", async () => {
+    const workItemId = "wi-01HXSQK2KG72RRYVWEQH4S83FK"
+    const marker = `<!-- ready-for-agent:work-item:${workItemId} -->`
+    const summary = "## Findings"
+    let posted = false
+    const mutations: unknown[] = []
+
+    const makeClient = (
+      issueState: "OPEN" | "CLOSED",
+    ): GitHubGraphqlClient => ({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: { issue?: { comments?: unknown } }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: posted
+                    ? [{ body: `${summary}\n\n${marker}` }]
+                    : [{ body: "unrelated" }],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: {
+              id: "I_kwDOOpen",
+              state: issueState,
+            },
+          },
+        }) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        if ((request as { addComment?: unknown }).addComment !== undefined) {
+          posted = true
+          const body = (
+            request as {
+              addComment: { __args: { input: { body: string } } }
+            }
+          ).addComment.__args.input.body
+          return Promise.resolve({
+            addComment: {
+              commentEdge: { node: { body } },
+            },
+          }) as never
+        }
+        return Promise.reject(new Error("close failed"))
+      },
+    })
+
+    const first = makeGitHubService(makeClient("OPEN"))
+    await expect(
+      Effect.runPromise(
+        first.ensureIssueCompletedWithSummary(
+          repository,
+          42,
+          workItemId,
+          summary,
+        ),
+      ),
+    ).rejects.toBeInstanceOf(GitHubRequestError)
+
+    expect(mutations).toHaveLength(2)
+    expect((mutations[0] as { addComment?: unknown }).addComment).toBeDefined()
+    expect((mutations[1] as { closeIssue?: unknown }).closeIssue).toBeDefined()
+
+    mutations.length = 0
+    const second = makeGitHubService({
+      ...makeClient("OPEN"),
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve({
+          closeIssue: {
+            issue: { state: "CLOSED" },
+          },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      second.ensureIssueCompletedWithSummary(
+        repository,
+        42,
+        workItemId,
+        summary,
+      ),
+    )
+
+    expect(mutations).toHaveLength(1)
+    expect(
+      (mutations[0] as { addComment?: unknown }).addComment,
+    ).toBeUndefined()
+    expect(mutations[0]).toMatchObject({
+      closeIssue: {
+        __args: {
+          input: {
+            issueId: "I_kwDOOpen",
+            stateReason: "COMPLETED",
+          },
+        },
+      },
+    })
+  })
+
+  it("maps missing Issue and credential failures for completion", async () => {
+    const missing = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: { issue: null },
+        }) as never,
+    })
+    const missingResult = await Effect.runPromise(
+      Effect.result(
+        missing.ensureIssueCompletedWithSummary(
+          repository,
+          99,
+          "wi-01HXSQK2KG72RRYVWEQH4S83FK",
+          "## Summary",
+        ),
+      ),
+    )
+    expect(Result.isFailure(missingResult)).toBe(true)
+    if (Result.isFailure(missingResult)) {
+      expect(missingResult.failure).toBeInstanceOf(GitHubRequestError)
+    }
+
+    const unavailable = makeGitHubService({
+      query: () => Promise.resolve({ repository: null }) as never,
+    })
+    const unavailableResult = await Effect.runPromise(
+      Effect.result(
+        unavailable.ensureIssueCompletedWithSummary(
+          repository,
+          99,
+          "wi-01HXSQK2KG72RRYVWEQH4S83FK",
+          "## Summary",
+        ),
+      ),
+    )
+    expect(unavailableResult).toEqual(
+      Result.fail(new GitHubRepositoryUnavailableError(repository)),
+    )
+
+    let mutationAttempts = 0
+    const failingMutation = makeGitHubService({
+      query: (request) => {
+        const issueSelection = (
+          request as {
+            repository?: { issue?: { comments?: unknown } }
+          }
+        ).repository?.issue
+        if (issueSelection?.comments !== undefined) {
+          return Promise.resolve({
+            repository: {
+              issue: {
+                comments: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: {
+            issue: { id: "I_kwDOOpen", state: "OPEN" },
+          },
+        }) as never
+      },
+      mutation: () => {
+        mutationAttempts += 1
+        return Promise.reject(new Error("token rejected"))
+      },
+    })
+    await expect(
+      Effect.runPromise(
+        failingMutation.ensureIssueCompletedWithSummary(
+          repository,
+          42,
+          "wi-01HXSQK2KG72RRYVWEQH4S83FK",
+          "## Summary",
+        ),
+      ),
+    ).rejects.toBeInstanceOf(GitHubRequestError)
+    expect(mutationAttempts).toBe(1)
+  })
+
   it("does not merge a PR whose current head checks are not successful", async () => {
     const service = makeGitHubService({
       query: () =>

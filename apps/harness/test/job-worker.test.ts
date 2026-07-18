@@ -146,6 +146,7 @@ const defaultGithubLayer = Layer.succeed(GitHubService, {
     Effect.succeed({ _tag: "open" as const }),
   markPullRequestReadyForReview: () => Effect.void,
   mergePullRequest: () => Effect.void,
+  ensureIssueCompletedWithSummary: () => Effect.void,
   listReadyIssues: () => Effect.succeed([]),
 } satisfies GitHubServiceShape)
 
@@ -403,6 +404,7 @@ describe("Job worker", () => {
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
       listReadyIssues: () =>
         Effect.succeed([
           {

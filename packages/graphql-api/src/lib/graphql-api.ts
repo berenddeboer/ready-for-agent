@@ -336,7 +336,7 @@ const githubTokenCreationUrl = (repository: Repository) => {
   )
   url.searchParams.set("target_name", repository.githubOwner)
   url.searchParams.set("expires_in", "90")
-  url.searchParams.set("issues", "read")
+  url.searchParams.set("issues", "write")
   url.searchParams.set("contents", "write")
   url.searchParams.set("pull_requests", "write")
   // Actions + commit statuses help with CI visibility. Per-check CheckRun nodes

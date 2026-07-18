@@ -50,6 +50,7 @@ export const makeGitHubServiceTest = (
     getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "open" }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
+    ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))
       if (fixture === undefined) {

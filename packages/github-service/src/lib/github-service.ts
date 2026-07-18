@@ -69,6 +69,20 @@ export interface GitHubServiceShape {
     void,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
+  /**
+   * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)
+   * and the Issue is closed with state reason COMPLETED. Idempotent across
+   * retries and already-closed Issues.
+   */
+  readonly ensureIssueCompletedWithSummary: (
+    repository: GitHubRepository,
+    issueNumber: number,
+    workItemId: string,
+    summaryMarkdown: string,
+  ) => Effect.Effect<
+    void,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
 }
 
 export class GitHubService extends Context.Service<

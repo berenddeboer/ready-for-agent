@@ -17,6 +17,7 @@ const serviceWithList = (
   getPullRequestLifecycleStatus: () => Effect.die("not used"),
   markPullRequestReadyForReview: () => Effect.die("not used"),
   mergePullRequest: () => Effect.die("not used"),
+  ensureIssueCompletedWithSummary: () => Effect.die("not used"),
 })
 
 test("ambient GitHub authentication is resolved once", async () => {

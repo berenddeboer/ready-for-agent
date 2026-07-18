@@ -124,6 +124,20 @@ export const ambientGitHubLayer = (options: {
         authenticated((service) =>
           service.mergePullRequest(repository, headRefName),
         ),
+      ensureIssueCompletedWithSummary: (
+        repository,
+        issueNumber,
+        workItemId,
+        summaryMarkdown,
+      ) =>
+        authenticated((service) =>
+          service.ensureIssueCompletedWithSummary(
+            repository,
+            issueNumber,
+            workItemId,
+            summaryMarkdown,
+          ),
+        ),
       listReadyIssues: (repository) =>
         authenticated((service) => service.listReadyIssues(repository)),
     } satisfies GitHubServiceShape

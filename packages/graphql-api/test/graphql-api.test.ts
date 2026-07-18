@@ -574,7 +574,7 @@ describe("GraphQL API", () => {
     expect(creationUrl.searchParams.get("name")).toBe(
       `${repository.githubRepo} - ready-for-agent`,
     )
-    expect(creationUrl.searchParams.get("issues")).toBe("read")
+    expect(creationUrl.searchParams.get("issues")).toBe("write")
     expect(creationUrl.searchParams.get("contents")).toBe("write")
     expect(creationUrl.searchParams.get("pull_requests")).toBe("write")
     expect(creationUrl.searchParams.get("actions")).toBe("read")

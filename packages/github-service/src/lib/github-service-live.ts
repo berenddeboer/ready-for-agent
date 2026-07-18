@@ -679,6 +679,10 @@ const boundLogExcerpt = (logText: string, maxExcerptChars: number): string => {
 const safeLogFileName = (externalId: string): string =>
   `${externalId.replace(/[^a-zA-Z0-9._-]+/g, "-")}.log`
 
+/** Hidden HTML comment marker tying a completion summary to a Work Item. */
+export const workItemCompletionMarker = (workItemId: string): string =>
+  `<!-- ready-for-agent:work-item:${workItemId} -->`
+
 export const makeGitHubService = (
   client: GitHubGraphqlClient,
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
@@ -1082,6 +1086,208 @@ export const makeGitHubService = (
       }
     },
   ),
+  ensureIssueCompletedWithSummary: Effect.fn(
+    "GitHubService.ensureIssueCompletedWithSummary",
+  )(function* (repository, issueNumber, workItemId, summaryMarkdown) {
+    if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+      return yield* new GitHubRequestError({
+        message: `Invalid Issue number for ${repository.owner}/${repository.name}: ${String(issueNumber)}`,
+      })
+    }
+    if (typeof workItemId !== "string" || workItemId.trim() === "") {
+      return yield* new GitHubRequestError({
+        message: `Invalid Work Item id for ${repository.owner}/${repository.name}#${issueNumber}`,
+      })
+    }
+    if (typeof summaryMarkdown !== "string" || summaryMarkdown.trim() === "") {
+      return yield* new GitHubRequestError({
+        message: `Empty completion summary for ${repository.owner}/${repository.name}#${issueNumber}`,
+      })
+    }
+
+    const marker = workItemCompletionMarker(workItemId)
+    const issueRef = `${repository.owner}/${repository.name}#${issueNumber}`
+
+    const issueResult = yield* githubQuery(
+      `Failed to load Issue ${issueRef}`,
+      (signal) =>
+        client.query(
+          {
+            repository: {
+              __args: repository,
+              issue: {
+                __args: { number: issueNumber },
+                id: true,
+                state: true,
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    if (issueResult.repository === null) {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const issue = issueResult.repository.issue
+    if (issue === null || issue === undefined) {
+      return yield* new GitHubRequestError({
+        message: `No Issue found for ${issueRef}`,
+      })
+    }
+    if (typeof issue.id !== "string" || issue.id.trim() === "") {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned an invalid Issue id for ${issueRef}`,
+      })
+    }
+    if (issue.state !== "OPEN" && issue.state !== "CLOSED") {
+      return yield* new GitHubRequestError({
+        message: `GitHub returned an invalid Issue state for ${issueRef}`,
+      })
+    }
+
+    let hasMarkedComment = false
+    let commentsAfter: string | null = null
+    while (true) {
+      const commentsResult = yield* githubQuery(
+        `Failed to list comments for Issue ${issueRef}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                issue: {
+                  __args: { number: issueNumber },
+                  comments: {
+                    __args: {
+                      first: PAGE_SIZE,
+                      after: commentsAfter,
+                    },
+                    nodes: {
+                      body: true,
+                    },
+                    pageInfo: {
+                      endCursor: true,
+                      hasNextPage: true,
+                    },
+                  },
+                },
+              },
+            },
+            signal,
+          ),
+      )
+      if (commentsResult.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      const commentsIssue = commentsResult.repository.issue
+      if (commentsIssue === null || commentsIssue === undefined) {
+        return yield* new GitHubRequestError({
+          message: `No Issue found for ${issueRef}`,
+        })
+      }
+      for (const comment of commentsIssue.comments.nodes ?? []) {
+        if (comment !== null && typeof comment.body === "string") {
+          if (comment.body.includes(marker)) {
+            hasMarkedComment = true
+            break
+          }
+        }
+      }
+      if (hasMarkedComment) {
+        break
+      }
+      if (!commentsIssue.comments.pageInfo.hasNextPage) {
+        break
+      }
+      const endCursor = commentsIssue.comments.pageInfo.endCursor
+      if (typeof endCursor !== "string" || endCursor.trim() === "") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid comments page cursor for ${issueRef}`,
+        })
+      }
+      commentsAfter = endCursor
+    }
+
+    if (!hasMarkedComment) {
+      if (client.mutation === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub GraphQL client does not support mutations for ${issueRef}`,
+        })
+      }
+      const mutate = client.mutation
+      const body = `${summaryMarkdown.trimEnd()}\n\n${marker}`
+      const addResult = yield* githubRequest(
+        `Failed to post completion summary on Issue ${issueRef}`,
+        (signal) =>
+          mutate(
+            {
+              addComment: {
+                __args: {
+                  input: {
+                    subjectId: issue.id,
+                    body,
+                  },
+                },
+                commentEdge: {
+                  node: {
+                    body: true,
+                  },
+                },
+              },
+            },
+            signal,
+          ),
+      )
+      const postedBody = addResult.addComment?.commentEdge?.node?.body
+      if (typeof postedBody !== "string" || !postedBody.includes(marker)) {
+        return yield* new GitHubRequestError({
+          message: `GitHub did not return a marked completion comment for ${issueRef}`,
+        })
+      }
+    }
+
+    if (issue.state === "CLOSED") {
+      return
+    }
+
+    if (client.mutation === undefined) {
+      return yield* new GitHubRequestError({
+        message: `GitHub GraphQL client does not support mutations for ${issueRef}`,
+      })
+    }
+    const mutate = client.mutation
+    const closeResult = yield* githubRequest(
+      `Failed to close Issue ${issueRef}`,
+      (signal) =>
+        mutate(
+          {
+            closeIssue: {
+              __args: {
+                input: {
+                  issueId: issue.id,
+                  stateReason: "COMPLETED",
+                },
+              },
+              issue: {
+                state: true,
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    const closedIssue = closeResult.closeIssue?.issue
+    if (closedIssue === null || closedIssue === undefined) {
+      return yield* new GitHubRequestError({
+        message: `GitHub did not return an Issue after closing ${issueRef}`,
+      })
+    }
+    if (closedIssue.state !== "CLOSED") {
+      return yield* new GitHubRequestError({
+        message: `Issue ${issueRef} is still open after close`,
+      })
+    }
+  }),
   listReadyIssues: Effect.fn("GitHubService.listReadyIssues")(
     function* (repository) {
       const issues: InternalReadyLabeledIssue[] = []

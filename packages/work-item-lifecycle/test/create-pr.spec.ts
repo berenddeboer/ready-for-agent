@@ -89,6 +89,7 @@ const stubGitHub = (
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
       listReadyIssues: () => Effect.succeed([]),
       ...overrides,
     }),
