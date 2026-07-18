@@ -27,6 +27,7 @@ import {
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
+  BuildModelNotConfiguredError,
   CommitOpenCodeError,
   CreatePrOpenCodeError,
   IssueBlockedError,
@@ -136,8 +137,25 @@ describe("WorkItemLifecycle", () => {
     blockedBy: [],
   }
 
+  const seedHarnessBuildModel = Effect.gen(function* () {
+    const db = yield* DbService
+    const config = yield* db.getConfig
+    if (config.defaultModel !== null && config.defaultVariant !== null) {
+      return
+    }
+    yield* db.updateConfig({
+      defaultModel: config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+      defaultVariant: config.defaultVariant ?? "low",
+      reviewModel: config.reviewModel,
+      reviewVariant: config.reviewVariant,
+      maxConcurrentOpencodeSessions: config.maxConcurrentOpencodeSessions,
+      maxConcurrentWorkItems: config.maxConcurrentWorkItems,
+    })
+  })
+
   const seedActionableIssue = Effect.gen(function* () {
     const db = yield* DbService
+    yield* seedHarnessBuildModel
     const repository = yield* db.addRepository(sampleRepository)
     const issue = yield* db.storeIssue({
       repositoryId: repository.id,
@@ -201,6 +219,62 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.variant).toBe(config.defaultVariant)
           expect(workItem.reviewModel).toBe(config.defaultModel)
           expect(workItem.reviewVariant).toBe(config.defaultVariant)
+        }),
+      ))
+
+    it("rejects when no build model can be resolved", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const repository = yield* db.addRepository(sampleRepository)
+          const issue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            ...sampleIssueFields,
+          })
+
+          const error = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+          )
+
+          expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
+          if (error instanceof BuildModelNotConfiguredError) {
+            expect(error.message).toBe("Select a default build model first")
+          }
+        }),
+      ))
+
+    it("allows repository build override when harness defaults are unset", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const repository = yield* db.addRepository(sampleRepository)
+          const issue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            ...sampleIssueFields,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: repository.paused,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultVariant: "max",
+            reviewModel: null,
+            reviewVariant: null,
+            autoMerge: repository.autoMerge,
+          })
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.variant).toBe("max")
+          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.reviewVariant).toBe("max")
         }),
       ))
 
@@ -502,6 +576,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const db = yield* DbService
+          yield* seedHarnessBuildModel
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
@@ -2668,6 +2743,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const db = yield* DbService
+          yield* seedHarnessBuildModel
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
@@ -4324,6 +4400,7 @@ describe("WorkItemLifecycle", () => {
     const seedIssue = (githubIssueNumber: number) =>
       Effect.gen(function* () {
         const db = yield* DbService
+        yield* seedHarnessBuildModel
         const repository = yield* db.addRepository({
           ...sampleRepository,
           localPath: `/repos/acme/widgets-${githubIssueNumber}.git`,
@@ -4343,7 +4420,12 @@ describe("WorkItemLifecycle", () => {
         const db = yield* DbService
         const config = yield* db.getConfig
         yield* db.updateConfig({
-          ...config,
+          defaultModel:
+            config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+          defaultVariant: config.defaultVariant ?? "low",
+          reviewModel: config.reviewModel,
+          reviewVariant: config.reviewVariant,
+          maxConcurrentOpencodeSessions: config.maxConcurrentOpencodeSessions,
           maxConcurrentWorkItems,
         })
       })

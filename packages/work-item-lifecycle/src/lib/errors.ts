@@ -39,6 +39,12 @@ export class UnfinishedWorkItemExistsError extends Data.TaggedError(
   readonly workItemId: string
 }> {}
 
+export class BuildModelNotConfiguredError extends Data.TaggedError(
+  "BuildModelNotConfiguredError",
+)<{
+  readonly message: string
+}> {}
+
 export class WorkItemNotFoundError extends Data.TaggedError(
   "WorkItemNotFoundError",
 )<{

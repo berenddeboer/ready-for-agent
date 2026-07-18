@@ -17,8 +17,12 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults), optional review model and variant (null falls back to harness review settings, then the build model/variant), and Auto-merge. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created.
+Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults; if those are also unset the empty option is labeled as harness default not configured), optional review model and variant (null falls back to harness review settings, then the resolved build model/variant), and Auto-merge. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created. A repository build override alone is enough to create Work Items even when harness defaults are still unset.
 _Avoid_: Project config, repo config file
+
+**Harness Config**:
+Harness-wide operator preferences stored as a single config row: optional default build model and build thinking level (variant), optional review model and review thinking level (null means same as build), and concurrency limits (default two OpenCode sessions and five concurrent Work Items). On a fresh empty database the build model and variant start null (unconfigured); there is no product-seeded free model. First-run UI opens Settings and shows a banner until a build model and thinking level are saved. Creating a Work Item fails with a structured error when neither a repository override nor harness defaults resolve a build model and variant.
+_Avoid_: Default model seed, product default model
 
 **Auto-merge**:
 A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge.
@@ -108,7 +112,7 @@ The state of an unfinished, non-paused Work Item that has not yet been Admitted 
 _Avoid_: Queued Step Run, paused, Not Implemented
 
 **Implement Now**:
-An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected.
+An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked when no build model and variant can be resolved from repository override or harness defaults (`Select a default build model first`).
 _Avoid_: Auto-implement, enqueue Issue
 
 **Implement Locally**:

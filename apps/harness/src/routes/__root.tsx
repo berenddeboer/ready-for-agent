@@ -56,6 +56,21 @@ const modelsQuery = {
   },
 }
 
+const isBuildModelConfigured = (
+  config:
+    | {
+        defaultModel: string | null
+        defaultVariant: string | null
+      }
+    | null
+    | undefined,
+): boolean =>
+  config != null &&
+  config.defaultModel != null &&
+  config.defaultModel.length > 0 &&
+  config.defaultVariant != null &&
+  config.defaultVariant.length > 0
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
@@ -117,27 +132,32 @@ function SettingsButton() {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const config = useQuery({ ...configQuery, enabled: dialogOpen })
+  const [autoOpenAttempted, setAutoOpenAttempted] = useState(false)
+  const config = useQuery(configQuery)
   const models = useQuery({ ...modelsQuery, enabled: dialogOpen })
   const [defaultModel, setDefaultModel] = useState("")
-  const [defaultVariant, setDefaultVariant] = useState("low")
+  const [defaultVariant, setDefaultVariant] = useState("")
   const [reviewModel, setReviewModel] = useState("")
   const [reviewVariant, setReviewVariant] = useState("")
   const [maxConcurrentOpencodeSessions, setMaxConcurrentOpencodeSessions] =
     useState("2")
   const [maxConcurrentWorkItems, setMaxConcurrentWorkItems] = useState("5")
+  const buildConfigured = isBuildModelConfigured(config.data)
+
   useEffect(() => {
-    if (dialogOpen && config.data) {
-      setDefaultModel(config.data.defaultModel)
-      setDefaultVariant(config.data.defaultVariant)
-      setReviewModel(config.data.reviewModel ?? "")
-      setReviewVariant(config.data.reviewVariant ?? "")
-      setMaxConcurrentOpencodeSessions(
-        String(config.data.maxConcurrentOpencodeSessions),
-      )
-      setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
+    if (!dialogOpen || !config.data) {
+      return
     }
+    setDefaultModel(config.data.defaultModel ?? "")
+    setDefaultVariant(config.data.defaultVariant ?? "")
+    setReviewModel(config.data.reviewModel ?? "")
+    setReviewVariant(config.data.reviewVariant ?? "")
+    setMaxConcurrentOpencodeSessions(
+      String(config.data.maxConcurrentOpencodeSessions),
+    )
+    setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
   }, [config.data, dialogOpen])
+
   const updateConfig = useMutation({
     mutationFn: (input: {
       defaultModel: string
@@ -174,8 +194,8 @@ function SettingsButton() {
       void models.refetch()
     }
     if (config.data) {
-      setDefaultModel(config.data.defaultModel)
-      setDefaultVariant(config.data.defaultVariant)
+      setDefaultModel(config.data.defaultModel ?? "")
+      setDefaultVariant(config.data.defaultVariant ?? "")
       setReviewModel(config.data.reviewModel ?? "")
       setReviewVariant(config.data.reviewVariant ?? "")
       setMaxConcurrentOpencodeSessions(
@@ -186,6 +206,16 @@ function SettingsButton() {
     updateConfig.reset()
     dialogRef.current?.showModal()
   }
+
+  useEffect(() => {
+    if (autoOpenAttempted || !config.isSuccess || buildConfigured) {
+      return
+    }
+    setAutoOpenAttempted(true)
+    setDialogOpen(true)
+    updateConfig.reset()
+    dialogRef.current?.showModal()
+  }, [autoOpenAttempted, buildConfigured, config.isSuccess, updateConfig.reset])
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -206,12 +236,29 @@ function SettingsButton() {
     defaultModel.length > 0 && !models.data?.includes(defaultModel)
   const hasUnavailableReviewModel =
     reviewModel.length > 0 && !models.data?.includes(reviewModel)
-  const hasCustomBuildVariant = !standardVariants.includes(defaultVariant)
+  const hasCustomBuildVariant =
+    defaultVariant.length > 0 && !standardVariants.includes(defaultVariant)
   const hasCustomReviewVariant =
     reviewVariant.length > 0 && !standardVariants.includes(reviewVariant)
+  const showUnconfiguredGuidance = config.isSuccess && !buildConfigured
 
   return (
     <>
+      {showUnconfiguredGuidance && !dialogOpen && (
+        <div
+          className="mr-auto flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-950"
+          role="status"
+        >
+          <span>Select a default build model first</span>
+          <button
+            type="button"
+            className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950 underline-offset-2 hover:bg-amber-200 hover:underline"
+            onClick={openSettings}
+          >
+            Open Settings
+          </button>
+        </div>
+      )}
       <button
         type="button"
         className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
@@ -252,10 +299,16 @@ function SettingsButton() {
             <p className="mt-1 text-sm text-slate-500">
               Defaults for agent sessions and OpenCode concurrency.
             </p>
+            {showUnconfiguredGuidance && (
+              <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                Select a default build model and thinking level before the
+                harness can create work.
+              </p>
+            )}
           </div>
 
           <div className="grid gap-5 px-6 py-5">
-            {config.isPending || models.isPending ? (
+            {config.isPending || (dialogOpen && models.isPending) ? (
               <p className="text-sm text-slate-500">Loading settings...</p>
             ) : config.isError || models.isError ? (
               <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
@@ -272,10 +325,15 @@ function SettingsButton() {
                     onChange={(event) => setDefaultModel(event.target.value)}
                     required
                   >
+                    {!buildConfigured && defaultModel.length === 0 && (
+                      <option value="" disabled>
+                        Select a build model
+                      </option>
+                    )}
                     {hasUnavailableBuildModel && (
                       <option value={defaultModel}>{defaultModel}</option>
                     )}
-                    {models.data.map((model) => (
+                    {(models.data ?? []).map((model) => (
                       <option key={model} value={model}>
                         {model}
                       </option>
@@ -295,6 +353,11 @@ function SettingsButton() {
                     onChange={(event) => setDefaultVariant(event.target.value)}
                     required
                   >
+                    {!buildConfigured && defaultVariant.length === 0 && (
+                      <option value="" disabled>
+                        Select a thinking level
+                      </option>
+                    )}
                     {hasCustomBuildVariant && (
                       <option value={defaultVariant}>{defaultVariant}</option>
                     )}
@@ -322,7 +385,7 @@ function SettingsButton() {
                     {hasUnavailableReviewModel && (
                       <option value={reviewModel}>{reviewModel}</option>
                     )}
-                    {models.data.map((model) => (
+                    {(models.data ?? []).map((model) => (
                       <option key={`review-${model}`} value={model}>
                         {model}
                       </option>
@@ -425,7 +488,9 @@ function SettingsButton() {
                 config.isError ||
                 models.isPending ||
                 models.isError ||
-                updateConfig.isPending
+                updateConfig.isPending ||
+                defaultModel.length === 0 ||
+                defaultVariant.length === 0
               }
             >
               {updateConfig.isPending ? "Saving..." : "Save settings"}

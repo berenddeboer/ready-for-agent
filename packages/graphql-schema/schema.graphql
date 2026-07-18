@@ -9,8 +9,8 @@ type Query {
 }
 
 type Config {
-  defaultModel: String!
-  defaultVariant: String!
+  defaultModel: String
+  defaultVariant: String
   reviewModel: String
   reviewVariant: String
   maxConcurrentOpencodeSessions: Int!

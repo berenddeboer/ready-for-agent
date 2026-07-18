@@ -531,8 +531,8 @@ function RepositoryCard({
   }
 
   const standardVariants = ["low", "medium", "high", "max"]
-  const harnessDefaultModel = config.data?.defaultModel ?? "harness default"
-  const harnessDefaultVariant = config.data?.defaultVariant ?? "harness default"
+  const harnessDefaultModel = config.data?.defaultModel ?? "not configured"
+  const harnessDefaultVariant = config.data?.defaultVariant ?? "not configured"
   const resolvedBuildModel = repository.defaultModel ?? harnessDefaultModel
   const resolvedBuildVariant =
     repository.defaultVariant ?? harnessDefaultVariant

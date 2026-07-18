@@ -91,6 +91,14 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   const driveToNeedsHuman = Effect.gen(function* () {
     const db = yield* DbService
     const lifecycle = yield* WorkItemLifecycle
+    yield* db.updateConfig({
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultVariant: "low",
+      reviewModel: null,
+      reviewVariant: null,
+      maxConcurrentOpencodeSessions: 2,
+      maxConcurrentWorkItems: 5,
+    })
     const repository = yield* db.addRepository({
       githubOwner: "acme",
       githubRepo: "widgets",

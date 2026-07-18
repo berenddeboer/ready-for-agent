@@ -34,6 +34,7 @@ import { EnqueueError, type QueueService } from "@ready-for-agent/queue-service"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
+  BuildModelNotConfiguredError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -364,6 +365,11 @@ const toGraphQLError = (error: unknown): GraphQLError => {
         },
       },
     )
+  }
+  if (error instanceof BuildModelNotConfiguredError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: "BUILD_MODEL_NOT_CONFIGURED" },
+    })
   }
   if (error instanceof WorkItemLifecycleDatabaseError) {
     return new GraphQLError(error.message, {
