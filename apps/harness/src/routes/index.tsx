@@ -263,10 +263,7 @@ function HomePage() {
           Clanker Harness
         </h1>
       </header>
-      <Suspense fallback={<RepositoryCardsSkeleton />}>
-        <RepositoryCards />
-      </Suspense>
-      <section className="mt-8" aria-label="Jobs">
+      <section aria-label="Jobs">
         <h2 className="mb-4 text-lg font-bold tracking-[-0.02em] text-slate-900">
           Jobs
         </h2>
@@ -274,6 +271,11 @@ function HomePage() {
           <JobsCard />
         </Suspense>
       </section>
+      <div className="mt-8">
+        <Suspense fallback={<RepositoryCardsSkeleton />}>
+          <RepositoryCards />
+        </Suspense>
+      </div>
     </main>
   )
 }
