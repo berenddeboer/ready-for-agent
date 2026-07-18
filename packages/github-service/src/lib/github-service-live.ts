@@ -680,7 +680,7 @@ const safeLogFileName = (externalId: string): string =>
   `${externalId.replace(/[^a-zA-Z0-9._-]+/g, "-")}.log`
 
 /** Hidden HTML comment marker tying a completion summary to a Work Item. */
-export const workItemCompletionMarker = (workItemId: string): string =>
+const workItemCompletionMarker = (workItemId: string): string =>
   `<!-- ready-for-agent:work-item:${workItemId} -->`
 
 export const makeGitHubService = (
