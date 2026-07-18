@@ -6,6 +6,7 @@ import {
   stubDbServiceLayer,
 } from "@ready-for-agent/db-service/test"
 import {
+  GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
   type PullRequestCheckStatus,
@@ -77,15 +78,20 @@ const seedWorkItem = Effect.gen(function* () {
   )
 })
 
-const githubWith = (status: PullRequestCheckStatus) =>
+const githubWith = (
+  status: PullRequestCheckStatus,
+  overrides: Partial<GitHubServiceShape> = {},
+) =>
   Layer.succeed(GitHubService, {
     listReadyIssues: () => Effect.succeed([]),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () => Effect.succeed(status),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
     getPullRequestLifecycleStatus: () =>
       Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
+    ...overrides,
   } satisfies GitHubServiceShape)
 
 const opencodeWith = (
@@ -122,6 +128,7 @@ describe("PR status check steps", () => {
           ...mergeable,
         })
       },
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -252,6 +259,7 @@ describe("PR status check steps", () => {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -325,6 +333,7 @@ describe("PR status check steps", () => {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -364,14 +373,53 @@ describe("PR status check steps", () => {
         Effect.provide(
           Layer.mergeAll(
             db,
-            githubWith({
-              _tag: "failed",
-              ...mergeable,
-              terminalChecks: [
-                { externalId: "checkrun:1", name: "lint", outcome: "red" },
-                { externalId: "checkrun:2", name: "unit", outcome: "red" },
-              ],
-            }),
+            githubWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:88026385443",
+                    name: "lint",
+                    outcome: "red",
+                  },
+                  {
+                    externalId: "actions-job:88026385444",
+                    name: "unit",
+                    outcome: "red",
+                  },
+                ],
+              },
+              {
+                getPrStatusCheckDiagnostics: () =>
+                  Effect.succeed([
+                    {
+                      externalId: "actions-job:88026385443",
+                      name: "lint",
+                      source: "actions-job" as const,
+                      htmlUrl:
+                        "https://github.com/acme/widgets/actions/runs/1/job/88026385443",
+                      logFetch: {
+                        _tag: "ok" as const,
+                        excerpt: "error TS6305: typecheck failed",
+                        localPath:
+                          "/tmp/worktree/.ready-for-agent/status-check-logs/actions-job-88026385443.log",
+                      },
+                    },
+                    {
+                      externalId: "actions-job:88026385444",
+                      name: "unit",
+                      source: "actions-job" as const,
+                      htmlUrl: null,
+                      logFetch: {
+                        _tag: "ok" as const,
+                        excerpt: "1 test failed",
+                        localPath: null,
+                      },
+                    },
+                  ]),
+              },
+            ),
             keymaxxer,
             opencodeWith(
               ["fixed and pushed", "READY_FOR_AGENT_RESULT: PROCESSED"],
@@ -391,13 +439,74 @@ describe("PR status check steps", () => {
     expect(result.rows.every((row) => row.handled_at === null)).toBe(true)
     expect(prompts).toHaveLength(2)
     expect(prompts[0]).toContain("Diagnose and fix these failing checks")
-    expect(prompts[0]).toContain("- lint")
-    expect(prompts[0]).toContain("- unit")
+    expect(prompts[0]).toContain(
+      "- lint (external id: actions-job:88026385443, source: Actions job)",
+    )
+    expect(prompts[0]).toContain(
+      "- unit (external id: actions-job:88026385444, source: Actions job)",
+    )
+    expect(prompts[0]).toContain(
+      "Fine-grained GitHub PATs often cannot use the Checks API",
+    )
+    expect(prompts[0]).toContain("--method GET")
+    expect(prompts[0]).toContain("Harness diagnostics for the red checks")
+    expect(prompts[0]).toContain("error TS6305: typecheck failed")
+    expect(prompts[0]).toContain(
+      "/tmp/worktree/.ready-for-agent/status-check-logs/actions-job-88026385443.log",
+    )
     expect(prompts[0]).toContain(
       "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
     )
     expect(prompts[0]).not.toContain("automated reviews may have completed")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+  })
+
+  it("fails the investigate step when harness diagnostics cannot load", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* Effect.result(investigatePrStatusChecks(context))
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:200",
+                    name: "lint",
+                    outcome: "red",
+                  },
+                ],
+              },
+              {
+                getPrStatusCheckDiagnostics: () =>
+                  Effect.fail(
+                    new GitHubRequestError({
+                      message: "Actions API unauthorized",
+                      statusCode: 401,
+                    }),
+                  ),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") {
+      expect(String(result.failure)).toContain(
+        "Failed to load PR Status Check diagnostics",
+      )
+    }
   })
 
   it("adds automated-review instructions when the batch contains a green check", async () => {
@@ -432,7 +541,9 @@ describe("PR status check steps", () => {
       ),
     )
 
-    expect(prompts[0]).toContain("- lint")
+    expect(prompts[0]).toContain(
+      "- lint (external id: checkrun:2, source: unknown source)",
+    )
     expect(prompts[0]).toContain("automated reviews may have completed")
     expect(prompts[0]).toContain(
       "disregard reviews that are visibly still in progress",

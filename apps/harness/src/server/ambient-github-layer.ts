@@ -108,6 +108,10 @@ export const ambientGitHubLayer = (options: {
         authenticated((service) =>
           service.getPullRequestCheckStatus(repository, headRefName),
         ),
+      getPrStatusCheckDiagnostics: (repository, checks, options) =>
+        authenticated((service) =>
+          service.getPrStatusCheckDiagnostics(repository, checks, options),
+        ),
       getPullRequestLifecycleStatus: (repository, headRefName) =>
         authenticated((service) =>
           service.getPullRequestLifecycleStatus(repository, headRefName),

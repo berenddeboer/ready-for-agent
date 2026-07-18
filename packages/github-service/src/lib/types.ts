@@ -14,6 +14,50 @@ export interface TerminalPrStatusCheck {
   readonly outcome: TerminalPrStatusCheckOutcome
 }
 
+/**
+ * Where a stored PR Status Check external id came from (prefix of the id).
+ * Watch emits `actions-job:<id>` for Checks runs and Actions jobs, and
+ * `status:<id>` for commit statuses.
+ */
+export type PrStatusCheckDiagnosticSource = "actions-job" | "status" | "unknown"
+
+export type PrStatusCheckLogFetch =
+  | {
+      readonly _tag: "ok"
+      readonly excerpt: string
+      readonly localPath: string | null
+    }
+  | {
+      readonly _tag: "unavailable"
+      readonly reason: string
+    }
+
+/**
+ * Harness-owned evidence for one red PR Status Check handed to Investigate.
+ */
+export interface PrStatusCheckDiagnostic {
+  readonly externalId: string
+  readonly name: string
+  readonly source: PrStatusCheckDiagnosticSource
+  readonly htmlUrl: string | null
+  readonly logFetch: PrStatusCheckLogFetch
+}
+
+export interface PrStatusCheckDiagnosticsRequest {
+  readonly externalId: string
+  readonly name: string
+}
+
+export interface PrStatusCheckDiagnosticsOptions {
+  /**
+   * When set, successful log downloads are written under this directory and
+   * `logFetch.localPath` points at the file.
+   */
+  readonly logDirectory?: string
+  /** Max characters kept in `logFetch.excerpt` (tail of the log). */
+  readonly maxExcerptChars?: number
+}
+
 export type PullRequestMergeability = "mergeable" | "conflicting" | "unknown"
 
 export type PullRequestCheckStatus = (

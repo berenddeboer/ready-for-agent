@@ -11,8 +11,9 @@ not need to use Keymaxxer themselves; use normally authenticated tools such as
 `gh` and `git` directly.
 
 Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
-`statusCheckRollup.contexts`). Use a classic PAT with `repo` for harness CI
-watching.
+`statusCheckRollup.contexts`). That 403 is expected: the harness falls back to
+Actions jobs for terminal PR Status Check identity and downloads Actions job
+logs for Status Check Handoff diagnostics (`actions=read`, `statuses=read`).
 
 ### Triage labels
 

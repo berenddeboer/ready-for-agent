@@ -84,6 +84,7 @@ const stubGitHub = (
           baseRefName: "main",
           headPushedAt: null,
         }),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
