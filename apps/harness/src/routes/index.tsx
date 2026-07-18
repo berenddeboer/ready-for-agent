@@ -19,7 +19,7 @@ import {
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
-import { sessionWorktreeLine } from "../session-worktree-line.js"
+import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -1538,7 +1538,7 @@ function JobsCard() {
               )}
             </>
           )
-          const sessionWorktree = sessionWorktreeLine(
+          const { sessionId, worktreePath } = sessionWorktreeParts(
             workItem.sessionId,
             workItem.worktreePath,
           )
@@ -1576,13 +1576,27 @@ function JobsCard() {
                   <WorkItemPauseButton workItem={workItem} />
                 </div>
               </div>
-              {sessionWorktree !== null && (
-                <p className="mt-1 mb-0 min-w-0">
-                  <Copy
-                    value={sessionWorktree}
-                    className="w-full"
-                    textClassName="font-mono text-[0.7rem] text-slate-500"
-                  />
+              {(sessionId !== null || worktreePath !== null) && (
+                <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
+                  {sessionId !== null && (
+                    <Copy
+                      value={sessionId}
+                      className="min-w-0 max-w-full"
+                      textClassName="font-mono text-[0.7rem] text-slate-500"
+                    />
+                  )}
+                  {sessionId !== null && worktreePath !== null && (
+                    <span className="shrink-0 font-mono text-[0.7rem] text-slate-500">
+                      -
+                    </span>
+                  )}
+                  {worktreePath !== null && (
+                    <Copy
+                      value={worktreePath}
+                      className="min-w-0 max-w-full"
+                      textClassName="font-mono text-[0.7rem] text-slate-500"
+                    />
+                  )}
                 </p>
               )}
               <WorkItemLifecycleStatus

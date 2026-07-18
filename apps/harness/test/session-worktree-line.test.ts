@@ -1,31 +1,53 @@
-import { sessionWorktreeLine } from "../src/session-worktree-line.ts"
+import { sessionWorktreeParts } from "../src/session-worktree-line.ts"
 import { describe, expect, test } from "bun:test"
 
-describe("sessionWorktreeLine", () => {
-  test("formats both session and worktree with spaces around slash", () => {
+describe("sessionWorktreeParts", () => {
+  test("returns both session and worktree when present", () => {
     expect(
-      sessionWorktreeLine(
+      sessionWorktreeParts(
         "ses_090b4a729ffev80sNihn1xDyHB",
         "/home/berend/src/ready-for-agent/worktree1",
       ),
-    ).toBe(
-      "ses_090b4a729ffev80sNihn1xDyHB / /home/berend/src/ready-for-agent/worktree1",
-    )
+    ).toEqual({
+      sessionId: "ses_090b4a729ffev80sNihn1xDyHB",
+      worktreePath: "/home/berend/src/ready-for-agent/worktree1",
+    })
   })
 
   test("shows only session when path is missing", () => {
-    expect(sessionWorktreeLine("ses_abc", null)).toBe("ses_abc")
-    expect(sessionWorktreeLine("ses_abc", "")).toBe("ses_abc")
+    expect(sessionWorktreeParts("ses_abc", null)).toEqual({
+      sessionId: "ses_abc",
+      worktreePath: null,
+    })
+    expect(sessionWorktreeParts("ses_abc", "")).toEqual({
+      sessionId: "ses_abc",
+      worktreePath: null,
+    })
   })
 
   test("shows only worktree when session is missing", () => {
-    expect(sessionWorktreeLine(null, "/tmp/wt")).toBe("/tmp/wt")
-    expect(sessionWorktreeLine("", "/tmp/wt")).toBe("/tmp/wt")
+    expect(sessionWorktreeParts(null, "/tmp/wt")).toEqual({
+      sessionId: null,
+      worktreePath: "/tmp/wt",
+    })
+    expect(sessionWorktreeParts("", "/tmp/wt")).toEqual({
+      sessionId: null,
+      worktreePath: "/tmp/wt",
+    })
   })
 
-  test("returns null when both are empty", () => {
-    expect(sessionWorktreeLine(null, null)).toBeNull()
-    expect(sessionWorktreeLine("", "")).toBeNull()
-    expect(sessionWorktreeLine(undefined, undefined)).toBeNull()
+  test("returns null parts when both are empty", () => {
+    expect(sessionWorktreeParts(null, null)).toEqual({
+      sessionId: null,
+      worktreePath: null,
+    })
+    expect(sessionWorktreeParts("", "")).toEqual({
+      sessionId: null,
+      worktreePath: null,
+    })
+    expect(sessionWorktreeParts(undefined, undefined)).toEqual({
+      sessionId: null,
+      worktreePath: null,
+    })
   })
 })

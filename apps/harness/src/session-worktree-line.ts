@@ -1,20 +1,15 @@
 const present = (value: string | null | undefined): value is string =>
   value !== null && value !== undefined && value !== ""
 
-export const sessionWorktreeLine = (
+export type SessionWorktreeParts = {
+  sessionId: string | null
+  worktreePath: string | null
+}
+
+export const sessionWorktreeParts = (
   sessionId: string | null | undefined,
   worktreePath: string | null | undefined,
-): string | null => {
-  const hasSession = present(sessionId)
-  const hasPath = present(worktreePath)
-  if (hasSession && hasPath) {
-    return `${sessionId} / ${worktreePath}`
-  }
-  if (hasSession) {
-    return sessionId
-  }
-  if (hasPath) {
-    return worktreePath
-  }
-  return null
-}
+): SessionWorktreeParts => ({
+  sessionId: present(sessionId) ? sessionId : null,
+  worktreePath: present(worktreePath) ? worktreePath : null,
+})
