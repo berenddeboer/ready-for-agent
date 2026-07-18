@@ -64,6 +64,11 @@ jobs:
             bun nx affected -t lint knip test typecheck
           fi
 
+      # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
+      # Production live e2e below remains vault-backed and separate.
+      - name: Harness dev smoke
+        run: bunx nx run harness:smoke
+
       # Live Gherkin e2e: trusted main only (this workflow). Never on PR (pr.yml).
       - name: Require live e2e vault key
         env:
