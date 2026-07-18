@@ -201,6 +201,7 @@ const makeRuntime = (
     getWorkItem: unused,
     listWorkItemsForIssue: unused,
     listWorkItemsForRepository: unused,
+    countCommittedPullRequests: unused,
     continueAfterHumanPrOutcome: unused,
     admitWaitingWorkItems: Effect.succeed(0),
     ...lifecycleOverrides,
@@ -2514,5 +2515,65 @@ describe("GraphQL API", () => {
     )
 
     expect(response.status).toBe(403)
+  })
+
+  test("committedPullRequestsCount aggregates via lifecycle with ISO bounds", async () => {
+    const calls: Array<{ fromMs: number; toMs: number }> = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        countCommittedPullRequests: (fromMs, toMs) => {
+          calls.push({ fromMs, toMs })
+          return Effect.succeed(3)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Count($from: String!, $to: String!) {
+          committedPullRequestsCount(from: $from, to: $to)
+        }`,
+        variables: {
+          from: "2026-07-18T00:00:00.000Z",
+          to: "2026-07-19T00:00:00.000Z",
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { committedPullRequestsCount: 3 },
+    })
+    expect(calls).toEqual([
+      {
+        fromMs: Date.parse("2026-07-18T00:00:00.000Z"),
+        toMs: Date.parse("2026-07-19T00:00:00.000Z"),
+      },
+    ])
+  })
+
+  test("committedPullRequestsCount rejects invalid ISO instants", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Count($from: String!, $to: String!) {
+          committedPullRequestsCount(from: $from, to: $to)
+        }`,
+        variables: {
+          from: "not-a-date",
+          to: "2026-07-19T00:00:00.000Z",
+        },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      errors?: ReadonlyArray<{ message: string }>
+    }
+    expect(body.errors?.[0]?.message).toContain("Invalid ISO instant for from")
   })
 })

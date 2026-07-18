@@ -16,6 +16,7 @@ import {
   liveDurationMs,
   useNowMs,
 } from "../live-duration.js"
+import { localCommittedPullRequestDayBounds } from "../local-day-bounds.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
@@ -282,6 +283,18 @@ const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
     limit: JOBS_COMPLETED_LIMIT,
   })
 
+const committedPullRequestsCountQuery = (from: string, to: string) => ({
+  queryKey: ["committed-pull-requests-count", from, to] as const,
+  queryFn: async (): Promise<number> => {
+    const result = await graphql.query({
+      committedPullRequestsCount: {
+        __args: { from, to },
+      },
+    })
+    return result.committedPullRequestsCount
+  },
+})
+
 const patchWorkItemsCaches = (
   queryClient: ReturnType<typeof useQueryClient>,
   repositoryId: string,
@@ -311,6 +324,9 @@ function HomePage() {
           Clanker Harness
         </h1>
       </header>
+      <section aria-label="Committed pull requests" className="mb-8">
+        <CommittedPullRequestsDashboard />
+      </section>
       <section aria-label="Jobs">
         <h2 className="mb-4 text-lg font-bold tracking-[-0.02em] text-slate-900">
           Jobs
@@ -325,6 +341,70 @@ function HomePage() {
         </Suspense>
       </div>
     </main>
+  )
+}
+
+function CommittedPullRequestsDashboard() {
+  const bounds = localCommittedPullRequestDayBounds()
+  const todayQuery = useQuery(
+    committedPullRequestsCountQuery(bounds.todayFrom, bounds.todayTo),
+  )
+  const yesterdayQuery = useQuery(
+    committedPullRequestsCountQuery(bounds.yesterdayFrom, bounds.yesterdayTo),
+  )
+  const loading = todayQuery.isLoading || yesterdayQuery.isLoading
+  const failed = todayQuery.isError || yesterdayQuery.isError
+
+  if (loading) {
+    return (
+      <article
+        className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]"
+        role="status"
+        aria-label="Loading committed pull requests"
+        aria-busy="true"
+      >
+        <div className="grid grid-cols-2 gap-4">
+          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+        </div>
+      </article>
+    )
+  }
+
+  if (failed) {
+    return (
+      <article className="rounded-[0.9rem] border border-red-200 bg-red-50 p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
+        <p className="m-0 text-sm text-red-700" role="alert">
+          Could not load committed pull requests. Please try again.
+        </p>
+      </article>
+    )
+  }
+
+  const today = todayQuery.data ?? 0
+  const yesterday = yesterdayQuery.data ?? 0
+
+  return (
+    <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            Today
+          </p>
+          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+            {today}
+          </p>
+        </div>
+        <div>
+          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            Yesterday
+          </p>
+          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+            {yesterday}
+          </p>
+        </div>
+      </div>
+    </article>
   )
 }
 
