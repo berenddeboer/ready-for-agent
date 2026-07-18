@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { runGitHubCli } from "../bin/cli.js"
+import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
 import { getOpenPullRequestNumberProgram } from "../bin/get-open-pr-number.js"
 import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
 import { getPrLifecycleStatusProgram } from "../bin/get-pr-lifecycle-status.js"
@@ -22,6 +23,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "get-pr-lifecycle-status",
   "mark-pr-ready-for-review",
   "merge-pull-request",
+  "ensure-issue-completed-with-summary",
 ] as const
 
 export type GitHubHelperOperation = (typeof GITHUB_HELPER_OPERATIONS)[number]
@@ -121,6 +123,7 @@ const programs: Record<
   "get-pr-lifecycle-status": getPrLifecycleStatusProgram,
   "mark-pr-ready-for-review": markPrReadyForReviewProgram,
   "merge-pull-request": mergePullRequestProgram,
+  "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
 }
 
 /**

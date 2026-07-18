@@ -64,6 +64,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       getPullRequestLifecycleStatus: () => Effect.succeed(status),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
   const makeLayer = (status: PullRequestLifecycleStatus) =>

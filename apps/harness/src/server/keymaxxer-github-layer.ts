@@ -502,6 +502,47 @@ export const keymaxxerGitHubLayer = (options: {
               Effect.fail(requestError(repository, "merge pull request")),
             ),
           ),
+        ensureIssueCompletedWithSummary: (
+          repository,
+          issueNumber,
+          workItemId,
+          summaryMarkdown,
+        ) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "complete Issue with summary",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const number = encodeArgument(String(issueNumber))
+            const workItem = encodeArgument(workItemId)
+            const summary = encodeArgument(summaryMarkdown)
+            const result = yield* runGitHubBin(
+              tokenName,
+              "ensure-issue-completed-with-summary",
+              [owner, name, number, workItem, summary],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "complete Issue with summary",
+                result.stderr || result.stdout,
+              )
+            }
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "complete Issue with summary"),
+              ),
+            ),
+          ),
         listReadyIssues: (repository) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

@@ -17,6 +17,40 @@ type Mutation {
     input: MarkPullRequestReadyForReviewInput!
   ): MarkPullRequestReadyForReviewPayload
   mergePullRequest(input: MergePullRequestInput!): MergePullRequestPayload
+  addComment(input: AddCommentInput!): AddCommentPayload
+  closeIssue(input: CloseIssueInput!): CloseIssuePayload
+}
+
+input AddCommentInput {
+  subjectId: ID!
+  body: String!
+  clientMutationId: String
+}
+
+type AddCommentPayload {
+  clientMutationId: String
+  commentEdge: IssueCommentEdge
+}
+
+type IssueCommentEdge {
+  node: IssueComment
+}
+
+input CloseIssueInput {
+  issueId: ID!
+  stateReason: IssueClosedStateReason
+  clientMutationId: String
+}
+
+type CloseIssuePayload {
+  clientMutationId: String
+  issue: Issue
+}
+
+enum IssueClosedStateReason {
+  COMPLETED
+  NOT_PLANNED
+  DUPLICATE
 }
 
 input MarkPullRequestReadyForReviewInput {
@@ -172,6 +206,7 @@ type PageInfo {
 }
 
 type Issue {
+  id: ID!
   number: Int!
   title: String!
   body: String!
@@ -180,6 +215,7 @@ type Issue {
   state: IssueState!
   repository: Repository!
   parent: Issue
+  comments(first: Int, after: String): IssueCommentConnection!
   subIssues(first: Int, after: String): IssueConnection!
   subIssuesSummary: SubIssuesSummary!
   blockedBy(first: Int, after: String): IssueConnection!
@@ -188,6 +224,16 @@ type Issue {
     after: String
     includeClosedPrs: Boolean
   ): PullRequestConnection!
+}
+
+type IssueCommentConnection {
+  nodes: [IssueComment]
+  pageInfo: PageInfo!
+}
+
+type IssueComment {
+  id: ID!
+  body: String!
 }
 
 type SubIssuesSummary {

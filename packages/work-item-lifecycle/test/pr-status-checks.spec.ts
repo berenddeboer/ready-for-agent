@@ -92,6 +92,7 @@ const githubWith = (
       Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
+    ensureIssueCompletedWithSummary: () => Effect.void,
     ...overrides,
   } satisfies GitHubServiceShape)
 
@@ -134,6 +135,7 @@ describe("PR status check steps", () => {
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const status = await Effect.runPromise(
@@ -265,6 +267,7 @@ describe("PR status check steps", () => {
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const result = await Effect.runPromise(
@@ -339,6 +342,7 @@ describe("PR status check steps", () => {
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
     const second = await Effect.runPromise(

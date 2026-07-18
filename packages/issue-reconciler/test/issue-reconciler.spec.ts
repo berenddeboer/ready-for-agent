@@ -165,6 +165,7 @@ const makeGitHubLayer = (
       Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.void,
+    ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: ({ owner, name }) => {
       actions.push(`github:${owner}/${name}`)
       return error ? Effect.fail(error) : Effect.succeed(issues)
