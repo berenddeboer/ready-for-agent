@@ -21,6 +21,9 @@
     },
     {
       "path": "../../packages/graphql-client/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/github-service/tsconfig.lib.json"
     }
   ]
 }

@@ -1,11 +1,9 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { Effect, Schema } from "effect"
-import {
-  GitHubRepositoryUnavailableError,
-  type GitHubService,
-  GitHubServiceLive,
-  formatUserFacingError,
-} from "../index.js"
+import { GitHubRepositoryUnavailableError } from "../lib/errors.js"
+import type { GitHubService } from "../lib/github-service.js"
+import { GitHubServiceLive } from "../lib/github-service-live.js"
+import { formatUserFacingError } from "../lib/user-facing-error.js"
 
 export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
   "CliArgumentError",
