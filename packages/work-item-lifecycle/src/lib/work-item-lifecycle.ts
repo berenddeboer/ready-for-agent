@@ -203,6 +203,7 @@ type WorkItemRow = {
   readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
   readonly starting_commit_oid: string | null
+  readonly completion_summary: string | null
   readonly session_id: string | null
   readonly failure_code: string | null
   readonly failure_message: string | null
@@ -278,6 +279,7 @@ const toWorkItemRecord = (
   pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
   startingCommitOid: row.starting_commit_oid,
+  completionSummary: row.completion_summary,
   sessionId: row.session_id,
   failureCode: row.failure_code,
   failureMessage: row.failure_message,
@@ -289,7 +291,7 @@ const toWorkItemRecord = (
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, model, variant, review_model,
                    review_variant, state, state_ready_at, paused, waiting_since, holds_worker_slot,
-                   pause_before_step, worktree_path, starting_commit_oid, session_id,
+                   pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
                    failure_message, created_at, updated_at`
 
@@ -352,6 +354,8 @@ const nextOperationalStep = (
     case "decide_pr_merge":
       return "merge_pr"
     case "merge_pr":
+      return "local_cleanup"
+    case "close_issue":
       return "local_cleanup"
     case "local_cleanup":
       return "complete"
@@ -1088,6 +1092,8 @@ export const makeWorkItemLifecycleLive = (
         {
           readonly worktreePath?: string | null
           readonly startingCommitOid?: string | null
+          readonly completionSummary?: string | null
+          readonly pauseBeforeStep?: OperationalLifecycleStep | null
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
@@ -1118,7 +1124,22 @@ export const makeWorkItemLifecycleLive = (
               .implement(context)
               .pipe(Effect.map((sessionId) => ({ sessionId })))
           case "assess_changes":
-            return steps.assessChanges(context).pipe(Effect.as({}))
+            return steps.assessChanges(context).pipe(
+              Effect.map((result) =>
+                result._tag === "changes"
+                  ? {}
+                  : {
+                      completionSummary: result.completionSummary,
+                      pauseBeforeStep:
+                        workItem.pause_before_step === "commit"
+                          ? ("close_issue" as const)
+                          : undefined,
+                      transition: {
+                        nextState: "close_issue" as const,
+                      },
+                    },
+              ),
+            )
           case "pre_commit":
             return steps.preCommit(context).pipe(Effect.as({}))
           case "review":
@@ -1270,6 +1291,8 @@ export const makeWorkItemLifecycleLive = (
             )
           case "merge_pr":
             return steps.mergePr(context).pipe(Effect.as({}))
+          case "close_issue":
+            return steps.closeIssue(context).pipe(Effect.as({}))
           case "local_cleanup":
             return steps
               .localCleanup(context)
@@ -1320,6 +1343,8 @@ export const makeWorkItemLifecycleLive = (
         readonly output: {
           readonly worktreePath?: string | null
           readonly startingCommitOid?: string | null
+          readonly completionSummary?: string | null
+          readonly pauseBeforeStep?: OperationalLifecycleStep | null
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
@@ -1355,6 +1380,10 @@ export const makeWorkItemLifecycleLive = (
             output.startingCommitOid === undefined
               ? workItem.starting_commit_oid
               : output.startingCommitOid
+          const completionSummary =
+            output.completionSummary === undefined
+              ? workItem.completion_summary
+              : output.completionSummary
           const sessionId = output.sessionId ?? workItem.session_id
           const githubPullRequestNumber =
             output.githubPullRequestNumber ??
@@ -1391,6 +1420,7 @@ export const makeWorkItemLifecycleLive = (
                        failure_message = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
+                        completion_summary = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
@@ -1403,6 +1433,7 @@ export const makeWorkItemLifecycleLive = (
                       revalidation.failureMessage,
                       worktreePath,
                       startingCommitOid,
+                      completionSummary,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -1416,6 +1447,7 @@ export const makeWorkItemLifecycleLive = (
                        state_ready_at = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
+                        completion_summary = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
@@ -1426,6 +1458,7 @@ export const makeWorkItemLifecycleLive = (
                       now,
                       worktreePath,
                       startingCommitOid,
+                      completionSummary,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -1441,6 +1474,7 @@ export const makeWorkItemLifecycleLive = (
                        failure_message = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
+                        completion_summary = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
@@ -1453,6 +1487,7 @@ export const makeWorkItemLifecycleLive = (
                         "OpenCode requested human intervention",
                       worktreePath,
                       startingCommitOid,
+                      completionSummary,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -1471,8 +1506,12 @@ export const makeWorkItemLifecycleLive = (
                     readonly pause_before_step: OperationalLifecycleStep | null
                   }[]
                   const isPaused = Boolean(pausedRows[0]?.paused)
-                  const pauseBeforeStep =
+                  const currentPauseBefore =
                     pausedRows[0]?.pause_before_step ?? null
+                  const pauseBeforeStep =
+                    output.pauseBeforeStep === undefined
+                      ? currentPauseBefore
+                      : output.pauseBeforeStep
                   const shouldPauseBeforeNext =
                     pauseBeforeStep !== null && pauseBeforeStep === nextStep
                   // Do not clear operator Pause; only set paused when auto-pausing.
@@ -1486,8 +1525,10 @@ export const makeWorkItemLifecycleLive = (
                        paused = 1,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
+                        pause_before_step = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
+                        completion_summary = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         updated_at = ?
@@ -1495,8 +1536,10 @@ export const makeWorkItemLifecycleLive = (
                       [
                         nextStep,
                         stateReadyAt,
+                        pauseBeforeStep,
                         worktreePath,
                         startingCommitOid,
+                        completionSummary,
                         sessionId,
                         githubPullRequestNumber,
                         now,
@@ -1511,8 +1554,10 @@ export const makeWorkItemLifecycleLive = (
                        state_ready_at = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
+                        pause_before_step = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
+                        completion_summary = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         updated_at = ?
@@ -1520,8 +1565,10 @@ export const makeWorkItemLifecycleLive = (
                       [
                         nextStep,
                         stateReadyAt,
+                        pauseBeforeStep,
                         worktreePath,
                         startingCommitOid,
+                        completionSummary,
                         sessionId,
                         githubPullRequestNumber,
                         now,
@@ -1533,8 +1580,10 @@ export const makeWorkItemLifecycleLive = (
                       `UPDATE work_item
                    SET state = ?,
                        state_ready_at = ?,
+                        pause_before_step = ?,
                         worktree_path = ?,
                         starting_commit_oid = ?,
+                        completion_summary = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         updated_at = ?
@@ -1542,8 +1591,10 @@ export const makeWorkItemLifecycleLive = (
                       [
                         nextStep,
                         stateReadyAt,
+                        pauseBeforeStep,
                         worktreePath,
                         startingCommitOid,
+                        completionSummary,
                         sessionId,
                         githubPullRequestNumber,
                         now,
@@ -1921,6 +1972,7 @@ export const makeWorkItemLifecycleLive = (
                 reviewVariant: workItem.review_variant,
                 worktreePath: workItem.worktree_path,
                 startingCommitOid: workItem.starting_commit_oid,
+                completionSummary: workItem.completion_summary,
                 sessionId: workItem.session_id,
                 maxDuration,
               }
@@ -1989,7 +2041,8 @@ export const makeWorkItemLifecycleLive = (
                   }
 
                   const revalidation =
-                    stepRun.step === "local_cleanup"
+                    stepRun.step === "local_cleanup" ||
+                    stepRun.step === "close_issue"
                       ? ({ ok: true } as const)
                       : yield* revalidateIssue(
                           workItem.repository_id,
@@ -2333,6 +2386,7 @@ export const makeWorkItemLifecycleLive = (
         reviewVariant: row.review_variant,
         worktreePath: row.worktree_path,
         startingCommitOid: row.starting_commit_oid,
+        completionSummary: row.completion_summary,
         sessionId: row.session_id,
       })
 
@@ -2754,6 +2808,7 @@ export const makeWorkItemLifecycleLive = (
             reviewVariant: currentWorkItem.review_variant,
             worktreePath: currentWorkItem.worktree_path,
             startingCommitOid: currentWorkItem.starting_commit_oid,
+            completionSummary: currentWorkItem.completion_summary,
             sessionId: currentWorkItem.session_id,
           }
 

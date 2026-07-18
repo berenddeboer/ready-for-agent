@@ -217,6 +217,7 @@ export const workItem = snakeCase.table(
         "mark_pr_ready_for_review",
         "decide_pr_merge",
         "merge_pr",
+        "close_issue",
         "local_cleanup",
         "complete",
         "failed",
@@ -255,6 +256,7 @@ export const workItem = snakeCase.table(
         "mark_pr_ready_for_review",
         "decide_pr_merge",
         "merge_pr",
+        "close_issue",
         "local_cleanup",
       ],
     }),
@@ -263,6 +265,10 @@ export const workItem = snakeCase.table(
      * Exact commit OID at Create Worktree success; Assess Changes baseline.
      */
     startingCommitOid: text(),
+    /**
+     * Durable No-Change Outcome completion summary (Markdown); null until confirmed.
+     */
+    completionSummary: text(),
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),
@@ -316,6 +322,7 @@ export const stepRun = snakeCase.table(
         "mark_pr_ready_for_review",
         "decide_pr_merge",
         "merge_pr",
+        "close_issue",
         "local_cleanup",
       ],
     }).notNull(),

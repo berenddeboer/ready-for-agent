@@ -1,4 +1,5 @@
 import { Context, type Duration, type Effect } from "effect"
+import type { AssessChangesResult } from "./assess-changes.js"
 import type { DecidePrMergeResult } from "./decide-pr-merge.js"
 import type {
   PrStatusCheckInvestigationResult,
@@ -21,6 +22,7 @@ export interface LifecycleStepContext {
   readonly reviewVariant: string
   readonly worktreePath: string | null
   readonly startingCommitOid: string | null
+  readonly completionSummary: string | null
   readonly sessionId: string | null
   readonly maxDuration?: Duration.Duration
 }
@@ -47,7 +49,7 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<string, unknown>
   readonly assessChanges: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, unknown>
+  ) => Effect.Effect<AssessChangesResult, unknown>
   readonly preCommit: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
@@ -76,6 +78,9 @@ export interface LifecycleStepsShape {
     context: LifecycleStepContext,
   ) => Effect.Effect<DecidePrMergeResult, unknown>
   readonly mergePr: (
+    context: LifecycleStepContext,
+  ) => Effect.Effect<void, unknown>
+  readonly closeIssue: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, unknown>
   readonly localCleanup: (

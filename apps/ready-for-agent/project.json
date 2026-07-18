@@ -35,7 +35,10 @@
         "command": "bun --conditions @ready-for-agent/source scripts/generate-standalone-embed.ts"
       },
       "inputs": [
-        "{workspaceRoot}/apps/harness/dist/client/**/*",
+        {
+          "dependentTasksOutputFiles": "**/dist/client/**/*",
+          "transitive": false
+        },
         "{projectRoot}/package.json",
         "{projectRoot}/scripts/generate-standalone-embed.ts"
       ],

@@ -22,11 +22,25 @@ export class AssessChangesStartingCommitMissingError extends Data.TaggedError(
   readonly message: string
 }> {}
 
-export class AssessChangesNoObservableChangeError extends Data.TaggedError(
-  "AssessChangesNoObservableChangeError",
+export class AssessChangesSessionMissingError extends Data.TaggedError(
+  "AssessChangesSessionMissingError",
 )<{
   readonly workItemId: string
-  readonly startingCommitOid: string
+  readonly message: string
+}> {}
+
+export class AssessChangesOpenCodeError extends Data.TaggedError(
+  "AssessChangesOpenCodeError",
+)<{
+  readonly workItemId: string
+  readonly message: string
+  readonly cause?: unknown
+}> {}
+
+export class AssessChangesResultError extends Data.TaggedError(
+  "AssessChangesResultError",
+)<{
+  readonly workItemId: string
   readonly message: string
 }> {}
 
@@ -34,4 +48,6 @@ export type AssessChangesError =
   | AssessChangesWorktreeContextMissingError
   | AssessChangesInvalidWorktreeContextError
   | AssessChangesStartingCommitMissingError
-  | AssessChangesNoObservableChangeError
+  | AssessChangesSessionMissingError
+  | AssessChangesOpenCodeError
+  | AssessChangesResultError

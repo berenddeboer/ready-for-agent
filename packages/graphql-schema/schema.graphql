@@ -111,6 +111,7 @@ enum WorkItemState {
   MARK_PR_READY_FOR_REVIEW
   DECIDE_PR_MERGE
   MERGE_PR
+  CLOSE_ISSUE
   LOCAL_CLEANUP
   COMPLETE
   FAILED
@@ -146,6 +147,7 @@ enum LifecyclePhase {
   MARK_PR_READY_FOR_REVIEW
   DECIDE_PR_MERGE
   MERGE_PR
+  CLOSE_ISSUE
   LOCAL_CLEANUP
 }
 
@@ -177,6 +179,11 @@ type WorkItem {
   stateReadyAt: String!
   worktreePath: String
   startingCommitOid: String
+  """
+  Markdown completion summary for a No-Change Outcome; null when the Work Item
+  produced repository changes or has not confirmed no-change yet.
+  """
+  completionSummary: String
   sessionId: String
   failureCode: String
   createdAt: String!

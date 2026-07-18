@@ -170,6 +170,7 @@ type WorkItemState =
   | "MARK_PR_READY_FOR_REVIEW"
   | "DECIDE_PR_MERGE"
   | "MERGE_PR"
+  | "CLOSE_ISSUE"
   | "LOCAL_CLEANUP"
   | "COMPLETE"
   | "FAILED"
@@ -204,6 +205,7 @@ type WorkItem = {
   isTerminal: boolean
   sessionId: string | null
   worktreePath: string | null
+  completionSummary: string | null
   createdAt: string
   lifecycleLabels: readonly {
     phase: string
@@ -228,6 +230,7 @@ const workItemFields = {
   isTerminal: true,
   sessionId: true,
   worktreePath: true,
+  completionSummary: true,
   createdAt: true,
   lifecycleLabels: {
     phase: true,

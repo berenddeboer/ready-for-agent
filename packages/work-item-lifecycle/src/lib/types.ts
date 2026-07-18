@@ -32,6 +32,7 @@ export type OperationalLifecycleStep =
   | "mark_pr_ready_for_review"
   | "decide_pr_merge"
   | "merge_pr"
+  | "close_issue"
   | "local_cleanup"
 
 export type WorkItemState =
@@ -89,6 +90,8 @@ export interface WorkItemRecord {
   readonly worktreePath: string | null
   /** Exact commit OID recorded by Create Worktree for Assess Changes. */
   readonly startingCommitOid: string | null
+  /** Durable No-Change Outcome completion summary (Markdown). */
+  readonly completionSummary: string | null
   readonly sessionId: string | null
   readonly failureCode: string | null
   readonly failureMessage: string | null
@@ -203,7 +206,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   create_worktree: Duration.minutes(5),
   install_dependencies: Duration.minutes(15),
   implement: Duration.hours(2),
-  assess_changes: Duration.minutes(5),
+  assess_changes: Duration.hours(1),
   pre_commit: Duration.hours(2),
   review: Duration.hours(1),
   commit: Duration.minutes(5),
@@ -214,6 +217,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   mark_pr_ready_for_review: Duration.minutes(5),
   decide_pr_merge: Duration.minutes(15),
   merge_pr: Duration.minutes(5),
+  close_issue: Duration.minutes(5),
   local_cleanup: Duration.minutes(5),
 }
 
