@@ -18,6 +18,14 @@ type Query {
     listKind: WorkItemsListKind
     limit: Int
   ): [WorkItem!]!
+  """
+  Count of unique Work Items that committed a pull request in [from, to).
+  A Work Item counts when it has a non-null GitHub PR number and at least one
+  successful commit Step Run whose finished_at falls in the half-open range.
+  `from` and `to` are ISO-8601 instants (browser local calendar-day boundaries).
+  Counts across all repositories; not limited by Jobs card filters or limits.
+  """
+  committedPullRequestsCount(from: String!, to: String!): Int!
 }
 
 """

@@ -115,6 +115,21 @@ type WorkItemsArgs = IssuesArgs & {
   limit?: number
 }
 
+type CommittedPullRequestsCountArgs = {
+  from: string
+  to: string
+}
+
+const parseIsoInstantMs = (value: string, field: string): number => {
+  const ms = Date.parse(value)
+  if (Number.isNaN(ms)) {
+    throw new GraphQLError(`Invalid ISO instant for ${field}: ${value}`, {
+      extensions: { code: "BAD_USER_INPUT" },
+    })
+  }
+  return ms
+}
+
 const toWorkItemsListKind = (
   listKind: WorkItemsArgs["listKind"],
 ): WorkItemsListKind | undefined => {
@@ -686,6 +701,36 @@ export const createGraphqlApi = (
                       relevantIssueNumbers.has(workItem.githubIssueNumber),
                   )
                   return filterWorkItemsByListKind(visible, listKind, limit)
+                }),
+              ),
+            )
+            if (Result.isFailure(result)) {
+              throw toGraphQLError(result.failure)
+            }
+            return result.success
+          },
+          committedPullRequestsCount: async (
+            _parent: unknown,
+            args: CommittedPullRequestsCountArgs,
+          ) => {
+            const fromMs = parseIsoInstantMs(args.from, "from")
+            const toMs = parseIsoInstantMs(args.to, "to")
+            if (toMs < fromMs) {
+              throw new GraphQLError(
+                "`to` must be greater than or equal to `from`",
+                {
+                  extensions: { code: "BAD_USER_INPUT" },
+                },
+              )
+            }
+            const result = await runtime.runPromise(
+              Effect.result(
+                Effect.gen(function* () {
+                  const lifecycle = yield* WorkItemLifecycle
+                  return yield* lifecycle.countCommittedPullRequests(
+                    fromMs,
+                    toMs,
+                  )
                 }),
               ),
             )

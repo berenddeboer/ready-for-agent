@@ -484,6 +484,14 @@ export interface WorkItemLifecycleShape {
   readonly listWorkItemsForRepository: (
     repositoryId: string,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
+  /**
+   * Count unique Work Items with a non-null GitHub PR number and a successful
+   * commit Step Run whose finished_at is in the half-open range [fromMs, toMs).
+   */
+  readonly countCommittedPullRequests: (
+    fromMs: number,
+    toMs: number,
+  ) => Effect.Effect<number, ListWorkItemsError>
   readonly continueAfterHumanPrOutcome: (
     workItemId: string,
     outcome: HumanPrOutcome,
@@ -689,6 +697,28 @@ export const makeWorkItemLifecycleLive = (
         return rows.map((row) =>
           toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
         )
+      })
+
+      const countCommittedPullRequests = Effect.fn(
+        "WorkItemLifecycle.countCommittedPullRequests",
+      )(function* (fromMs: number, toMs: number) {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT COUNT(DISTINCT wi.id) AS count
+             FROM work_item wi
+             INNER JOIN step_run sr ON sr.work_item_id = wi.id
+             WHERE wi.github_pull_request_number IS NOT NULL
+               AND sr.step = 'commit'
+               AND sr.status = 'succeeded'
+               AND sr.finished_at IS NOT NULL
+               AND sr.finished_at >= ?
+               AND sr.finished_at < ?`,
+            [fromMs, toMs],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly count: number
+        }[]
+        return Number(rows[0]?.count ?? 0)
       })
 
       const loadStepRunRow = (
@@ -3192,6 +3222,7 @@ export const makeWorkItemLifecycleLive = (
         getWorkItem,
         listWorkItemsForIssue,
         listWorkItemsForRepository,
+        countCommittedPullRequests,
         continueAfterHumanPrOutcome,
         admitWaitingWorkItems,
       })

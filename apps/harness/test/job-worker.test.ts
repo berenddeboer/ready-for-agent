@@ -229,6 +229,7 @@ const queueLayer = (
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
     }),
@@ -1415,6 +1416,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
     })
@@ -1510,6 +1512,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
     })
@@ -1639,6 +1642,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
     })
@@ -1824,6 +1828,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
     })
@@ -1930,6 +1935,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
     })
