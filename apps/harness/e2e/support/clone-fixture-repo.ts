@@ -98,6 +98,11 @@ const assertSecretPresentViaCli = (env: NodeJS.ProcessEnv) => {
   }
 }
 
+export const keymaxxerRunArgs = (
+  secretName: string,
+  command: string,
+): string[] => ["run", "--secrets", secretName, "--", command]
+
 const cloneViaCli = (checkoutParent: string, env: NodeJS.ProcessEnv) => {
   assertSecretPresentViaCli(env)
   const dest = join(checkoutParent, "repo")
@@ -112,7 +117,7 @@ const cloneViaCli = (checkoutParent: string, env: NodeJS.ProcessEnv) => {
 
   const result = spawnSync(
     keymaxxerBin(),
-    ["run", "--secrets", FIXTURE_SECRET_NAME, "--", "bash", "-c", cloneCommand],
+    keymaxxerRunArgs(FIXTURE_SECRET_NAME, cloneCommand),
     {
       env,
       encoding: "utf8",

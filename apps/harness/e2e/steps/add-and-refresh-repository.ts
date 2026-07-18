@@ -41,15 +41,19 @@ When("I add the Repository with the CLI", async ({ world }) => {
     throw new Error("Fixture checkout path is missing from the scenario world")
   }
 
-  const result = spawnSync("bun", ["run", "harness-cli", "add", checkoutPath], {
-    cwd: workspaceRoot,
-    env: {
-      ...process.env,
-      READY_FOR_AGENT_GRAPHQL_URL: E2E_GRAPHQL_URL,
+  const result = spawnSync(
+    "bun",
+    ["run", "ready-for-agent", "add", checkoutPath],
+    {
+      cwd: workspaceRoot,
+      env: {
+        ...process.env,
+        READY_FOR_AGENT_GRAPHQL_URL: E2E_GRAPHQL_URL,
+      },
+      encoding: "utf8",
+      timeout: 60_000,
     },
-    encoding: "utf8",
-    timeout: 60_000,
-  })
+  )
 
   if (result.status !== 0) {
     throw new Error(
