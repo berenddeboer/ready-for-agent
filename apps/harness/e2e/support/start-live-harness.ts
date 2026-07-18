@@ -1,6 +1,6 @@
 /**
- * Start the production-built Harness with a fresh isolated database and the
- * real Keymaxxer Sidecar (via run-with-keymaxxer-sidecar).
+ * Start the production-built Harness with a fresh isolated database.
+ * Production lifecycle owns migrations and Keymaxxer Sidecar coordination.
  *
  * CI / fixture mode: temporary HOME with the checked-in encrypted vault.
  * Local mode: developer's vault; does not copy over ~/.keymaxxer.
@@ -32,6 +32,7 @@ const env: NodeJS.ProcessEnv = {
   ...process.env,
   SQLITE_DATABASE_PATH: dbPath,
   PORT: String(port),
+  NO_BROWSER: "1",
 }
 
 const masterKey =
@@ -76,54 +77,25 @@ if (!existsSync(distServer)) {
   process.exit(1)
 }
 
-const migrate = spawn(
+const child = spawn(
   process.execPath,
-  [
-    "--conditions",
-    "@ready-for-agent/source",
-    resolve(workspaceRoot, "packages/db/src/bin/migrate.ts"),
-  ],
+  ["--conditions", "@ready-for-agent/source", serverEntry],
   {
-    cwd: workspaceRoot,
+    cwd: harnessRoot,
     env,
     stdio: "inherit",
   },
 )
 
-migrate.on("exit", (code) => {
-  if (code !== 0) {
-    rmSync(runDir, { recursive: true, force: true })
-    process.exit(code ?? 1)
-  }
+const shutdown = (signal: NodeJS.Signals) => {
+  child.kill(signal)
+  rmSync(runDir, { recursive: true, force: true })
+}
+process.once("SIGINT", () => shutdown("SIGINT"))
+process.once("SIGTERM", () => shutdown("SIGTERM"))
 
-  const child = spawn(
-    process.execPath,
-    [
-      "--conditions",
-      "@ready-for-agent/source",
-      resolve(workspaceRoot, "scripts/run-with-keymaxxer-sidecar.ts"),
-      process.execPath,
-      "--conditions",
-      "@ready-for-agent/source",
-      serverEntry,
-    ],
-    {
-      cwd: harnessRoot,
-      env,
-      stdio: "inherit",
-    },
-  )
-
-  const shutdown = (signal: NodeJS.Signals) => {
-    child.kill(signal)
-    rmSync(runDir, { recursive: true, force: true })
-  }
-  process.once("SIGINT", () => shutdown("SIGINT"))
-  process.once("SIGTERM", () => shutdown("SIGTERM"))
-
-  child.on("exit", (childCode, signal) => {
-    rmSync(runDir, { recursive: true, force: true })
-    if (signal) process.kill(process.pid, signal)
-    process.exit(childCode ?? 1)
-  })
+child.on("exit", (childCode, signal) => {
+  rmSync(runDir, { recursive: true, force: true })
+  if (signal) process.kill(process.pid, signal)
+  process.exit(childCode ?? 1)
 })

@@ -34,9 +34,12 @@ describe("single application server topology", () => {
     expect(harness.targets.dev?.options?.command).toContain(
       "export SQLITE_DATABASE_PATH",
     )
-    expect(harness.targets.start?.options?.command).toContain(
+    expect(harness.targets.start?.options?.command).toContain("server.ts")
+    expect(harness.targets.start?.options?.command).not.toContain(
       "run-with-keymaxxer-sidecar",
     )
+    expect(harness.targets.start?.dependsOn).toEqual(["build"])
+    expect(harness.targets.start?.dependsOn).not.toContain("db:migrate")
   })
 
   test("uses TanStack Start SPA mode without the old API proxy", async () => {
