@@ -172,10 +172,10 @@ describe("Keymaxxer-backed GitHub layer", () => {
     )
     expect(runs[0]?.command).toContain("list-ready-issues.ts")
     expect(runs[0]?.command).toMatch(
-      /bun --conditions @ready-for-agent\/source "\/.*list-ready-issues\.ts"/,
+      /"--conditions" "@ready-for-agent\/source" "\/.*list-ready-issues\.ts"/,
     )
     expect(runs[0]?.command).not.toContain(
-      "packages/github-service/src/bin/list-ready-issues.ts",
+      "--ready-for-agent-internal-github-helper",
     )
     expect(runs[0]?.cwd).toBe("/workspace")
     expect(runs[0]?.command).not.toContain("Ready issue")
@@ -239,6 +239,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       ],
     })
     expect(runs[0]?.command).toContain("get-pr-check-status.ts")
+    expect(runs[0]?.command).toContain('"--conditions"')
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
   })
 
@@ -272,6 +273,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
 
     expect(number).toBe(321)
     expect(runs[0]?.command).toContain("get-open-pr-number.ts")
+    expect(runs[0]?.command).toContain('"--conditions"')
   })
 
   test("decodes no_checks and pending terminalChecks from the bin", async () => {
@@ -386,6 +388,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
     )
 
     expect(runs[0]?.command).toContain("mark-pr-ready-for-review.ts")
+    expect(runs[0]?.command).toContain('"--conditions"')
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
   })
 
@@ -463,6 +466,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
     )
 
     expect(runs[0]?.command).toContain("merge-pull-request.ts")
+    expect(runs[0]?.command).toContain('"--conditions"')
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
   })
 })

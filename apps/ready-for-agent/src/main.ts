@@ -1,5 +1,9 @@
 #!/usr/bin/env bun
 import {
+  isInternalGitHubHelperMode,
+  runGitHubHelperProcess,
+} from "@ready-for-agent/github-service"
+import {
   isInternalKeymaxxerSidecarMode,
   runKeymaxxerSidecarProcess,
 } from "@ready-for-agent/keymaxxer-service"
@@ -7,6 +11,8 @@ import { READY_FOR_AGENT_VERSION } from "./generated/version.ts"
 
 if (isInternalKeymaxxerSidecarMode(process.argv)) {
   await runKeymaxxerSidecarProcess()
+} else if (isInternalGitHubHelperMode(process.argv)) {
+  runGitHubHelperProcess()
 } else {
   const { BunRuntime, BunServices } = await import("@effect/platform-bun")
   const { Effect, Layer } = await import("effect")

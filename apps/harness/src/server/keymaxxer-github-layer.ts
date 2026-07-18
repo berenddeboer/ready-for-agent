@@ -1,11 +1,13 @@
 import { Effect, Layer, Schema } from "effect"
 import {
+  type GitHubHelperOperation,
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
   type ReadyLabeledIssue,
-  githubServiceBinScriptPath,
+  formatGitHubHelperShellCommand,
+  resolveGitHubHelperChildSpawn,
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -230,18 +232,14 @@ export const keymaxxerGitHubLayer = (options: {
         })
       const runGitHubBin = (
         tokenName: string,
-        scriptFileName: string,
+        operation: GitHubHelperOperation,
         args: readonly string[],
       ) =>
         runGitHubCommand(
           tokenName,
-          [
-            "bun",
-            "--conditions",
-            "@ready-for-agent/source",
-            JSON.stringify(githubServiceBinScriptPath(scriptFileName)),
-            ...args,
-          ].join(" "),
+          formatGitHubHelperShellCommand(
+            resolveGitHubHelperChildSpawn({ operation, args }),
+          ),
         )
 
       const service: GitHubServiceShape = {
@@ -259,7 +257,7 @@ export const keymaxxerGitHubLayer = (options: {
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
-              "get-open-pr-number.ts",
+              "get-open-pr-number",
               [owner, name, head],
             )
             if (result.exitCode === 2) {
@@ -302,7 +300,7 @@ export const keymaxxerGitHubLayer = (options: {
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
-              "get-pr-check-status.ts",
+              "get-pr-check-status",
               [owner, name, head],
             )
             if (result.exitCode === 2) {
@@ -363,7 +361,7 @@ export const keymaxxerGitHubLayer = (options: {
                 : ""
             const result = yield* runGitHubBin(
               tokenName,
-              "get-pr-status-check-diagnostics.ts",
+              "get-pr-status-check-diagnostics",
               logDirectory === ""
                 ? [owner, name, checksArg]
                 : [owner, name, checksArg, logDirectory],
@@ -410,7 +408,7 @@ export const keymaxxerGitHubLayer = (options: {
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
-              "get-pr-lifecycle-status.ts",
+              "get-pr-lifecycle-status",
               [owner, name, head],
             )
             if (result.exitCode === 2) {
@@ -455,7 +453,7 @@ export const keymaxxerGitHubLayer = (options: {
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
-              "mark-pr-ready-for-review.ts",
+              "mark-pr-ready-for-review",
               [owner, name, head],
             )
             if (result.exitCode === 2) {
@@ -486,7 +484,7 @@ export const keymaxxerGitHubLayer = (options: {
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
-              "merge-pull-request.ts",
+              "merge-pull-request",
               [owner, name, head],
             )
             if (result.exitCode === 2) {
@@ -516,11 +514,10 @@ export const keymaxxerGitHubLayer = (options: {
 
             const owner = encodeArgument(repository.owner)
             const name = encodeArgument(repository.name)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "list-ready-issues.ts",
-              [owner, name],
-            )
+            const result = yield* runGitHubBin(tokenName, "list-ready-issues", [
+              owner,
+              name,
+            ])
 
             if (result.exitCode === 2) {
               return yield* new GitHubRepositoryUnavailableError(repository)
