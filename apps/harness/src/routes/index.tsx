@@ -330,6 +330,22 @@ function HomePage() {
           Clanker Harness
         </h1>
       </header>
+      <Suspense fallback={<RepositoryCardsSkeleton />}>
+        <HomeBody />
+      </Suspense>
+    </main>
+  )
+}
+
+function HomeBody() {
+  const { data: repositories } = useSuspenseQuery(repositoriesQuery)
+
+  if (repositories.length === 0) {
+    return <RepositoryCards />
+  }
+
+  return (
+    <>
       <section aria-label="Committed pull requests" className="mb-8">
         <CommittedPullRequestsDashboard />
       </section>
@@ -342,11 +358,9 @@ function HomePage() {
         </Suspense>
       </section>
       <div className="mt-8">
-        <Suspense fallback={<RepositoryCardsSkeleton />}>
-          <RepositoryCards />
-        </Suspense>
+        <RepositoryCards />
       </div>
-    </main>
+    </>
   )
 }
 
