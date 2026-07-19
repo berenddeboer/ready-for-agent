@@ -138,6 +138,11 @@ bun --conditions @ready-for-agent/source \
   packages/release-versioning/src/bin/apply-publish-versions.ts 0.1.0 --for-publish
 ```
 
+Invoke these scripts via Nx targets or `bun … path/to/script.ts` only. Do not add a
+`package.json` `"bin"` entry for the TypeScript sources: Bun workspace linking
+chmods bin targets executable and leaves a mode-only dirty tree (`100644` →
+`100755`) after `bun install`.
+
 `--for-publish` also stages npm READMEs: the root product [README.md](README.md)
 into `apps/ready-for-agent/` (so the npm page is install/usage, not monorepo
 architecture notes), and a shared platform-binary stub into each
