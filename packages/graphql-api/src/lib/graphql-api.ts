@@ -56,6 +56,10 @@ import {
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
+  commandExistsOnPath,
+  resolveAddRepositoryCommand,
+} from "./add-repository-command.js"
+import {
   activateRepositoryPolling,
   enqueueRefreshRepositoryJob,
   suspendRepositoryPolling,
@@ -558,9 +562,13 @@ const toNativeResponse = (response: unknown): Response => {
 
 export const createGraphqlApi = (
   runtime: GraphqlRuntime,
-  options: { readonly opencodeCwd?: string } = {},
+  options: {
+    readonly opencodeCwd?: string
+    readonly commandExists?: (command: string) => boolean
+  } = {},
 ) => {
   const opencodeCwd = options.opencodeCwd ?? process.cwd()
+  const commandExists = options.commandExists ?? commandExistsOnPath
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
   let modelsCache: ReadonlyArray<string> | null = null
   let modelsInFlight: Promise<ReadonlyArray<string>> | null = null
@@ -570,6 +578,8 @@ export const createGraphqlApi = (
       resolvers: {
         Query: {
           health: () => true,
+          addRepositoryCommand: () =>
+            resolveAddRepositoryCommand(commandExists),
           repositories: async () => {
             const result = await runtime.runPromise(
               Effect.result(
