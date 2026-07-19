@@ -6,10 +6,14 @@ export const localCommittedPullRequestDayBounds = (now = new Date()) => {
   startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
   const startOfYesterday = new Date(startOfToday)
   startOfYesterday.setDate(startOfYesterday.getDate() - 1)
+  const startOfLastWeek = new Date(startOfToday)
+  startOfLastWeek.setDate(startOfLastWeek.getDate() - 7)
   return {
     todayFrom: startOfToday.toISOString(),
     todayTo: startOfTomorrow.toISOString(),
     yesterdayFrom: startOfYesterday.toISOString(),
     yesterdayTo: startOfToday.toISOString(),
+    lastWeekFrom: startOfLastWeek.toISOString(),
+    lastWeekTo: startOfToday.toISOString(),
   }
 }
