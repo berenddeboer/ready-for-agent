@@ -277,6 +277,38 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("suggests add repository command with npx when operator binary is not on PATH", async () => {
+    const response = await createGraphqlApi(runtime, {
+      commandExists: () => false,
+    }).fetch(
+      graphqlRequest({
+        query: `query { addRepositoryCommand }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepositoryCommand: "npx ready-for-agent add /path/to/local/repo",
+      },
+    })
+  })
+
+  test("suggests add repository command without npx when operator binary is on PATH", async () => {
+    const response = await createGraphqlApi(runtime, {
+      commandExists: (command) => command === "ready-for-agent",
+    }).fetch(
+      graphqlRequest({
+        query: `query { addRepositoryCommand }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepositoryCommand: "ready-for-agent add /path/to/local/repo",
+      },
+    })
+  })
+
   test("activates Issue Polling when adding a repository that already has a GitHub token", async () => {
     const ensured: Array<{
       queue: string

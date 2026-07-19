@@ -89,6 +89,16 @@ const repositoriesQuery = {
   },
 }
 
+const addRepositoryCommandQuery = {
+  queryKey: ["addRepositoryCommand"],
+  staleTime: Number.POSITIVE_INFINITY,
+  gcTime: Number.POSITIVE_INFINITY,
+  queryFn: async () => {
+    const result = await graphql.query({ addRepositoryCommand: true })
+    return result.addRepositoryCommand
+  },
+}
+
 const issuesQuery = (repositoryId: string) => ({
   queryKey: ["issues", repositoryId],
   queryFn: async () => {
@@ -417,6 +427,9 @@ function CommittedPullRequestsDashboard() {
 function RepositoryCards() {
   const queryClient = useQueryClient()
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
+  const { data: addRepositoryCommand } = useSuspenseQuery(
+    addRepositoryCommandQuery,
+  )
   const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
   const [issuesChangeCounts, setIssuesChangeCounts] = useState<
     Readonly<Record<string, number>>
@@ -537,7 +550,7 @@ function RepositoryCards() {
             Add a local Git repository with the operator binary:
           </p>
           <code className="mt-3 inline-block rounded-md bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800">
-            ready-for-agent add /path/to/local/repo
+            {addRepositoryCommand}
           </code>
         </div>
       </>

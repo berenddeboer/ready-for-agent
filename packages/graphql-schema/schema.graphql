@@ -1,5 +1,10 @@
 type Query {
   health: Boolean!
+  """
+  Suggested CLI to add a local repository from the blank-slate empty state.
+  Uses `ready-for-agent` when that binary is on PATH; otherwise `npx ready-for-agent`.
+  """
+  addRepositoryCommand: String!
   repositories: [Repository!]!
   repositoryCredentials: [RepositoryCredential!]!
   config: Config!
