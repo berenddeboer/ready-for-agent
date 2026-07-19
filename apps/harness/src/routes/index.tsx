@@ -1018,51 +1018,51 @@ function RepositoryCard({
           </span>
         </div>
       </div>
-      <dl className="m-0 grid gap-[0.8rem]">
-        <div className="min-w-0">
-          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Local path
+      <dl className="m-0 grid gap-1">
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            Path:
           </dt>
           <dd
-            className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700"
+            className="m-0 min-w-0 truncate font-mono text-slate-700"
             title={repository.localPath}
           >
             {repository.localPath}
           </dd>
         </div>
-        <div className="min-w-0">
-          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Checkout
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            Checkout:
           </dt>
-          <dd className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700">
+          <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
             {repository.isBare ? "Bare repository" : "Working tree"}
           </dd>
         </div>
-        <div className="min-w-0">
-          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Build model
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            Build model:
           </dt>
-          <dd className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700">
+          <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
             {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
             {" · "}
             {repository.defaultVariant ?? `Default (${harnessDefaultVariant})`}
           </dd>
         </div>
-        <div className="min-w-0">
-          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Review model
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            Review model:
           </dt>
-          <dd className="mt-[0.15rem] truncate font-mono text-[0.82rem] text-slate-700">
+          <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
             {repository.reviewModel ?? `Default (${harnessReviewModel})`}
             {" · "}
             {repository.reviewVariant ?? `Default (${harnessReviewVariant})`}
           </dd>
         </div>
-        <div className="min-w-0">
-          <dt className="text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Auto-merge
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            Auto-merge:
           </dt>
-          <dd className="mt-[0.15rem] text-[0.82rem] text-slate-700">
+          <dd className="m-0 text-slate-700">
             {repository.autoMerge ? "Enabled" : "Disabled"}
           </dd>
         </div>
