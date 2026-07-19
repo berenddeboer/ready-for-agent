@@ -168,6 +168,9 @@ const queueLayer = (
     jobId: string,
     delay: Duration.Duration,
   ) => Effect.Effect<unknown> = () => Effect.void,
+  interruptRunningStepRunsFromPriorWorker: Effect.Effect<number> = Effect.succeed(
+    0,
+  ),
 ) =>
   Layer.mergeAll(
     defaultGithubLayer,
@@ -224,6 +227,7 @@ const queueLayer = (
       implementNow: unused,
       implementLocally: unused,
       recoverOrphanedStepRuns,
+      interruptRunningStepRunsFromPriorWorker,
       runStep,
       retry: unused,
       pause: unused,
@@ -1415,6 +1419,7 @@ describe("Job worker", () => {
       implementNow: unused,
       implementLocally: unused,
       recoverOrphanedStepRuns: Effect.succeed(0),
+      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
       runStep: () => Effect.succeed({ _tag: "noop" as const }),
       retry: unused,
       pause: unused,
@@ -1488,6 +1493,77 @@ describe("Job worker", () => {
     )
   })
 
+  test("startup interrupts Step Runs left running by a prior worker process", async () => {
+    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+    let priorWorkerInterruptCalls = 0
+    const lifecycle = Layer.succeed(WorkItemLifecycle, {
+      maxDurations: {
+        create_worktree: Duration.minutes(5),
+        install_dependencies: Duration.minutes(15),
+        implement: Duration.hours(2),
+        assess_changes: Duration.minutes(5),
+        pre_commit: Duration.hours(2),
+        review: Duration.hours(1),
+        commit: Duration.minutes(5),
+        create_pr: Duration.minutes(10),
+        watch_pr_status_checks: Duration.minutes(5),
+        resolve_pr_merge_conflict: Duration.hours(2),
+        investigate_pr_status_checks: Duration.hours(2),
+        mark_pr_ready_for_review: Duration.minutes(5),
+        decide_pr_merge: Duration.minutes(15),
+        merge_pr: Duration.minutes(5),
+        close_issue: Duration.minutes(5),
+        local_cleanup: Duration.minutes(5),
+      },
+      implementNow: unused,
+      implementLocally: unused,
+      recoverOrphanedStepRuns: Effect.succeed(0),
+      interruptRunningStepRunsFromPriorWorker: Effect.sync(() => {
+        priorWorkerInterruptCalls += 1
+        return 1
+      }),
+      runStep: () => Effect.succeed({ _tag: "noop" as const }),
+      retry: unused,
+      pause: unused,
+      start: unused,
+      abandon: unused,
+      reset: unused,
+      getWorkItem: unused,
+      listWorkItemsForIssue: unused,
+      listWorkItemsForRepository: () => Effect.succeed([]),
+      countCommittedPullRequests: () => Effect.succeed(0),
+      continueAfterHumanPrOutcome: unused,
+      admitWaitingWorkItems: Effect.succeed(0),
+    })
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startJobWorker({
+            idlePollInterval: Duration.zero,
+            samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+          })
+          expect(priorWorkerInterruptCalls).toBe(1)
+        }),
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            defaultGithubLayer,
+            database,
+            queue,
+            Layer.succeed(IssueReconciler, {
+              reconcile: () => Effect.die("not used"),
+            }),
+            keymaxxerLayer(),
+            lifecycle,
+          ),
+        ),
+        Effect.orDie,
+      ),
+    )
+  })
+
   test("startup enqueues one Polling Auto-heal Job without awaiting repair", async () => {
     const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
     const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
@@ -1513,6 +1589,7 @@ describe("Job worker", () => {
       implementNow: unused,
       implementLocally: unused,
       recoverOrphanedStepRuns: Effect.succeed(0),
+      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
       runStep: () => Effect.succeed({ _tag: "noop" as const }),
       retry: unused,
       pause: unused,
@@ -1645,6 +1722,7 @@ describe("Job worker", () => {
       implementNow: unused,
       implementLocally: unused,
       recoverOrphanedStepRuns: Effect.succeed(0),
+      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
       runStep: () => Effect.succeed({ _tag: "noop" as const }),
       retry: unused,
       pause: unused,
@@ -1833,6 +1911,7 @@ describe("Job worker", () => {
       implementNow: unused,
       implementLocally: unused,
       recoverOrphanedStepRuns: Effect.succeed(0),
+      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
       runStep: () => Effect.succeed({ _tag: "noop" as const }),
       retry: unused,
       pause: unused,
@@ -1942,6 +2021,7 @@ describe("Job worker", () => {
       implementNow: unused,
       implementLocally: unused,
       recoverOrphanedStepRuns: Effect.succeed(0),
+      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
       runStep: () => Effect.succeed({ _tag: "noop" as const }),
       retry: unused,
       pause: unused,
