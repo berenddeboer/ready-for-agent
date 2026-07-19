@@ -1047,55 +1047,6 @@ export const createGraphqlApi = (
             }
             return result.success
           },
-          removeRepositoryGitHubToken: async (
-            _parent: unknown,
-            args: RepositoryCredentialArgs,
-          ) => {
-            const result = await runtime.runPromise(
-              Effect.result(
-                tokenProvisioning.withPermits(1)(
-                  Effect.gen(function* () {
-                    const db = yield* DbService
-                    const repositories = yield* db.listRepositories
-                    const repository = repositories.find(
-                      ({ id }) => id === args.repositoryId,
-                    )
-                    if (repository === undefined) {
-                      return yield* new RepositoryNotFoundError({
-                        repositoryId: args.repositoryId,
-                      })
-                    }
-
-                    const keymaxxer = yield* KeymaxxerService
-                    const account = `${repository.githubOwner}/${repository.githubRepo}`
-                    const existingToken = yield* keymaxxer.findSecret({
-                      provider: "github",
-                      account,
-                    })
-                    if (existingToken !== null) {
-                      yield* keymaxxer.removeSecret(existingToken)
-                    }
-                    yield* suspendRepositoryPolling(repository.id).pipe(
-                      Effect.catch((error) =>
-                        Effect.logWarning(
-                          "Repository polling was not suspended",
-                          {
-                            repositoryId: repository.id,
-                            error,
-                          },
-                        ),
-                      ),
-                    )
-                    return repositoryCredential(repository, null)
-                  }),
-                ),
-              ),
-            )
-            if (Result.isFailure(result)) {
-              throw toGraphQLError(result.failure)
-            }
-            return result.success
-          },
           removeRepository: async (
             _parent: unknown,
             args: RemoveRepositoryArgs,

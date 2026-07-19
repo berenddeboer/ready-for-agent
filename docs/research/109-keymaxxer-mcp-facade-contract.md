@@ -18,7 +18,7 @@ Verified against:
 1. **Transport:** MCP **Streamable HTTP** on loopback (required). Optional legacy **SSE** is nice-to-have; OpenCode falls back only if Streamable HTTP fails for non-auth reasons.
 2. **Architecture:** **Equivalent-tool facade**, not a transparent JSON-RPC proxy of the upstream stdio session.
 3. **Upstream:** Exactly **one** `keymaxxer serve` stdio process remains the sole keyholder (vault key + Allow-session set).
-4. **Tools:** Facade advertises the same four MCP tool names, schemas, and text result shapes as Keymaxxer: `keymaxxer_list`, `keymaxxer_add`, `keymaxxer_run`, `keymaxxer_rm`.
+4. **Tools:** Facade advertises the same three MCP tool names, schemas, and text result shapes as Keymaxxer: `keymaxxer_list`, `keymaxxer_add`, `keymaxxer_run`. Secret deletion is CLI-only (`keymaxxer rm`).
 5. **HTTP sessions ≠ vault session:** Each client gets its own Streamable HTTP MCP session; all sessions forward tool calls to the single stdio Keymaxxer client.
 
 ---
@@ -158,7 +158,6 @@ Register on the facade exactly as Keymaxxer does:
 | `keymaxxer_list` | `{}` | Text JSON array of secret metadata (no values) |
 | `keymaxxer_run` | `command`, `secrets[]`, optional `cwd`, `timeoutMs` | Text: `exit_code`, optional redaction line, stdout/stderr; `isError` if exit ≠ 0 |
 | `keymaxxer_add` | `name` + optional attrs | Text confirmation or cancel message; value never returned |
-| `keymaxxer_rm` | `name` | Text removed / not found |
 
 Descriptions and Zod/JSON schemas should match Keymaxxer so agents and the Harness `mcpKeymaxxerLayer` keep calling the same names.
 
@@ -171,7 +170,6 @@ With config key `keymaxxer` and MCP names `keymaxxer_*`, the LLM sees:
 - `keymaxxer_keymaxxer_list`
 - `keymaxxer_keymaxxer_run`
 - `keymaxxer_keymaxxer_add`
-- `keymaxxer_keymaxxer_rm`
 
 That matches **current** local stdio OpenCode wiring on this machine (global `mcp.keymaxxer` → same double prefix). Do **not** rename MCP tools to unprefixed `list`/`run` without a separate Harness migration: `packages/keymaxxer-service` calls `keymaxxer_list` / `keymaxxer_run` / `keymaxxer_add` by protocol name.
 

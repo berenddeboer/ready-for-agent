@@ -2,8 +2,9 @@
 
 Reusable Effect boundary for Keymaxxer vault operations. `KeymaxxerService`
 supports initializing the session, checking whether a named secret exists,
-opening Keymaxxer's add-secret flow, removing a named secret, and running a
-command with named secrets injected.
+opening Keymaxxer's add-secret flow, and running a command with named secrets
+injected. Secret deletion is a Keymaxxer CLI operation (`keymaxxer rm`), not part
+of this boundary.
 
 The boundary never returns raw secret values. `runWithSecrets` returns only the
 exit code and separate stdout and stderr streams. A non-zero exit is a command

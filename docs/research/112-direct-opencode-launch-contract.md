@@ -113,7 +113,7 @@ No `headers.Authorization`. Local stdio `keymaxxer` for the same server must not
 - Spawn with `extendEnv: true`.
 - **Strip** from the OpenCode child env before spawn: `GH_TOKEN`, `GITHUB_TOKEN`, and any `GITHUB_TOKEN_*`.
 - Capability reaches OpenCode **only** via forced `OPENCODE_CONFIG_CONTENT` (`mcp.keymaxxer.url`).
-- OpenCode never receives secret **values** in its environment. Secret use goes through Keymaxxer MCP tools (`keymaxxer_list`, `keymaxxer_run`, `keymaxxer_add`, `keymaxxer_rm`).
+- OpenCode never receives secret **values** in its environment. Secret use goes through Keymaxxer MCP tools (`keymaxxer_list`, `keymaxxer_run`, `keymaxxer_add`).
 
 ### GitHub-using lifecycle steps
 

@@ -77,15 +77,12 @@ READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4300/graphql \
 ### Other commands
 
 ```bash
-ready-for-agent remove-github-token /path/to/local/repo
-ready-for-agent remove-github-token owner/repository
-ready-for-agent remove-github-token repo-01H...
-
 ready-for-agent --help
 ready-for-agent start --help
 ready-for-agent add --help
-ready-for-agent remove-github-token --help
 ```
+
+To delete a stored GitHub token, use the Keymaxxer CLI (`keymaxxer rm <SECRET_NAME>`), then reload the Harness so it detects the missing credential.
 
 ## Requirements
 

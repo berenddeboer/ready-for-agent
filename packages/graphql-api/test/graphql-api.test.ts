@@ -154,7 +154,6 @@ const makeRuntime = (
     findSecrets: (inputs) => Effect.succeed(inputs.map(() => null)),
     hasSecret: () => Effect.succeed(false),
     addSecret: () => Effect.succeed(true),
-    removeSecret: () => Effect.succeed(true),
     runWithSecrets: () => Effect.die("not used"),
     ...keymaxxerOverrides,
   }
@@ -759,102 +758,6 @@ describe("GraphQL API", () => {
         }),
       ],
     })
-  })
-
-  test("removes a repository GitHub token and suspends Issue Polling", async () => {
-    let removedName: string | undefined
-    const removedKeys: Array<{ queue: string; key: string }> = []
-    await runtime.dispose()
-    runtime = makeRuntime(
-      {},
-      {},
-      {
-        findSecret: ({ account }) =>
-          Effect.succeed(
-            account === "acme/widgets" ? "GITHUB_TOKEN_ACME_WIDGETS" : null,
-          ),
-        removeSecret: (name) =>
-          Effect.sync(() => {
-            removedName = name
-            return true
-          }),
-      },
-      {
-        removeKeyed: (queueName, key) =>
-          Effect.sync(() => {
-            removedKeys.push({ queue: queueName, key })
-          }),
-      },
-    )
-
-    const response = await createGraphqlApi(runtime).fetch(
-      graphqlRequest({
-        query: `mutation RemoveToken($repositoryId: ID!) {
-          removeRepositoryGitHubToken(repositoryId: $repositoryId) {
-            repositoryId configured githubTokenSecretName
-          }
-        }`,
-        variables: { repositoryId: repository.id },
-      }),
-    )
-
-    expect(await response.json()).toEqual({
-      data: {
-        removeRepositoryGitHubToken: {
-          repositoryId: repository.id,
-          configured: false,
-          githubTokenSecretName: "GITHUB_TOKEN_ACME_WIDGETS",
-        },
-      },
-    })
-    expect(removedName).toBe("GITHUB_TOKEN_ACME_WIDGETS")
-    expect(removedKeys).toEqual([{ queue: "issue-poll", key: repository.id }])
-  })
-
-  test("remove repository GitHub token is idempotent when missing", async () => {
-    let removeCalls = 0
-    let removeKeyedCalls = 0
-    await runtime.dispose()
-    runtime = makeRuntime(
-      {},
-      {},
-      {
-        findSecret: () => Effect.succeed(null),
-        removeSecret: () =>
-          Effect.sync(() => {
-            removeCalls += 1
-            return false
-          }),
-      },
-      {
-        removeKeyed: () =>
-          Effect.sync(() => {
-            removeKeyedCalls += 1
-          }),
-      },
-    )
-
-    const response = await createGraphqlApi(runtime).fetch(
-      graphqlRequest({
-        query: `mutation {
-          removeRepositoryGitHubToken(repositoryId: "${repository.id}") {
-            repositoryId configured githubTokenSecretName
-          }
-        }`,
-      }),
-    )
-
-    expect(await response.json()).toEqual({
-      data: {
-        removeRepositoryGitHubToken: {
-          repositoryId: repository.id,
-          configured: false,
-          githubTokenSecretName: "GITHUB_TOKEN_ACME_WIDGETS",
-        },
-      },
-    })
-    expect(removeCalls).toBe(0)
-    expect(removeKeyedCalls).toBe(1)
   })
 
   test("removes a repository and suspends Issue Polling", async () => {

@@ -1,9 +1,5 @@
-import { Console, Effect, Schema } from "effect"
+import { Console, Effect } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
-import {
-  isRepositoryId,
-  resolveRepositoryTarget,
-} from "./resolve-repository-target.ts"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
@@ -17,15 +13,6 @@ const noOpenFlag = Flag.boolean("no-open").pipe(
     "Do not open the default browser after a successful start (also: NO_BROWSER)",
   ),
 )
-
-class RepositoryNotRegistered extends Schema.TaggedErrorClass<RepositoryNotRegistered>()(
-  "RepositoryNotRegistered",
-  { detail: Schema.String },
-) {
-  override get message() {
-    return this.detail
-  }
-}
 
 const startHarness = (noOpen: boolean) =>
   Effect.gen(function* () {
@@ -60,56 +47,13 @@ const addCommand = Command.make("add", { path: pathArg }, ({ path }) =>
   }),
 ).pipe(Command.withDescription("Add a local repository to the harness"))
 
-const targetArg = Argument.string("target").pipe(
-  Argument.withDescription(
-    "Local path, owner/repository, or repository id (repo-…)",
-  ),
-)
-
-const removeGitHubTokenCommand = Command.make(
-  "remove-github-token",
-  { target: targetArg },
-  ({ target }) =>
-    Effect.gen(function* () {
-      const graphqlApi = yield* GraphqlApi
-      const repositories = yield* graphqlApi.listRepositories
-      const localGit = yield* LocalGit
-      const repository = yield* resolveRepositoryTarget(
-        target,
-        repositories,
-        localGit.inspect,
-      )
-
-      if (repository === undefined) {
-        return yield* new RepositoryNotRegistered({
-          detail: isRepositoryId(target)
-            ? `Repository not registered: ${target}`
-            : `No registered repository matches ${target}`,
-        })
-      }
-
-      const credential = yield* graphqlApi.removeRepositoryGitHubToken(
-        repository.id,
-      )
-
-      yield* Console.log(
-        `Removed GitHub token for ${repository.githubOwner}/${repository.githubRepo}`,
-      )
-      yield* Console.log(`  secret: ${credential.githubTokenSecretName}`)
-    }),
-).pipe(
-  Command.withDescription(
-    "Remove the Keymaxxer GitHub token for a registered repository",
-  ),
-)
-
 export const cli = Command.make(
   "ready-for-agent",
   { noOpen: noOpenFlag },
   ({ noOpen }) => startHarness(noOpen),
 ).pipe(
   Command.withDescription(
-    "Ready for Agent operator binary (start Harness, add repositories, manage tokens)",
+    "Ready for Agent operator binary (start Harness, add repositories)",
   ),
-  Command.withSubcommands([startCommand, addCommand, removeGitHubTokenCommand]),
+  Command.withSubcommands([startCommand, addCommand]),
 )

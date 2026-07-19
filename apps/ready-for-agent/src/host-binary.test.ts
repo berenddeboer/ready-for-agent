@@ -168,7 +168,7 @@ describe("compiled host binary ambient-auth smoke", () => {
     const helpText = new TextDecoder().decode(help.stdout)
     expect(helpText).toContain("add")
     expect(helpText).toContain("start")
-    expect(helpText).toContain("remove-github-token")
+    expect(helpText).not.toContain("remove-github-token")
 
     const startOnce = async () => {
       const child = spawn(binaryPath, ["--no-open"], {

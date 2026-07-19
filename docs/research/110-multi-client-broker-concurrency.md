@@ -21,7 +21,7 @@ Verified against:
 2. **Single-flight unlock** across all HTTP clients: one passphrase dialog; all waiters share one result.
 3. **Global human-dialog lane**: serialize unlock, approval, and add-secret UI so stacked OS dialogs never appear.
 4. **Approval coalescing**: waiters for the same sensitive secret set share one dialog decision; Allow-session still lives only in upstream Keymaxxer’s `approved` set.
-5. **After dialogs are not needed**, allow concurrent `keymaxxer_list` / already-approved `keymaxxer_run` / `keymaxxer_rm` so long runs do not block list.
+5. **After dialogs are not needed**, allow concurrent `keymaxxer_list` / already-approved `keymaxxer_run` so long runs do not block list.
 6. **Disconnect = Layer A only**: cancel that session’s pending responses; never close the upstream keyholder; never cancel other sessions’ work.
 7. **Cancellation** does not tear down shared unlock or shared approvals; orphaned upstream runs may finish without delivering a result.
 8. **Timeouts**: client MCP timeout ≥ 300s for dialog paths; facade must not impose a shorter dialog timeout; optional cap + queue for concurrent secret-bearing runs (backpressure).
@@ -119,13 +119,12 @@ Implementation shape: a shared async mutex (`dialogLane`) acquired before any up
 | `keymaxxer_list` | Unlock only (if locked) | Acquire dialog lane **only while vault is locked**; after unlock, list is free |
 | `keymaxxer_run` | Unlock + approval if sensitive secrets not yet session-approved | Dialog lane for unlock/approval phase; run body may leave the lane (see R2) |
 | `keymaxxer_add` | Unlock + add UI | Always dialog lane for whole call |
-| `keymaxxer_rm` | Unlock only | Same as list |
 
-**Practical simplification (acceptable for v1):** hold the dialog lane for the entire upstream `tools/call` of `keymaxxer_run` / `keymaxxer_add` when the vault is locked **or** when `keymaxxer_run` includes any secret that is not known to be non-sensitive-and-unlocked-path. Without a facade-side sensitivity cache, **v1 may serialize all `keymaxxer_run` and `keymaxxer_add`**, and only parallelize `keymaxxer_list` / `keymaxxer_rm` after first successful unlock.
+**Practical simplification (acceptable for v1):** hold the dialog lane for the entire upstream `tools/call` of `keymaxxer_run` / `keymaxxer_add` when the vault is locked **or** when `keymaxxer_run` includes any secret that is not known to be non-sensitive-and-unlocked-path. Without a facade-side sensitivity cache, **v1 may serialize all `keymaxxer_run` and `keymaxxer_add`**, and only parallelize `keymaxxer_list` after first successful unlock.
 
 **Preferred v1.1:** after first unlock, maintain a facade-side **read-only cache** of last `keymaxxer_list` metadata (names + sensitivity flags only) plus a mirror of session-approved names inferred from successful runs (or an explicit non-secret status channel later). Then:
 
-- `list` / `rm` / non-sensitive `run` / already session-approved `run` → no dialog lane
+- `list` / non-sensitive `run` / already session-approved `run` → no dialog lane
 - sensitive unapproved `run` / `add` / locked vault → dialog lane
 
 Never cache secret **values**.
@@ -202,7 +201,7 @@ Where to implement:
 
 **Rule B2 — Queue overflow.** If queue depth exceeds a configured max (e.g. **32**), return `isError` text to that caller without opening dialogs: `error: keymaxxer busy — too many concurrent runs`.
 
-**Rule B3 — List priority.** `keymaxxer_list` and `keymaxxer_rm` (post-unlock) should not sit behind the run queue; only behind dialog lane when vault locked.
+**Rule B3 — List priority.** `keymaxxer_list` (post-unlock) should not sit behind the run queue; only behind dialog lane when vault locked.
 
 **Rule B4 — Fairness.** FIFO global queue is enough for v1. Per-session fairness is out of scope unless starvation appears in the prototype.
 
@@ -229,7 +228,7 @@ Where to implement:
 on tools/call(name, args, session):
   register pending(session, requestId)
 
-  if name == keymaxxer_list or keymaxxer_rm:
+  if name == keymaxxer_list:
     if !facade.unlocked:
       await dialogLane.run(() => forward(name, args))  // unlock side effect
       facade.unlocked = true on success

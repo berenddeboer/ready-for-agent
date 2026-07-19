@@ -29,11 +29,6 @@ const mockUpstream = (): KeymaxxerUpstreamClient => ({
     if (name === "keymaxxer_add") {
       return { content: [{ type: "text", text: `added ${String(args.name)}` }] }
     }
-    if (name === "keymaxxer_rm") {
-      return {
-        content: [{ type: "text", text: `Removed '${String(args.name)}'.` }],
-      }
-    }
     if (name === "keymaxxer_run") {
       return {
         content: [
@@ -84,14 +79,13 @@ describe("sidecar-backed Keymaxxer layer", () => {
             { provider: "github", account: "acme/widgets" },
           ])
           const added = yield* keymaxxer.addSecret({ name: "NEW_SECRET" })
-          const removed = yield* keymaxxer.removeSecret("PRESENT_SECRET")
           const run = yield* keymaxxer.runWithSecrets({
             command: "true",
             cwd: "/tmp",
             secrets: ["PRESENT_SECRET"],
             timeoutMs: 5_000,
           })
-          return { present, found, foundMany, added, removed, run }
+          return { present, found, foundMany, added, run }
         }).pipe(Effect.provide(sidecarKeymaxxerLayer(facade.url))),
       )
 
@@ -99,7 +93,6 @@ describe("sidecar-backed Keymaxxer layer", () => {
       expect(result.found).toBe("PRESENT_SECRET")
       expect(result.foundMany).toEqual(["PRESENT_SECRET"])
       expect(result.added).toBe(true)
-      expect(result.removed).toBe(true)
       expect(result.run).toEqual({ exitCode: 0, stdout: "ok", stderr: "" })
     } finally {
       await facade.stop()

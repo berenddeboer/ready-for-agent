@@ -113,11 +113,14 @@ start the Harness first.
 
 ### Remove a GitHub token
 
+Token deletion is a Keymaxxer CLI operation, not an operator binary command:
+
 ```bash
-bun run ready-for-agent remove-github-token /path/to/local/repo
-bun run ready-for-agent remove-github-token owner/repository
-bun run ready-for-agent remove-github-token repo-01H...
+keymaxxer rm <SECRET_NAME>
 ```
+
+After deletion, reload the Harness so it detects the missing credential and
+offers the existing Create GitHub token / Store in Keymaxxer flow.
 
 ### Help
 
@@ -125,5 +128,4 @@ bun run ready-for-agent remove-github-token repo-01H...
 bun run ready-for-agent --help
 bun run ready-for-agent start --help
 bun run ready-for-agent add --help
-bun run ready-for-agent remove-github-token --help
 ```
