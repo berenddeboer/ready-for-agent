@@ -130,12 +130,11 @@ export const isTerminalWorkItemState = (
   (TERMINAL_WORK_ITEM_STATES as readonly string[]).includes(state)
 
 /**
- * Jobs card Completed tab: finished outcomes only.
- * Needs Human is domain-terminal for admission but stays on Working as active handoff.
+ * Jobs card Completed tab: successful finished outcomes only.
+ * Terminal `failed` belongs on Failed. Needs Human stays on Working as active handoff.
  */
 export const JOBS_COMPLETED_WORK_ITEM_STATES = [
   "complete",
-  "failed",
   "abandoned",
 ] as const satisfies readonly WorkItemState[]
 
@@ -147,20 +146,73 @@ export const isJobsCompletedWorkItemState = (
 ): state is JobsCompletedWorkItemState =>
   (JOBS_COMPLETED_WORK_ITEM_STATES as readonly string[]).includes(state)
 
-/** Jobs card Working tab: unfinished lifecycle work plus Needs Human handoffs. */
-export const isJobsWorkingWorkItemState = (state: WorkItemState): boolean =>
-  !isJobsCompletedWorkItemState(state)
+/** Latest Step Run statuses that place a nonterminal Work Item on Failed. */
+export const JOBS_FAILED_STEP_RUN_STATUSES = [
+  "failed",
+  "interrupted",
+] as const satisfies readonly StepRunStatus[]
 
-/** GraphQL / Jobs list partition: working vs completed membership. */
-export type WorkItemsListKind = "working" | "completed"
+export type JobsFailedStepRunStatus =
+  (typeof JOBS_FAILED_STEP_RUN_STATUSES)[number]
+
+export const isJobsFailedStepRunStatus = (
+  status: StepRunStatus,
+): status is JobsFailedStepRunStatus =>
+  (JOBS_FAILED_STEP_RUN_STATUSES as readonly string[]).includes(status)
+
+type JobsListMembershipItem = {
+  readonly state: WorkItemState
+  readonly stepRuns: readonly { readonly status: StepRunStatus }[]
+}
 
 /**
- * Filter Work Items for Jobs Working / Completed lists.
- * Completed is ordered by createdAt newest-first (recency for the last-N window).
+ * Jobs card Failed tab: terminal `failed`, or nonterminal stopped on a
+ * failed/interrupted latest Step Run (retriable).
+ */
+export const isJobsFailedWorkItem = (item: JobsListMembershipItem): boolean => {
+  if (item.state === "failed") {
+    return true
+  }
+  if (isTerminalWorkItemState(item.state)) {
+    return false
+  }
+  const latest = item.stepRuns.at(-1)
+  return latest !== undefined && isJobsFailedStepRunStatus(latest.status)
+}
+
+/**
+ * Jobs card Working tab: unfinished lifecycle work plus Needs Human handoffs,
+ * excluding Work Items currently stopped on a failed/interrupted Step Run.
+ */
+export const isJobsWorkingWorkItem = (item: JobsListMembershipItem): boolean =>
+  !isJobsCompletedWorkItemState(item.state) && !isJobsFailedWorkItem(item)
+
+/** GraphQL / Jobs list partition: Working / Failed / Completed membership. */
+export type WorkItemsListKind = "working" | "failed" | "completed"
+
+const newestCreatedFirst = <T extends { readonly createdAt: Date }>(
+  items: readonly T[],
+): T[] =>
+  items
+    .slice()
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+
+const applyLimit = <T>(
+  items: readonly T[],
+  limit: number | undefined,
+): readonly T[] => (limit === undefined ? items : items.slice(0, limit))
+
+/**
+ * Filter Work Items for Jobs Working / Failed / Completed lists.
+ * Failed and Completed are ordered by createdAt newest-first (recency for last-N windows).
  * Working preserves input order. Omitting listKind returns the input unchanged.
  */
 export const filterWorkItemsByListKind = <
-  T extends { readonly state: WorkItemState; readonly createdAt: Date },
+  T extends {
+    readonly state: WorkItemState
+    readonly createdAt: Date
+    readonly stepRuns: readonly { readonly status: StepRunStatus }[]
+  },
 >(
   workItems: readonly T[],
   listKind: WorkItemsListKind | undefined,
@@ -170,16 +222,20 @@ export const filterWorkItemsByListKind = <
     return workItems
   }
   if (listKind === "working") {
-    const working = workItems.filter((item) =>
-      isJobsWorkingWorkItemState(item.state),
-    )
-    return limit === undefined ? working : working.slice(0, limit)
+    return applyLimit(workItems.filter(isJobsWorkingWorkItem), limit)
   }
-  const completed = workItems
-    .filter((item) => isJobsCompletedWorkItemState(item.state))
-    .slice()
-    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
-  return limit === undefined ? completed : completed.slice(0, limit)
+  if (listKind === "failed") {
+    return applyLimit(
+      newestCreatedFirst(workItems.filter(isJobsFailedWorkItem)),
+      limit,
+    )
+  }
+  return applyLimit(
+    newestCreatedFirst(
+      workItems.filter((item) => isJobsCompletedWorkItemState(item.state)),
+    ),
+    limit,
+  )
 }
 
 export const STEP_RUN_REASON = {

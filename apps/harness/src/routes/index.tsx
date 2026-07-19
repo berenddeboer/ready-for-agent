@@ -252,14 +252,20 @@ const workItemFields = {
   },
 } as const
 
-type WorkItemsListKindArg = "WORKING" | "COMPLETED"
+type WorkItemsListKindArg = "WORKING" | "FAILED" | "COMPLETED"
 
 type WorkItemsQueryOptions = {
   readonly listKind?: WorkItemsListKindArg
   readonly limit?: number
 }
 
+/** Completed history window (successful finished outcomes). */
 const JOBS_COMPLETED_LIMIT = 15
+/**
+ * Failed history window (terminal failed + retriable stoppages).
+ * Explicit product choice, independent of JOBS_COMPLETED_LIMIT.
+ */
+const JOBS_FAILED_LIMIT = 15
 
 const workItemsQuery = (
   repositoryId: string,
@@ -292,6 +298,12 @@ const workItemsQuery = (
 
 const jobsWorkingWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, { listKind: "WORKING" })
+
+const jobsFailedWorkItemsQuery = (repositoryId: string) =>
+  workItemsQuery(repositoryId, {
+    listKind: "FAILED",
+    limit: JOBS_FAILED_LIMIT,
+  })
 
 const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, {
@@ -1640,7 +1652,25 @@ function RepositoryIssueRow({
   )
 }
 
-type JobsTab = "working" | "completed"
+type JobsTab = "working" | "failed" | "completed"
+
+const JOBS_TABS = [
+  { id: "working", label: "Working" },
+  { id: "failed", label: "Failed" },
+  { id: "completed", label: "Completed" },
+] as const satisfies readonly { id: JobsTab; label: string }[]
+
+const jobsTabEmptyMessage = (tab: JobsTab): string => {
+  if (tab === "working") return "No working jobs."
+  if (tab === "failed") return "No failed jobs."
+  return "No completed jobs."
+}
+
+const jobsTabListAriaLabel = (tab: JobsTab): string => {
+  if (tab === "working") return "Working jobs"
+  if (tab === "failed") return "Failed jobs"
+  return "Completed jobs"
+}
 
 function JobsCard() {
   const [selectedTab, setSelectedTab] = useState<JobsTab>("working")
@@ -1648,6 +1678,11 @@ function JobsCard() {
   const workingQueries = useQueries({
     queries: repositories.map((repository) =>
       jobsWorkingWorkItemsQuery(repository.id),
+    ),
+  })
+  const failedQueries = useQueries({
+    queries: repositories.map((repository) =>
+      jobsFailedWorkItemsQuery(repository.id),
     ),
   })
   const completedQueries = useQueries({
@@ -1678,18 +1713,28 @@ function JobsCard() {
   const workingItems = sortNewestFirst(
     workingQueries.flatMap((query) => query.data ?? []),
   )
+  const failedItems = sortNewestFirst(
+    failedQueries.flatMap((query) => query.data ?? []),
+  ).slice(0, JOBS_FAILED_LIMIT)
   const completedItems = sortNewestFirst(
     completedQueries.flatMap((query) => query.data ?? []),
   ).slice(0, JOBS_COMPLETED_LIMIT)
-  const activeItems = selectedTab === "working" ? workingItems : completedItems
+  const activeItems =
+    selectedTab === "working"
+      ? workingItems
+      : selectedTab === "failed"
+        ? failedItems
+        : completedItems
   const activeQueries =
-    selectedTab === "working" ? workingQueries : completedQueries
+    selectedTab === "working"
+      ? workingQueries
+      : selectedTab === "failed"
+        ? failedQueries
+        : completedQueries
   const loading = activeQueries.some((query) => query.isLoading)
   const failed = activeQueries.some((query) => query.isError)
-  const emptyMessage =
-    selectedTab === "working" ? "No working jobs." : "No completed jobs."
-  const listAriaLabel =
-    selectedTab === "working" ? "Working jobs" : "Completed jobs"
+  const emptyMessage = jobsTabEmptyMessage(selectedTab)
+  const listAriaLabel = jobsTabListAriaLabel(selectedTab)
 
   if (repositories.length === 0) {
     return (
@@ -1722,12 +1767,7 @@ function JobsCard() {
         role="tablist"
         aria-label="Jobs"
       >
-        {(
-          [
-            { id: "working", label: "Working" },
-            { id: "completed", label: "Completed" },
-          ] as const
-        ).map((tab) => {
+        {JOBS_TABS.map((tab, tabIndex) => {
           const selected = selectedTab === tab.id
           return (
             <button
@@ -1747,9 +1787,13 @@ function JobsCard() {
               onKeyDown={(event) => {
                 if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
                   event.preventDefault()
-                  const nextTab = tab.id === "working" ? "completed" : "working"
-                  setSelectedTab(nextTab)
-                  document.getElementById(`jobs-tab-${nextTab}`)?.focus()
+                  const delta = event.key === "ArrowRight" ? 1 : -1
+                  const nextIndex =
+                    (tabIndex + delta + JOBS_TABS.length) % JOBS_TABS.length
+                  const nextTab = JOBS_TABS[nextIndex]
+                  if (nextTab === undefined) return
+                  setSelectedTab(nextTab.id)
+                  document.getElementById(`jobs-tab-${nextTab.id}`)?.focus()
                 }
               }}
             >

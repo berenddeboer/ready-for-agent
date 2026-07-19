@@ -1814,6 +1814,26 @@ describe("GraphQL API", () => {
       state: "implement" as const,
       stepRuns: [],
     }
+    const retriableFailed = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "implement" as const,
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          status: "failed" as const,
+          finishedAt: new Date("2026-07-14T08:00:02.000Z"),
+          reasonCode: "handler_failed",
+          reasonMessage: "boom",
+        },
+      ],
+    }
+    const terminalFailed = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "failed" as const,
+      stepRuns: [],
+    }
     await runtime.dispose()
     runtime = makeRuntime(
       {
@@ -1824,7 +1844,13 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () =>
-          Effect.succeed([needsHuman, complete, implementing]),
+          Effect.succeed([
+            needsHuman,
+            complete,
+            implementing,
+            retriableFailed,
+            terminalFailed,
+          ]),
       },
     )
 
@@ -1860,11 +1886,9 @@ describe("GraphQL API", () => {
     const completed = Array.from({ length: 18 }, (_, index) => ({
       ...workItem,
       id: makeWorkItemId(),
-      state: (index % 3 === 0
-        ? "complete"
-        : index % 3 === 1
-          ? "failed"
-          : "abandoned") as "complete" | "failed" | "abandoned",
+      state: (index % 2 === 0 ? "complete" : "abandoned") as
+        | "complete"
+        | "abandoned",
       createdAt: new Date(baseTime + index * 1000),
       stepRuns: [],
     }))
@@ -1873,6 +1897,13 @@ describe("GraphQL API", () => {
       id: makeWorkItemId(),
       state: "needs_human" as const,
       createdAt: new Date(baseTime + 50_000),
+      stepRuns: [],
+    }
+    const terminalFailed = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "failed" as const,
+      createdAt: new Date(baseTime + 40_000),
       stepRuns: [],
     }
     await runtime.dispose()
@@ -1885,7 +1916,7 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () =>
-          Effect.succeed([...completed, needsHuman]),
+          Effect.succeed([...completed, needsHuman, terminalFailed]),
       },
     )
 
@@ -1909,7 +1940,9 @@ describe("GraphQL API", () => {
     }
     expect(body.data.workItems).toHaveLength(15)
     expect(
-      body.data.workItems.every((item) => item.state !== "NEEDS_HUMAN"),
+      body.data.workItems.every(
+        (item) => item.state !== "NEEDS_HUMAN" && item.state !== "FAILED",
+      ),
     ).toBe(true)
     expect(body.data.workItems.map((item) => item.id)).toEqual(
       completed
@@ -1920,6 +1953,114 @@ describe("GraphQL API", () => {
         .slice(0, 15)
         .map((item) => item.id),
     )
+  })
+
+  test("filters Failed Work Items including retriable and terminal failures", async () => {
+    const baseTime = Date.parse("2026-01-01T00:00:00.000Z")
+    const retriableId = makeWorkItemId()
+    const terminalFailedId = makeWorkItemId()
+    const failedStep = {
+      id: "srun-01J00000000000000000000FAIL",
+      workItemId: retriableId,
+      step: "implement" as const,
+      status: "failed" as const,
+      queueJobId: null,
+      queuedAt: new Date(baseTime),
+      startedAt: new Date(baseTime + 1),
+      finishedAt: new Date(baseTime + 2),
+      reasonCode: "handler_failed",
+      reasonMessage: "boom",
+      queueWaitMs: 1,
+      executionDurationMs: 1,
+    }
+    const retriable = {
+      ...workItem,
+      id: retriableId,
+      state: "implement" as const,
+      createdAt: new Date(baseTime + 1000),
+      stepRuns: [failedStep],
+    }
+    const terminalFailed = {
+      ...workItem,
+      id: terminalFailedId,
+      state: "failed" as const,
+      createdAt: new Date(baseTime + 2000),
+      stepRuns: [
+        {
+          ...failedStep,
+          id: "srun-01J0000000000000000000TERM",
+          workItemId: terminalFailedId,
+        },
+      ],
+    }
+    const complete = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "complete" as const,
+      createdAt: new Date(baseTime + 3000),
+      stepRuns: [],
+    }
+    const runningId = makeWorkItemId()
+    const running = {
+      ...workItem,
+      id: runningId,
+      state: "implement" as const,
+      createdAt: new Date(baseTime + 4000),
+      stepRuns: [
+        {
+          ...failedStep,
+          id: "srun-01J0000000000000000000RUNN",
+          workItemId: runningId,
+          status: "running" as const,
+          finishedAt: null,
+          reasonCode: null,
+          reasonMessage: null,
+        },
+      ],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([retriable, terminalFailed, complete, running]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
+          workItems(repositoryId: $repositoryId, listKind: $listKind) {
+            id state canRetry isTerminal
+          }
+        }`,
+        variables: { repositoryId: repository.id, listKind: "FAILED" },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: terminalFailed.id,
+            state: "FAILED",
+            canRetry: false,
+            isTerminal: true,
+          },
+          {
+            id: retriable.id,
+            state: "IMPLEMENT",
+            canRetry: true,
+            isTerminal: false,
+          },
+        ],
+      },
+    })
   })
 
   test("hides terminal Work Items whose Issue is no longer Relevant", async () => {
