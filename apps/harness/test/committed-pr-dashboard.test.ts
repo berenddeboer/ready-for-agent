@@ -68,13 +68,13 @@ describe("Committed pull requests dashboard UI", () => {
       "Could not load committed pull requests. Please try again.",
     )
     expect(source).toContain('role="alert"')
-    const homePage = source.slice(
-      source.indexOf("function HomePage()"),
+    const homeBody = source.slice(
+      source.indexOf("function HomeBody()"),
       source.indexOf("function CommittedPullRequestsDashboard()"),
     )
-    expect(homePage).toContain("<CommittedPullRequestsDashboard />")
-    expect(homePage).toContain("<JobsCard />")
-    expect(homePage).not.toContain("Suspense fallback={<Committed")
+    expect(homeBody).toContain("<CommittedPullRequestsDashboard />")
+    expect(homeBody).toContain("<JobsCard />")
+    expect(homeBody).not.toContain("Suspense fallback={<Committed")
   })
 
   test("displays zero counts rather than hiding the dashboard", () => {
@@ -87,5 +87,23 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("yesterdayQuery.data ?? 0")
     expect(dashboard).toContain("{today}")
     expect(dashboard).toContain("{yesterday}")
+  })
+
+  test("hides PR dashboard and Jobs when no repositories are configured", () => {
+    const source = homeSource()
+    const homeBody = source.slice(
+      source.indexOf("function HomeBody()"),
+      source.indexOf("function CommittedPullRequestsDashboard()"),
+    )
+    expect(homeBody).toContain("repositories.length === 0")
+    expect(homeBody).toContain("return <RepositoryCards />")
+    const emptyBranch = homeBody.slice(
+      homeBody.indexOf("repositories.length === 0"),
+      homeBody.indexOf("return ("),
+    )
+    expect(emptyBranch).not.toContain("<CommittedPullRequestsDashboard")
+    expect(emptyBranch).not.toContain("<JobsCard")
+    expect(emptyBranch).not.toContain('aria-label="Committed pull requests"')
+    expect(emptyBranch).not.toContain('aria-label="Jobs"')
   })
 })

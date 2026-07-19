@@ -27,6 +27,14 @@ Given("the Harness has no configured Repositories", async ({ page }) => {
   await expect(
     page.getByRole("region", { name: "Configured repositories" }),
   ).toHaveCount(0)
+  await expect(
+    page.getByRole("region", { name: "Committed pull requests" }),
+  ).toHaveCount(0)
+  await expect(page.getByText("Today", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Yesterday", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Jobs" })).toHaveCount(0)
+  await expect(page.getByRole("heading", { name: "Jobs" })).toHaveCount(0)
+  await expect(page.getByText("Add a repository to see jobs.")).toHaveCount(0)
 })
 
 Given("the End-to-End Fixture Repository is checked out", async ({ world }) => {
