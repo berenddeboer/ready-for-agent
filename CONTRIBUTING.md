@@ -48,7 +48,6 @@ Operator subcommands against a running Harness:
 
 ```bash
 bun run ready-for-agent add /path/to/local/repo
-bun run ready-for-agent remove-github-token owner/repository
 ```
 
 Non-default GraphQL URL:
@@ -103,7 +102,7 @@ tracker).
 ## Package layout
 
 - Public product surface: `apps/ready-for-agent` (unified binary: `start`,
-  `add`, `remove-github-token`)
+  `add`)
 - Harness UI + backend: `apps/harness`
 - Keymaxxer sidecar: `apps/keymaxxer-sidecar`
 - Internal libraries: `packages/*` (remain private / unpublished)

@@ -127,7 +127,6 @@ const keymaxxerLayer = (
     findSecrets: () => Effect.die("not used"),
     hasSecret: () => Effect.die("not used"),
     addSecret: () => Effect.die("not used"),
-    removeSecret: () => Effect.die("not used"),
     runWithSecrets: () => Effect.die("not used"),
   })
 
@@ -1610,7 +1609,6 @@ describe("Job worker", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
-      removeSecret: () => Effect.die("not used"),
       runWithSecrets: () => Effect.die("not used"),
     })
 
@@ -1886,7 +1884,6 @@ describe("Job worker", () => {
       findSecrets: () => Effect.die("not used"),
       hasSecret: () => Effect.die("not used"),
       addSecret: () => Effect.die("not used"),
-      removeSecret: () => Effect.die("not used"),
       runWithSecrets: () => Effect.die("not used"),
     })
     const lifecycle = Layer.succeed(WorkItemLifecycle, {

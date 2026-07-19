@@ -256,57 +256,6 @@ describe("MCP Keymaxxer layer", () => {
     ])
   })
 
-  test("removes a secret by name", async () => {
-    const calls: string[] = []
-    let secrets = [
-      {
-        name: "GITHUB_TOKEN_ACME_WIDGETS",
-        provider: "github",
-        account: "acme/widgets",
-      },
-    ]
-    const client: KeymaxxerToolClient = {
-      callTool: async (input) => {
-        calls.push(input.name)
-        if (input.name === "keymaxxer_list") {
-          return textResult(JSON.stringify(secrets))
-        }
-        if (input.name === "keymaxxer_rm") {
-          secrets = secrets.filter(
-            (secret) => secret.name !== input.arguments.name,
-          )
-          return textResult(`Removed '${input.arguments.name}'.`)
-        }
-        return textResult("unexpected", true)
-      },
-      close: async () => {},
-    }
-
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
-        const keymaxxer = yield* KeymaxxerService
-        yield* keymaxxer.initialize
-        const removed = yield* keymaxxer.removeSecret(
-          "GITHUB_TOKEN_ACME_WIDGETS",
-        )
-        const remaining = yield* keymaxxer.hasSecret(
-          "GITHUB_TOKEN_ACME_WIDGETS",
-        )
-        return { removed, remaining }
-      }).pipe(
-        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
-      ),
-    )
-
-    expect(result).toEqual({ removed: true, remaining: false })
-    expect(calls).toEqual([
-      "keymaxxer_list",
-      "keymaxxer_rm",
-      "keymaxxer_list",
-      "keymaxxer_list",
-    ])
-  })
-
   test("returns non-zero command results with separate output streams", async () => {
     const client: KeymaxxerToolClient = {
       callTool: async () =>

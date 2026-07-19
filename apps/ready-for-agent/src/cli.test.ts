@@ -58,9 +58,6 @@ describe("operator binary CLI seam", () => {
       Layer.provideMerge(
         Layer.succeed(GraphqlApi, {
           addRepository: () => Effect.die("graphql should not run for start"),
-          listRepositories: Effect.die("graphql should not run for start"),
-          removeRepositoryGitHubToken: () =>
-            Effect.die("graphql should not run for start"),
         }),
       ),
     )
@@ -83,8 +80,6 @@ describe("operator binary CLI seam", () => {
                 message: `Unable to connect\n\n${HARNESS_START_HINT}`,
               }),
             ),
-          listRepositories: Effect.die("unused"),
-          removeRepositoryGitHubToken: () => Effect.die("unused"),
         }),
       ),
     )
@@ -99,7 +94,7 @@ describe("operator binary CLI seam", () => {
     }
   })
 
-  test("binary help lists start, add, remove-github-token, and --no-open", () => {
+  test("binary help lists start, add, and --no-open", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
@@ -113,7 +108,7 @@ describe("operator binary CLI seam", () => {
     expect(result.status).toBe(0)
     expect(output).toContain("start")
     expect(output).toContain("add")
-    expect(output).toContain("remove-github-token")
+    expect(output).not.toContain("remove-github-token")
     expect(output).toContain("no-open")
   })
 
@@ -123,9 +118,6 @@ describe("operator binary CLI seam", () => {
       Layer.provideMerge(
         Layer.succeed(GraphqlApi, {
           addRepository: () => Effect.die("graphql should not run for start"),
-          listRepositories: Effect.die("graphql should not run for start"),
-          removeRepositoryGitHubToken: () =>
-            Effect.die("graphql should not run for start"),
         }),
       ),
     )

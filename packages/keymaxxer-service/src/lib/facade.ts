@@ -13,7 +13,6 @@ export const TOOL_NAMES = [
   "keymaxxer_list",
   "keymaxxer_run",
   "keymaxxer_add",
-  "keymaxxer_rm",
 ] as const
 
 export type FacadeHandle = {
@@ -220,21 +219,6 @@ export const startKeymaxxerFacade = async (
       },
       async (args) => {
         const result = await forwardTool("keymaxxer_add", args)
-        return result as {
-          content: { type: "text"; text: string }[]
-          isError?: boolean
-        }
-      },
-    )
-
-    server.registerTool(
-      "keymaxxer_rm",
-      {
-        description: "Remove a secret by name.",
-        inputSchema: { name: z.string() },
-      },
-      async (args) => {
-        const result = await forwardTool("keymaxxer_rm", args)
         return result as {
           content: { type: "text"; text: string }[]
           isError?: boolean

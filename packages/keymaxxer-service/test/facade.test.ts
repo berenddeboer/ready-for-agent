@@ -105,7 +105,6 @@ describe("Keymaxxer MCP facade security surface", () => {
         expect(namesA).toEqual([
           "keymaxxer_add",
           "keymaxxer_list",
-          "keymaxxer_rm",
           "keymaxxer_run",
         ])
         expect(namesB).toEqual(namesA)
