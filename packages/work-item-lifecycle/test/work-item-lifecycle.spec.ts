@@ -28,6 +28,7 @@ import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
   BuildModelNotConfiguredError,
+  CloseIssueEligibilityError,
   CommitOpenCodeError,
   CreatePrOpenCodeError,
   IssueBlockedError,
@@ -49,6 +50,8 @@ import {
   WorkItemLifecycleLive,
   WorkItemNotFoundError,
   WorkItemTerminalError,
+  filterWorkItemsByListKind,
+  isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -2668,6 +2671,166 @@ describe("WorkItemLifecycle", () => {
           }
         }),
       ))
+
+    it("fails the Work Item terminally on Close Issue eligibility errors", () => {
+      const cases = [
+        {
+          name: "missing",
+          failureCode: "issue_not_found",
+          message: "Issue #42 is no longer present in the Issue store",
+        },
+        {
+          name: "parent",
+          failureCode: "issue_is_parent",
+          message: "Issue #42 has children and is no longer a Leaf Issue",
+        },
+        {
+          name: "blocked",
+          failureCode: "issue_blocked",
+          message: "Issue #42 is blocked by 1 Issue(s)",
+        },
+      ] as const
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          for (const testCase of cases) {
+            const steps: LifecycleStepsShape = {
+              ...successfulSteps,
+              assessChanges: () =>
+                Effect.succeed({
+                  _tag: "no_changes",
+                  completionSummary: "Done without file changes",
+                }),
+              closeIssue: () =>
+                Effect.fail(
+                  new CloseIssueEligibilityError({
+                    workItemId: "unused",
+                    failureCode: testCase.failureCode,
+                    message: testCase.message,
+                  }),
+                ),
+            }
+
+            yield* Effect.gen(function* () {
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+              yield* claimAndRunPending
+              yield* claimAndRunPending
+              yield* claimAndRunPending
+              const afterAssess = yield* claimAndRunPending
+              expect(afterAssess._tag).toBe("processed")
+              if (afterAssess._tag !== "processed") {
+                return
+              }
+              expect(afterAssess.workItem.state).toBe("close_issue")
+
+              const failedClose = yield* claimAndRunPending
+              expect(failedClose._tag).toBe("processed")
+              if (failedClose._tag !== "processed") {
+                return
+              }
+              expect(failedClose.workItem.state).toBe("failed")
+              expect(failedClose.workItem.failureCode).toBe(
+                testCase.failureCode,
+              )
+              expect(failedClose.workItem.failureMessage).toBe(testCase.message)
+              expect(isTerminalWorkItemState(failedClose.workItem.state)).toBe(
+                true,
+              )
+              expect(failedClose.workItem.holdsWorkerSlot).toBe(false)
+              const closeRun = failedClose.workItem.stepRuns.at(-1)!
+              expect(closeRun.step).toBe("close_issue")
+              expect(closeRun.status).toBe("failed")
+              expect(closeRun.reasonCode).toBe(testCase.failureCode)
+              expect(closeRun.reasonMessage).toBe(testCase.message)
+
+              const listed = [afterAssess.workItem, failedClose.workItem]
+              expect(
+                filterWorkItemsByListKind(listed, "working").map(
+                  (item) => item.state,
+                ),
+              ).toEqual(["close_issue"])
+              expect(
+                filterWorkItemsByListKind(listed, "completed").map(
+                  (item) => item.state,
+                ),
+              ).toEqual(["failed"])
+
+              const retryError = yield* Effect.flip(lifecycle.retry(created.id))
+              expect(retryError).toBeInstanceOf(WorkItemTerminalError)
+            }).pipe(Effect.provide(makeTestLayer(steps)))
+          }
+        }),
+      )
+    })
+
+    it("keeps Close Issue retriable for non-eligibility handler failures", () => {
+      let closeAttempts = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        assessChanges: () =>
+          Effect.succeed({
+            _tag: "no_changes",
+            completionSummary: "Done without file changes",
+          }),
+        closeIssue: () =>
+          Effect.gen(function* () {
+            closeAttempts += 1
+            if (closeAttempts === 1) {
+              return yield* Effect.fail(new Error("GitHub temporary failure"))
+            }
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterAssess = yield* claimAndRunPending
+          expect(afterAssess._tag).toBe("processed")
+          if (afterAssess._tag !== "processed") {
+            return
+          }
+          expect(afterAssess.workItem.state).toBe("close_issue")
+
+          const failedClose = yield* claimAndRunPending
+          expect(failedClose._tag).toBe("processed")
+          if (failedClose._tag !== "processed") {
+            return
+          }
+          expect(failedClose.workItem.state).toBe("close_issue")
+          expect(failedClose.workItem.failureCode).toBeNull()
+          expect(isTerminalWorkItemState(failedClose.workItem.state)).toBe(
+            false,
+          )
+          expect(failedClose.workItem.stepRuns.at(-1)?.status).toBe("failed")
+          expect(failedClose.workItem.stepRuns.at(-1)?.reasonCode).toBe(
+            STEP_RUN_REASON.handlerFailed,
+          )
+
+          yield* lifecycle.retry(created.id)
+          const afterRetry = yield* claimAndRunPending
+          expect(afterRetry._tag).toBe("processed")
+          if (afterRetry._tag === "processed") {
+            expect(afterRetry.workItem.state).toBe("local_cleanup")
+          }
+          expect(closeAttempts).toBe(2)
+        }),
+      )
+    })
 
     it("returns noop for a Step Run that is not Queued matching the pending state", () =>
       runTest(

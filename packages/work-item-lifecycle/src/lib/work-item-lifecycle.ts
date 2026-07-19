@@ -29,6 +29,7 @@ import {
   type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
+import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
@@ -134,12 +135,40 @@ const handlerFailureMessage = (error: unknown): string => {
   return conciseMessage(error, "Lifecycle Step handler failed")
 }
 
+const closeIssueEligibilityFailure = (
+  cause: Cause.Cause<unknown>,
+): {
+  readonly failureCode: string
+  readonly failureMessage: string
+} | null => {
+  const errorOption = Cause.findErrorOption(cause)
+  if (Option.isNone(errorOption)) {
+    return null
+  }
+  const error = errorOption.value
+  if (error instanceof CloseIssueEligibilityError) {
+    return {
+      failureCode: error.failureCode,
+      failureMessage: error.message,
+    }
+  }
+  return null
+}
+
 const classifyHandlerFailure = (
   cause: Cause.Cause<unknown>,
 ): {
   readonly reasonCode: string
   readonly reasonMessage: string
 } => {
+  const eligibility = closeIssueEligibilityFailure(cause)
+  if (eligibility !== null) {
+    return {
+      reasonCode: eligibility.failureCode,
+      reasonMessage: eligibility.failureMessage,
+    }
+  }
+
   const errorOption = Cause.findErrorOption(cause)
   if (Option.isSome(errorOption)) {
     const error = errorOption.value
@@ -1683,10 +1712,20 @@ export const makeWorkItemLifecycleLive = (
         readonly reasonCode: string
         readonly reasonMessage: string
         readonly cause: Cause.Cause<unknown>
+        readonly terminalFailure?: {
+          readonly failureCode: string
+          readonly failureMessage: string
+        }
       }): Effect.Effect<WorkItemRecord, RunStepError> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
-          const { stepRun, workItem, reasonCode, reasonMessage } = input
+          const {
+            stepRun,
+            workItem,
+            reasonCode,
+            reasonMessage,
+            terminalFailure,
+          } = input
 
           yield* Effect.logError("Lifecycle Step handler failed", {
             workItemId: workItem.id,
@@ -1694,6 +1733,7 @@ export const makeWorkItemLifecycleLive = (
             step: stepRun.step,
             reasonCode,
             reasonMessage,
+            terminal: terminalFailure !== undefined,
           })
 
           yield* sql
@@ -1710,15 +1750,35 @@ export const makeWorkItemLifecycleLive = (
                   [now, reasonCode, reasonMessage, now, stepRun.id],
                 )
 
-                // Non-terminal failure releases the Worker Slot (no auto-wait).
-                yield* sql.unsafe(
-                  `UPDATE work_item
+                if (terminalFailure !== undefined) {
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                   SET state = 'failed',
+                       state_ready_at = ?,
+                       failure_code = ?,
+                       failure_message = ?,
+                       holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                    [
+                      now,
+                      terminalFailure.failureCode,
+                      terminalFailure.failureMessage,
+                      now,
+                      workItem.id,
+                    ],
+                  )
+                } else {
+                  yield* sql.unsafe(
+                    `UPDATE work_item
                    SET holds_worker_slot = 0,
                        waiting_since = NULL,
                        updated_at = ?
                    WHERE id = ?`,
-                  [now, workItem.id],
-                )
+                    [now, workItem.id],
+                  )
+                }
 
                 if (stepRun.queue_job_id !== null) {
                   yield* queue.fail(stepRun.queue_job_id, {
@@ -2161,12 +2221,22 @@ export const makeWorkItemLifecycleLive = (
                       }
                     }
 
+                    const eligibility = closeIssueEligibilityFailure(
+                      handlerExit.cause,
+                    )
                     const failed = yield* completeFailedStep({
                       stepRun: afterStart,
                       workItem,
                       reasonCode: classification.reasonCode,
                       reasonMessage: classification.reasonMessage,
                       cause: handlerExit.cause,
+                      terminalFailure:
+                        eligibility === null
+                          ? undefined
+                          : {
+                              failureCode: eligibility.failureCode,
+                              failureMessage: eligibility.failureMessage,
+                            },
                     })
                     return { _tag: "processed" as const, workItem: failed }
                   }
