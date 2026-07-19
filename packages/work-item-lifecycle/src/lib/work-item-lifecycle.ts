@@ -60,6 +60,7 @@ import {
   type OperationalLifecycleStep,
   STEP_RUN_REASON,
   type StepRunId,
+  type StepRunReasonCode,
   type StepRunRecord,
   type StepRunStatus,
   WORK_ITEM_LIFECYCLE_QUEUE,
@@ -458,6 +459,15 @@ export interface WorkItemLifecycleShape {
     number,
     WorkItemLifecycleDatabaseError
   >
+  /**
+   * Process-epoch ownership: every Step Run still `running` from a prior
+   * harness/job-worker process is Interrupted, slots released, queue jobs acked.
+   * Call once before the job worker accepts new claims after startup.
+   */
+  readonly interruptRunningStepRunsFromPriorWorker: Effect.Effect<
+    number,
+    WorkItemLifecycleDatabaseError
+  >
   readonly implementNow: (
     repositoryId: string,
     githubIssueNumber: number,
@@ -556,6 +566,27 @@ export const makeWorkItemLifecycleLive = (
             "Work Item Lifecycle requires a QueueService that participates in database transactions",
         })
       }
+
+      // Best-effort graceful shutdown: interrupt in-process Step Runs so dispose
+      // does not leave durable `running` when the process exits cleanly.
+      yield* Effect.addFinalizer(() =>
+        Effect.gen(function* () {
+          const executions = [...activeStepExecutions.values()]
+          if (executions.length === 0) {
+            return
+          }
+          yield* Effect.forEach(
+            executions,
+            ({ cancel }) => Deferred.succeed(cancel, undefined),
+            { discard: true },
+          )
+          yield* Effect.forEach(
+            executions,
+            ({ finished }) => Deferred.await(finished),
+            { discard: true, concurrency: "unbounded" },
+          )
+        }),
+      )
 
       const findUnfinishedWorkItemId = (
         repositoryId: string,
@@ -1802,62 +1833,162 @@ export const makeWorkItemLifecycleLive = (
           )
         })
 
-      const recoverOrphanedStepRuns = Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis
-        const rows = (yield* sql
-          .unsafe(
-            `UPDATE step_run
-             SET status = 'interrupted',
-                 finished_at = ?,
-                 reason_code = ?,
-                 reason_message = ?,
-                 updated_at = ?
-             WHERE status = 'running'
-               AND (
-                 queue_job_id IS NULL
-                 OR NOT EXISTS (
-                   SELECT 1 FROM job_queue
-                   WHERE job_queue.id = step_run.queue_job_id
-                 )
-                 OR EXISTS (
-                   SELECT 1 FROM job_queue
-                   WHERE job_queue.id = step_run.queue_job_id
-                     AND job_queue.job_attempts >= job_queue.job_retry_limit
-                     AND (
-                       job_queue.locked_until IS NULL
-                       OR job_queue.locked_until <= ?
-                     )
-                 )
-               )
-             RETURNING id, work_item_id`,
-            [
-              now,
-              STEP_RUN_REASON.interrupted,
-              "Lifecycle Step lost its queue delivery",
-              now,
-              now,
-            ],
-          )
-          .pipe(Effect.mapError(toDatabaseError))) as readonly {
-          readonly id: string
-          readonly work_item_id: string
-        }[]
-        if (rows.length > 0) {
-          const repositoryIds = new Set<string>()
-          for (const row of rows) {
-            const workItem = yield* loadWorkItemRow(row.work_item_id)
-            if (workItem) {
-              repositoryIds.add(workItem.repository_id)
-            }
+      const interruptSelectedRunningStepRuns = (input: {
+        readonly reasonCode: StepRunReasonCode
+        readonly reasonMessage: string
+        readonly selectSql: string
+        readonly selectParams: readonly unknown[]
+      }): Effect.Effect<number, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const candidates = (yield* sql
+            .unsafe(input.selectSql, [...input.selectParams])
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly id: string
+            readonly work_item_id: string
+            readonly queue_job_id: string | null
+            readonly repository_id: string
+          }[]
+
+          if (candidates.length === 0) {
+            return 0
           }
+
+          const interrupted: {
+            readonly workItemId: string
+            readonly repositoryId: string
+          }[] = []
+
+          yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                for (const row of candidates) {
+                  const updated = (yield* sql.unsafe(
+                    `UPDATE step_run
+                     SET status = 'interrupted',
+                         finished_at = ?,
+                         reason_code = ?,
+                         reason_message = ?,
+                         updated_at = ?
+                     WHERE id = ? AND status = 'running'
+                     RETURNING id`,
+                    [now, input.reasonCode, input.reasonMessage, now, row.id],
+                  )) as readonly { readonly id: string }[]
+                  if (updated.length === 0) {
+                    continue
+                  }
+
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                     SET holds_worker_slot = 0,
+                         waiting_since = NULL,
+                         updated_at = ?
+                     WHERE id = ?`,
+                    [now, row.work_item_id],
+                  )
+
+                  if (row.queue_job_id !== null) {
+                    yield* queue
+                      .acknowledge(row.queue_job_id)
+                      .pipe(
+                        Effect.catchTag("JobNotFoundError", () => Effect.void),
+                      )
+                  }
+
+                  interrupted.push({
+                    workItemId: row.work_item_id,
+                    repositoryId: row.repository_id,
+                  })
+                }
+              }),
+            )
+            .pipe(
+              Effect.catch((error) =>
+                catchTransactionError(error).pipe(
+                  Effect.mapError(
+                    (mapped): WorkItemLifecycleDatabaseError =>
+                      mapped instanceof WorkItemLifecycleDatabaseError
+                        ? mapped
+                        : new WorkItemLifecycleDatabaseError({
+                            message: `Failed to interrupt running Step Runs: ${String(mapped)}`,
+                            cause: mapped,
+                          }),
+                  ),
+                ),
+              ),
+            )
+
+          if (interrupted.length === 0) {
+            return 0
+          }
+
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError(
+                "Failed to admit waiters after interrupting Step Runs",
+                { error: String(error) },
+              ),
+            ),
+          )
+
+          const repositoryIds = new Set(
+            interrupted.map((row) => row.repositoryId),
+          )
           yield* Effect.forEach(
             [...repositoryIds],
             (repositoryId) => notifyWorkItemsChanged(repositoryId),
             { discard: true },
           )
-        }
-        return rows.length
+
+          return interrupted.length
+        })
+
+      const recoverOrphanedStepRuns = Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        return yield* interruptSelectedRunningStepRuns({
+          reasonCode: STEP_RUN_REASON.interrupted,
+          reasonMessage: "Lifecycle Step lost its queue delivery",
+          selectSql: `SELECT step_run.id,
+                             step_run.work_item_id,
+                             step_run.queue_job_id,
+                             work_item.repository_id
+                      FROM step_run
+                      INNER JOIN work_item ON work_item.id = step_run.work_item_id
+                      WHERE step_run.status = 'running'
+                        AND (
+                          step_run.queue_job_id IS NULL
+                          OR NOT EXISTS (
+                            SELECT 1 FROM job_queue
+                            WHERE job_queue.id = step_run.queue_job_id
+                          )
+                          OR EXISTS (
+                            SELECT 1 FROM job_queue
+                            WHERE job_queue.id = step_run.queue_job_id
+                              AND job_queue.job_attempts >= job_queue.job_retry_limit
+                              AND (
+                                job_queue.locked_until IS NULL
+                                OR job_queue.locked_until <= ?
+                              )
+                          )
+                        )`,
+          selectParams: [now],
+        })
       })
+
+      const interruptRunningStepRunsFromPriorWorker =
+        interruptSelectedRunningStepRuns({
+          reasonCode: STEP_RUN_REASON.workerRestarted,
+          reasonMessage:
+            "Harness job worker stopped or restarted while the Step Run was still Running",
+          selectSql: `SELECT step_run.id,
+                             step_run.work_item_id,
+                             step_run.queue_job_id,
+                             work_item.repository_id
+                      FROM step_run
+                      INNER JOIN work_item ON work_item.id = step_run.work_item_id
+                      WHERE step_run.status = 'running'`,
+          selectParams: [],
+        })
 
       const runStep = Effect.fn("WorkItemLifecycle.runStep")(function* (
         stepRunId: string,
@@ -3296,6 +3427,7 @@ export const makeWorkItemLifecycleLive = (
       return WorkItemLifecycle.of({
         maxDurations,
         recoverOrphanedStepRuns,
+        interruptRunningStepRunsFromPriorWorker,
         implementNow,
         implementLocally,
         runStep,

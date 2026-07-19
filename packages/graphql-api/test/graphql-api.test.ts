@@ -196,6 +196,7 @@ const makeRuntime = (
     implementNow: unused,
     implementLocally: unused,
     recoverOrphanedStepRuns: Effect.succeed(0),
+    interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
     runStep: unused,
     retry: unused,
     pause: unused,

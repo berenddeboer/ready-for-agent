@@ -566,9 +566,29 @@ export const runJobWorker = (options: JobWorkerOptions = {}) =>
 /**
  * Start the polling runtime and durably enqueue one high-priority Polling
  * Auto-heal Job without awaiting repair completion.
+ *
+ * Before accepting claims, interrupt any Step Runs still marked `running` from a
+ * prior process generation so Jobs UI cannot show zombie RUNNING work.
  */
 export const startJobWorker = (options: JobWorkerOptions = {}) =>
   Effect.gen(function* () {
+    const lifecycle = yield* WorkItemLifecycle
+    yield* lifecycle.interruptRunningStepRunsFromPriorWorker.pipe(
+      Effect.tap((count) =>
+        count > 0
+          ? Effect.logWarning(
+              "Interrupted Step Runs left running by a prior harness process",
+              { count },
+            )
+          : Effect.void,
+      ),
+      Effect.catch((error) =>
+        Effect.logError(
+          "Failed to interrupt prior-process running Step Runs on startup",
+          { error: formatLogError(error) },
+        ),
+      ),
+    )
     yield* transferPersistedRefreshJobs
     yield* enqueuePollingAutoHealJob
     yield* runJobWorker(options).pipe(

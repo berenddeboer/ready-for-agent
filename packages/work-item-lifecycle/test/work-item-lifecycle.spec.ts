@@ -3343,6 +3343,13 @@ describe("WorkItemLifecycle", () => {
             stepRun.queueJobId,
           ])
 
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET holds_worker_slot = 1, updated_at = ?
+             WHERE id = ?`,
+            [now, created.id],
+          )
+
           expect(yield* lifecycle.recoverOrphanedStepRuns).toBe(1)
 
           const recovered = yield* lifecycle.getWorkItem(created.id)
@@ -3353,6 +3360,7 @@ describe("WorkItemLifecycle", () => {
           expect(recovered.stepRuns[0]?.reasonMessage).toBe(
             "Lifecycle Step lost its queue delivery",
           )
+          expect(recovered.holdsWorkerSlot).toBe(false)
         }),
       ))
 
@@ -3398,6 +3406,116 @@ describe("WorkItemLifecycle", () => {
           expect(recovered.stepRuns[0]?.reasonCode).toBe(
             STEP_RUN_REASON.interrupted,
           )
+          expect(recovered.holdsWorkerSlot).toBe(false)
+          const remainingJobs = (yield* sql.unsafe(
+            `SELECT id FROM job_queue WHERE id = ?`,
+            [stepRun.queueJobId],
+          )) as readonly { readonly id: string }[]
+          expect(remainingJobs).toHaveLength(0)
+        }),
+      ))
+
+    it("interrupts a Running Step Run with a still-valid queue lock on prior-worker reconciliation", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRun = created.stepRuns[0]!
+          const now = Date.now()
+          const lockUntil = now + Duration.toMillis(Duration.hours(2))
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [now, now, stepRun.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE job_queue
+             SET locked_until = ?,
+                 job_attempts = 0,
+                 updated_at = ?
+             WHERE id = ?`,
+            [lockUntil, now, stepRun.queueJobId],
+          )
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET holds_worker_slot = 1, updated_at = ?
+             WHERE id = ?`,
+            [now, created.id],
+          )
+
+          // Lease-only orphan recovery must not touch a healthy-looking lock.
+          expect(yield* lifecycle.recoverOrphanedStepRuns).toBe(0)
+
+          expect(yield* lifecycle.interruptRunningStepRunsFromPriorWorker).toBe(
+            1,
+          )
+
+          const recovered = yield* lifecycle.getWorkItem(created.id)
+          expect(recovered.stepRuns[0]?.status).toBe("interrupted")
+          expect(recovered.stepRuns[0]?.reasonCode).toBe(
+            STEP_RUN_REASON.workerRestarted,
+          )
+          expect(recovered.stepRuns[0]?.reasonMessage).toContain(
+            "stopped or restarted",
+          )
+          expect(recovered.holdsWorkerSlot).toBe(false)
+
+          const remainingJobs = (yield* sql.unsafe(
+            `SELECT id FROM job_queue WHERE id = ?`,
+            [stepRun.queueJobId],
+          )) as readonly { readonly id: string }[]
+          expect(remainingJobs).toHaveLength(0)
+
+          // No silent redelivery / auto-rerun of the interrupted step.
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(claimed)).toBe(true)
+
+          // Operator Retry still works.
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.stepRuns).toHaveLength(2)
+          expect(retried.stepRuns[0]!.status).toBe("interrupted")
+          expect(retried.stepRuns[1]!.status).toBe("queued")
+        }),
+      ))
+
+    it("does not interrupt live Running Step Runs during periodic orphan recovery", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRun = created.stepRuns[0]!
+          const now = Date.now()
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running', started_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [now, now, stepRun.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE job_queue
+             SET locked_until = ?, job_attempts = 0, updated_at = ?
+             WHERE id = ?`,
+            [now + 60_000, now, stepRun.queueJobId],
+          )
+
+          expect(yield* lifecycle.recoverOrphanedStepRuns).toBe(0)
+
+          const stillRunning = yield* lifecycle.getWorkItem(created.id)
+          expect(stillRunning.stepRuns[0]?.status).toBe("running")
         }),
       ))
 

@@ -187,6 +187,8 @@ export const STEP_RUN_REASON = {
   handlerDefect: "handler_defect",
   timeout: "timeout",
   interrupted: "interrupted",
+  /** Prior harness/job-worker process ended while the Step Run was still Running. */
+  workerRestarted: "worker_restarted",
   abandoned: "abandoned",
   reset: "reset",
   paused: "paused",
