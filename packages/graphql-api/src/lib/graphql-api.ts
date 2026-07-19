@@ -115,7 +115,7 @@ type IssuesArgs = {
 
 type WorkItemsArgs = IssuesArgs & {
   githubIssueNumber?: number
-  listKind?: "WORKING" | "COMPLETED"
+  listKind?: "WORKING" | "FAILED" | "COMPLETED"
   limit?: number
 }
 
@@ -138,6 +138,7 @@ const toWorkItemsListKind = (
   listKind: WorkItemsArgs["listKind"],
 ): WorkItemsListKind | undefined => {
   if (listKind === "WORKING") return "working"
+  if (listKind === "FAILED") return "failed"
   if (listKind === "COMPLETED") return "completed"
   return undefined
 }

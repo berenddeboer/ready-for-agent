@@ -47,7 +47,7 @@ export const followRepositoryWorkItemsLive = async ({
 
   /**
    * Refetch every work-items cache for the repository (default list plus any
-   * Jobs Working/Completed listKind variants already in the query cache).
+   * Jobs Working/Failed/Completed listKind variants already in the query cache).
    */
   const refresh = async (repositoryId: string) => {
     const defaultQuery = queries.workItems(repositoryId)

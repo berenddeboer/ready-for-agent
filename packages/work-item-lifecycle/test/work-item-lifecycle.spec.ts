@@ -2755,10 +2755,15 @@ describe("WorkItemLifecycle", () => {
                 ),
               ).toEqual(["close_issue"])
               expect(
-                filterWorkItemsByListKind(listed, "completed").map(
+                filterWorkItemsByListKind(listed, "failed").map(
                   (item) => item.state,
                 ),
               ).toEqual(["failed"])
+              expect(
+                filterWorkItemsByListKind(listed, "completed").map(
+                  (item) => item.state,
+                ),
+              ).toEqual([])
 
               const retryError = yield* Effect.flip(lifecycle.retry(created.id))
               expect(retryError).toBeInstanceOf(WorkItemTerminalError)

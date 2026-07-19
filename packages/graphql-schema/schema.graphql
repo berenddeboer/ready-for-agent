@@ -13,9 +13,13 @@ type Query {
   """
   Work Items for a repository (or one issue when githubIssueNumber is set).
   Omit listKind/limit for the full list (backward-compatible default).
-  listKind WORKING: unfinished + Needs Human (no 15-cap from the Jobs card).
-  listKind COMPLETED: Complete/Failed/Abandoned only, newest createdAt first;
-  pass limit (e.g. 15) to bound finished history.
+  listKind WORKING: unfinished + Needs Human, excluding Failed membership
+  (no history cap from the Jobs card).
+  listKind FAILED: terminal failed plus nonterminal Work Items whose latest
+  Step Run is failed or interrupted; newest createdAt first. Pass limit
+  (e.g. 15) to bound Failed history — independent of the Completed limit.
+  listKind COMPLETED: Complete and Abandoned only, newest createdAt first;
+  pass limit (e.g. 15) to bound finished history. Terminal failed is not included.
   """
   workItems(
     repositoryId: ID!
@@ -34,10 +38,11 @@ type Query {
 }
 
 """
-Jobs card partition: Working vs Completed membership.
+Jobs card partition: Working / Failed / Completed membership.
 """
 enum WorkItemsListKind {
   WORKING
+  FAILED
   COMPLETED
 }
 
