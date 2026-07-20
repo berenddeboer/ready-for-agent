@@ -20,6 +20,7 @@ import {
   type WorkItemsListKind,
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
+  isRetryableFailedWorkItem,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
@@ -345,8 +346,7 @@ export const createGraphqlApi = (
           canRetry: (workItem: WorkItemRecord) => {
             const latestStatus = latestStepRun(workItem)?.status
             const recoverableStatusCheckFailure =
-              workItem.state === "failed" &&
-              workItem.failureCode === "pr_status_checks_unresolved"
+              isRetryableFailedWorkItem(workItem)
             return (
               workItem.waitingSince == null &&
               !workItem.paused &&

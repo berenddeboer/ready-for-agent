@@ -1765,7 +1765,7 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("filters Working Work Items including Needs Human", async () => {
+  test("filters Working Work Items including retriable failures", async () => {
     const needsHuman = {
       ...workItem,
       id: makeWorkItemId(),
@@ -1804,6 +1804,11 @@ describe("GraphQL API", () => {
       state: "failed" as const,
       stepRuns: [],
     }
+    const recoverableTerminalFailed = {
+      ...terminalFailed,
+      id: makeWorkItemId(),
+      failureCode: "pr_status_checks_unresolved",
+    }
     await runtime.dispose()
     runtime = makeRuntime(
       {
@@ -1819,6 +1824,7 @@ describe("GraphQL API", () => {
             implementing,
             retriableFailed,
             terminalFailed,
+            recoverableTerminalFailed,
           ]),
       },
     )
@@ -1827,7 +1833,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
           workItems(repositoryId: $repositoryId, listKind: $listKind) {
-            id state
+            id state canRetry isTerminal
           }
         }`,
         variables: { repositoryId: repository.id, listKind: "WORKING" },
@@ -1840,10 +1846,26 @@ describe("GraphQL API", () => {
           {
             id: needsHuman.id,
             state: "NEEDS_HUMAN",
+            canRetry: false,
+            isTerminal: true,
           },
           {
             id: implementing.id,
             state: "IMPLEMENT",
+            canRetry: false,
+            isTerminal: false,
+          },
+          {
+            id: retriableFailed.id,
+            state: "IMPLEMENT",
+            canRetry: true,
+            isTerminal: false,
+          },
+          {
+            id: recoverableTerminalFailed.id,
+            state: "FAILED",
+            canRetry: true,
+            isTerminal: true,
           },
         ],
       },
@@ -1923,7 +1945,7 @@ describe("GraphQL API", () => {
     )
   })
 
-  test("filters Failed Work Items including retriable and terminal failures", async () => {
+  test("filters Failed Work Items to non-retryable terminal failures", async () => {
     const baseTime = Date.parse("2026-01-01T00:00:00.000Z")
     const retriableId = makeWorkItemId()
     const terminalFailedId = makeWorkItemId()
@@ -1952,8 +1974,8 @@ describe("GraphQL API", () => {
       ...workItem,
       id: terminalFailedId,
       state: "failed" as const,
-      failureCode: "pr_status_checks_unresolved",
-      failureMessage: "Manual fixing may be required",
+      failureCode: "issue_not_open",
+      failureMessage: "Issue is no longer open",
       createdAt: new Date(baseTime + 2000),
       stepRuns: [
         {
@@ -2021,14 +2043,8 @@ describe("GraphQL API", () => {
           {
             id: terminalFailed.id,
             state: "FAILED",
-            canRetry: true,
+            canRetry: false,
             isTerminal: true,
-          },
-          {
-            id: retriable.id,
-            state: "IMPLEMENT",
-            canRetry: true,
-            isTerminal: false,
           },
         ],
       },

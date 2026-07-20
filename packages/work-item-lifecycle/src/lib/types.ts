@@ -138,7 +138,7 @@ export const isTerminalWorkItemState = (
 
 /**
  * Jobs card Completed tab: successful finished outcomes only.
- * Terminal `failed` belongs on Failed. Needs Human stays on Working as active handoff.
+ * Non-retryable terminal `failed` belongs on Failed. Needs Human stays on Working.
  */
 export const JOBS_COMPLETED_WORK_ITEM_STATES = [
   "complete",
@@ -153,43 +153,27 @@ export const isJobsCompletedWorkItemState = (
 ): state is JobsCompletedWorkItemState =>
   (JOBS_COMPLETED_WORK_ITEM_STATES as readonly string[]).includes(state)
 
-/** Latest Step Run statuses that place a nonterminal Work Item on Failed. */
-export const JOBS_FAILED_STEP_RUN_STATUSES = [
-  "failed",
-  "interrupted",
-] as const satisfies readonly StepRunStatus[]
-
-export type JobsFailedStepRunStatus =
-  (typeof JOBS_FAILED_STEP_RUN_STATUSES)[number]
-
-export const isJobsFailedStepRunStatus = (
-  status: StepRunStatus,
-): status is JobsFailedStepRunStatus =>
-  (JOBS_FAILED_STEP_RUN_STATUSES as readonly string[]).includes(status)
+export const RETRYABLE_FAILED_WORK_ITEM_CODE = "pr_status_checks_unresolved"
 
 type JobsListMembershipItem = {
   readonly state: WorkItemState
-  readonly stepRuns: readonly { readonly status: StepRunStatus }[]
+  readonly failureCode?: string | null
 }
 
-/**
- * Jobs card Failed tab: terminal `failed`, or nonterminal stopped on a
- * failed/interrupted latest Step Run (retriable).
- */
-export const isJobsFailedWorkItem = (item: JobsListMembershipItem): boolean => {
-  if (item.state === "failed") {
-    return true
-  }
-  if (isTerminalWorkItemState(item.state)) {
-    return false
-  }
-  const latest = item.stepRuns.at(-1)
-  return latest !== undefined && isJobsFailedStepRunStatus(latest.status)
-}
+/** Persisted terminal status-check failures are retryable for compatibility. */
+export const isRetryableFailedWorkItem = (
+  item: JobsListMembershipItem,
+): boolean =>
+  item.state === "failed" &&
+  item.failureCode === RETRYABLE_FAILED_WORK_ITEM_CODE
+
+/** Jobs card Failed tab: non-retryable terminal failures only. */
+export const isJobsFailedWorkItem = (item: JobsListMembershipItem): boolean =>
+  item.state === "failed" && !isRetryableFailedWorkItem(item)
 
 /**
- * Jobs card Working tab: unfinished lifecycle work plus Needs Human handoffs,
- * excluding Work Items currently stopped on a failed/interrupted Step Run.
+ * Jobs card Working tab: unfinished lifecycle work, retryable stoppages, and
+ * Needs Human handoffs.
  */
 export const isJobsWorkingWorkItem = (item: JobsListMembershipItem): boolean =>
   !isJobsCompletedWorkItemState(item.state) && !isJobsFailedWorkItem(item)
@@ -217,8 +201,8 @@ const applyLimit = <T>(
 export const filterWorkItemsByListKind = <
   T extends {
     readonly state: WorkItemState
+    readonly failureCode?: string | null
     readonly createdAt: Date
-    readonly stepRuns: readonly { readonly status: StepRunStatus }[]
   },
 >(
   workItems: readonly T[],
