@@ -136,7 +136,7 @@ const applyProductionMigrations = async (
   _environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> => {
   await Effect.runPromise(
-    runConfiguredMigrations.pipe(
+    runConfiguredMigrations().pipe(
       Effect.provide(DatabaseLive),
       Effect.tap(() =>
         Effect.sync(() => {

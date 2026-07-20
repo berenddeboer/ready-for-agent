@@ -1,7 +1,15 @@
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { connect } from "@tursodatabase/database"
-import { Context, Effect, Layer, Scope, Semaphore, Stream } from "effect"
+import {
+  Context,
+  Effect,
+  Layer,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from "effect"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import * as Client from "effect/unstable/sql/SqlClient"
 import type { Connection } from "effect/unstable/sql/SqlConnection"
@@ -44,14 +52,44 @@ const sqlError = (cause: unknown, operation: string) =>
     }),
   })
 
-const ensureLocalDatabaseParentDir = (path: string) => {
-  if (path === ":memory:") return
-  mkdirSync(dirname(path), { recursive: true })
-}
+export class DatabaseDirectoryError extends Schema.TaggedErrorClass<DatabaseDirectoryError>()(
+  "DatabaseDirectoryError",
+  {
+    path: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
+
+const ensureLocalDatabaseParentDir = (path: string) =>
+  path === ":memory:"
+    ? Effect.void
+    : Effect.try({
+        try: () => {
+          mkdirSync(dirname(path), { recursive: true })
+        },
+        catch: (cause) =>
+          new DatabaseDirectoryError({ path: dirname(path), cause }),
+      })
+
+/** Streaming SQL is not implemented for the Turso local driver. */
+const executeStreamUnsupported = () =>
+  Stream.fail(
+    new SqlError({
+      reason: classifySqliteError(
+        new Error(
+          "executeStream is not supported by the Turso local SqlClient",
+        ),
+        {
+          message: "executeStream is not supported",
+          operation: "executeStream",
+        },
+      ),
+    }),
+  )
 
 const makeClient = (path: string, options?: TursoClientOptions) =>
   Effect.gen(function* () {
-    ensureLocalDatabaseParentDir(path)
+    yield* ensureLocalDatabaseParentDir(path)
     const databaseOptions: NonNullable<Parameters<typeof connect>[1]> = {}
     if (options?.defaultQueryTimeout !== undefined)
       databaseOptions.defaultQueryTimeout = options.defaultQueryTimeout
@@ -60,7 +98,14 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
       catch: (cause) => sqlError(cause, "open database"),
     })
     yield* Effect.addFinalizer(() =>
-      Effect.promise(() => db.close()).pipe(Effect.ignore),
+      Effect.tryPromise({
+        try: () => db.close(),
+        catch: (cause) => sqlError(cause, "close database"),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Failed to close Turso database", { error }),
+        ),
+      ),
     )
 
     yield* Effect.tryPromise({
@@ -97,7 +142,7 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
         execute(sql, params).pipe(
           Effect.map((rows) => (transformRows ? transformRows(rows) : rows)),
         ),
-      executeStream: () => Stream.die("executeStream not implemented"),
+      executeStream: executeStreamUnsupported,
     }
     const semaphore = yield* Semaphore.make(1)
     const acquirer = semaphore.withPermits(1)(Effect.succeed(connection))
@@ -122,6 +167,12 @@ const makeClient = (path: string, options?: TursoClientOptions) =>
     })
   })
 
+/**
+ * Turso SDK `SqlClient` layer (`@tursodatabase/database`).
+ * Shares `DatabasePathConfig` with `@ready-for-agent/db`'s `DatabaseLive`
+ * (Bun SQLite). Prefer `DatabaseLive` for the harness host binary; use this
+ * layer when you need the Turso driver (e.g. concurrent-tx / multiproc tests).
+ */
 export const makeTursoLive = (options?: TursoClientOptions) =>
   Layer.effectContext(
     Effect.gen(function* () {
