@@ -62,3 +62,15 @@ export class InvalidJobKeyError extends Schema.TaggedErrorClass<InvalidJobKeyErr
     message: Schema.String,
   },
 ) {}
+
+/**
+ * Error thrown when a queue read/inspect operation fails (list, stats).
+ */
+export class QueueReadError extends Schema.TaggedErrorClass<QueueReadError>()(
+  "QueueReadError",
+  {
+    queue: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
