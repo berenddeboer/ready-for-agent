@@ -1,27 +1,32 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class CreateWorktreeRepositoryNotFoundError extends Data.TaggedError(
+export class CreateWorktreeRepositoryNotFoundError extends Schema.TaggedErrorClass<CreateWorktreeRepositoryNotFoundError>()(
   "CreateWorktreeRepositoryNotFoundError",
-)<{
-  readonly repositoryId: string
-}> {}
+  {
+    repositoryId: Schema.String,
+  },
+) {}
 
-export class WorktreeConflictError extends Data.TaggedError(
+export class WorktreeConflictError extends Schema.TaggedErrorClass<WorktreeConflictError>()(
   "WorktreeConflictError",
-)<{
-  readonly message: string
-  readonly branchName: string
-  readonly worktreePath: string
-}> {}
+  {
+    message: Schema.String,
+    branchName: Schema.String,
+    worktreePath: Schema.String,
+  },
+) {}
 
-export class GitCommandError extends Data.TaggedError("GitCommandError")<{
-  readonly message: string
-  readonly command: string
-  readonly args: readonly string[]
-  readonly cwd?: string
-  readonly exitCode: number
-  readonly stderr: string
-}> {}
+export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()(
+  "GitCommandError",
+  {
+    message: Schema.String,
+    command: Schema.String,
+    args: Schema.Array(Schema.String),
+    cwd: Schema.optional(Schema.String),
+    exitCode: Schema.Finite,
+    stderr: Schema.String,
+  },
+) {}
 
 export type CreateWorktreeError =
   | CreateWorktreeRepositoryNotFoundError

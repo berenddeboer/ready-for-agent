@@ -26,11 +26,21 @@ import { localCleanup, removeWorktree } from "./remove-worktree.js"
 import { resolvePrMergeConflict } from "./resolve-pr-merge-conflict.js"
 import { review } from "./review.js"
 
+type StepServices =
+  | DbService
+  | KeymaxxerService
+  | FileSystem.FileSystem
+  | Path.Path
+  | ChildProcessSpawner.ChildProcessSpawner
+  | Opencode
+  | GitHubService
+  | SqlClient.SqlClient
+
 /**
  * Production LifecycleSteps: Create Worktree through local cleanup, including
  * Assess Changes (git then optional OpenCode confirm) and Close Issue for
  * No-Change Outcomes. Captures platform, database, Keymaxxer, GitHub, and
- * OpenCode services so handlers remain `Effect<A>` with no requirements.
+ * OpenCode services so handlers remain `Effect<A, E>` with no requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,
@@ -45,30 +55,19 @@ export const LifecycleStepsLive = Layer.effect(
     const sql = yield* SqlClient.SqlClient
     const opencode = yield* limitOpencodeSessions(rawOpencode, db, sql)
 
-    const withServices = <A, E>(
-      effect: Effect.Effect<
-        A,
-        E,
-        | DbService
-        | KeymaxxerService
-        | FileSystem.FileSystem
-        | Path.Path
-        | ChildProcessSpawner.ChildProcessSpawner
-        | Opencode
-        | GitHubService
-        | SqlClient.SqlClient
-      >,
-    ) =>
-      effect.pipe(
-        Effect.provideService(DbService, db),
-        Effect.provideService(KeymaxxerService, keymaxxer),
-        Effect.provideService(FileSystem.FileSystem, fs),
-        Effect.provideService(Path.Path, path),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.provideService(Opencode, opencode),
-        Effect.provideService(GitHubService, github),
-        Effect.provideService(SqlClient.SqlClient, sql),
-      )
+    const services = Layer.mergeAll(
+      Layer.succeed(DbService, db),
+      Layer.succeed(KeymaxxerService, keymaxxer),
+      Layer.succeed(FileSystem.FileSystem, fs),
+      Layer.succeed(Path.Path, path),
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(Opencode, opencode),
+      Layer.succeed(GitHubService, github),
+      Layer.succeed(SqlClient.SqlClient, sql),
+    )
+
+    const withServices = <A, E>(effect: Effect.Effect<A, E, StepServices>) =>
+      effect.pipe(Effect.provide(services))
 
     return LifecycleSteps.of({
       createWorktree: (context) => withServices(createWorktree(context)),

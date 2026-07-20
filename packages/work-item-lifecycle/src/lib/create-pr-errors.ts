@@ -1,51 +1,57 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class CreatePrWorktreeContextMissingError extends Data.TaggedError(
+export class CreatePrWorktreeContextMissingError extends Schema.TaggedErrorClass<CreatePrWorktreeContextMissingError>()(
   "CreatePrWorktreeContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CreatePrInvalidWorktreeContextError extends Data.TaggedError(
+export class CreatePrInvalidWorktreeContextError extends Schema.TaggedErrorClass<CreatePrInvalidWorktreeContextError>()(
   "CreatePrInvalidWorktreeContextError",
-)<{
-  readonly workItemId: string
-  readonly worktreePath: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    worktreePath: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CreatePrSessionContextMissingError extends Data.TaggedError(
+export class CreatePrSessionContextMissingError extends Schema.TaggedErrorClass<CreatePrSessionContextMissingError>()(
   "CreatePrSessionContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CreatePrCredentialError extends Data.TaggedError(
+export class CreatePrCredentialError extends Schema.TaggedErrorClass<CreatePrCredentialError>()(
   "CreatePrCredentialError",
-)<{
-  readonly repositoryId: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class CreatePrOpenCodeError extends Data.TaggedError(
+export class CreatePrOpenCodeError extends Schema.TaggedErrorClass<CreatePrOpenCodeError>()(
   "CreatePrOpenCodeError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly sessionId?: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    sessionId: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class CreatePrLookupError extends Data.TaggedError(
+export class CreatePrLookupError extends Schema.TaggedErrorClass<CreatePrLookupError>()(
   "CreatePrLookupError",
-)<{
-  readonly repositoryId: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type CreatePrError =
   | CreatePrWorktreeContextMissingError

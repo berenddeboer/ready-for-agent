@@ -1,115 +1,151 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
 export * from "./create-worktree-errors.js"
 export * from "./install-dependencies-errors.js"
 
-export class NonTransactionalQueueError extends Data.TaggedError(
+export class NonTransactionalQueueError extends Schema.TaggedErrorClass<NonTransactionalQueueError>()(
   "NonTransactionalQueueError",
-)<{
-  readonly message: string
-}> {}
+  {
+    message: Schema.String,
+  },
+) {}
 
-export class IssueNotFoundError extends Data.TaggedError("IssueNotFoundError")<{
-  readonly repositoryId: string
-  readonly githubIssueNumber: number
-}> {}
+export class IssueNotFoundError extends Schema.TaggedErrorClass<IssueNotFoundError>()(
+  "IssueNotFoundError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+  },
+) {}
 
-export class IssueNotOpenError extends Data.TaggedError("IssueNotOpenError")<{
-  readonly repositoryId: string
-  readonly githubIssueNumber: number
-  readonly state: string
-}> {}
+export class IssueNotOpenError extends Schema.TaggedErrorClass<IssueNotOpenError>()(
+  "IssueNotOpenError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+    state: Schema.String,
+  },
+) {}
 
-export class ParentIssueError extends Data.TaggedError("ParentIssueError")<{
-  readonly repositoryId: string
-  readonly githubIssueNumber: number
-}> {}
+export class ParentIssueError extends Schema.TaggedErrorClass<ParentIssueError>()(
+  "ParentIssueError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+  },
+) {}
 
-export class IssueBlockedError extends Data.TaggedError("IssueBlockedError")<{
-  readonly repositoryId: string
-  readonly githubIssueNumber: number
-  readonly blockerCount: number
-}> {}
+export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError>()(
+  "IssueBlockedError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+    blockerCount: Schema.Finite,
+  },
+) {}
 
-export class UnfinishedWorkItemExistsError extends Data.TaggedError(
+export class UnfinishedWorkItemExistsError extends Schema.TaggedErrorClass<UnfinishedWorkItemExistsError>()(
   "UnfinishedWorkItemExistsError",
-)<{
-  readonly repositoryId: string
-  readonly githubIssueNumber: number
-  readonly workItemId: string
-}> {}
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+    workItemId: Schema.String,
+  },
+) {}
 
-export class BuildModelNotConfiguredError extends Data.TaggedError(
+export class BuildModelNotConfiguredError extends Schema.TaggedErrorClass<BuildModelNotConfiguredError>()(
   "BuildModelNotConfiguredError",
-)<{
-  readonly message: string
-}> {}
+  {
+    message: Schema.String,
+  },
+) {}
 
-export class WorkItemNotFoundError extends Data.TaggedError(
+export class WorkItemNotFoundError extends Schema.TaggedErrorClass<WorkItemNotFoundError>()(
   "WorkItemNotFoundError",
-)<{
-  readonly workItemId: string
-}> {}
+  {
+    workItemId: Schema.String,
+  },
+) {}
 
-export class StepRunNotFoundError extends Data.TaggedError(
+export class StepRunNotFoundError extends Schema.TaggedErrorClass<StepRunNotFoundError>()(
   "StepRunNotFoundError",
-)<{
-  readonly stepRunId: string
-}> {}
+  {
+    stepRunId: Schema.String,
+  },
+) {}
 
-export class WorkItemLifecycleDatabaseError extends Data.TaggedError(
+export class WorkItemLifecycleDatabaseError extends Schema.TaggedErrorClass<WorkItemLifecycleDatabaseError>()(
   "WorkItemLifecycleDatabaseError",
-)<{
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class WorkItemTerminalError extends Data.TaggedError(
+export class WorkItemTerminalError extends Schema.TaggedErrorClass<WorkItemTerminalError>()(
   "WorkItemTerminalError",
-)<{
-  readonly workItemId: string
-  readonly state: string
-}> {}
+  {
+    workItemId: Schema.String,
+    state: Schema.String,
+  },
+) {}
 
-export class ActiveStepRunExistsError extends Data.TaggedError(
+export class ActiveStepRunExistsError extends Schema.TaggedErrorClass<ActiveStepRunExistsError>()(
   "ActiveStepRunExistsError",
-)<{
-  readonly workItemId: string
-  readonly stepRunId: string
-  readonly status: string
-}> {}
+  {
+    workItemId: Schema.String,
+    stepRunId: Schema.String,
+    status: Schema.String,
+  },
+) {}
 
-export class RetryNotEligibleError extends Data.TaggedError(
+export class RetryNotEligibleError extends Schema.TaggedErrorClass<RetryNotEligibleError>()(
   "RetryNotEligibleError",
-)<{
-  readonly workItemId: string
-  readonly reason: string
-}> {}
+  {
+    workItemId: Schema.String,
+    reason: Schema.String,
+  },
+) {}
 
-export class WorkItemHasRunningStepError extends Data.TaggedError(
+export class WorkItemHasRunningStepError extends Schema.TaggedErrorClass<WorkItemHasRunningStepError>()(
   "WorkItemHasRunningStepError",
-)<{
-  readonly workItemId: string
-  readonly stepRunId: string
-}> {}
+  {
+    workItemId: Schema.String,
+    stepRunId: Schema.String,
+  },
+) {}
 
-export class ResetCleanupError extends Data.TaggedError("ResetCleanupError")<{
-  readonly workItemId: string
-  readonly message: string
-  readonly cause: unknown
-}> {}
+export class ResetCleanupError extends Schema.TaggedErrorClass<ResetCleanupError>()(
+  "ResetCleanupError",
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
 
-export class AbandonCleanupError extends Data.TaggedError(
+export class AbandonCleanupError extends Schema.TaggedErrorClass<AbandonCleanupError>()(
   "AbandonCleanupError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-  readonly cause: unknown
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {}
 
-export class NeedsHumanHandoffNotEligibleError extends Data.TaggedError(
+export class NeedsHumanHandoffNotEligibleError extends Schema.TaggedErrorClass<NeedsHumanHandoffNotEligibleError>()(
   "NeedsHumanHandoffNotEligibleError",
-)<{
-  readonly workItemId: string
-  readonly reason: string
-}> {}
+  {
+    workItemId: Schema.String,
+    reason: Schema.String,
+  },
+) {}
+
+/** Ad-hoc step failure for tests and non-domain handler failures. */
+export class LifecycleStepFailedError extends Schema.TaggedErrorClass<LifecycleStepFailedError>()(
+  "LifecycleStepFailedError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}

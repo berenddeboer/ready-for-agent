@@ -8,6 +8,7 @@ import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { QueueService } from "@ready-for-agent/queue-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  LifecycleStepFailedError,
   LifecycleSteps,
   type LifecycleStepsShape,
   WORK_ITEM_LIFECYCLE_QUEUE,
@@ -989,7 +990,11 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.gen(function* () {
             closeAttempts += 1
             if (closeAttempts === 1) {
-              return yield* Effect.fail(new Error("GitHub temporary failure"))
+              return yield* Effect.fail(
+                new LifecycleStepFailedError({
+                  message: "GitHub temporary failure",
+                }),
+              )
             }
             githubCalls.push(context.completionSummary ?? "")
           }),
@@ -997,7 +1002,11 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.gen(function* () {
             cleanupAttempts += 1
             if (cleanupAttempts === 1) {
-              return yield* Effect.fail(new Error("cleanup temporary failure"))
+              return yield* Effect.fail(
+                new LifecycleStepFailedError({
+                  message: "cleanup temporary failure",
+                }),
+              )
             }
           }),
         removeWorktree: () => Effect.void,

@@ -1,41 +1,46 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class ImplementWorktreeContextMissingError extends Data.TaggedError(
+export class ImplementWorktreeContextMissingError extends Schema.TaggedErrorClass<ImplementWorktreeContextMissingError>()(
   "ImplementWorktreeContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class ImplementInvalidWorktreeContextError extends Data.TaggedError(
+export class ImplementInvalidWorktreeContextError extends Schema.TaggedErrorClass<ImplementInvalidWorktreeContextError>()(
   "ImplementInvalidWorktreeContextError",
-)<{
-  readonly workItemId: string
-  readonly worktreePath: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    worktreePath: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class ImplementRepositoryNotFoundError extends Data.TaggedError(
+export class ImplementRepositoryNotFoundError extends Schema.TaggedErrorClass<ImplementRepositoryNotFoundError>()(
   "ImplementRepositoryNotFoundError",
-)<{
-  readonly repositoryId: string
-  readonly message: string
-}> {}
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class ImplementIssueContextMissingError extends Data.TaggedError(
+export class ImplementIssueContextMissingError extends Schema.TaggedErrorClass<ImplementIssueContextMissingError>()(
   "ImplementIssueContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class ImplementOpenCodeError extends Data.TaggedError(
+export class ImplementOpenCodeError extends Schema.TaggedErrorClass<ImplementOpenCodeError>()(
   "ImplementOpenCodeError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type ImplementError =
   | ImplementWorktreeContextMissingError

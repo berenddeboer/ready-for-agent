@@ -1,17 +1,19 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class RemoveWorktreeCredentialError extends Data.TaggedError(
+export class RemoveWorktreeCredentialError extends Schema.TaggedErrorClass<RemoveWorktreeCredentialError>()(
   "RemoveWorktreeCredentialError",
-)<{
-  readonly repositoryId: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class RemoveWorktreeRemoteError extends Data.TaggedError(
+export class RemoveWorktreeRemoteError extends Schema.TaggedErrorClass<RemoveWorktreeRemoteError>()(
   "RemoveWorktreeRemoteError",
-)<{
-  readonly message: string
-  readonly branchName: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    branchName: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}

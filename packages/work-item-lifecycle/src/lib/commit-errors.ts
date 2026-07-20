@@ -1,35 +1,39 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class CommitWorktreeContextMissingError extends Data.TaggedError(
+export class CommitWorktreeContextMissingError extends Schema.TaggedErrorClass<CommitWorktreeContextMissingError>()(
   "CommitWorktreeContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CommitInvalidWorktreeContextError extends Data.TaggedError(
+export class CommitInvalidWorktreeContextError extends Schema.TaggedErrorClass<CommitInvalidWorktreeContextError>()(
   "CommitInvalidWorktreeContextError",
-)<{
-  readonly workItemId: string
-  readonly worktreePath: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    worktreePath: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CommitSessionContextMissingError extends Data.TaggedError(
+export class CommitSessionContextMissingError extends Schema.TaggedErrorClass<CommitSessionContextMissingError>()(
   "CommitSessionContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CommitOpenCodeError extends Data.TaggedError(
+export class CommitOpenCodeError extends Schema.TaggedErrorClass<CommitOpenCodeError>()(
   "CommitOpenCodeError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly sessionId?: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    sessionId: Schema.optional(Schema.String),
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type CommitError =
   | CommitWorktreeContextMissingError

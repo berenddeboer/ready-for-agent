@@ -8,6 +8,7 @@ import {
   Exit,
   Layer,
   Option,
+  Predicate,
   Result,
   Schema,
 } from "effect"
@@ -49,7 +50,11 @@ import {
   WorkItemNotFoundError,
   WorkItemTerminalError,
 } from "./errors.js"
-import { type LifecycleStepContext, LifecycleSteps } from "./lifecycle-steps.js"
+import {
+  type LifecycleStepContext,
+  LifecycleSteps,
+  type RunHandlerError,
+} from "./lifecycle-steps.js"
 import { CurrentStepRun } from "./opencode-session-limiter.js"
 import {
   PreCommitHookFailedError,
@@ -125,7 +130,7 @@ const isActiveStepRunUniqueViolation = (error: SqlError): boolean => {
 const conciseMessage = (value: unknown, fallback: string): string =>
   formatUserFacingError(value, fallback, 500)
 
-const handlerFailureMessage = (error: unknown): string => {
+const handlerFailureMessage = (error: RunHandlerError): string => {
   if (
     error instanceof PreCommitHookFailedError ||
     error instanceof PreCommitStageError
@@ -135,8 +140,10 @@ const handlerFailureMessage = (error: unknown): string => {
   return conciseMessage(error, "Lifecycle Step handler failed")
 }
 
+type HandlerExitError = RunHandlerError | Cause.TimeoutError
+
 const closeIssueEligibilityFailure = (
-  cause: Cause.Cause<unknown>,
+  cause: Cause.Cause<HandlerExitError>,
 ): {
   readonly failureCode: string
   readonly failureMessage: string
@@ -156,7 +163,7 @@ const closeIssueEligibilityFailure = (
 }
 
 const classifyHandlerFailure = (
-  cause: Cause.Cause<unknown>,
+  cause: Cause.Cause<HandlerExitError>,
 ): {
   readonly reasonCode: string
   readonly reasonMessage: string
@@ -172,12 +179,7 @@ const classifyHandlerFailure = (
   const errorOption = Cause.findErrorOption(cause)
   if (Option.isSome(errorOption)) {
     const error = errorOption.value
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "_tag" in error &&
-      (error as { _tag: string })._tag === "TimeoutError"
-    ) {
+    if (Predicate.isTagged(error, "TimeoutError")) {
       return {
         reasonCode: STEP_RUN_REASON.timeout,
         reasonMessage:
@@ -1167,7 +1169,7 @@ export const makeWorkItemLifecycleLive = (
             readonly reason?: string
           }
         },
-        unknown
+        RunHandlerError
       > => {
         switch (step) {
           case "create_worktree":

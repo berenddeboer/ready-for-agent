@@ -1,17 +1,24 @@
-import { Data, Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
-export class ResolvePrMergeConflictContextError extends Data.TaggedError(
+export class ResolvePrMergeConflictContextError extends Schema.TaggedErrorClass<ResolvePrMergeConflictContextError>()(
   "ResolvePrMergeConflictContextError",
-)<{ readonly message: string }> {}
+  {
+    message: Schema.String,
+  },
+) {}
 
-export class ResolvePrMergeConflictOpenCodeError extends Data.TaggedError(
+export class ResolvePrMergeConflictOpenCodeError extends Schema.TaggedErrorClass<ResolvePrMergeConflictOpenCodeError>()(
   "ResolvePrMergeConflictOpenCodeError",
-)<{ readonly message: string; readonly cause?: unknown }> {}
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type ResolvePrMergeConflictResult =
   | { readonly _tag: "processed" }

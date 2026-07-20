@@ -1,38 +1,42 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class WorktreeContextMissingError extends Data.TaggedError(
+export class WorktreeContextMissingError extends Schema.TaggedErrorClass<WorktreeContextMissingError>()(
   "WorktreeContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class InvalidWorktreeContextError extends Data.TaggedError(
+export class InvalidWorktreeContextError extends Schema.TaggedErrorClass<InvalidWorktreeContextError>()(
   "InvalidWorktreeContextError",
-)<{
-  readonly workItemId: string
-  readonly worktreePath: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    worktreePath: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class InstallCommandError extends Data.TaggedError(
+export class InstallCommandError extends Schema.TaggedErrorClass<InstallCommandError>()(
   "InstallCommandError",
-)<{
-  readonly message: string
-  readonly command: string
-  readonly args: readonly string[]
-  readonly cwd: string
-  readonly exitCode: number
-  readonly stderr: string
-}> {}
+  {
+    message: Schema.String,
+    command: Schema.String,
+    args: Schema.Array(Schema.String),
+    cwd: Schema.String,
+    exitCode: Schema.Finite,
+    stderr: Schema.String,
+  },
+) {}
 
-export class InstallDependenciesFallbackError extends Data.TaggedError(
+export class InstallDependenciesFallbackError extends Schema.TaggedErrorClass<InstallDependenciesFallbackError>()(
   "InstallDependenciesFallbackError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type InstallDependenciesError =
   | WorktreeContextMissingError
