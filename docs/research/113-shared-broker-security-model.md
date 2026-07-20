@@ -53,7 +53,7 @@ Same-user memory inspection is irreducible without OS-level isolation; Keymaxxer
 http://127.0.0.1:<port>/<capability>/mcp
 ```
 
-- Port: fixed loopback default `5032` / `KEYMAXXER_SIDECAR_PORT` (per #111)
+- Port: fixed loopback default `6057` / `KEYMAXXER_SIDECAR_PORT` (per #111)
 - Host: `127.0.0.1` only
 - MCP Streamable HTTP lives only under `/<capability>/mcp`
 
@@ -108,7 +108,7 @@ Nx may still set port-related env for the sidecar process; the **secret path is 
 ## Logging and storage constraints
 
 - After bootstrap capture, treat the full URL (and path segment) as a **secret**
-- Logs/metrics may show **host:port only** (e.g. `listening on 127.0.0.1:5032`)
+- Logs/metrics may show **host:port only** (e.g. `listening on 127.0.0.1:6057`)
 - Redact path segments that match the live capability in any access/error/crash logging
 - Never put the capability in error response bodies
 - Do not persist the capability to disk, git, or durable config
@@ -125,7 +125,7 @@ Accepted leak class under the threat model: same-UID readers of process env / `O
   "mcp": {
     "keymaxxer": {
       "type": "remote",
-      "url": "http://127.0.0.1:5032/<capability>/mcp",
+      "url": "http://127.0.0.1:6057/<capability>/mcp",
       "enabled": true,
       "oauth": false,
       "timeout": 300000

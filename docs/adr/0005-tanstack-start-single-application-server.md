@@ -4,7 +4,7 @@ status: accepted
 
 # TanStack Start owns the single application server
 
-Ready for Agent uses TanStack Start in SPA mode as its sole loopback application server, on `127.0.0.1:4200` by default. The same server delivers the SPA and exposes `/graphql`; there is no listener on the former API port `3001`, and both the SPA and CLI use GraphQL rather than introducing TanStack server functions as a second application interface.
+Ready for Agent uses TanStack Start in SPA mode as its sole loopback application server, on `127.0.0.1:6056` by default. The same server delivers the SPA and exposes `/graphql`; there is no listener on the former API port `3001`, and both the SPA and CLI use GraphQL rather than introducing TanStack server functions as a second application interface.
 
 Live application notifications also use GraphQL subscriptions rather than a separate event endpoint. Repository membership changes publish a payload-free invalidation signal after persistence; each connected UI then refetches the authoritative Configured Repositories query. The subscription is deliberately not an event log: reconnecting or resuming clients refetch instead of replaying missed changes.
 

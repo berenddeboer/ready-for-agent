@@ -215,7 +215,7 @@ const makeRuntime = (
 }
 
 const graphqlRequest = (body: unknown, origin?: string) =>
-  new Request("http://127.0.0.1:4200/graphql", {
+  new Request("http://127.0.0.1:6056/graphql", {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -492,7 +492,7 @@ describe("GraphQL API", () => {
     runtime = makeRuntime({ repositoryChanges: Stream.make(undefined) })
 
     const response = await createGraphqlApi(runtime).fetch(
-      new Request("http://127.0.0.1:4200/graphql", {
+      new Request("http://127.0.0.1:6056/graphql", {
         method: "POST",
         headers: {
           accept: "text/event-stream",
@@ -2599,7 +2599,7 @@ describe("GraphQL API", () => {
     })
 
     const response = await createGraphqlApi(runtime).fetch(
-      new Request("http://127.0.0.1:4200/graphql", {
+      new Request("http://127.0.0.1:6056/graphql", {
         method: "POST",
         headers: {
           accept: "text/event-stream",
@@ -2628,7 +2628,7 @@ describe("GraphQL API", () => {
     })
 
     const response = await createGraphqlApi(runtime).fetch(
-      new Request("http://127.0.0.1:4200/graphql", {
+      new Request("http://127.0.0.1:6056/graphql", {
         method: "POST",
         headers: {
           accept: "text/event-stream",
@@ -2654,7 +2654,7 @@ describe("GraphQL API", () => {
     })
 
     const response = await createGraphqlApi(runtime).fetch(
-      new Request("http://127.0.0.1:4200/graphql", {
+      new Request("http://127.0.0.1:6056/graphql", {
         method: "POST",
         headers: {
           accept: "text/event-stream",
@@ -2678,7 +2678,7 @@ describe("GraphQL API", () => {
 
   test("accepts same-origin browser requests", async () => {
     const response = await createGraphqlApi(runtime).fetch(
-      addRepositoryRequest("http://127.0.0.1:4200"),
+      addRepositoryRequest("http://127.0.0.1:6056"),
     )
 
     expect(response.status).toBe(200)

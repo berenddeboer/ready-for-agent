@@ -33,7 +33,7 @@ describe("ApplicationConfig", () => {
       SQLITE_DATABASE_PATH: "  ",
     })
 
-    expect(config.graphqlUrl).toBe("http://127.0.0.1:4200/graphql")
+    expect(config.graphqlUrl).toBe("http://127.0.0.1:6056/graphql")
     expect(config.databasePath).toBe(
       config.platform === "darwin"
         ? "/home/operator/Library/Application Support/ready-for-agent/ready-for-agent.db"

@@ -1,12 +1,12 @@
 import { Config } from "effect"
 
-export const defaultKeymaxxerSidecarPort = 5032
+export const defaultKeymaxxerSidecarPort = 6057
 
 const isValidTcpPort = (port: number): boolean =>
   Number.isInteger(port) && port >= 1 && port <= 65_535
 
 /**
- * Effect Config for KEYMAXXER_SIDECAR_PORT (default 5032).
+ * Effect Config for KEYMAXXER_SIDECAR_PORT (default 6057).
  * Process entrypoints may still read env synchronously via
  * `keymaxxerSidecarPortFromEnvironment`.
  */

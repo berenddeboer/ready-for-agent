@@ -41,7 +41,7 @@ const start = (binary: string, timeout: string, onSessionId?: OnSessionId) =>
     Effect.provide(
       Opencode.layer({
         binary,
-        keymaxxerMcpUrl: "http://127.0.0.1:5032/test/mcp",
+        keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
       }).pipe(Layer.provide(BunServices.layer)),
     ),
   )

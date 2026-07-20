@@ -40,9 +40,9 @@ Equivalent Nx target:
 bunx nx run harness:dev
 ```
 
-- UI: `http://127.0.0.1:4200`
-- GraphQL: `http://127.0.0.1:4200/graphql`
-- Sidecar (dev): `127.0.0.1:5032` (preserves Keymaxxer session across reloads)
+- UI: `http://127.0.0.1:6056`
+- GraphQL: `http://127.0.0.1:6056/graphql`
+- Sidecar (dev): `127.0.0.1:6057` (preserves Keymaxxer session across reloads)
 
 Operator subcommands against a running Harness:
 

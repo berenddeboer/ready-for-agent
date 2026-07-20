@@ -8,7 +8,7 @@ import { describe, expect, it } from "bun:test"
 
 const TestLayer = Opencode.layerForTests(
   process.env.KEYMAXXER_SIDECAR_URL ??
-    "http://127.0.0.1:5032/integration-test/mcp",
+    "http://127.0.0.1:6057/integration-test/mcp",
 ).pipe(Layer.provide(BunServices.layer))
 
 describe("Opencode integration", () => {

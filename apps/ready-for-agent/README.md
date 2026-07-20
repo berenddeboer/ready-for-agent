@@ -63,7 +63,7 @@ is optional (`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH); ambient GitHub auth
 still works without it.
 
 On successful start the default browser opens to the local UI
-(`http://127.0.0.1:4200/` by default). Disable with:
+(`http://127.0.0.1:6056/` by default). Disable with:
 
 ```bash
 bun run ready-for-agent --no-open
@@ -97,14 +97,14 @@ bun run ready-for-agent add /path/to/local/repo
 ```
 
 The command inspects the local git repository, calls the harness GraphQL
-endpoint at `http://127.0.0.1:4200/graphql`, and prints the persisted Repository
+endpoint at `http://127.0.0.1:6056/graphql`, and prints the persisted Repository
 fields. The path must be a git repository with a GitHub remote, and new
 Repositories are reported as paused.
 
 Override the endpoint when the harness is available elsewhere:
 
 ```bash
-READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4300/graphql \
+READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
   bun run ready-for-agent add /path/to/local/repo
 ```
 

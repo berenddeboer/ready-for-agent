@@ -27,12 +27,12 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: Number(process.env.PORT ?? 4200),
+    port: Number(process.env.PORT ?? 6056),
     strictPort: true,
   },
   preview: {
     host: "127.0.0.1",
-    port: Number(process.env.PORT ?? 4200),
+    port: Number(process.env.PORT ?? 6056),
     strictPort: true,
   },
 })

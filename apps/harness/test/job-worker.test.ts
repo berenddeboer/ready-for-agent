@@ -630,7 +630,7 @@ describe("Job worker", () => {
       jobs.push(successJob, failureJob)
 
       const response = await createGraphqlApi(runtime).fetch(
-        new Request("http://127.0.0.1:4200/graphql", {
+        new Request("http://127.0.0.1:6056/graphql", {
           method: "POST",
           headers: {
             accept: "text/event-stream",

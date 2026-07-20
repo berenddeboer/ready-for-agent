@@ -3,7 +3,7 @@ import { Config, Context, Effect, Layer, Option } from "effect"
 import type { BrowserOpenEnv } from "../browser-open.ts"
 import { resolveDefaultDatabasePath } from "../product-data-dir.ts"
 
-const DEFAULT_GRAPHQL_URL = "http://127.0.0.1:4200/graphql"
+const DEFAULT_GRAPHQL_URL = "http://127.0.0.1:6056/graphql"
 
 const optionalString = (name: string) => Config.option(Config.string(name))
 
