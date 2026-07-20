@@ -215,6 +215,7 @@ type WorkItem = {
   paused: boolean
   canRetry: boolean
   isTerminal: boolean
+  failureCode: string | null
   sessionId: string | null
   worktreePath: string | null
   completionSummary: string | null
@@ -240,6 +241,7 @@ const workItemFields = {
   paused: true,
   canRetry: true,
   isTerminal: true,
+  failureCode: true,
   sessionId: true,
   worktreePath: true,
   completionSummary: true,
@@ -1463,7 +1465,8 @@ function RepositoryIssueRow({
   )
   const latestWorkItem = issueWorkItems.at(-1)
   const hasUnfinishedWorkItem =
-    latestWorkItem !== undefined && !latestWorkItem.isTerminal
+    latestWorkItem !== undefined &&
+    (!latestWorkItem.isTerminal || latestWorkItem.canRetry)
   const canImplement =
     isActionable && !workItemsLoading && !hasUnfinishedWorkItem
   const onImplementSuccess = (workItem: WorkItem) => {
@@ -2064,6 +2067,10 @@ function WorkItemLifecycleStatus({
   const queryClient = useQueryClient()
   const status = workItem.status
   const canRetry = compact && workItem.canRetry
+  const retriesStatusChecks =
+    workItem.failureCode === "pr_status_checks_unresolved" ||
+    workItem.state === "WATCH_PR_STATUS_CHECKS" ||
+    workItem.state === "INVESTIGATE_PR_STATUS_CHECKS"
   const canReset = compact
   const dataUpdatedAt = queryClient
     .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })
@@ -2276,7 +2283,13 @@ function WorkItemLifecycleStatus({
               disabled={actionsPending}
               onClick={() => retry.mutate()}
             >
-              {retry.isPending ? "Retrying..." : "Retry"}
+              {retry.isPending
+                ? retriesStatusChecks
+                  ? "Retrying checks..."
+                  : "Retrying..."
+                : retriesStatusChecks
+                  ? "Retry checks"
+                  : "Retry"}
             </button>
           )}
         </div>
@@ -2288,7 +2301,9 @@ function WorkItemLifecycleStatus({
       )}
       {retry.isError && (
         <p className="mt-1.5 mb-0 text-xs text-red-700" role="alert">
-          Could not retry this job.
+          {retriesStatusChecks
+            ? "Could not retry these checks."
+            : "Could not retry this job."}
         </p>
       )}
     </div>

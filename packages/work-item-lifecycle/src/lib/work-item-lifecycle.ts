@@ -56,6 +56,7 @@ import {
   type RunHandlerError,
 } from "./lifecycle-steps.js"
 import { CurrentStepRun } from "./opencode-session-limiter.js"
+import { PrStatusChecksUnresolvedError } from "./pr-status-checks.js"
 import {
   PreCommitHookFailedError,
   PreCommitStageError,
@@ -184,6 +185,12 @@ const classifyHandlerFailure = (
         reasonCode: STEP_RUN_REASON.timeout,
         reasonMessage:
           "Lifecycle Step exceeded its configured maximum duration",
+      }
+    }
+    if (error instanceof PrStatusChecksUnresolvedError) {
+      return {
+        reasonCode: STEP_RUN_REASON.prStatusChecksUnresolved,
+        reasonMessage: error.message,
       }
     }
     return {
@@ -337,6 +344,8 @@ const PR_STATUS_CHECKS_MIN_GREEN_WAIT = Duration.seconds(60)
 const PR_STATUS_CHECKS_STALE_HEAD_NO_CHECK_WAIT = Duration.minutes(2)
 /** Stored on a green watch Step Run that requeues for one confirmation poll. */
 const PR_STATUS_CHECKS_GREEN_CONFIRMING = "pr_checks_green_confirming"
+/** Stored when handled red checks leave the aggregate failed for confirmation. */
+const PR_STATUS_CHECKS_FAILED_CONFIRMING = "pr_checks_failed_confirming"
 
 const isStaleNoChecksHead = (
   headPushedAt: Date | null,
@@ -1165,10 +1174,8 @@ export const makeWorkItemLifecycleLive = (
               | OperationalLifecycleStep
               | "complete"
               | "needs_human"
-              | "failed"
             readonly delay?: Duration.Duration
             readonly reason?: string
-            readonly failureCode?: string
           }
         },
         RunHandlerError
@@ -1247,15 +1254,29 @@ export const makeWorkItemLifecycleLive = (
                       },
                     }
                   }
-                  // Aggregate still pending, or red results already handed off —
-                  // keep polling for new executions rather than re-investigating.
-                  if (status === "pending" || status === "failed") {
+                  if (status === "pending") {
                     return {
                       transition: {
                         nextState: "watch_pr_status_checks" as const,
                         delay: PR_STATUS_CHECKS_POLL_DELAY,
                       },
                     }
+                  }
+                  if (status === "failed") {
+                    const priorNote = yield* previousWatchPollNote(workItem.id)
+                    if (priorNote !== PR_STATUS_CHECKS_FAILED_CONFIRMING) {
+                      return {
+                        stepRunNote: PR_STATUS_CHECKS_FAILED_CONFIRMING,
+                        transition: {
+                          nextState: "watch_pr_status_checks" as const,
+                          delay: PR_STATUS_CHECKS_POLL_DELAY,
+                        },
+                      }
+                    }
+                    return yield* new PrStatusChecksUnresolvedError({
+                      message:
+                        "Manual fixing may be required. GitHub status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on GitHub, then click Retry checks.",
+                    })
                   }
                   const isNoChecks =
                     typeof status === "object" && status._tag === "no_checks"
@@ -1332,16 +1353,10 @@ export const makeWorkItemLifecycleLive = (
                         nextState: "watch_pr_status_checks" as const,
                         delay: PR_STATUS_CHECKS_POLL_DELAY,
                       }
-                    : result._tag === "needs_human"
-                      ? {
-                          nextState: "needs_human" as const,
-                          reason: result.reason,
-                        }
-                      : {
-                          nextState: "failed" as const,
-                          reason: result.reason,
-                          failureCode: "pr_status_checks_unresolved",
-                        },
+                    : {
+                        nextState: "needs_human" as const,
+                        reason: result.reason,
+                      },
               })),
             )
           case "mark_pr_ready_for_review":
@@ -1424,10 +1439,8 @@ export const makeWorkItemLifecycleLive = (
               | OperationalLifecycleStep
               | "complete"
               | "needs_human"
-              | "failed"
             readonly delay?: Duration.Duration
             readonly reason?: string
-            readonly failureCode?: string
           }
         }
         readonly revalidation:
@@ -1557,36 +1570,6 @@ export const makeWorkItemLifecycleLive = (
                       now,
                       transition?.reason ??
                         "OpenCode requested human intervention",
-                      worktreePath,
-                      startingCommitOid,
-                      completionSummary,
-                      sessionId,
-                      githubPullRequestNumber,
-                      now,
-                      workItem.id,
-                    ],
-                  )
-                } else if (nextStep === "failed") {
-                  yield* sql.unsafe(
-                    `UPDATE work_item
-                   SET state = 'failed',
-                       state_ready_at = ?,
-                       failure_code = ?,
-                       failure_message = ?,
-                        worktree_path = ?,
-                        starting_commit_oid = ?,
-                        completion_summary = ?,
-                        session_id = ?,
-                        github_pull_request_number = ?,
-                        holds_worker_slot = 0,
-                        waiting_since = NULL,
-                        updated_at = ?
-                   WHERE id = ?`,
-                    [
-                      now,
-                      transition?.failureCode ?? "pr_status_checks_unresolved",
-                      transition?.reason ??
-                        "PR status checks remained unresolved",
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
@@ -3200,7 +3183,14 @@ export const makeWorkItemLifecycleLive = (
           return yield* new WorkItemNotFoundError({ workItemId })
         }
 
-        if (isTerminalWorkItemState(workItem.state)) {
+        const recoverableStatusCheckFailure =
+          workItem.state === "failed" &&
+          workItem.failure_code === "pr_status_checks_unresolved"
+
+        if (
+          isTerminalWorkItemState(workItem.state) &&
+          !recoverableStatusCheckFailure
+        ) {
           return yield* new WorkItemTerminalError({
             workItemId,
             state: workItem.state,
@@ -3214,7 +3204,10 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        const pendingStep = workItem.state as OperationalLifecycleStep
+        const pendingStep: OperationalLifecycleStep =
+          recoverableStatusCheckFailure
+            ? "watch_pr_status_checks"
+            : (workItem.state as OperationalLifecycleStep)
 
         const activeRows = (yield* sql
           .unsafe(
@@ -3238,32 +3231,34 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        const latestPendingRows = (yield* sql
-          .unsafe(
-            `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
-                  started_at, finished_at, reason_code, reason_message
-           FROM step_run
-           WHERE work_item_id = ?
-             AND step = ?
-           ORDER BY queued_at DESC, id DESC
-           LIMIT 1`,
-            [workItemId, pendingStep],
-          )
-          .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
+        if (!recoverableStatusCheckFailure) {
+          const latestPendingRows = (yield* sql
+            .unsafe(
+              `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
+                    started_at, finished_at, reason_code, reason_message
+             FROM step_run
+             WHERE work_item_id = ?
+               AND step = ?
+             ORDER BY queued_at DESC, id DESC
+             LIMIT 1`,
+              [workItemId, pendingStep],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
 
-        const latest = latestPendingRows[0]
-        if (!latest) {
-          return yield* new RetryNotEligibleError({
-            workItemId,
-            reason: "no_prior_step_run",
-          })
-        }
+          const latest = latestPendingRows[0]
+          if (!latest) {
+            return yield* new RetryNotEligibleError({
+              workItemId,
+              reason: "no_prior_step_run",
+            })
+          }
 
-        if (latest.status !== "failed" && latest.status !== "interrupted") {
-          return yield* new RetryNotEligibleError({
-            workItemId,
-            reason: `latest_status_${latest.status}`,
-          })
+          if (latest.status !== "failed" && latest.status !== "interrupted") {
+            return yield* new RetryNotEligibleError({
+              workItemId,
+              reason: `latest_status_${latest.status}`,
+            })
+          }
         }
 
         const now = yield* Clock.currentTimeMillis
@@ -3271,6 +3266,19 @@ export const makeWorkItemLifecycleLive = (
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
+              if (recoverableStatusCheckFailure) {
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = 'watch_pr_status_checks',
+                       state_ready_at = ?,
+                       failure_code = NULL,
+                       failure_message = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, now, workItemId],
+                )
+              }
+
               const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
               if (!acquired) {
                 return

@@ -34,6 +34,7 @@ import type {
   PrStatusCheckResult,
   PrStatusChecksContextError,
   PrStatusChecksOpenCodeError,
+  PrStatusChecksUnresolvedError,
 } from "./pr-status-checks.js"
 import type { PreCommitError } from "./pre-commit-errors.js"
 import type { RemoveWorktreeError } from "./remove-worktree.js"
@@ -90,6 +91,7 @@ export type LifecycleStepError =
   | DecidePrMergeOpenCodeError
   | PrStatusChecksContextError
   | PrStatusChecksOpenCodeError
+  | PrStatusChecksUnresolvedError
   | ResolvePrMergeConflictContextError
   | ResolvePrMergeConflictOpenCodeError
   | MarkPrReadyForReviewContextError

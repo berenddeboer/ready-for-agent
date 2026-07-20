@@ -40,6 +40,7 @@ import {
   type LifecycleStepsShape,
   NonTransactionalQueueError,
   ParentIssueError,
+  PrStatusChecksUnresolvedError,
   PreCommitHookFailedError,
   ResetCleanupError,
   RetryNotEligibleError,
@@ -1919,18 +1920,17 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("fails the Work Item terminally when investigation reports FAILED with no action on red checks", () => {
+    it("stops retryably when investigation cannot recover red checks", () => {
       const checkId = "psc-unresolved-red"
+      const failureMessage =
+        "Manual fixing may be required. ActionLint failed twice on GitHub 503; restart did not help. Please fix or rerun the checks on GitHub, then click Retry checks."
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
         investigatePrStatusChecks: () =>
-          Effect.succeed({
-            _tag: "failed" as const,
-            reason:
-              "ActionLint failed twice on GitHub 503; restart did not help",
-            handledCheckIds: [checkId],
-          }),
+          Effect.fail(
+            new PrStatusChecksUnresolvedError({ message: failureMessage }),
+          ),
       }
 
       return runWithSteps(
@@ -1966,34 +1966,138 @@ describe("WorkItemLifecycle", () => {
           const investigated = yield* claimAndRunPending
           expect(investigated._tag).toBe("processed")
           if (investigated._tag === "processed") {
-            expect(investigated.workItem.state).toBe("failed")
-            expect(investigated.workItem.failureCode).toBe(
-              "pr_status_checks_unresolved",
+            expect(investigated.workItem.state).toBe(
+              "investigate_pr_status_checks",
             )
-            expect(investigated.workItem.failureMessage).toBe(
-              "ActionLint failed twice on GitHub 503; restart did not help",
-            )
+            expect(investigated.workItem.failureCode).toBeNull()
+            expect(investigated.workItem.failureMessage).toBeNull()
             expect(investigated.workItem.holdsWorkerSlot).toBe(false)
             const investigateRun = investigated.workItem.stepRuns.find(
               (run) => run.step === "investigate_pr_status_checks",
             )
-            expect(investigateRun?.status).toBe("succeeded")
+            expect(investigateRun?.status).toBe("failed")
+            expect(investigateRun?.reasonCode).toBe(
+              STEP_RUN_REASON.prStatusChecksUnresolved,
+            )
+            expect(investigateRun?.reasonMessage).toBe(failureMessage)
           }
 
           const checks = (yield* sql.unsafe(
             `SELECT handled_at FROM pr_status_check WHERE id = ?`,
             [checkId],
           )) as readonly { readonly handled_at: number | null }[]
-          expect(checks[0]?.handled_at).not.toBeNull()
+          expect(checks[0]?.handled_at).toBeNull()
 
           const jobs = (yield* sql.unsafe(
-            `SELECT id FROM job_queue`,
+            `SELECT id FROM job_queue WHERE job_attempts < job_retry_limit`,
           )) as readonly { readonly id: string }[]
           expect(jobs).toHaveLength(0)
 
           const final = yield* lifecycle.getWorkItem(created.id)
-          expect(final.state).toBe("failed")
-          expect(final.failureCode).toBe("pr_status_checks_unresolved")
+          expect(final.state).toBe("investigate_pr_status_checks")
+          expect(final.failureCode).toBeNull()
+        }),
+      )
+    })
+
+    it("requires consecutive aggregate-failed polls before stopping retryably", () => {
+      const statuses = [
+        "failed",
+        "pending",
+        "failed",
+        "failed",
+        "succeeded",
+        "succeeded",
+      ] as const
+      let statusIndex = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed(statuses[statusIndex++] ?? "failed"),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const confirming = yield* claimAndRunPending
+          expect(confirming._tag).toBe("processed")
+          if (confirming._tag === "processed") {
+            expect(confirming.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          const delayed = (yield* sql.unsafe(
+            `SELECT available_at, created_at FROM job_queue`,
+          )) as readonly {
+            readonly available_at: number
+            readonly created_at: number
+          }[]
+          expect(delayed).toHaveLength(1)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const pending = yield* claimAndRunPending
+          expect(pending._tag).toBe("processed")
+          if (pending._tag === "processed") {
+            expect(pending.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const reconfirming = yield* claimAndRunPending
+          expect(reconfirming._tag).toBe("processed")
+          if (reconfirming._tag === "processed") {
+            expect(reconfirming.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const stopped = yield* claimAndRunPending
+          expect(stopped._tag).toBe("processed")
+          if (stopped._tag === "processed") {
+            expect(stopped.workItem.state).toBe("watch_pr_status_checks")
+            expect(stopped.workItem.failureCode).toBeNull()
+            expect(stopped.workItem.failureMessage).toBeNull()
+            expect(stopped.workItem.holdsWorkerSlot).toBe(false)
+            expect(stopped.workItem.stepRuns.at(-1)?.status).toBe("failed")
+            expect(stopped.workItem.stepRuns.at(-1)?.reasonCode).toBe(
+              STEP_RUN_REASON.prStatusChecksUnresolved,
+            )
+            expect(stopped.workItem.stepRuns.at(-1)?.reasonMessage).toContain(
+              "fix or rerun the checks on GitHub, then click Retry checks",
+            )
+          }
+
+          const jobs = (yield* sql.unsafe(
+            `SELECT id FROM job_queue WHERE job_attempts < job_retry_limit`,
+          )) as readonly { readonly id: string }[]
+          expect(jobs).toHaveLength(0)
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("watch_pr_status_checks")
+          expect(retried.stepRuns.at(-1)?.status).toBe("queued")
+
+          const firstGreen = yield* claimAndRunPending
+          expect(firstGreen._tag).toBe("processed")
+          if (firstGreen._tag === "processed") {
+            expect(firstGreen.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const ready = yield* claimAndRunPending
+          expect(ready._tag).toBe("processed")
+          if (ready._tag === "processed") {
+            expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+          }
         }),
       )
     })
@@ -3451,6 +3555,47 @@ describe("WorkItemLifecycle", () => {
           expect(retried.stepRuns).toHaveLength(2)
           expect(retried.stepRuns[0]!.status).toBe("interrupted")
           expect(retried.stepRuns[1]!.status).toBe("queued")
+        }),
+      ))
+
+    it("recovers a persisted terminal status-check failure into Watch", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const now = Date.now()
+
+          yield* sql.unsafe(`DELETE FROM job_queue`)
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'succeeded', started_at = ?, finished_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [now, now, now, created.stepRuns[0]!.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET state = 'failed',
+                 failure_code = 'pr_status_checks_unresolved',
+                 failure_message = 'Legacy unresolved checks',
+                 holds_worker_slot = 0,
+                 updated_at = ?
+             WHERE id = ?`,
+            [now, created.id],
+          )
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("watch_pr_status_checks")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.failureMessage).toBeNull()
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "watch_pr_status_checks",
+            status: "queued",
+          })
         }),
       ))
 

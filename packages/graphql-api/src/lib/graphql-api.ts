@@ -344,11 +344,16 @@ export const createGraphqlApi = (
           paused: (workItem: WorkItemRecord) => workItem.paused,
           canRetry: (workItem: WorkItemRecord) => {
             const latestStatus = latestStepRun(workItem)?.status
+            const recoverableStatusCheckFailure =
+              workItem.state === "failed" &&
+              workItem.failureCode === "pr_status_checks_unresolved"
             return (
               workItem.waitingSince == null &&
               !workItem.paused &&
-              !isTerminalWorkItemState(workItem.state) &&
-              (latestStatus === "failed" || latestStatus === "interrupted")
+              (recoverableStatusCheckFailure ||
+                (!isTerminalWorkItemState(workItem.state) &&
+                  (latestStatus === "failed" ||
+                    latestStatus === "interrupted")))
             )
           },
           isTerminal: (workItem: WorkItemRecord) =>

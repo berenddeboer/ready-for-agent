@@ -28,6 +28,13 @@ export class PrStatusChecksOpenCodeError extends Schema.TaggedErrorClass<PrStatu
   },
 ) {}
 
+export class PrStatusChecksUnresolvedError extends Schema.TaggedErrorClass<PrStatusChecksUnresolvedError>()(
+  "PrStatusChecksUnresolvedError",
+  {
+    message: Schema.String,
+  },
+) {}
+
 export type PrStatusCheckResult =
   | "pending"
   | {
@@ -47,11 +54,6 @@ export type PrStatusCheckInvestigationResult =
   | { readonly _tag: "processed"; readonly handledCheckIds: readonly string[] }
   | {
       readonly _tag: "needs_human"
-      readonly reason: string
-      readonly handledCheckIds: readonly string[]
-    }
-  | {
-      readonly _tag: "failed"
       readonly reason: string
       readonly handledCheckIds: readonly string[]
     }
@@ -153,6 +155,18 @@ const listUnhandledChecks = (workItemId: string) =>
     return observed.filter((row) => row.handled_at === null)
   })
 
+const retireUnhandledRedChecks = (workItemId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = yield* Clock.currentTimeMillis
+    yield* sql.unsafe(
+      `UPDATE pr_status_check
+       SET handled_at = ?, updated_at = ?
+       WHERE work_item_id = ? AND outcome = 'red' AND handled_at IS NULL`,
+      [now, now, workItemId],
+    )
+  })
+
 export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
@@ -168,6 +182,11 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
         ? status.terminalChecks
         : []
     yield* observeTerminalChecks(context.workItemId, terminalChecks)
+    // A successful aggregate proves any retained red executions are obsolete
+    // (for example, an operator reran a failed workflow successfully).
+    if (status._tag === "succeeded") {
+      yield* retireUnhandledRedChecks(context.workItemId)
+    }
     const unhandled = yield* listUnhandledChecks(context.workItemId)
     if (status._tag === "closed") {
       return "closed" satisfies PrStatusCheckResult
@@ -327,11 +346,20 @@ const buildInvestigationVerdictPrompt = (): string =>
     "Do not make further code changes unless required to answer accurately.",
     "Reply with exactly one machine-readable result line (and optional brief prose before it):",
     "READY_FOR_AGENT_RESULT: PROCESSED",
-    "Use PROCESSED only when you took an action expected to produce new check executions (for example a commit and push, or restarting failed checks), or when the handoff was green-only review feedback with nothing to address.",
+    "Use PROCESSED only when you took an action expected to produce new check executions or a replacement execution (for example a commit and push, or restarting failed checks), or when the handoff was green-only review feedback with nothing to address.",
     "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED. Report:",
     "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
     "or, only when the handoff cannot be processed autonomously or requires a human decision:",
     "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
+  ].join("\n")
+
+const buildInvestigationRecoveryPrompt = (reason: string): string =>
+  [
+    "Make one focused recovery attempt to get the pull request out of its red state.",
+    `Your previous verdict was FAILED: ${reason}`,
+    "Re-check the current pull request and try any safe action that can produce a replacement check execution, including restarting an appropriate failed workflow.",
+    "Do not create an empty or no-op commit merely to restart checks.",
+    "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
   ].join("\n")
 
 export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
@@ -415,33 +443,65 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             }),
         ),
       )
-    const verdict = yield* opencode
-      .continue({
-        sessionId,
-        prompt: buildInvestigationVerdictPrompt(),
-        cwd: worktreePath,
-        model: context.model,
-        variant: context.variant,
-        timeout:
-          context.maxDuration ??
-          DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new PrStatusChecksOpenCodeError({
-              message:
-                "OpenCode failed while investigating PR status checks (verdict)",
-              cause,
-            }),
-        ),
-      )
-    const investigation = parseInvestigationResult(verdict.assistantText)
-    if (investigation === null) {
-      return yield* new PrStatusChecksOpenCodeError({
-        message: "OpenCode did not report PROCESSED, FAILED, or NEEDS_HUMAN",
-      })
+    const requestVerdict = (phase: string) =>
+      opencode
+        .continue({
+          sessionId,
+          prompt: buildInvestigationVerdictPrompt(),
+          cwd: worktreePath,
+          model: context.model,
+          variant: context.variant,
+          timeout:
+            context.maxDuration ??
+            DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new PrStatusChecksOpenCodeError({
+                message: `OpenCode failed while investigating PR status checks (${phase})`,
+                cause,
+              }),
+          ),
+          Effect.flatMap(({ assistantText }) => {
+            const result = parseInvestigationResult(assistantText)
+            return result === null
+              ? Effect.fail(
+                  new PrStatusChecksOpenCodeError({
+                    message:
+                      "OpenCode did not report PROCESSED, FAILED, or NEEDS_HUMAN",
+                  }),
+                )
+              : Effect.succeed(result)
+          }),
+        )
+
+    let investigation = yield* requestVerdict("verdict")
+    if (investigation !== "processed" && investigation._tag === "failed") {
+      yield* opencode
+        .continue({
+          sessionId,
+          prompt: buildInvestigationRecoveryPrompt(investigation.reason),
+          cwd: worktreePath,
+          model: context.model,
+          variant: context.variant,
+          timeout:
+            context.maxDuration ??
+            DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new PrStatusChecksOpenCodeError({
+                message:
+                  "OpenCode failed while investigating PR status checks (recovery)",
+                cause,
+              }),
+          ),
+        )
+      investigation = yield* requestVerdict("recovery verdict")
     }
+
     const handledCheckIds = unhandled.map((check) => check.id)
     if (investigation === "processed") {
       return {
@@ -456,9 +516,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         handledCheckIds,
       } satisfies PrStatusCheckInvestigationResult
     }
-    return {
-      _tag: "failed",
-      reason: investigation.reason,
-      handledCheckIds,
-    } satisfies PrStatusCheckInvestigationResult
+    return yield* new PrStatusChecksUnresolvedError({
+      message: `Manual fixing may be required. ${investigation.reason}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
+    })
   })
