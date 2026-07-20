@@ -1,3 +1,5 @@
+export * from "./lib/client-service.js"
+export * from "./lib/config.js"
 export * from "./lib/facade.js"
 export * from "./lib/http-layer.js"
 export * from "./lib/mcp-layer.js"

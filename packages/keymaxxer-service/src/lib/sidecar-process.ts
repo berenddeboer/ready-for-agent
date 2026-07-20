@@ -1,11 +1,12 @@
+import { defaultKeymaxxerSidecarPort } from "./config.js"
 import { startKeymaxxerFacade } from "./facade.js"
-import { KeymaxxerError } from "./models.js"
+
+export { defaultKeymaxxerSidecarPort } from "./config.js"
 
 /** Hidden argv token: re-enter the same executable as the Keymaxxer Sidecar. */
 export const INTERNAL_KEYMAXXER_SIDECAR_ARG =
   "--ready-for-agent-internal-keymaxxer-sidecar"
 
-export const defaultKeymaxxerSidecarPort = 5032
 export const keymaxxerSidecarHost = "127.0.0.1"
 
 export const isInternalKeymaxxerSidecarMode = (
@@ -138,14 +139,12 @@ export const runKeymaxxerSidecarProcess = async (
       error instanceof Error
         ? error.message
         : `Keymaxxer Sidecar failed to listen on ${keymaxxerSidecarHost}:${port}. Set KEYMAXXER_SIDECAR_PORT to an unused port.`
+    // Process boundary: single-line stderr for topology tests; no Effect error channel.
     console.error(
       message.startsWith("Keymaxxer Sidecar failed")
         ? message
         : `Keymaxxer Sidecar failed to listen on ${keymaxxerSidecarHost}:${port}. Set KEYMAXXER_SIDECAR_PORT to an unused port.`,
     )
-    if (!(error instanceof KeymaxxerError)) {
-      // keep stderr single-line for topology test
-    }
     exitProcess(1)
   }
 }
