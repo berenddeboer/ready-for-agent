@@ -1,79 +1,93 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class InvalidRepositoryInputError extends Data.TaggedError(
+export class InvalidRepositoryInputError extends Schema.TaggedErrorClass<InvalidRepositoryInputError>()(
   "InvalidRepositoryInputError",
-)<{
-  readonly field: "githubOwner" | "githubRepo" | "localPath"
-  readonly message: string
-}> {}
+  {
+    field: Schema.Literals(["githubOwner", "githubRepo", "localPath"]),
+    message: Schema.String,
+  },
+) {}
 
-export class RepositoryAlreadyExistsError extends Data.TaggedError(
+export class RepositoryAlreadyExistsError extends Schema.TaggedErrorClass<RepositoryAlreadyExistsError>()(
   "RepositoryAlreadyExistsError",
-)<{
-  readonly githubOwner: string
-  readonly githubRepo: string
-}> {}
+  {
+    githubOwner: Schema.String,
+    githubRepo: Schema.String,
+  },
+) {}
 
-export class LocalPathInUseError extends Data.TaggedError(
+export class LocalPathInUseError extends Schema.TaggedErrorClass<LocalPathInUseError>()(
   "LocalPathInUseError",
-)<{
-  readonly localPath: string
-}> {}
+  {
+    localPath: Schema.String,
+  },
+) {}
 
-export class RepositoryNotFoundError extends Data.TaggedError(
+export class RepositoryNotFoundError extends Schema.TaggedErrorClass<RepositoryNotFoundError>()(
   "RepositoryNotFoundError",
-)<{
-  readonly repositoryId: string
-}> {}
+  {
+    repositoryId: Schema.String,
+  },
+) {}
 
-export class RepositoryHasRunningStepError extends Data.TaggedError(
+export class RepositoryHasRunningStepError extends Schema.TaggedErrorClass<RepositoryHasRunningStepError>()(
   "RepositoryHasRunningStepError",
-)<{
-  readonly repositoryId: string
-  readonly stepRunId: string
-  readonly workItemId: string
-}> {}
+  {
+    repositoryId: Schema.String,
+    stepRunId: Schema.String,
+    workItemId: Schema.String,
+  },
+) {}
 
-export class InvalidIssueInputError extends Data.TaggedError(
+export class InvalidIssueInputError extends Schema.TaggedErrorClass<InvalidIssueInputError>()(
   "InvalidIssueInputError",
-)<{
-  readonly field:
-    | "githubIssueNumber"
-    | "title"
-    | "url"
-    | "state"
-    | "githubCreatedAt"
-    | "parent"
-    | "parentPosition"
-    | "blockedBy"
-  readonly message: string
-}> {}
+  {
+    field: Schema.Literals([
+      "githubIssueNumber",
+      "title",
+      "url",
+      "state",
+      "githubCreatedAt",
+      "parent",
+      "parentPosition",
+      "blockedBy",
+    ]),
+    message: Schema.String,
+  },
+) {}
 
-export class InvalidConfigInputError extends Data.TaggedError(
+export class InvalidConfigInputError extends Schema.TaggedErrorClass<InvalidConfigInputError>()(
   "InvalidConfigInputError",
-)<{
-  readonly field:
-    | "defaultModel"
-    | "defaultVariant"
-    | "reviewModel"
-    | "reviewVariant"
-    | "maxConcurrentOpencodeSessions"
-    | "maxConcurrentWorkItems"
-  readonly message: string
-}> {}
+  {
+    field: Schema.Literals([
+      "defaultModel",
+      "defaultVariant",
+      "reviewModel",
+      "reviewVariant",
+      "maxConcurrentOpencodeSessions",
+      "maxConcurrentWorkItems",
+    ]),
+    message: Schema.String,
+  },
+) {}
 
-export class InvalidRepositorySettingsError extends Data.TaggedError(
+export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<InvalidRepositorySettingsError>()(
   "InvalidRepositorySettingsError",
-)<{
-  readonly field:
-    | "defaultModel"
-    | "defaultVariant"
-    | "reviewModel"
-    | "reviewVariant"
-  readonly message: string
-}> {}
+  {
+    field: Schema.Literals([
+      "defaultModel",
+      "defaultVariant",
+      "reviewModel",
+      "reviewVariant",
+    ]),
+    message: Schema.String,
+  },
+) {}
 
-export class DatabaseError extends Data.TaggedError("DatabaseError")<{
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+export class DatabaseError extends Schema.TaggedErrorClass<DatabaseError>()(
+  "DatabaseError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}

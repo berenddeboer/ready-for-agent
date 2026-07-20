@@ -7,6 +7,7 @@ import type { DbService } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
   stubDbServiceLayer,
+  testRepositoryId,
 } from "@ready-for-agent/db-service/test"
 import {
   GitHubService,
@@ -37,7 +38,7 @@ const baseContext = (
   overrides: Partial<LifecycleStepContext> = {},
 ): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
-  repositoryId: "repo-test",
+  repositoryId: testRepositoryId,
   githubIssueNumber: 91,
   model: "opencode/test-model",
   variant: "high",
