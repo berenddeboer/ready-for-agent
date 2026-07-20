@@ -5,6 +5,7 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  type MergePullRequestResult,
   type ReadyLabeledIssue,
   formatGitHubHelperShellCommand,
   resolveGitHubHelperChildSpawn,
@@ -142,6 +143,22 @@ const SerializedPullRequestLifecycleStatus = Schema.Union([
   Schema.TaggedStruct("merged", {}),
   Schema.TaggedStruct("closed", {}),
   Schema.TaggedStruct("not_found", {}),
+])
+
+const SerializedMergePullRequestResult = Schema.Union([
+  Schema.TaggedStruct("merged", {}),
+  Schema.TaggedStruct("revalidation", {
+    reason: Schema.Literals([
+      "head_changed",
+      "checks_not_green",
+      "mergeability_changed",
+    ]),
+    message: RequiredString,
+  }),
+  Schema.TaggedStruct("needs_human", {
+    reason: Schema.Literals(["closed_unmerged", "merge_rejected"]),
+    message: RequiredString,
+  }),
 ])
 
 const requestError = (
@@ -468,6 +485,17 @@ export const keymaxxerGitHubLayer = (options: {
                 result.stderr || result.stdout,
               )
             }
+            return yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(SerializedMergePullRequestResult),
+            )(result.stdout).pipe(
+              Effect.mapError(() =>
+                requestError(
+                  repository,
+                  "decode merge pull request result",
+                  result.stdout,
+                ),
+              ),
+            ) as Effect.Effect<MergePullRequestResult, GitHubRequestError>
           }).pipe(
             Effect.catchTag("KeymaxxerError", () =>
               Effect.fail(requestError(repository, "merge pull request")),

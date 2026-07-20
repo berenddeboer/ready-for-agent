@@ -104,6 +104,25 @@ export type PullRequestLifecycleStatus =
   | { readonly _tag: "closed" }
   | { readonly _tag: "not_found" }
 
+export type MergeRevalidationReason =
+  | "head_changed"
+  | "checks_not_green"
+  | "mergeability_changed"
+
+/** Domain result of a merge attempt; request/response failures remain errors. */
+export type MergePullRequestResult =
+  | { readonly _tag: "merged" }
+  | {
+      readonly _tag: "revalidation"
+      readonly reason: MergeRevalidationReason
+      readonly message: string
+    }
+  | {
+      readonly _tag: "needs_human"
+      readonly reason: "closed_unmerged" | "merge_rejected"
+      readonly message: string
+    }
+
 export interface GitHubPullRequestReference {
   readonly number: number
   readonly repository: string

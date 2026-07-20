@@ -40,7 +40,7 @@ export const mergePr = (context: LifecycleStepContext) =>
       workItemId: context.workItemId,
     })
     const github = yield* GitHubService
-    yield* github.mergePullRequest(
+    return yield* github.mergePullRequest(
       { owner: repository.githubOwner, name: repository.githubRepo },
       branch,
     )

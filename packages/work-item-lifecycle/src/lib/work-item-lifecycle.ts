@@ -1157,6 +1157,25 @@ export const makeWorkItemLifecycleLive = (
           return rows[0]?.reason_message ?? null
         })
 
+      const mergeRevalidationCount = (
+        workItemId: string,
+      ): Effect.Effect<number, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT COUNT(*) AS count FROM step_run
+               WHERE work_item_id = ?
+                 AND step = 'merge_pr'
+                 AND status = 'succeeded'
+                 AND reason_code = ?`,
+              [workItemId, STEP_RUN_REASON.mergeRevalidation],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly count: number
+          }[]
+          return Number(rows[0]?.count ?? 0)
+        })
+
       const runHandler = (
         step: OperationalLifecycleStep,
         context: LifecycleStepContext,
@@ -1170,6 +1189,7 @@ export const makeWorkItemLifecycleLive = (
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
+          readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
           readonly transition?: {
             readonly nextState:
@@ -1377,7 +1397,41 @@ export const makeWorkItemLifecycleLive = (
               ),
             )
           case "merge_pr":
-            return steps.mergePr(context).pipe(Effect.as({}))
+            return steps.mergePr(context).pipe(
+              Effect.flatMap((result) =>
+                Effect.gen(function* () {
+                  if (result._tag === "merged") {
+                    return {}
+                  }
+                  if (result._tag === "needs_human") {
+                    return {
+                      transition: {
+                        nextState: "needs_human" as const,
+                        reason: result.message,
+                      },
+                    }
+                  }
+                  const priorOutcomes = yield* mergeRevalidationCount(
+                    workItem.id,
+                  )
+                  const outcomeNumber = priorOutcomes + 1
+                  return {
+                    stepRunReasonCode: STEP_RUN_REASON.mergeRevalidation,
+                    stepRunNote: result.message,
+                    transition:
+                      outcomeNumber <= 3
+                        ? {
+                            nextState: "watch_pr_status_checks" as const,
+                          }
+                        : {
+                            nextState: "needs_human" as const,
+                            reason:
+                              "Merge revalidation requires human intervention after four changed merge attempts",
+                          },
+                  }
+                }),
+              ),
+            )
           case "close_issue":
             return steps.closeIssue(context).pipe(Effect.as({}))
           case "local_cleanup":
@@ -1435,6 +1489,7 @@ export const makeWorkItemLifecycleLive = (
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
+          readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
           readonly transition?: {
             readonly nextState:
@@ -1483,10 +1538,17 @@ export const makeWorkItemLifecycleLive = (
                   `UPDATE step_run
                  SET status = 'succeeded',
                      finished_at = ?,
+                     reason_code = ?,
                      reason_message = ?,
                      updated_at = ?
-                 WHERE id = ? AND status = 'running'`,
-                  [now, output.stepRunNote ?? null, now, stepRun.id],
+                  WHERE id = ? AND status = 'running'`,
+                  [
+                    now,
+                    output.stepRunReasonCode ?? null,
+                    output.stepRunNote ?? null,
+                    now,
+                    stepRun.id,
+                  ],
                 )
 
                 for (const checkId of output.handledCheckIds ?? []) {
@@ -2618,13 +2680,13 @@ export const makeWorkItemLifecycleLive = (
         sessionId: row.session_id,
       })
 
-      const isDecidePrMergeNeedsHumanHandoff = (
+      const isMergeNeedsHumanHandoff = (
         row: WorkItemRow,
         latestStep: OperationalLifecycleStep | null,
       ): boolean =>
         row.state === "needs_human" &&
         row.github_pull_request_number !== null &&
-        latestStep === "decide_pr_merge"
+        (latestStep === "decide_pr_merge" || latestStep === "merge_pr")
 
       const loadLatestStep = (
         workItemId: string,
@@ -2892,11 +2954,11 @@ export const makeWorkItemLifecycleLive = (
         }
 
         const latestStep = yield* loadLatestStep(workItemId)
-        if (!isDecidePrMergeNeedsHumanHandoff(workItem, latestStep)) {
+        if (!isMergeNeedsHumanHandoff(workItem, latestStep)) {
           return yield* new NeedsHumanHandoffNotEligibleError({
             workItemId,
             reason:
-              "Work Item is not a Decide PR Merge Needs Human handoff with a Work Item PR",
+              "Work Item is not a merge-related Needs Human handoff with a Work Item PR",
           })
         }
 

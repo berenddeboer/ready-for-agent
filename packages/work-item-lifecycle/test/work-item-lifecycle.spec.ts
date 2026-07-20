@@ -78,7 +78,7 @@ describe("WorkItemLifecycle", () => {
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
     markPrReadyForReview: () => Effect.void,
     decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-    mergePr: () => Effect.void,
+    mergePr: () => Effect.succeed({ _tag: "merged" }),
     closeIssue: () => Effect.void,
     localCleanup: () => Effect.void,
     removeWorktree: () => Effect.void,
@@ -1302,6 +1302,200 @@ describe("WorkItemLifecycle", () => {
         }),
       ))
 
+    it("allows three merge revalidations, replays Decide, preserves checks, and hands off the fourth", () => {
+      let decideCalls = 0
+      let mergeCalls = 0
+      let conflictReturned = false
+      let resolveCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => {
+          if (mergeCalls === 1 && !conflictReturned) {
+            conflictReturned = true
+            return Effect.succeed({
+              _tag: "conflict",
+              retiredCheckIds: [],
+            })
+          }
+          return Effect.succeed("succeeded")
+        },
+        resolvePrMergeConflict: () => {
+          resolveCalls += 1
+          return Effect.succeed({ _tag: "processed" })
+        },
+        decidePrMerge: () => {
+          decideCalls += 1
+          return Effect.succeed({ _tag: "clanker_merge" })
+        },
+        mergePr: () => {
+          mergeCalls += 1
+          return Effect.succeed({
+            _tag: "revalidation",
+            reason: "head_changed",
+            message: "Pull request head changed while merging",
+          })
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check
+               (id, work_item_id, external_id, name, outcome, handled_at, observed_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, 'green', ?, ?, ?, ?)`,
+            [
+              "psc-preserved",
+              created.id,
+              "actions-job:123",
+              "test",
+              1,
+              1,
+              1,
+              1,
+            ],
+          )
+
+          for (let index = 0; index < 12; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          for (let attempt = 1; attempt <= 4; attempt += 1) {
+            yield* makeQueuedJobsAvailable
+            const mergeResult = yield* claimAndRunPending
+            expect(mergeResult._tag).toBe("processed")
+            if (mergeResult._tag !== "processed") continue
+            expect(mergeResult.workItem.state).toBe(
+              attempt <= 3 ? "watch_pr_status_checks" : "needs_human",
+            )
+            if (attempt <= 3) {
+              for (let replayStep = 0; replayStep < 6; replayStep += 1) {
+                if (
+                  (yield* lifecycle.getWorkItem(created.id)).state ===
+                  "merge_pr"
+                ) {
+                  break
+                }
+                yield* makeQueuedJobsAvailable
+                yield* claimAndRunPending
+              }
+              expect((yield* lifecycle.getWorkItem(created.id)).state).toBe(
+                "merge_pr",
+              )
+            }
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          expect(final.failureMessage).toContain("four changed merge attempts")
+          expect(decideCalls).toBe(4)
+          expect(resolveCalls).toBe(1)
+          expect(
+            final.stepRuns.filter(
+              (run) =>
+                run.step === "merge_pr" &&
+                run.reasonCode === STEP_RUN_REASON.mergeRevalidation,
+            ),
+          ).toHaveLength(4)
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at FROM pr_status_check
+             WHERE work_item_id = ? AND external_id = ?`,
+            [created.id, "actions-job:123"],
+          )) as readonly { readonly handled_at: number | null }[]
+          expect(checks).toEqual([{ handled_at: 1 }])
+        }),
+      )
+    })
+
+    it("enters merge-related Needs Human on an unchanged rejected merge", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        mergePr: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason: "merge_rejected",
+            message: "GitHub rejected the unchanged mergeable pull request",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 13; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          expect(final.failureMessage).toContain("unchanged mergeable")
+          expect(final.stepRuns.at(-1)).toMatchObject({
+            step: "merge_pr",
+            status: "succeeded",
+          })
+        }),
+      )
+    })
+
+    it("keeps operational merge failures retryable", () => {
+      let mergeCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        mergePr: () => {
+          mergeCalls += 1
+          return mergeCalls === 1
+            ? Effect.fail(
+                new LifecycleStepFailedError({ message: "GitHub unavailable" }),
+              )
+            : Effect.succeed({ _tag: "merged" })
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          for (let index = 0; index < 13; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+
+          const failed = yield* lifecycle.getWorkItem(created.id)
+          expect(failed.state).toBe("merge_pr")
+          expect(failed.stepRuns.at(-1)?.status).toBe("failed")
+
+          yield* lifecycle.retry(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+          const retried = yield* lifecycle.getWorkItem(created.id)
+          expect(retried.state).toBe("local_cleanup")
+          expect(
+            retried.stepRuns.filter((run) => run.step === "merge_pr").at(-1)
+              ?.status,
+          ).toBe("succeeded")
+        }),
+      )
+    })
+
     it("retains the worktree path when local cleanup fails and clears it after Retry", () => {
       let cleanupAttempts = 0
       const steps: LifecycleStepsShape = {
@@ -2239,7 +2433,7 @@ describe("WorkItemLifecycle", () => {
         },
         mergePr: (context) => {
           seen.push(context)
-          return Effect.void
+          return Effect.succeed({ _tag: "merged" as const })
         },
         closeIssue: () => Effect.void,
         localCleanup: (context) => {

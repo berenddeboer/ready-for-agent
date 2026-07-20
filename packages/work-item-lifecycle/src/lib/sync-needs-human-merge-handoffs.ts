@@ -5,7 +5,7 @@ import { WorkItemLifecycle } from "./work-item-lifecycle.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 /**
- * After Issue reconciliation, resume Decide PR Merge Needs Human handoffs when
+ * After Issue reconciliation, resume merge-related Needs Human handoffs when
  * the Work Item PR was merged (local cleanup) or closed unmerged (Abandon).
  * GitHub lookup failures are skipped so Refresh still succeeds.
  */
@@ -33,7 +33,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
       const latest = workItem.stepRuns.at(-1)
       if (
         latest === undefined ||
-        latest.step !== "decide_pr_merge" ||
+        (latest.step !== "decide_pr_merge" && latest.step !== "merge_pr") ||
         latest.status !== "succeeded"
       ) {
         continue

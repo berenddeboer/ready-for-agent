@@ -8,8 +8,8 @@ export const mergePullRequestProgram = (args: ReadonlyArray<string>) =>
     const name = yield* decodeArgument(args[1], "name")
     const headRefName = yield* decodeArgument(args[2], "head ref")
     const github = yield* GitHubService
-    yield* github.mergePullRequest({ owner, name }, headRefName)
-    yield* writeStandardOutput(JSON.stringify({ _tag: "merged" }))
+    const result = yield* github.mergePullRequest({ owner, name }, headRefName)
+    yield* writeStandardOutput(JSON.stringify(result))
   })
 
 if (import.meta.main)

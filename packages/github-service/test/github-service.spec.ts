@@ -14,6 +14,7 @@ import {
   sanitizeUserFacingText,
   stripAnsi,
 } from "../src/index.js"
+import { GenqlError } from "../src/internal/generated/runtime/error.js"
 import {
   type GitHubGraphqlClient,
   makeGitHubService,
@@ -1034,6 +1035,7 @@ describe("GitHubService live implementation", () => {
                   state: "OPEN",
                   merged: false,
                   headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
                   statusCheckRollup: { state: "SUCCESS" },
                 },
               ],
@@ -1089,7 +1091,7 @@ describe("GitHubService live implementation", () => {
     )
   })
 
-  it("fails merge when the PR is closed unmerged", async () => {
+  it("returns a human outcome when the PR is closed unmerged", async () => {
     const service = makeGitHubService({
       query: () =>
         Promise.resolve({
@@ -1108,12 +1110,276 @@ describe("GitHubService live implementation", () => {
     })
 
     const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch"),
+    )
+    expect(result).toMatchObject({
+      _tag: "needs_human",
+      reason: "closed_unmerged",
+    })
+  })
+
+  it.each([
+    ["non-green checks", "MERGEABLE", "FAILURE", "checks_not_green"],
+    ["a conflict", "CONFLICTING", "SUCCESS", "mergeability_changed"],
+    ["unknown mergeability", "UNKNOWN", "SUCCESS", "mergeability_changed"],
+  ] as const)("returns a revalidation outcome for %s", async (_description, mergeable, checkState, reason) => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable,
+                  statusCheckRollup: { state: checkState },
+                },
+              ],
+            },
+          },
+        }) as never,
+    })
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch"),
+    )
+    expect(result).toMatchObject({ _tag: "revalidation", reason })
+  })
+
+  it.each([
+    [
+      "a changed head",
+      {
+        state: "OPEN",
+        merged: false,
+        headRefOid: "def456",
+        mergeable: "MERGEABLE",
+        statusCheckRollup: { state: "SUCCESS" },
+      },
+      "revalidation",
+      "head_changed",
+    ],
+    [
+      "newly non-green checks",
+      {
+        state: "OPEN",
+        merged: false,
+        headRefOid: "abc123",
+        mergeable: "MERGEABLE",
+        statusCheckRollup: { state: "PENDING" },
+      },
+      "revalidation",
+      "checks_not_green",
+    ],
+    [
+      "changed mergeability",
+      {
+        state: "OPEN",
+        merged: false,
+        headRefOid: "abc123",
+        mergeable: "CONFLICTING",
+        statusCheckRollup: { state: "SUCCESS" },
+      },
+      "revalidation",
+      "mergeability_changed",
+    ],
+    [
+      "an unchanged rejected merge",
+      {
+        state: "OPEN",
+        merged: false,
+        headRefOid: "abc123",
+        mergeable: "MERGEABLE",
+        statusCheckRollup: { state: "SUCCESS" },
+      },
+      "needs_human",
+      "merge_rejected",
+    ],
+  ] as const)("classifies %s returned by the merge mutation", async (_description, pullRequest, tag, reason) => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "SUCCESS" },
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () =>
+        Promise.resolve({ mergePullRequest: { pullRequest } }) as never,
+    })
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch"),
+    )
+    expect(result).toMatchObject({ _tag: tag, reason })
+  })
+
+  it("keeps malformed merge responses as operational failures", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "SUCCESS" },
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () => Promise.resolve({ mergePullRequest: null }) as never,
+    })
+
+    const result = await Effect.runPromise(
       Effect.result(service.mergePullRequest(repository, "branch")),
     )
     expect(Result.isFailure(result)).toBe(true)
     if (Result.isFailure(result)) {
       expect(result.failure).toBeInstanceOf(GitHubRequestError)
     }
+  })
+
+  it("revalidates after an expected-head GraphQL rejection", async () => {
+    let queries = 0
+    const requests: unknown[] = []
+    const service = makeGitHubService({
+      query: (request) => {
+        requests.push(request)
+        queries += 1
+        return Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: queries === 1 ? "abc123" : "def456",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "SUCCESS" },
+                },
+              ],
+            },
+          },
+        }) as never
+      },
+      mutation: () =>
+        Promise.reject(
+          new GenqlError([{ message: "Head branch was modified" }], null),
+        ),
+    })
+
+    const result = await Effect.runPromise(
+      service.mergePullRequest(repository, "branch"),
+    )
+    expect(result).toMatchObject({
+      _tag: "revalidation",
+      reason: "head_changed",
+    })
+    expect(queries).toBe(2)
+    expect(requests[1]).toMatchObject({
+      repository: {
+        pullRequests: {
+          __args: { states: ["OPEN", "CLOSED", "MERGED"] },
+        },
+      },
+    })
+  })
+
+  it("keeps unrelated GraphQL merge errors operational", async () => {
+    let queries = 0
+    const service = makeGitHubService({
+      query: () => {
+        queries += 1
+        return Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "SUCCESS" },
+                },
+              ],
+            },
+          },
+        }) as never
+      },
+      mutation: () =>
+        Promise.reject(
+          new GenqlError(
+            [{ message: "Resource not accessible by personal access token" }],
+            null,
+          ),
+        ),
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(service.mergePullRequest(repository, "branch")),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    expect(queries).toBe(1)
+  })
+
+  it("keeps malformed mutation rollups operational", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_kwDOOpen",
+                  state: "OPEN",
+                  merged: false,
+                  headRefOid: "abc123",
+                  mergeable: "MERGEABLE",
+                  statusCheckRollup: { state: "SUCCESS" },
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () =>
+        Promise.resolve({
+          mergePullRequest: {
+            pullRequest: {
+              state: "OPEN",
+              merged: false,
+              headRefOid: "abc123",
+              mergeable: "MERGEABLE",
+              statusCheckRollup: { state: "BROKEN" },
+            },
+          },
+        }) as never,
+    })
+
+    const result = await Effect.runPromise(
+      Effect.result(service.mergePullRequest(repository, "branch")),
+    )
+    expect(Result.isFailure(result)).toBe(true)
   })
 
   it("posts a marked completion summary and closes an open Issue as COMPLETED", async () => {
@@ -1662,7 +1928,7 @@ describe("GitHubService live implementation", () => {
     expect(mutationAttempts).toBe(1)
   })
 
-  it("does not merge a PR whose current head checks are not successful", async () => {
+  it("revalidates a PR whose current head checks are not successful", async () => {
     const service = makeGitHubService({
       query: () =>
         Promise.resolve({
@@ -1686,12 +1952,12 @@ describe("GitHubService live implementation", () => {
     })
 
     const result = await Effect.runPromise(
-      Effect.result(service.mergePullRequest(repository, "branch")),
+      service.mergePullRequest(repository, "branch"),
     )
-    expect(Result.isFailure(result)).toBe(true)
-    if (Result.isFailure(result)) {
-      expect(result.failure).toBeInstanceOf(GitHubRequestError)
-    }
+    expect(result).toMatchObject({
+      _tag: "revalidation",
+      reason: "checks_not_green",
+    })
   })
 
   it("fetches every ready-for-agent page and returns mapped issues by number", async () => {

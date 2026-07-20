@@ -5,6 +5,7 @@ import type {
 } from "./errors.js"
 import type {
   GitHubRepository,
+  MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
   PrStatusCheckDiagnosticsRequest,
@@ -66,7 +67,7 @@ export interface GitHubServiceShape {
     repository: GitHubRepository,
     headRefName: string,
   ) => Effect.Effect<
-    void,
+    MergePullRequestResult,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
   /**

@@ -15,6 +15,7 @@ import {
   type FieldsSelection,
   createClient,
 } from "../internal/generated/index.js"
+import { GenqlError } from "../internal/generated/runtime/error.js"
 import type {
   Mutation,
   MutationGenqlSelection,
@@ -31,6 +32,7 @@ import type {
   GitHubIssueState,
   GitHubPullRequestLifecycleState,
   GitHubPullRequestReference,
+  MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticSource,
   PrStatusCheckDiagnosticsOptions,
@@ -129,6 +131,36 @@ interface GitHubApiPullRequest {
   readonly statusCheckRollup: {
     readonly state: unknown
   } | null
+}
+
+interface GitHubMergePullRequestSnapshot {
+  readonly state: unknown
+  readonly merged: unknown
+  readonly headRefOid: unknown
+  readonly mergeable: unknown
+  readonly statusCheckRollup: { readonly state: unknown } | null
+}
+
+const isGitHubStatusCheckState = (
+  state: unknown,
+): state is "SUCCESS" | "FAILURE" | "ERROR" | "EXPECTED" | "PENDING" =>
+  state === "SUCCESS" ||
+  state === "FAILURE" ||
+  state === "ERROR" ||
+  state === "EXPECTED" ||
+  state === "PENDING"
+
+const isMergeGraphqlRejection = (error: GenqlError): boolean => {
+  const message = error.message.toLowerCase()
+  return (
+    message.includes("head branch was modified") ||
+    message.includes("pull request is not mergeable") ||
+    message.includes("protected branch") ||
+    message.includes("required status check") ||
+    message.includes("required approving review") ||
+    message.includes("merging is blocked") ||
+    message.includes("merge is not allowed")
+  )
 }
 
 interface GitHubRestCheckRun {
@@ -996,33 +1028,37 @@ export const makeGitHubService = (
   }),
   mergePullRequest: Effect.fn("GitHubService.mergePullRequest")(
     function* (repository, headRefName) {
-      const result = yield* githubQuery(
-        `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-        (signal) =>
-          client.query(
-            {
-              repository: {
-                __args: repository,
-                pullRequests: {
-                  __args: {
-                    first: 1,
-                    headRefName,
-                  },
-                  nodes: {
-                    id: true,
-                    state: true,
-                    merged: true,
-                    headRefOid: true,
-                    statusCheckRollup: {
+      const loadPullRequest = () =>
+        githubQuery(
+          `Failed to find pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+          (signal) =>
+            client.query(
+              {
+                repository: {
+                  __args: repository,
+                  pullRequests: {
+                    __args: {
+                      first: 1,
+                      headRefName,
+                      states: ["OPEN", "CLOSED", "MERGED"],
+                    },
+                    nodes: {
+                      id: true,
                       state: true,
+                      merged: true,
+                      mergeable: true,
+                      headRefOid: true,
+                      statusCheckRollup: {
+                        state: true,
+                      },
                     },
                   },
                 },
               },
-            },
-            signal,
-          ),
-      )
+              signal,
+            ),
+        )
+      const result = yield* loadPullRequest()
       if (result.repository === null) {
         return yield* new GitHubRepositoryUnavailableError(repository)
       }
@@ -1037,13 +1073,20 @@ export const makeGitHubService = (
           message: `GitHub returned an invalid pull request id for ${repository.owner}/${repository.name}:${headRefName}`,
         })
       }
+      if (pullRequest.merged !== true && pullRequest.merged !== false) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid merged flag for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
       if (pullRequest.merged === true || pullRequest.state === "MERGED") {
-        return
+        return { _tag: "merged" } as const
       }
       if (pullRequest.state === "CLOSED") {
-        return yield* new GitHubRequestError({
-          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} is closed`,
-        })
+        return {
+          _tag: "needs_human",
+          reason: "closed_unmerged",
+          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} was closed without merging`,
+        } as const
       }
       if (pullRequest.state !== "OPEN") {
         return yield* new GitHubRequestError({
@@ -1058,13 +1101,44 @@ export const makeGitHubService = (
           message: `GitHub returned an invalid pull request head for ${repository.owner}/${repository.name}:${headRefName}`,
         })
       }
+      if (pullRequest.statusCheckRollup === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub omitted the check rollup for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        pullRequest.statusCheckRollup !== null &&
+        !isGitHubStatusCheckState(pullRequest.statusCheckRollup.state)
+      ) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid check rollup for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
       if (
         pullRequest.statusCheckRollup !== null &&
         pullRequest.statusCheckRollup.state !== "SUCCESS"
       ) {
+        return {
+          _tag: "revalidation",
+          reason: "checks_not_green",
+          message: `Pull request checks are no longer successful for ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
+      }
+      if (
+        pullRequest.mergeable !== "MERGEABLE" &&
+        pullRequest.mergeable !== "CONFLICTING" &&
+        pullRequest.mergeable !== "UNKNOWN"
+      ) {
         return yield* new GitHubRequestError({
-          message: `Pull request checks are not successful for ${repository.owner}/${repository.name}:${headRefName}`,
+          message: `GitHub returned invalid mergeability for ${repository.owner}/${repository.name}:${headRefName}`,
         })
+      }
+      if (pullRequest.mergeable !== "MERGEABLE") {
+        return {
+          _tag: "revalidation",
+          reason: "mergeability_changed",
+          message: `Pull request mergeability is ${pullRequest.mergeable.toLowerCase()} for ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
       }
       if (client.mutation === undefined) {
         return yield* new GitHubRequestError({
@@ -1072,29 +1146,51 @@ export const makeGitHubService = (
         })
       }
       const mutate = client.mutation
-      const mutation = yield* githubRequest(
-        `Failed to merge pull request for ${repository.owner}/${repository.name}:${headRefName}`,
-        (signal) =>
-          mutate(
-            {
-              mergePullRequest: {
-                __args: {
-                  input: {
-                    pullRequestId: pullRequest.id,
-                    expectedHeadOid: pullRequest.headRefOid,
-                    mergeMethod: "SQUASH",
+      const mutationResult = yield* Effect.result(
+        githubRequest(
+          `Failed to merge pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+          (signal) =>
+            mutate(
+              {
+                mergePullRequest: {
+                  __args: {
+                    input: {
+                      pullRequestId: pullRequest.id,
+                      expectedHeadOid: pullRequest.headRefOid,
+                      mergeMethod: "SQUASH",
+                    },
+                  },
+                  pullRequest: {
+                    merged: true,
+                    state: true,
+                    headRefOid: true,
+                    mergeable: true,
+                    statusCheckRollup: {
+                      state: true,
+                    },
                   },
                 },
-                pullRequest: {
-                  merged: true,
-                  state: true,
-                },
               },
-            },
-            signal,
-          ),
+              signal,
+            ),
+        ),
       )
-      const mergedPullRequest = mutation.mergePullRequest?.pullRequest
+      let mergedPullRequest: GitHubMergePullRequestSnapshot | null | undefined
+      if (Result.isFailure(mutationResult)) {
+        if (
+          !(mutationResult.failure.cause instanceof GenqlError) ||
+          !isMergeGraphqlRejection(mutationResult.failure.cause)
+        ) {
+          return yield* mutationResult.failure
+        }
+        const refreshed = yield* loadPullRequest()
+        if (refreshed.repository === null) {
+          return yield* new GitHubRepositoryUnavailableError(repository)
+        }
+        mergedPullRequest = refreshed.repository.pullRequests.nodes?.[0]
+      } else {
+        mergedPullRequest = mutationResult.success.mergePullRequest?.pullRequest
+      }
       if (mergedPullRequest === null || mergedPullRequest === undefined) {
         return yield* new GitHubRequestError({
           message: `GitHub did not return a pull request after merge for ${repository.owner}/${repository.name}:${headRefName}`,
@@ -1102,12 +1198,88 @@ export const makeGitHubService = (
       }
       if (
         mergedPullRequest.merged !== true &&
-        mergedPullRequest.state !== "MERGED"
+        mergedPullRequest.merged !== false
       ) {
         return yield* new GitHubRequestError({
-          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} was not merged`,
+          message: `GitHub returned an invalid merged flag after merge for ${repository.owner}/${repository.name}:${headRefName}`,
         })
       }
+      if (
+        mergedPullRequest.merged === true ||
+        mergedPullRequest.state === "MERGED"
+      ) {
+        return { _tag: "merged" } as const
+      }
+      if (mergedPullRequest.state === "CLOSED") {
+        return {
+          _tag: "needs_human",
+          reason: "closed_unmerged",
+          message: `Pull request for ${repository.owner}/${repository.name}:${headRefName} was concurrently closed without merging`,
+        } as const
+      }
+      if (mergedPullRequest.state !== "OPEN") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request state after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        typeof mergedPullRequest.headRefOid !== "string" ||
+        mergedPullRequest.headRefOid.trim() === ""
+      ) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request head after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (mergedPullRequest.headRefOid !== pullRequest.headRefOid) {
+        return {
+          _tag: "revalidation",
+          reason: "head_changed",
+          message: `Pull request head changed while merging ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
+      }
+      if (mergedPullRequest.statusCheckRollup === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub omitted the check rollup after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        mergedPullRequest.statusCheckRollup !== null &&
+        !isGitHubStatusCheckState(mergedPullRequest.statusCheckRollup.state)
+      ) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid check rollup after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      if (
+        mergedPullRequest.statusCheckRollup !== null &&
+        mergedPullRequest.statusCheckRollup.state !== "SUCCESS"
+      ) {
+        return {
+          _tag: "revalidation",
+          reason: "checks_not_green",
+          message: `Pull request checks changed while merging ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
+      }
+      if (
+        mergedPullRequest.mergeable === "CONFLICTING" ||
+        mergedPullRequest.mergeable === "UNKNOWN"
+      ) {
+        return {
+          _tag: "revalidation",
+          reason: "mergeability_changed",
+          message: `Pull request mergeability changed while merging ${repository.owner}/${repository.name}:${headRefName}`,
+        } as const
+      }
+      if (mergedPullRequest.mergeable !== "MERGEABLE") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned invalid mergeability after merge for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      return {
+        _tag: "needs_human",
+        reason: "merge_rejected",
+        message: `GitHub rejected the unchanged, open, green, mergeable pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+      } satisfies MergePullRequestResult
     },
   ),
   ensureIssueCompletedWithSummary: Effect.fn(

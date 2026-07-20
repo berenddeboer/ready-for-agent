@@ -21,7 +21,7 @@ import { describe, expect, it } from "bun:test"
 const PlatformLayer = BunServices.layer
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -47,7 +47,7 @@ const initWorktreeRepo = async (root: string) => {
   await git(worktree, ["config", "user.name", "Test"])
   await writeFile(join(worktree, "README.md"), "# widgets\n")
   await git(worktree, ["add", "README.md"])
-  await git(worktree, ["commit", "-m", "initial"])
+  await git(worktree, ["commit", "--no-verify", "-m", "initial"])
   const startingCommitOid = await git(worktree, ["rev-parse", "HEAD"])
   return { worktree, startingCommitOid }
 }
@@ -85,7 +85,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.void,
         localCleanup: () => Effect.void,
         removeWorktree: () => Effect.void,
@@ -199,7 +199,7 @@ describe("Assess Changes lifecycle routes", () => {
       const { worktree, startingCommitOid } = await initWorktreeRepo(root)
       await writeFile(join(worktree, "README.md"), "# later\n")
       await git(worktree, ["add", "README.md"])
-      await git(worktree, ["commit", "-m", "after start"])
+      await git(worktree, ["commit", "--no-verify", "-m", "after start"])
 
       const steps: LifecycleStepsShape = {
         createWorktree: () =>
@@ -221,7 +221,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.void,
         localCleanup: () => Effect.void,
         removeWorktree: () => Effect.void,
@@ -327,7 +327,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.void,
         localCleanup: () => Effect.void,
         removeWorktree: () => Effect.void,
@@ -465,7 +465,7 @@ describe("Assess Changes lifecycle routes", () => {
           decidePrMergeCalls += 1
           return Effect.succeed({ _tag: "clanker_merge" })
         },
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: (context) =>
           Effect.sync(() => {
             githubCalls.push({
@@ -619,7 +619,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => Effect.die("close issue must not run"),
         localCleanup: () => Effect.void,
         removeWorktree: () => Effect.void,
@@ -728,7 +728,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => {
           closeCalls += 1
           return Effect.void
@@ -845,7 +845,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: () => {
           closeCalls += 1
           return Effect.void
@@ -985,7 +985,7 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
         markPrReadyForReview: () => Effect.void,
         decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-        mergePr: () => Effect.void,
+        mergePr: () => Effect.succeed({ _tag: "merged" }),
         closeIssue: (context) =>
           Effect.gen(function* () {
             closeAttempts += 1

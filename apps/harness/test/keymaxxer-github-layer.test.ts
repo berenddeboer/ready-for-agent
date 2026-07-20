@@ -428,6 +428,19 @@ describe("Keymaxxer-backed GitHub layer", () => {
 
   test("merges a PR through the configured repository token", async () => {
     const runs: RunWithSecretsInput[] = []
+    const serializedOutcomes = [
+      { _tag: "merged" },
+      {
+        _tag: "revalidation",
+        reason: "head_changed",
+        message: "Head changed",
+      },
+      {
+        _tag: "needs_human",
+        reason: "merge_rejected",
+        message: "Merge rejected",
+      },
+    ] as const
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
       initialize: Effect.void,
       findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -438,7 +451,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
         runs.push(input)
         return Effect.succeed({
           exitCode: 0,
-          stdout: JSON.stringify({ _tag: "merged" }),
+          stdout: JSON.stringify(serializedOutcomes[runs.length - 1]),
           stderr: "",
         })
       },
@@ -447,12 +460,14 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Layer.provide(keymaxxerLayer),
     )
 
-    await Effect.runPromise(
+    const outcomes = await Effect.runPromise(
       Effect.gen(function* () {
         const github = yield* GitHubService
-        yield* github.mergePullRequest(
-          { owner: "acme", name: "widgets" },
-          "rfa/acme-widgets/42/wi-test",
+        return yield* Effect.forEach(serializedOutcomes, () =>
+          github.mergePullRequest(
+            { owner: "acme", name: "widgets" },
+            "rfa/acme-widgets/42/wi-test",
+          ),
         )
       }).pipe(Effect.provide(layer)),
     )
@@ -460,6 +475,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(runs[0]?.command).toContain("merge-pull-request.ts")
     expect(runs[0]?.command).toContain('"--conditions"')
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+    expect(outcomes).toEqual(serializedOutcomes)
   })
 
   test("rejects malformed Ready Issue fields through Schema", async () => {

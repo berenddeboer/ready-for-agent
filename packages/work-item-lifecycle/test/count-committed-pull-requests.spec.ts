@@ -30,7 +30,7 @@ const successfulSteps: LifecycleStepsShape = {
     Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
   markPrReadyForReview: () => Effect.void,
   decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
-  mergePr: () => Effect.void,
+  mergePr: () => Effect.succeed({ _tag: "merged" }),
   closeIssue: () => Effect.void,
   localCleanup: () => Effect.void,
   removeWorktree: () => Effect.void,

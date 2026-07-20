@@ -59,7 +59,7 @@ const run = <A, E>(
   )
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -86,7 +86,7 @@ const initBareRepository = async (root: string) => {
   await git(source, ["config", "user.name", "Test"])
   await writeFile(join(source, "README.md"), "# widgets\n")
   await git(source, ["add", "README.md"])
-  await git(source, ["commit", "-m", "initial"])
+  await git(source, ["commit", "--no-verify", "-m", "initial"])
   await git(root, ["clone", "--bare", source, bare])
   return bare
 }
