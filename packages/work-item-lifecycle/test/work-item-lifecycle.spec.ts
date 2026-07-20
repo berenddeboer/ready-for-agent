@@ -1953,6 +1953,76 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("returns a waiting automated review to delayed Watch without handling its checks", () => {
+      const checkId = "psc-active-review"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "waiting",
+            handledCheckIds: [],
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+          const watched = yield* claimAndRunPending
+          expect(watched._tag).toBe("processed")
+          if (watched._tag === "processed") {
+            expect(watched.workItem.state).toBe("investigate_pr_status_checks")
+          }
+
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES (?, ?, 'checkrun:active-review', 'review', 'green', NULL, ?, ?, ?)`,
+            [checkId, created.id, now, now, now],
+          )
+
+          const investigated = yield* claimAndRunPending
+          expect(investigated._tag).toBe("processed")
+          if (investigated._tag === "processed") {
+            expect(investigated.workItem.state).toBe("watch_pr_status_checks")
+            expect(investigated.workItem.failureMessage).toBeNull()
+          }
+
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at, handled_by_step_run_id
+             FROM pr_status_check
+             WHERE id = ?`,
+            [checkId],
+          )) as readonly {
+            readonly handled_at: number | null
+            readonly handled_by_step_run_id: string | null
+          }[]
+          expect(checks).toEqual([
+            { handled_at: null, handled_by_step_run_id: null },
+          ])
+
+          const delayed = (yield* sql.unsafe(
+            `SELECT available_at, created_at FROM job_queue`,
+          )) as readonly { available_at: number; created_at: number }[]
+          expect(delayed).toHaveLength(1)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+        }),
+      )
+    })
+
     it("retires completed checks atomically when conflict resolution is queued and returns to delayed Watch", () => {
       const checkId = "psc-conflict-retired"
       const steps: LifecycleStepsShape = {
