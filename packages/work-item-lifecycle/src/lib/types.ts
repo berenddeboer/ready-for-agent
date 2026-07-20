@@ -167,6 +167,13 @@ export const isRetryableFailedWorkItem = (
   item.state === "failed" &&
   item.failureCode === RETRYABLE_FAILED_WORK_ITEM_CODE
 
+export const isRetryableNeedsHumanWorkItem = (
+  item: Pick<WorkItemRecord, "state" | "stepRuns">,
+): boolean =>
+  item.state === "needs_human" &&
+  item.stepRuns.at(-1)?.step === "investigate_pr_status_checks" &&
+  item.stepRuns.at(-1)?.status === "succeeded"
+
 /** Jobs card Failed tab: non-retryable terminal failures only. */
 export const isJobsFailedWorkItem = (item: JobsListMembershipItem): boolean =>
   item.state === "failed" && !isRetryableFailedWorkItem(item)
