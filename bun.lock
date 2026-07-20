@@ -155,9 +155,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@ready-for-agent/db-service": "workspace:*",
-        "@ready-for-agent/github-service": "workspace:*",
         "@ready-for-agent/graphql-schema": "workspace:*",
-        "@ready-for-agent/issue-reconciler": "workspace:*",
         "@ready-for-agent/keymaxxer-service": "workspace:*",
         "@ready-for-agent/opencode": "workspace:*",
         "@ready-for-agent/queue-service": "workspace:*",
