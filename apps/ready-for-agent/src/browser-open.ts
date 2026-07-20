@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process"
+
 export type BrowserOpenEnv = Partial<
   Record<"NO_BROWSER" | "PORT", string | undefined>
 >
@@ -51,4 +53,34 @@ export const browserOpenCommand = (
   }
 
   return { command: "xdg-open", args: [url] }
+}
+
+/**
+ * Detached browser launch is deliberately a host boundary: polling uses fetch
+ * and the launcher must outlive its child rather than be scoped to an Effect.
+ */
+export const openBrowserWhenReady = (platform: string, url: string): void => {
+  const { command, args } = browserOpenCommand(platform, url)
+  const deadline = Date.now() + 60_000
+
+  const tryOpen = async () => {
+    while (Date.now() < deadline) {
+      try {
+        const response = await fetch(url, { redirect: "manual" })
+        void response.body?.cancel()
+        if (response.status > 0) {
+          spawn(command, [...args], {
+            detached: true,
+            stdio: "ignore",
+          }).unref()
+          return
+        }
+      } catch {
+        // Port not ready yet.
+      }
+      await Bun.sleep(250)
+    }
+  }
+
+  void tryOpen()
 }

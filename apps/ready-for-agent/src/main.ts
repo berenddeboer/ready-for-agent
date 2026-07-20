@@ -18,13 +18,17 @@ if (isInternalKeymaxxerSidecarMode(process.argv)) {
   const { Effect, Layer } = await import("effect")
   const { Command } = await import("effect/unstable/cli")
   const { cli } = await import("./cli.ts")
+  const { ApplicationConfig } = await import("./services/application-config.ts")
   const { GraphqlApi } = await import("./services/graphql-api.ts")
   const { LocalGit } = await import("./services/local-git.ts")
   const { StartHarness } = await import("./services/start-harness.ts")
 
-  const MainLive = LocalGit.layer.pipe(
-    Layer.provideMerge(GraphqlApi.layer),
-    Layer.provideMerge(StartHarness.layer),
+  const MainLive = Layer.mergeAll(
+    LocalGit.layer,
+    GraphqlApi.layer,
+    StartHarness.layer,
+  ).pipe(
+    Layer.provideMerge(ApplicationConfig.layer),
     Layer.provideMerge(BunServices.layer),
   )
 

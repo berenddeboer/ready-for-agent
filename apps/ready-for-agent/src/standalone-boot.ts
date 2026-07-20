@@ -50,14 +50,25 @@ const createEmbeddedSpaStartHandler = (input: {
 
 export const bootStandaloneProduction = async (input: {
   readonly noOpen: boolean
+  readonly databasePath: string
+  readonly browserEnv: {
+    readonly NO_BROWSER?: string | undefined
+    readonly PORT?: string | undefined
+  }
 }): Promise<void> => {
   const argv = [
     ...process.argv,
     ...(input.noOpen ? (["--no-open"] as const) : []),
   ]
 
+  // The production lifecycle is Promise-based host code. Keep its ambient
+  // environment read here and pass an immutable override instead of mutating it.
   await startProductionLifecycle({
-    environment: process.env,
+    environment: {
+      ...process.env,
+      ...input.browserEnv,
+      SQLITE_DATABASE_PATH: input.databasePath,
+    },
     argv,
     embeddedClientAssets,
     loadStartHandler: async () =>
