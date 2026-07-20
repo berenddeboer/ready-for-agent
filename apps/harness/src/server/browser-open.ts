@@ -2,7 +2,7 @@ export type BrowserOpenEnv = Partial<
   Record<"NO_BROWSER" | "PORT", string | undefined>
 >
 
-const DEFAULT_UI_PORT = 4200
+const DEFAULT_UI_PORT = 6056
 const DEFAULT_UI_HOST = "127.0.0.1"
 
 /** Whether production start should open the default browser to the local UI. */

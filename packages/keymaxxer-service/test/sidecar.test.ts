@@ -46,12 +46,12 @@ const mockUpstream = (): KeymaxxerUpstreamClient => ({
 
 describe("parseSidecarUrl", () => {
   test("accepts capability MCP URLs and rejects origins without path secret", () => {
-    expect(parseSidecarUrl("http://127.0.0.1:5032/abcXYZ0123/mcp").url).toBe(
-      "http://127.0.0.1:5032/abcXYZ0123/mcp",
+    expect(parseSidecarUrl("http://127.0.0.1:6057/abcXYZ0123/mcp").url).toBe(
+      "http://127.0.0.1:6057/abcXYZ0123/mcp",
     )
-    expect(() => parseSidecarUrl("http://127.0.0.1:5032")).toThrow()
-    expect(() => parseSidecarUrl("http://127.0.0.1:5032/mcp")).toThrow()
-    expect(() => parseSidecarUrl("http://localhost:5032/cap/mcp")).toThrow()
+    expect(() => parseSidecarUrl("http://127.0.0.1:6057")).toThrow()
+    expect(() => parseSidecarUrl("http://127.0.0.1:6057/mcp")).toThrow()
+    expect(() => parseSidecarUrl("http://localhost:6057/cap/mcp")).toThrow()
   })
 })
 
@@ -104,7 +104,7 @@ describe("sidecar-backed Keymaxxer layer", () => {
       Effect.runPromise(
         Effect.gen(function* () {
           yield* KeymaxxerService
-        }).pipe(Effect.provide(sidecarKeymaxxerLayer("http://127.0.0.1:5032"))),
+        }).pipe(Effect.provide(sidecarKeymaxxerLayer("http://127.0.0.1:6057"))),
       ),
     ).rejects.toMatchObject({
       _tag: "KeymaxxerError",

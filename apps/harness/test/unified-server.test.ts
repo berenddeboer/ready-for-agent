@@ -10,7 +10,7 @@ test("routes /graphql through the injected GraphQL handler", async () => {
     statusText: "OK",
   } as unknown as Response
 
-  const request = new Request("http://127.0.0.1:4200/graphql", {
+  const request = new Request("http://127.0.0.1:6056/graphql", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ query: "{ health }" }),
@@ -29,6 +29,6 @@ test("routes /graphql through the injected GraphQL handler", async () => {
   const response = await post!({ request, context } as never)
 
   expect(response.status).toBe(200)
-  expect(delegatedUrl).toBe("http://127.0.0.1:4200/graphql")
+  expect(delegatedUrl).toBe("http://127.0.0.1:6056/graphql")
   expect(await response.json()).toEqual({ data: { health: true } })
 })

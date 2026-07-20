@@ -111,11 +111,11 @@ describe("production lifecycle keymaxxer mode", () => {
   test("reuses an existing sidecar URL", () => {
     expect(
       resolveKeymaxxerMode({
-        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:5032/cap/mcp",
+        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
       }),
     ).toEqual({
       kind: "existing-url",
-      url: "http://127.0.0.1:5032/cap/mcp",
+      url: "http://127.0.0.1:6057/cap/mcp",
     })
   })
 
@@ -209,7 +209,7 @@ describe("production lifecycle process behavior", () => {
       startSidecar: async () => {
         order.push("sidecar")
         return {
-          url: "http://127.0.0.1:5032/capability/mcp",
+          url: "http://127.0.0.1:6057/capability/mcp",
           child,
         }
       },
@@ -220,7 +220,7 @@ describe("production lifecycle process behavior", () => {
         applicationStarted = true
         order.push("application")
         expect(environment.KEYMAXXER_SIDECAR_URL).toBe(
-          "http://127.0.0.1:5032/capability/mcp",
+          "http://127.0.0.1:6057/capability/mcp",
         )
         return fakeApplication()
       },
@@ -254,7 +254,7 @@ describe("production lifecycle process behavior", () => {
         },
         resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
         startSidecar: async () => ({
-          url: "http://127.0.0.1:5032/capability/mcp",
+          url: "http://127.0.0.1:6057/capability/mcp",
           child,
         }),
         applyMigrations: async () => {},
@@ -307,7 +307,7 @@ describe("production lifecycle process behavior", () => {
       },
       resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
       startSidecar: async () => ({
-        url: "http://127.0.0.1:5032/capability/mcp",
+        url: "http://127.0.0.1:6057/capability/mcp",
         child,
       }),
       applyMigrations: async () => {},
@@ -343,7 +343,7 @@ describe("production lifecycle process behavior", () => {
       },
       resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
       startSidecar: async () => ({
-        url: "http://127.0.0.1:5032/capability/mcp",
+        url: "http://127.0.0.1:6057/capability/mcp",
         child,
       }),
       applyMigrations: async () => {},
@@ -377,7 +377,7 @@ describe("production lifecycle process behavior", () => {
       ...baseOptions(),
       environment: {
         SQLITE_DATABASE_PATH: "/tmp/unused.db",
-        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:5032/cap/mcp",
+        KEYMAXXER_SIDECAR_URL: "http://127.0.0.1:6057/cap/mcp",
       },
       startSidecar: async () => {
         startSidecarCalls += 1
@@ -391,7 +391,7 @@ describe("production lifecycle process behavior", () => {
 
     expect(startSidecarCalls).toBe(0)
     expect(applicationEnvs[0]?.KEYMAXXER_SIDECAR_URL).toBe(
-      "http://127.0.0.1:5032/cap/mcp",
+      "http://127.0.0.1:6057/cap/mcp",
     )
     expect(events).toContain("sidecar-ready")
     await handle.dispose()

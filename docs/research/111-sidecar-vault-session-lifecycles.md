@@ -76,7 +76,7 @@ Not required for readiness:
 
 ### Port
 
-- Default `5032`, overridable with `KEYMAXXER_SIDECAR_PORT`
+- Default `6057`, overridable with `KEYMAXXER_SIDECAR_PORT`
 - Clients use `KEYMAXXER_SIDECAR_URL` (set by Nx for Harness)
 - Bind conflict → **fail fast** with a clear override message (no dynamic port, no discovery file)
 - Harness passes the same URL into OpenCode remote MCP config when spawning OpenCode (see launch-contract ticket)

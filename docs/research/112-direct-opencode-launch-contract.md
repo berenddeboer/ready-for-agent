@@ -95,7 +95,7 @@ Remote config shape (security half from #113):
   "mcp": {
     "keymaxxer": {
       "type": "remote",
-      "url": "http://127.0.0.1:5032/<capability>/mcp",
+      "url": "http://127.0.0.1:6057/<capability>/mcp",
       "enabled": true,
       "oauth": false,
       "timeout": 300000

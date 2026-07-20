@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test"
 
 describe("Keymaxxer development sidecar", () => {
   test("uses a fixed overridable port and rejects invalid values", () => {
+    expect(defaultKeymaxxerSidecarPort).toBe(6057)
     expect(keymaxxerSidecarPortFromEnvironment({})).toBe(
       defaultKeymaxxerSidecarPort,
     )

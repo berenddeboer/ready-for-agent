@@ -81,6 +81,6 @@ export const loadPort = (
   environment: Partial<Record<string, string | undefined>>,
 ) =>
   Config.option(Config.schema(Port, "PORT")).pipe(
-    Effect.map(Option.getOrElse(() => 4200)),
+    Effect.map(Option.getOrElse(() => 6056)),
     Effect.provide(environmentConfigLayer(environment)),
   )

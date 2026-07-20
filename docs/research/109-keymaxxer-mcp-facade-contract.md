@@ -87,7 +87,7 @@ Example injected via `OPENCODE_CONFIG_CONTENT` (merge, do not clobber other MCP 
   "mcp": {
     "keymaxxer": {
       "type": "remote",
-      "url": "http://127.0.0.1:5032/mcp",
+      "url": "http://127.0.0.1:6057/mcp",
       "enabled": true,
       "oauth": false,
       "headers": {

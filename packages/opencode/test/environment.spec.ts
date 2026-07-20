@@ -11,7 +11,7 @@ describe("makeOpencodeEnvironment", () => {
     expect(
       JSON.parse(
         makeEnv({
-          keymaxxerMcpUrl: "http://127.0.0.1:5032/cap/mcp",
+          keymaxxerMcpUrl: "http://127.0.0.1:6057/cap/mcp",
           environment: {},
         }).OPENCODE_CONFIG_CONTENT,
       ),
@@ -19,7 +19,7 @@ describe("makeOpencodeEnvironment", () => {
       mcp: {
         keymaxxer: {
           type: "remote",
-          url: "http://127.0.0.1:5032/cap/mcp",
+          url: "http://127.0.0.1:6057/cap/mcp",
           enabled: true,
           oauth: false,
           timeout: 300_000,
@@ -40,7 +40,7 @@ describe("makeOpencodeEnvironment", () => {
     expect(
       JSON.parse(
         makeEnv({
-          keymaxxerMcpUrl: "http://127.0.0.1:5032/cap/mcp",
+          keymaxxerMcpUrl: "http://127.0.0.1:6057/cap/mcp",
           environment: { OPENCODE_CONFIG_CONTENT: existingConfig },
         }).OPENCODE_CONFIG_CONTENT,
       ),
@@ -50,7 +50,7 @@ describe("makeOpencodeEnvironment", () => {
         filesystem: { enabled: true },
         keymaxxer: {
           type: "remote",
-          url: "http://127.0.0.1:5032/cap/mcp",
+          url: "http://127.0.0.1:6057/cap/mcp",
           enabled: true,
           oauth: false,
           timeout: 300_000,
@@ -61,7 +61,7 @@ describe("makeOpencodeEnvironment", () => {
 
   it("strips GitHub token environment variables", () => {
     const env = makeEnv({
-      keymaxxerMcpUrl: "http://127.0.0.1:5032/cap/mcp",
+      keymaxxerMcpUrl: "http://127.0.0.1:6057/cap/mcp",
       environment: {
         PATH: "/usr/bin",
         GH_TOKEN: "secret",

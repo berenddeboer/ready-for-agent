@@ -31,8 +31,8 @@ ready-for-agent
 ready-for-agent start
 ```
 
-- UI: `http://127.0.0.1:4200/`
-- GraphQL: `http://127.0.0.1:4200/graphql`
+- UI: `http://127.0.0.1:6056/`
+- GraphQL: `http://127.0.0.1:6056/graphql`
 
 On successful start the default browser opens to the UI. Disable with:
 
@@ -42,7 +42,19 @@ ready-for-agent --no-open
 NO_BROWSER=1 ready-for-agent
 ```
 
-Override the listen port with `PORT` when needed.
+Use different Harness and Keymaxxer Sidecar ports when needed:
+
+```bash
+# Harness on a non-default port
+PORT=7000 ready-for-agent
+
+# Point CLI commands at that harness
+READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
+  ready-for-agent add /path/to/local/repo
+
+# Keymaxxer Sidecar on a non-default port
+KEYMAXXER_SIDECAR_PORT=7001 ready-for-agent
+```
 
 ### Application data
 
@@ -70,7 +82,7 @@ If GraphQL is unreachable, the command fails with a hint to start the Harness
 first. Point at a non-default endpoint with:
 
 ```bash
-READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:4300/graphql \
+READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
   ready-for-agent add /path/to/local/repo
 ```
 

@@ -16,7 +16,7 @@ describe("graphql unreachable detection", () => {
 
   test("detects ECONNREFUSED nested causes", () => {
     const cause = new Error("fetch failed", {
-      cause: new Error("connect ECONNREFUSED 127.0.0.1:4200"),
+      cause: new Error("connect ECONNREFUSED 127.0.0.1:6056"),
     })
     expect(isGraphqlUnreachable(cause)).toBe(true)
     expect(formatGraphqlRequestFailure(cause)).toBe(
