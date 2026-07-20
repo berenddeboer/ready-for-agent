@@ -175,6 +175,7 @@ type WorkItem {
   id: ID!
   repositoryId: ID!
   githubIssueNumber: Int!
+  issueTitle: String
   githubPullRequestNumber: Int
   model: String!
   variant: String!

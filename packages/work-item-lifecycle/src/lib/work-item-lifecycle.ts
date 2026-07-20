@@ -229,6 +229,7 @@ type WorkItemRow = {
   readonly id: string
   readonly repository_id: string
   readonly github_issue_number: number
+  readonly issue_title: string | null
   readonly github_pull_request_number: number | null
   readonly model: string
   readonly variant: string
@@ -302,6 +303,7 @@ const toWorkItemRecord = (
   id: row.id as WorkItemId,
   repositoryId: row.repository_id,
   githubIssueNumber: row.github_issue_number,
+  issueTitle: row.issue_title,
   githubPullRequestNumber: row.github_pull_request_number,
   model: row.model,
   variant: row.variant,
@@ -328,7 +330,7 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
-const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, model, variant, review_model,
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, model, variant, review_model,
                    review_variant, state, state_ready_at, paused, waiting_since, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
@@ -3449,17 +3451,18 @@ export const makeWorkItemLifecycleLive = (
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
                  id, repository_id, github_issue_number, model, variant,
-                 review_model, review_variant, state, state_ready_at, paused,
-                 waiting_since, holds_worker_slot,
-                 pause_before_step, worktree_path, session_id, failure_code,
-                 failure_message, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                  issue_title, review_model, review_variant, state, state_ready_at, paused,
+                  waiting_since, holds_worker_slot,
+                  pause_before_step, worktree_path, session_id, failure_code,
+                  failure_message, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
                     githubIssueNumber,
                     model,
                     variant,
+                    issue.title,
                     reviewModel,
                     reviewVariant,
                     step,

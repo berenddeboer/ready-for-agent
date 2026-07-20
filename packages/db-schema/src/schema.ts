@@ -196,6 +196,7 @@ export const workItem = snakeCase.table(
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
     githubIssueNumber: integer().notNull(),
+    issueTitle: text(),
     githubPullRequestNumber: integer(),
     model: text().notNull(),
     variant: text().notNull(),

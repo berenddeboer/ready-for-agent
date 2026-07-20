@@ -68,6 +68,7 @@ const workItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: repository.id,
   githubIssueNumber: issue.githubIssueNumber,
+  issueTitle: issue.title,
   model: config.defaultModel,
   variant: config.defaultVariant,
   reviewModel: config.defaultModel,
@@ -2141,6 +2142,7 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       githubIssueNumber: 201,
+      issueTitle: "Completed issue title",
       state: "complete" as const,
       createdAt: new Date("2026-03-01T00:00:00.000Z"),
       stepRuns: [],
@@ -2149,6 +2151,7 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       githubIssueNumber: 202,
+      issueTitle: null,
       state: "abandoned" as const,
       createdAt: new Date("2026-03-02T00:00:00.000Z"),
       stepRuns: [],
@@ -2178,7 +2181,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
           workItems(repositoryId: $repositoryId, listKind: $listKind) {
-            id githubIssueNumber state
+            id githubIssueNumber issueTitle state
           }
         }`,
         variables: { repositoryId: repository.id, listKind: "COMPLETED" },
@@ -2191,11 +2194,13 @@ describe("GraphQL API", () => {
           {
             id: abandonedOrphan.id,
             githubIssueNumber: 202,
+            issueTitle: null,
             state: "ABANDONED",
           },
           {
             id: completeOrphan.id,
             githubIssueNumber: 201,
+            issueTitle: "Completed issue title",
             state: "COMPLETE",
           },
         ],

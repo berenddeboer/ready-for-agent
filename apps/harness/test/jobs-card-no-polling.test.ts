@@ -59,14 +59,18 @@ describe("JobsCard live updates", () => {
   })
 
   test("shows issue number with title and top-right pause control", () => {
-    const { jobsCard } = jobsCardSource()
+    const { source, jobsCard } = jobsCardSource()
     expect(jobsCard).not.toContain("Issue #")
     expect(jobsCard).toContain("#{workItem.githubIssueNumber}")
     expect(jobsCard).toContain("issueTitle")
+    expect(source).toContain("issueTitle: true")
+    expect(jobsCard).toContain(
+      "issue?.title ?? workItem.issueTitle ?? undefined",
+    )
     expect(jobsCard).toContain("issuesQuery(repository.id)")
     expect(jobsCard).toContain("title={issueIdentity}")
     expect(jobsCard).toContain("issueTitle === undefined")
-    expect(jobsCard).toContain("`#${workItem.githubIssueNumber}`")
+    expect(jobsCard).toContain(`\`#\${workItem.githubIssueNumber}\``)
     const pauseIndex = jobsCard.indexOf(
       "<WorkItemPauseButton workItem={workItem} />",
     )
