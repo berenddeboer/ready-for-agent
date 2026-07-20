@@ -17,7 +17,7 @@ export const githubTokenSecretName = (repository: Repository) =>
     .replace(/[^A-Za-z0-9_]/g, "_")
     .toUpperCase()
 
-export const githubTokenCreationUrl = (repository: Repository) => {
+const githubTokenCreationUrl = (repository: Repository) => {
   const url = new URL("https://github.com/settings/personal-access-tokens/new")
   url.searchParams.set("name", `${repository.githubRepo} - ready-for-agent`)
   url.searchParams.set(

@@ -70,7 +70,7 @@ const lifecyclePhase = (step: OperationalLifecycleStep): LifecyclePhase => {
   return step
 }
 
-export const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
+const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
   switch (phase) {
     case "implement":
       return "Build"
