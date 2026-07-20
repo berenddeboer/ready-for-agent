@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import { connect } from "@tursodatabase/database"
-import { ConfigProvider, Effect, Layer } from "effect"
+import { ConfigProvider, Effect, Exit, Layer, Stream } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { makeTursoLive } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -284,6 +284,30 @@ describe("makeTursoLive", () => {
         expect(rows).toEqual([{ value: "ok" }])
       } finally {
         await db.close()
+      }
+    } finally {
+      await cleanupDb(dbPath)
+    }
+  })
+
+  it("fails executeStream with a typed SqlError", async () => {
+    const dbPath = tempDbPath()
+    const TestLayer = makeTestLayer(dbPath)
+
+    try {
+      const exit = await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          return yield* Effect.exit(
+            Stream.runCollect(sql(sqlQuery("SELECT 1")).stream),
+          )
+        }).pipe(Effect.provide(TestLayer)),
+      )
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const error = exit.cause
+        expect(String(error)).toContain("executeStream")
       }
     } finally {
       await cleanupDb(dbPath)

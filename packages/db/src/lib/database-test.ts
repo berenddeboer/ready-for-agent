@@ -1,9 +1,7 @@
 import { SqliteClient } from "@effect/sql-sqlite-bun"
-import { type Config, Effect, Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
-  type MigrationReadError,
   MigrationsFolderConfig,
   defaultMigrationsFolder,
   runMigrations,
@@ -34,15 +32,7 @@ const MigrationLayer = Layer.effectDiscard(
 )
 
 /**
- * Full test database layer: in-memory SQLite + migrations + typed Drizzle.
+ * Full test database layer: in-memory SQLite + migrations.
+ * Default consumer path for tests; production uses {@link DatabaseLive}.
  */
-export const DatabaseTest: Layer.Layer<
-  SqlClient.SqlClient | SqliteClient.SqliteClient,
-  Config.ConfigError | MigrationReadError | SqlError
-> = Layer.merge(
-  SqliteTest,
-  MigrationLayer.pipe(Layer.provide(SqliteTest)),
-) as unknown as Layer.Layer<
-  SqlClient.SqlClient | SqliteClient.SqliteClient,
-  Config.ConfigError | MigrationReadError | SqlError
->
+export const DatabaseTest = MigrationLayer.pipe(Layer.provideMerge(SqliteTest))

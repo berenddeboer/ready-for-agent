@@ -1,4 +1,6 @@
+import { ConfigProvider, Effect } from "effect"
 import {
+  DatabasePathConfig,
   isLocalFilePath,
   normalizeDatabasePath,
   resolveProductDataDir,
@@ -68,5 +70,53 @@ describe("Turso database path helpers", () => {
         home: "/home/op",
       }),
     ).toBe("/home/op/.local/share/ready-for-agent/ready-for-agent.db")
+  })
+
+  it("resolves DatabasePathConfig defaults via ConfigProvider HOME/XDG", async () => {
+    const path = await Effect.runPromise(
+      DatabasePathConfig.pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              HOME: "/home/cfg",
+              XDG_DATA_HOME: "/var/cfg-data",
+            }),
+          ),
+        ),
+      ),
+    )
+    expect(path).toBe("/var/cfg-data/ready-for-agent/ready-for-agent.db")
+  })
+
+  it("prefers SQLITE_DATABASE_PATH over product defaults", async () => {
+    const path = await Effect.runPromise(
+      DatabasePathConfig.pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              SQLITE_DATABASE_PATH: "/tmp/explicit.db",
+              HOME: "/home/cfg",
+            }),
+          ),
+        ),
+      ),
+    )
+    expect(path).toBe("/tmp/explicit.db")
+  })
+
+  it("treats whitespace-only HOME as unset for product defaults", async () => {
+    const path = await Effect.runPromise(
+      DatabasePathConfig.pipe(
+        Effect.provide(
+          ConfigProvider.layer(
+            ConfigProvider.fromUnknown({
+              HOME: "   ",
+              XDG_DATA_HOME: "/var/cfg-data",
+            }),
+          ),
+        ),
+      ),
+    )
+    expect(path).toBe("/var/cfg-data/ready-for-agent/ready-for-agent.db")
   })
 })
