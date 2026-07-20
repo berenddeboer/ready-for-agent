@@ -1165,8 +1165,10 @@ export const makeWorkItemLifecycleLive = (
               | OperationalLifecycleStep
               | "complete"
               | "needs_human"
+              | "failed"
             readonly delay?: Duration.Duration
             readonly reason?: string
+            readonly failureCode?: string
           }
         },
         RunHandlerError
@@ -1330,10 +1332,16 @@ export const makeWorkItemLifecycleLive = (
                         nextState: "watch_pr_status_checks" as const,
                         delay: PR_STATUS_CHECKS_POLL_DELAY,
                       }
-                    : {
-                        nextState: "needs_human" as const,
-                        reason: result.reason,
-                      },
+                    : result._tag === "needs_human"
+                      ? {
+                          nextState: "needs_human" as const,
+                          reason: result.reason,
+                        }
+                      : {
+                          nextState: "failed" as const,
+                          reason: result.reason,
+                          failureCode: "pr_status_checks_unresolved",
+                        },
               })),
             )
           case "mark_pr_ready_for_review":
@@ -1416,8 +1424,10 @@ export const makeWorkItemLifecycleLive = (
               | OperationalLifecycleStep
               | "complete"
               | "needs_human"
+              | "failed"
             readonly delay?: Duration.Duration
             readonly reason?: string
+            readonly failureCode?: string
           }
         }
         readonly revalidation:
@@ -1547,6 +1557,36 @@ export const makeWorkItemLifecycleLive = (
                       now,
                       transition?.reason ??
                         "OpenCode requested human intervention",
+                      worktreePath,
+                      startingCommitOid,
+                      completionSummary,
+                      sessionId,
+                      githubPullRequestNumber,
+                      now,
+                      workItem.id,
+                    ],
+                  )
+                } else if (nextStep === "failed") {
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                   SET state = 'failed',
+                       state_ready_at = ?,
+                       failure_code = ?,
+                       failure_message = ?,
+                        worktree_path = ?,
+                        starting_commit_oid = ?,
+                        completion_summary = ?,
+                        session_id = ?,
+                        github_pull_request_number = ?,
+                        holds_worker_slot = 0,
+                        waiting_since = NULL,
+                        updated_at = ?
+                   WHERE id = ?`,
+                    [
+                      now,
+                      transition?.failureCode ?? "pr_status_checks_unresolved",
+                      transition?.reason ??
+                        "PR status checks remained unresolved",
                       worktreePath,
                       startingCommitOid,
                       completionSummary,

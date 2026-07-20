@@ -1919,10 +1919,94 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("keeps polling when aggregate is failed but all observed terminal checks are already handled", () => {
+    it("fails the Work Item terminally when investigation reports FAILED with no action on red checks", () => {
+      const checkId = "psc-unresolved-red"
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("failed"),
+        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "failed" as const,
+            reason:
+              "ActionLint failed twice on GitHub 503; restart did not help",
+            handledCheckIds: [checkId],
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES (?, ?, 'checkrun:unresolved', 'ActionLint', 'red', NULL, ?, ?, ?)`,
+            [checkId, created.id, now, now, now],
+          )
+
+          const handoff = yield* claimAndRunPending
+          expect(handoff._tag).toBe("processed")
+          if (handoff._tag === "processed") {
+            expect(handoff.workItem.state).toBe("investigate_pr_status_checks")
+          }
+
+          const investigated = yield* claimAndRunPending
+          expect(investigated._tag).toBe("processed")
+          if (investigated._tag === "processed") {
+            expect(investigated.workItem.state).toBe("failed")
+            expect(investigated.workItem.failureCode).toBe(
+              "pr_status_checks_unresolved",
+            )
+            expect(investigated.workItem.failureMessage).toBe(
+              "ActionLint failed twice on GitHub 503; restart did not help",
+            )
+            expect(investigated.workItem.holdsWorkerSlot).toBe(false)
+            const investigateRun = investigated.workItem.stepRuns.find(
+              (run) => run.step === "investigate_pr_status_checks",
+            )
+            expect(investigateRun?.status).toBe("succeeded")
+          }
+
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+            [checkId],
+          )) as readonly { readonly handled_at: number | null }[]
+          expect(checks[0]?.handled_at).not.toBeNull()
+
+          const jobs = (yield* sql.unsafe(
+            `SELECT id FROM job_queue`,
+          )) as readonly { readonly id: string }[]
+          expect(jobs).toHaveLength(0)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("failed")
+          expect(final.failureCode).toBe("pr_status_checks_unresolved")
+        }),
+      )
+    })
+
+    it("returns to delayed Watch after PROCESSED investigation when OpenCode took action", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "processed" as const,
+            handledCheckIds: [],
+          }),
       }
 
       return runWithSteps(
@@ -1937,11 +2021,18 @@ describe("WorkItemLifecycle", () => {
             yield* claimAndRunPending
           }
 
-          const afterFailed = yield* claimAndRunPending
-          expect(afterFailed._tag).toBe("processed")
-          if (afterFailed._tag === "processed") {
-            expect(afterFailed.workItem.state).toBe("watch_pr_status_checks")
-            expect(afterFailed.workItem.stepRuns.at(-1)?.status).toBe("queued")
+          const handoff = yield* claimAndRunPending
+          expect(handoff._tag).toBe("processed")
+          if (handoff._tag === "processed") {
+            expect(handoff.workItem.state).toBe("investigate_pr_status_checks")
+          }
+
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.state).toBe(
+              "watch_pr_status_checks",
+            )
           }
 
           const delayed = (yield* sql.unsafe(
