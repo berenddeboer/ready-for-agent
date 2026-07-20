@@ -2029,12 +2029,19 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("hides terminal Work Items whose Issue is no longer Relevant", async () => {
-    const terminalOrphan = {
+  test("hides non-Completed terminal Work Items whose Issue is no longer Relevant", async () => {
+    const needsHumanOrphan = {
       ...workItem,
       id: makeWorkItemId(),
       githubIssueNumber: 120,
       state: "needs_human" as const,
+      stepRuns: [],
+    }
+    const failedOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 122,
+      state: "failed" as const,
       stepRuns: [],
     }
     const unfinishedOrphan = {
@@ -2042,6 +2049,20 @@ describe("GraphQL API", () => {
       id: makeWorkItemId(),
       githubIssueNumber: 121,
       state: "implement" as const,
+      stepRuns: [],
+    }
+    const completeOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 123,
+      state: "complete" as const,
+      stepRuns: [],
+    }
+    const abandonedOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 124,
+      state: "abandoned" as const,
       stepRuns: [],
     }
     const terminalRelevant = {
@@ -2060,7 +2081,14 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () =>
-          Effect.succeed([terminalOrphan, unfinishedOrphan, terminalRelevant]),
+          Effect.succeed([
+            needsHumanOrphan,
+            failedOrphan,
+            unfinishedOrphan,
+            completeOrphan,
+            abandonedOrphan,
+            terminalRelevant,
+          ]),
       },
     )
 
@@ -2084,8 +2112,85 @@ describe("GraphQL API", () => {
             state: "IMPLEMENT",
           },
           {
+            id: completeOrphan.id,
+            githubIssueNumber: 123,
+            state: "COMPLETE",
+          },
+          {
+            id: abandonedOrphan.id,
+            githubIssueNumber: 124,
+            state: "ABANDONED",
+          },
+          {
             id: terminalRelevant.id,
             githubIssueNumber: issue.githubIssueNumber,
+            state: "COMPLETE",
+          },
+        ],
+      },
+    })
+  })
+
+  test("keeps complete and abandoned Work Items in COMPLETED when Issue is absent", async () => {
+    const completeOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 201,
+      state: "complete" as const,
+      createdAt: new Date("2026-03-01T00:00:00.000Z"),
+      stepRuns: [],
+    }
+    const abandonedOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 202,
+      state: "abandoned" as const,
+      createdAt: new Date("2026-03-02T00:00:00.000Z"),
+      stepRuns: [],
+    }
+    const failedOrphan = {
+      ...workItem,
+      id: makeWorkItemId(),
+      githubIssueNumber: 203,
+      state: "failed" as const,
+      createdAt: new Date("2026-03-03T00:00:00.000Z"),
+      stepRuns: [],
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForRepository: () =>
+          Effect.succeed([completeOrphan, abandonedOrphan, failedOrphan]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
+          workItems(repositoryId: $repositoryId, listKind: $listKind) {
+            id githubIssueNumber state
+          }
+        }`,
+        variables: { repositoryId: repository.id, listKind: "COMPLETED" },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: abandonedOrphan.id,
+            githubIssueNumber: 202,
+            state: "ABANDONED",
+          },
+          {
+            id: completeOrphan.id,
+            githubIssueNumber: 201,
             state: "COMPLETE",
           },
         ],
