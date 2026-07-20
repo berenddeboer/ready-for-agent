@@ -573,7 +573,8 @@ describe("PR status check steps", () => {
     expect(prompts).toHaveLength(4)
     expect(prompts[2]).toContain("focused recovery attempt")
     expect(prompts[2]).toContain("ActionLint failed on GitHub 503")
-    expect(prompts[2]).toContain("get the pull request out of its red state")
+    expect(prompts[2]).toContain("process the PR Status Check Handoff")
+    expect(prompts[2]).toContain("retry the failed inspection")
     expect(prompts[2]).toContain("Do not create an empty or no-op commit")
     expect(prompts[3]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
   })
@@ -705,6 +706,15 @@ describe("PR status check steps", () => {
     )
     expect(prompts[0]).toContain("automated reviews may have completed")
     expect(prompts[0]).toContain(
+      "Do not assume an automated review exists merely because CI is present",
+    )
+    expect(prompts[0]).toContain(
+      "Positive evidence is a relevant review run or a comment from a recognized automated reviewer",
+    )
+    expect(prompts[0]).toContain(
+      "If no relevant automated-review run or comment exists, that is a normal no-op",
+    )
+    expect(prompts[0]).toContain(
       "stop semantically incomplete even when GitHub reports its check and workflow as successful",
     )
     expect(prompts[0]).toContain(
@@ -722,14 +732,22 @@ describe("PR status check steps", () => {
       "stale incomplete comment when a newer attempt completed its review successfully",
     )
     expect(prompts[0]).toContain(
-      "linked latest review run is still active, leave it alone and do not start a duplicate",
+      "latest review attempt is still active, leave it alone and do not start a duplicate",
+    )
+    expect(prompts[0]).toContain("or left red checks unresolved")
+    expect(prompts[0]).toContain("report WAITING in the verdict turn")
+    expect(prompts[0]).toContain(
+      "terminal review attempt is incomplete when it produced no relevant review comment or its latest relevant comment remains visibly partial",
     )
     expect(prompts[0]).toContain(
-      "run is terminal and its latest relevant comment remains visibly incomplete, rerun the whole review workflow even when the run concluded success",
+      "Rerun the whole review workflow in either case",
     )
     expect(prompts[0]).toContain("do not use a failed-jobs-only rerun")
     expect(prompts[0]).toContain(
-      "cannot be restarted autonomously, report NEEDS_HUMAN",
+      "Report FAILED for a technical inability to inspect or retry it",
+    )
+    expect(prompts[0]).toContain(
+      "Report NEEDS_HUMAN only when evidence shows that an operator must perform or decide",
     )
     expect(prompts[0]).toContain(
       "completed review with no worthwhile feedback still needs no changes or rerun",
@@ -748,7 +766,7 @@ describe("PR status check steps", () => {
     )
   })
 
-  it("allows PROCESSED for a green-only review handoff with nothing to address", async () => {
+  it("allows PROCESSED for a green-only handoff with no review or nothing to address", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -789,11 +807,52 @@ describe("PR status check steps", () => {
       "Rerunning the whole workflow for a terminal incomplete review creates a replacement execution and supports PROCESSED",
     )
     expect(prompts[1]).toContain(
-      "terminal incomplete review is not green-only completed feedback with nothing to address",
+      "terminal incomplete review is not a green-only no-action success",
     )
     expect(prompts[1]).toContain(
-      "genuinely completed review with nothing to address",
+      "genuinely completed review had nothing to address",
     )
+    expect(prompts[1]).toContain(
+      "no relevant automated-review run or comment existed",
+    )
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: WAITING")
+    expect(prompts[1]).toContain(
+      "technical or observability failure prevented you from determining or recovering",
+    )
+  })
+
+  it("leaves a green handoff unhandled while its automated review is active", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "succeeded",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "review", outcome: "green" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith([
+              "The latest automated review run is still active.",
+              "READY_FOR_AGENT_RESULT: WAITING",
+            ]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "waiting",
+      handledCheckIds: [],
+    })
   })
 
   it("returns OpenCode's structured human intervention reason", async () => {

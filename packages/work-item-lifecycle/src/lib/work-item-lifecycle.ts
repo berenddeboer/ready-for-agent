@@ -1370,7 +1370,7 @@ export const makeWorkItemLifecycleLive = (
               Effect.map((result) => ({
                 handledCheckIds: result.handledCheckIds,
                 transition:
-                  result._tag === "processed"
+                  result._tag === "processed" || result._tag === "waiting"
                     ? {
                         nextState: "watch_pr_status_checks" as const,
                         delay: PR_STATUS_CHECKS_POLL_DELAY,
