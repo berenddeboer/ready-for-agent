@@ -1,4 +1,4 @@
-import { Clock, Context, Data, Effect, Layer } from "effect"
+import { Clock, Context, Effect, Layer, Schema } from "effect"
 import {
   type DatabaseError,
   DbService,
@@ -13,29 +13,35 @@ import {
   type ReadyLabeledIssue,
 } from "@ready-for-agent/github-service"
 
-export interface ReconciliationSummary {
-  readonly fetched: number
-  readonly inserted: number
-  readonly updated: number
-  readonly deleted: number
-  readonly unchanged: number
-}
+export const ReconciliationSummary = Schema.Struct({
+  fetched: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  inserted: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  updated: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  deleted: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  unchanged: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+})
+export type ReconciliationSummary = typeof ReconciliationSummary.Type
 
-export type ReconciliationMutation =
-  | "insert"
-  | "update"
-  | "delete"
-  | "record-success"
+export const ReconciliationMutation = Schema.Literals([
+  "insert",
+  "update",
+  "delete",
+  "record-success",
+])
+export type ReconciliationMutation = typeof ReconciliationMutation.Type
 
-export class ReconciliationMutationError extends Data.TaggedError(
+export class ReconciliationMutationError extends Schema.TaggedErrorClass<ReconciliationMutationError>()(
   "ReconciliationMutationError",
-)<{
-  readonly repositoryId: string
-  readonly operation: ReconciliationMutation
-  readonly githubIssueNumber?: number
-  readonly progress: ReconciliationSummary
-  readonly cause: unknown
-}> {}
+  {
+    repositoryId: Schema.String,
+    operation: ReconciliationMutation,
+    githubIssueNumber: Schema.optionalKey(
+      Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+    ),
+    progress: ReconciliationSummary,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type ReconciliationError =
   | GitHubRepositoryUnavailableError

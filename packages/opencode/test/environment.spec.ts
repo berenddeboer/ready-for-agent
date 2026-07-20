@@ -1,11 +1,16 @@
+import { Effect, Result } from "effect"
 import { makeOpencodeEnvironment } from "../src/index.js"
+import { OpencodeConfigError } from "../src/lib/errors.js"
 import { describe, expect, it } from "bun:test"
+
+const makeEnv = (options: Parameters<typeof makeOpencodeEnvironment>[0]) =>
+  Effect.runSync(makeOpencodeEnvironment(options))
 
 describe("makeOpencodeEnvironment", () => {
   it("forces remote Keymaxxer MCP with the capability URL", () => {
     expect(
       JSON.parse(
-        makeOpencodeEnvironment({
+        makeEnv({
           keymaxxerMcpUrl: "http://127.0.0.1:5032/cap/mcp",
           environment: {},
         }).OPENCODE_CONFIG_CONTENT,
@@ -34,7 +39,7 @@ describe("makeOpencodeEnvironment", () => {
 
     expect(
       JSON.parse(
-        makeOpencodeEnvironment({
+        makeEnv({
           keymaxxerMcpUrl: "http://127.0.0.1:5032/cap/mcp",
           environment: { OPENCODE_CONFIG_CONTENT: existingConfig },
         }).OPENCODE_CONFIG_CONTENT,
@@ -55,7 +60,7 @@ describe("makeOpencodeEnvironment", () => {
   })
 
   it("strips GitHub token environment variables", () => {
-    const env = makeOpencodeEnvironment({
+    const env = makeEnv({
       keymaxxerMcpUrl: "http://127.0.0.1:5032/cap/mcp",
       environment: {
         PATH: "/usr/bin",
@@ -74,9 +79,7 @@ describe("makeOpencodeEnvironment", () => {
 
   it("does not configure Keymaxxer when its capability URL is missing", () => {
     expect(
-      JSON.parse(
-        makeOpencodeEnvironment({ environment: {} }).OPENCODE_CONFIG_CONTENT,
-      ),
+      JSON.parse(makeEnv({ environment: {} }).OPENCODE_CONFIG_CONTENT),
     ).toEqual({})
   })
 
@@ -91,7 +94,7 @@ describe("makeOpencodeEnvironment", () => {
 
     expect(
       JSON.parse(
-        makeOpencodeEnvironment({
+        makeEnv({
           environment: { OPENCODE_CONFIG_CONTENT: existingConfig },
         }).OPENCODE_CONFIG_CONTENT,
       ),
@@ -99,5 +102,32 @@ describe("makeOpencodeEnvironment", () => {
       model: "anthropic/claude-sonnet-4-5",
       mcp: { filesystem: { enabled: true } },
     })
+  })
+
+  it("fails with OpencodeConfigError for non-object OPENCODE_CONFIG_CONTENT", () => {
+    const result = Effect.runSync(
+      makeOpencodeEnvironment({
+        environment: { OPENCODE_CONFIG_CONTENT: "[]" },
+      }).pipe(Effect.result),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(OpencodeConfigError)
+      expect(result.failure.message).toBe(
+        "OPENCODE_CONFIG_CONTENT must contain a JSON object",
+      )
+    }
+  })
+
+  it("fails with OpencodeConfigError for invalid JSON OPENCODE_CONFIG_CONTENT", () => {
+    const result = Effect.runSync(
+      makeOpencodeEnvironment({
+        environment: { OPENCODE_CONFIG_CONTENT: "{" },
+      }).pipe(Effect.result),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(OpencodeConfigError)
+    }
   })
 })
