@@ -1,6 +1,9 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 
-export const SecretName = Schema.String
+export const SecretName = Schema.String.pipe(
+  Schema.check(Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/)),
+  Schema.brand("SecretName"),
+)
 export type SecretName = typeof SecretName.Type
 
 export const AddSecretInput = Schema.Struct({
@@ -12,10 +15,18 @@ export const AddSecretInput = Schema.Struct({
   description: Schema.optional(Schema.String),
   tags: Schema.optional(Schema.String),
 })
-export type AddSecretInput = typeof AddSecretInput.Type
+export type AddSecretInput = {
+  readonly name: string
+  readonly provider?: string
+  readonly account?: string
+  readonly environment?: string
+  readonly access?: string
+  readonly description?: string
+  readonly tags?: string
+}
 
 export const HasSecretInput = Schema.Struct({ name: SecretName })
-export type HasSecretInput = typeof HasSecretInput.Type
+export type HasSecretInput = { readonly name: string }
 
 export const FindSecretInput = Schema.Struct({
   provider: Schema.String,
@@ -33,8 +44,37 @@ export const RunWithSecretsInput = Schema.Struct({
   cwd: Schema.String,
   secrets: Schema.Array(SecretName),
   timeoutMs: Schema.Finite,
-})
-export type RunWithSecretsInput = typeof RunWithSecretsInput.Type
+}).pipe(
+  Schema.check(
+    Schema.makeFilter(
+      (input: {
+        readonly command: string
+        readonly cwd: string
+        readonly secrets: readonly string[]
+        readonly timeoutMs: number
+      }) => {
+        if (input.command.trim() === "") return false
+        if (!input.cwd.startsWith("/")) return false
+        if (input.secrets.length === 0) return false
+        if (new Set(input.secrets).size !== input.secrets.length) return false
+        if (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0)
+          return false
+        return true
+      },
+      {
+        title: "RunWithSecretsInput",
+        description:
+          "non-empty command, absolute cwd, unique secrets, positive timeout",
+      },
+    ),
+  ),
+)
+export type RunWithSecretsInput = {
+  readonly command: string
+  readonly cwd: string
+  readonly secrets: readonly string[]
+  readonly timeoutMs: number
+}
 
 export const RunWithSecretsResult = Schema.Struct({
   exitCode: Schema.Finite,
@@ -43,22 +83,18 @@ export const RunWithSecretsResult = Schema.Struct({
 })
 export type RunWithSecretsResult = typeof RunWithSecretsResult.Type
 
-export const HealthResponse = Schema.Struct({
-  status: Schema.Literal("ok"),
-  protocolVersion: Schema.Literal(3),
+export const SecretMetadata = Schema.Struct({
+  name: Schema.String,
+  provider: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  account: Schema.optionalKey(Schema.NullOr(Schema.String)),
 })
+export type SecretMetadata = {
+  readonly name: string
+  readonly provider: string | null
+  readonly account: string | null
+}
 
-export const InitializeResponse = Schema.Struct({
-  initialized: Schema.Literal(true),
-})
-export const HasSecretResponse = Schema.Struct({ hasSecret: Schema.Boolean })
-export const FindSecretResponse = Schema.Struct({
-  name: Schema.NullOr(SecretName),
-})
-export const FindSecretsResponse = Schema.Struct({
-  names: Schema.Array(Schema.NullOr(SecretName)),
-})
-export const AddSecretResponse = Schema.Struct({ added: Schema.Boolean })
+export const SecretMetadataList = Schema.Array(SecretMetadata)
 
 export const protocolVersion = 3 as const
 
@@ -70,18 +106,99 @@ export class KeymaxxerError extends Schema.TaggedErrorClass<KeymaxxerError>()(
   },
 ) {}
 
-const secretNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/
+export const keymaxxerError = (operation: string, message: string) =>
+  new KeymaxxerError({ operation, message })
 
-export const validateSecretName = (name: string) => secretNamePattern.test(name)
+export const decodeSecretName = (
+  operation: string,
+  name: string,
+): Effect.Effect<SecretName, KeymaxxerError> =>
+  Schema.decodeUnknownEffect(SecretName)(name).pipe(
+    Effect.mapError(() => keymaxxerError(operation, "Invalid secret name")),
+  )
 
-export const validateRunInput = (input: RunWithSecretsInput) =>
-  input.command.trim() !== "" &&
-  input.cwd.startsWith("/") &&
-  input.secrets.length > 0 &&
-  input.secrets.every(validateSecretName) &&
-  new Set(input.secrets).size === input.secrets.length &&
-  Number.isInteger(input.timeoutMs) &&
-  input.timeoutMs > 0
+export const decodeAddSecretInput = (
+  input: AddSecretInput,
+): Effect.Effect<typeof AddSecretInput.Type, KeymaxxerError> =>
+  Schema.decodeUnknownEffect(AddSecretInput)(input).pipe(
+    Effect.mapError(() => keymaxxerError("addSecret", "Invalid secret name")),
+  )
+
+export const decodeRunWithSecretsInput = (
+  input: RunWithSecretsInput,
+): Effect.Effect<typeof RunWithSecretsInput.Type, KeymaxxerError> =>
+  Schema.decodeUnknownEffect(RunWithSecretsInput)(input).pipe(
+    Effect.mapError(() =>
+      keymaxxerError("runWithSecrets", "Invalid command input"),
+    ),
+  )
+
+export const decodeSecretMetadataList = (
+  operation: string,
+  text: string,
+): Effect.Effect<readonly SecretMetadata[], KeymaxxerError> =>
+  Effect.try({
+    try: () => JSON.parse(text) as unknown,
+    catch: () => keymaxxerError(operation, "Keymaxxer list failed"),
+  }).pipe(
+    Effect.flatMap((parsed) =>
+      Schema.decodeUnknownEffect(SecretMetadataList)(parsed).pipe(
+        Effect.mapError(() =>
+          keymaxxerError(operation, "Keymaxxer list failed"),
+        ),
+      ),
+    ),
+    Effect.map((items) =>
+      items.map((item) => ({
+        name: item.name,
+        provider: item.provider ?? null,
+        account: item.account ?? null,
+      })),
+    ),
+  )
+
+export const decodeRunWithSecretsResult = (
+  structuredContent: unknown,
+  text: string,
+): Effect.Effect<RunWithSecretsResult, KeymaxxerError> => {
+  const fromStructured =
+    Schema.decodeUnknownOption(RunWithSecretsResult)(structuredContent)
+  if (fromStructured._tag === "Some") {
+    return Effect.succeed(fromStructured.value)
+  }
+
+  const fromText = parseRunResultText(text)
+  if (fromText !== null) {
+    return Effect.succeed(fromText)
+  }
+
+  return Effect.fail(
+    keymaxxerError(
+      "runWithSecrets",
+      "Keymaxxer returned an invalid command result",
+    ),
+  )
+}
+
+const parseRunResultText = (text: string): RunWithSecretsResult | null => {
+  const exitCode = text.match(/^exit_code: (-?\d+)$/m)
+  const stdoutMarker = "--- stdout ---\n"
+  const stderrMarker = "\n--- stderr ---\n"
+  const stdoutStart = text.indexOf(stdoutMarker)
+  const stderrStart = text.indexOf(
+    stderrMarker,
+    stdoutStart + stdoutMarker.length,
+  )
+  const repeatedMarker = text.indexOf(stderrMarker, stderrStart + 1)
+  if (!exitCode || stdoutStart < 0 || stderrStart < stdoutStart) return null
+  if (repeatedMarker >= 0) return null
+
+  return {
+    exitCode: Number.parseInt(exitCode[1] ?? "", 10),
+    stdout: text.slice(stdoutStart + stdoutMarker.length, stderrStart),
+    stderr: text.slice(stderrStart + stderrMarker.length),
+  }
+}
 
 export const containsRawSecretValue = (value: unknown): boolean => {
   if (Array.isArray(value)) {
