@@ -1,4 +1,13 @@
-import { DateTime, Duration, Effect, Layer, Option, Schedule } from "effect"
+import {
+  Clock,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+} from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import type {
@@ -15,6 +24,7 @@ import {
   EnqueueError,
   JobId,
   JobNotFoundError,
+  QueueReadError,
   QueueService,
   makeJobId,
   validateJobKey,
@@ -40,11 +50,16 @@ const formatSqlError = (error: SqlError): string => {
   return parts.join(" -> ")
 }
 
-const isSqliteBusy = (error: unknown): boolean =>
-  error instanceof Error &&
-  (error.message.includes("SQLITE_BUSY") ||
-    error.message.includes("database is locked") ||
-    error.message.includes("SQL statements in progress"))
+const isSqliteBusy = (error: unknown): boolean => {
+  if (!(error instanceof Error)) return false
+  const message = error.message
+  return (
+    message.includes("SQLITE_BUSY") ||
+    message.includes("database is locked") ||
+    message.includes("SQL statements in progress") ||
+    message.includes("CONCURRENT")
+  )
+}
 
 const retrySqliteBusy = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
@@ -65,38 +80,164 @@ const retryLimitFromOptions = (options?: {
     ? DEFAULT_MAX_RETRIES
     : options.retryLimit + 1
 
-type JobRow = {
-  readonly id: string
-  readonly queue: string
-  readonly key: string | null
-  readonly job_payload: string
-  readonly job_attempts: number
-  readonly job_retry_limit: number
-  readonly available_at: number
-  readonly locked_until: number | null
-}
+const JobSqlRow = Schema.Struct({
+  id: Schema.String,
+  queue: Schema.String,
+  key: Schema.NullOr(Schema.String),
+  jobPayload: Schema.String,
+  jobAttempts: Schema.Finite,
+  jobRetryLimit: Schema.Finite,
+  availableAt: Schema.Finite,
+  lockedUntil: Schema.NullOr(Schema.Finite),
+}).pipe(
+  Schema.encodeKeys({
+    jobPayload: "job_payload",
+    jobAttempts: "job_attempts",
+    jobRetryLimit: "job_retry_limit",
+    availableAt: "available_at",
+    lockedUntil: "locked_until",
+  }),
+)
+type JobSqlRow = typeof JobSqlRow.Type
 
-const rawJob = (row: JobRow): RawJob => ({
-  jobId: JobId.make(row.id),
-  queue: row.queue,
-  key: row.key,
-  payload: JSON.parse(row.job_payload),
-  attempts: row.job_attempts,
-  maxAttempts: row.job_retry_limit,
-  availableAt: toUtc(row.available_at),
-  lockedUntil: toUtc(row.locked_until ?? row.available_at),
+const IdSqlRow = Schema.Struct({
+  id: Schema.String,
 })
 
-const keyedEntry = (row: JobRow): KeyedQueueEntry => ({
-  jobId: JobId.make(row.id),
-  queue: row.queue,
-  key: row.key as string,
-  payload: JSON.parse(row.job_payload),
-  attempts: row.job_attempts,
-  maxAttempts: row.job_retry_limit,
-  availableAt: toUtc(row.available_at),
-  lockedUntil: row.locked_until === null ? null : toUtc(row.locked_until),
+const KeyedLockSqlRow = Schema.Struct({
+  id: Schema.String,
+  key: Schema.NullOr(Schema.String),
+  lockedUntil: Schema.NullOr(Schema.Finite),
+}).pipe(
+  Schema.encodeKeys({
+    lockedUntil: "locked_until",
+  }),
+)
+
+const StatsSqlRow = Schema.Struct({
+  pending: Schema.Finite,
+  processing: Schema.Finite,
+  deadLetter: Schema.Finite,
 })
+
+const decodeJobRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(JobSqlRow))(rows)
+
+const decodeIdRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(IdSqlRow))(rows)
+
+const decodeKeyedLockRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(KeyedLockSqlRow))(rows)
+
+const decodeStatsRows = (rows: ReadonlyArray<unknown>) =>
+  Schema.decodeUnknownEffect(Schema.Array(StatsSqlRow))(rows)
+
+class JsonParseError extends Schema.TaggedErrorClass<JsonParseError>()(
+  "JsonParseError",
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+const parseJsonPayload = (raw: string) =>
+  Effect.try({
+    try: () => JSON.parse(raw) as unknown,
+    catch: (cause) =>
+      new JsonParseError({
+        message:
+          cause instanceof Error ? cause.message : "Failed to parse JSON",
+        cause,
+      }),
+  })
+
+const rawJobFromRow = (row: JobSqlRow): Effect.Effect<RawJob, JsonParseError> =>
+  Effect.gen(function* () {
+    const payload = yield* parseJsonPayload(row.jobPayload)
+    return {
+      jobId: JobId.make(row.id),
+      queue: row.queue,
+      key: row.key,
+      payload,
+      attempts: row.jobAttempts,
+      maxAttempts: row.jobRetryLimit,
+      availableAt: toUtc(row.availableAt),
+      lockedUntil: toUtc(row.lockedUntil ?? row.availableAt),
+    } satisfies RawJob
+  })
+
+const keyedEntryFromRow = (
+  row: JobSqlRow,
+): Effect.Effect<KeyedQueueEntry, JsonParseError> =>
+  Effect.gen(function* () {
+    const payload = yield* parseJsonPayload(row.jobPayload)
+    return {
+      jobId: JobId.make(row.id),
+      queue: row.queue,
+      key: row.key as string,
+      payload,
+      attempts: row.jobAttempts,
+      maxAttempts: row.jobRetryLimit,
+      availableAt: toUtc(row.availableAt),
+      lockedUntil: row.lockedUntil === null ? null : toUtc(row.lockedUntil),
+    } satisfies KeyedQueueEntry
+  })
+
+const toEnqueueError = (queue: string, error: SqlError) =>
+  new EnqueueError({
+    queue,
+    message: `Database error: ${formatSqlError(error)}`,
+    cause: error,
+  })
+
+const toClaimError = (queue: string, error: SqlError) =>
+  new ClaimError({
+    queue,
+    message: `Database error: ${formatSqlError(error)}`,
+    cause: error,
+  })
+
+const toAcknowledgeError = (jobId: string, error: SqlError) =>
+  new AcknowledgeError({
+    jobId,
+    message: `Database error: ${formatSqlError(error)}`,
+    cause: error,
+  })
+
+const toQueueReadSqlError = (queue: string, error: SqlError) =>
+  new QueueReadError({
+    queue,
+    message: `Database error: ${formatSqlError(error)}`,
+    cause: error,
+  })
+
+const toQueueReadSchemaError = (queue: string, error: Schema.SchemaError) =>
+  new QueueReadError({
+    queue,
+    message: `Database row shape error: ${error.message}`,
+    cause: error,
+  })
+
+const toClaimSchemaError = (queue: string, error: Schema.SchemaError) =>
+  new ClaimError({
+    queue,
+    message: `Database row shape error: ${error.message}`,
+    cause: error,
+  })
+
+const toEnqueueSchemaError = (queue: string, error: Schema.SchemaError) =>
+  new EnqueueError({
+    queue,
+    message: `Database row shape error: ${error.message}`,
+    cause: error,
+  })
+
+const toAcknowledgeSchemaError = (jobId: string, error: Schema.SchemaError) =>
+  new AcknowledgeError({
+    jobId,
+    message: `Database row shape error: ${error.message}`,
+    cause: error,
+  })
 
 export const SqliteQueueServiceLive = Layer.effect(
   QueueService,
@@ -112,7 +253,7 @@ export const SqliteQueueServiceLive = Layer.effect(
       ) =>
         Effect.gen(function* () {
           yield* validateQueueName(queue)
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const jobId = makeJobId()
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
@@ -128,17 +269,11 @@ export const SqliteQueueServiceLive = Layer.effect(
                 now,
               ],
             ),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new EnqueueError({
-                  queue,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
+          ).pipe(Effect.mapError((error) => toEnqueueError(queue, error)))
+          const decoded = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toEnqueueSchemaError(queue, error)),
           )
-          const row = rows[0] as { readonly id: string } | undefined
+          const row = decoded[0]
           if (!row)
             return yield* new EnqueueError({
               queue,
@@ -154,7 +289,7 @@ export const SqliteQueueServiceLive = Layer.effect(
       ) =>
         Effect.gen(function* () {
           yield* validateQueueName(queue)
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const jobId = makeJobId()
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
@@ -170,17 +305,11 @@ export const SqliteQueueServiceLive = Layer.effect(
                 now,
               ],
             ),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new EnqueueError({
-                  queue,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
+          ).pipe(Effect.mapError((error) => toEnqueueError(queue, error)))
+          const decoded = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toEnqueueSchemaError(queue, error)),
           )
-          const row = rows[0] as { readonly id: string } | undefined
+          const row = decoded[0]
           if (!row)
             return yield* new EnqueueError({
               queue,
@@ -198,7 +327,7 @@ export const SqliteQueueServiceLive = Layer.effect(
         Effect.gen(function* () {
           yield* validateQueueName(queue)
           yield* validateJobKey(key)
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const jobId = makeJobId()
           const availableAt = now + Duration.toMillis(delay)
           const result = yield* retrySqliteBusy(
@@ -220,9 +349,12 @@ export const SqliteQueueServiceLive = Layer.effect(
                     now,
                   ],
                 )
-                const insertedRow = inserted[0] as
-                  | { readonly id: string }
-                  | undefined
+                const insertedDecoded = yield* decodeIdRows(inserted).pipe(
+                  Effect.mapError((error) =>
+                    toEnqueueSchemaError(queue, error),
+                  ),
+                )
+                const insertedRow = insertedDecoded[0]
                 if (insertedRow) {
                   return {
                     jobId: JobId.make(insertedRow.id),
@@ -233,9 +365,12 @@ export const SqliteQueueServiceLive = Layer.effect(
                   `SELECT id FROM job_queue WHERE queue = ? AND key = ?`,
                   [queue, key],
                 )
-                const existingRow = existing[0] as
-                  | { readonly id: string }
-                  | undefined
+                const existingDecoded = yield* decodeIdRows(existing).pipe(
+                  Effect.mapError((error) =>
+                    toEnqueueSchemaError(queue, error),
+                  ),
+                )
+                const existingRow = existingDecoded[0]
                 if (!existingRow) {
                   return yield* new EnqueueError({
                     queue,
@@ -252,11 +387,7 @@ export const SqliteQueueServiceLive = Layer.effect(
             Effect.mapError((error) =>
               error instanceof EnqueueError
                 ? error
-                : new EnqueueError({
-                    queue,
-                    message: `Database error: ${formatSqlError(error as SqlError)}`,
-                    cause: error,
-                  }),
+                : toEnqueueError(queue, error as SqlError),
             ),
           )
           return result
@@ -272,12 +403,26 @@ export const SqliteQueueServiceLive = Layer.effect(
                ORDER BY key, id`,
               [queue],
             )
-            .pipe(Effect.orElseSucceed(() => []))
-          return (rows as ReadonlyArray<JobRow>).map(keyedEntry)
+            .pipe(Effect.mapError((error) => toQueueReadSqlError(queue, error)))
+          const decoded = yield* decodeJobRows(rows).pipe(
+            Effect.mapError((error) => toQueueReadSchemaError(queue, error)),
+          )
+          return yield* Effect.forEach(decoded, (row) =>
+            keyedEntryFromRow(row).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new QueueReadError({
+                    queue,
+                    message: `Failed to parse job payload for job ${row.id}`,
+                    cause,
+                  }),
+              ),
+            ),
+          )
         }),
       postponeKeyed: (jobId: string, delay: Duration.Duration) =>
         Effect.gen(function* () {
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const availableAt = now + Duration.toMillis(delay)
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
@@ -292,39 +437,21 @@ export const SqliteQueueServiceLive = Layer.effect(
                RETURNING id`,
               [availableAt, now, jobId],
             ),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new AcknowledgeError({
-                  jobId,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
+          ).pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const updated = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
           )
-          if (rows[0]) return
+          if (updated[0]) return
           const existing = yield* sql
             .unsafe(
               `SELECT id, key, locked_until FROM job_queue WHERE id = ?`,
               [jobId],
             )
-            .pipe(
-              Effect.mapError(
-                (error) =>
-                  new AcknowledgeError({
-                    jobId,
-                    message: `Database error: ${formatSqlError(error)}`,
-                    cause: error,
-                  }),
-              ),
-            )
-          const row = existing[0] as
-            | {
-                readonly id: string
-                readonly key: string | null
-                readonly locked_until: number | null
-              }
-            | undefined
+            .pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const decoded = yield* decodeKeyedLockRows(existing).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
+          )
+          const row = decoded[0]
           if (!row) return yield* new JobNotFoundError({ jobId })
           if (row.key === null) {
             return yield* new AcknowledgeError({
@@ -346,16 +473,7 @@ export const SqliteQueueServiceLive = Layer.effect(
               queue,
               key,
             ]),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new EnqueueError({
-                  queue,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
-          )
+          ).pipe(Effect.mapError((error) => toEnqueueError(queue, error)))
         }),
       rawClaim: (
         queue: string,
@@ -363,7 +481,7 @@ export const SqliteQueueServiceLive = Layer.effect(
       ) =>
         Effect.gen(function* () {
           yield* validateQueueName(queue)
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const lockedUntil = now + Duration.toMillis(visibilityTimeout)
           const rows = yield* retrySqliteBusy(
             sql.withTransaction(
@@ -379,18 +497,23 @@ export const SqliteQueueServiceLive = Layer.effect(
                 [lockedUntil, now, queue, now, now],
               ),
             ),
-          ).pipe(
+          ).pipe(Effect.mapError((error) => toClaimError(queue, error)))
+          const decoded = yield* decodeJobRows(rows).pipe(
+            Effect.mapError((error) => toClaimSchemaError(queue, error)),
+          )
+          const row = decoded[0]
+          if (!row) return Option.none()
+          const job = yield* rawJobFromRow(row).pipe(
             Effect.mapError(
-              (error) =>
+              (cause) =>
                 new ClaimError({
                   queue,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
+                  message: `Failed to parse job payload for job ${row.id}`,
+                  cause,
                 }),
             ),
           )
-          const row = rows[0] as JobRow | undefined
-          return row ? Option.some(rawJob(row)) : Option.none()
+          return Option.some(job)
         }),
       acknowledge: (jobId: string) =>
         Effect.gen(function* () {
@@ -398,21 +521,15 @@ export const SqliteQueueServiceLive = Layer.effect(
             sql.unsafe("DELETE FROM job_queue WHERE id = ? RETURNING id", [
               jobId,
             ]),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new AcknowledgeError({
-                  jobId,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
+          ).pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const decoded = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
           )
-          if (!rows[0]) return yield* new JobNotFoundError({ jobId })
+          if (!decoded[0]) return yield* new JobNotFoundError({ jobId })
         }),
       fail: (jobId: string, options?) =>
         Effect.gen(function* () {
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const statement =
             options?.retryable === false
               ? "UPDATE job_queue SET job_attempts = job_retry_limit, locked_until = NULL, updated_at = ? WHERE id = ? RETURNING id"
@@ -425,50 +542,32 @@ export const SqliteQueueServiceLive = Layer.effect(
               : [jobId]
           const rows = yield* retrySqliteBusy(
             sql.unsafe(statement, params),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new AcknowledgeError({
-                  jobId,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
+          ).pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const decoded = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
           )
-          if (!rows[0]) return yield* new JobNotFoundError({ jobId })
+          if (!decoded[0]) return yield* new JobNotFoundError({ jobId })
         }),
       extendVisibility: (jobId: string, timeout: Duration.Duration) =>
         Effect.gen(function* () {
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
               "UPDATE job_queue SET locked_until = ?, updated_at = ? WHERE id = ? AND locked_until IS NOT NULL RETURNING id",
               [now + Duration.toMillis(timeout), now, jobId],
             ),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new AcknowledgeError({
-                  jobId,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
+          ).pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const updated = yield* decodeIdRows(rows).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
           )
-          if (rows[0]) return
+          if (updated[0]) return
           const exists = yield* sql
             .unsafe("SELECT id FROM job_queue WHERE id = ?", [jobId])
-            .pipe(
-              Effect.mapError(
-                (error) =>
-                  new AcknowledgeError({
-                    jobId,
-                    message: `Database error: ${formatSqlError(error)}`,
-                    cause: error,
-                  }),
-              ),
-            )
-          if (!exists[0]) return yield* new JobNotFoundError({ jobId })
+            .pipe(Effect.mapError((error) => toAcknowledgeError(jobId, error)))
+          const decoded = yield* decodeIdRows(exists).pipe(
+            Effect.mapError((error) => toAcknowledgeSchemaError(jobId, error)),
+          )
+          if (!decoded[0]) return yield* new JobNotFoundError({ jobId })
           return yield* new AcknowledgeError({
             jobId,
             message: "Cannot extend visibility of unlocked job",
@@ -477,7 +576,7 @@ export const SqliteQueueServiceLive = Layer.effect(
       getStats: (queue: string) =>
         Effect.gen(function* () {
           yield* validateQueueName(queue)
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const rows = yield* sql
             .unsafe(
               `SELECT
@@ -487,12 +586,11 @@ export const SqliteQueueServiceLive = Layer.effect(
              FROM job_queue WHERE queue = ?`,
               [now, now, queue],
             )
-            .pipe(Effect.orElseSucceed(() => []))
-          return (
-            (rows[0] as
-              | { pending: number; processing: number; deadLetter: number }
-              | undefined) ?? { pending: 0, processing: 0, deadLetter: 0 }
+            .pipe(Effect.mapError((error) => toQueueReadSqlError(queue, error)))
+          const decoded = yield* decodeStatsRows(rows).pipe(
+            Effect.mapError((error) => toQueueReadSchemaError(queue, error)),
           )
+          return decoded[0] ?? { pending: 0, processing: 0, deadLetter: 0 }
         }),
       requeueByPayloadTag: (
         fromQueue: string,
@@ -503,7 +601,7 @@ export const SqliteQueueServiceLive = Layer.effect(
           yield* validateQueueName(fromQueue)
           yield* validateQueueName(toQueue)
           if (fromQueue === toQueue) return 0
-          const now = Date.now()
+          const now = yield* Clock.currentTimeMillis
           const rows = yield* retrySqliteBusy(
             sql.unsafe(
               `UPDATE job_queue
@@ -513,16 +611,7 @@ export const SqliteQueueServiceLive = Layer.effect(
                RETURNING id`,
               [toQueue, now, fromQueue, payloadTag],
             ),
-          ).pipe(
-            Effect.mapError(
-              (error) =>
-                new EnqueueError({
-                  queue: toQueue,
-                  message: `Database error: ${formatSqlError(error)}`,
-                  cause: error,
-                }),
-            ),
-          )
+          ).pipe(Effect.mapError((error) => toEnqueueError(toQueue, error)))
           return rows.length
         }),
     })

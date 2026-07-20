@@ -5,6 +5,7 @@ import type {
   ClaimError,
   EnqueueError,
   JobNotFoundError,
+  QueueReadError,
 } from "./errors.js"
 import {
   InvalidJobKeyError,
@@ -174,7 +175,10 @@ export interface QueueServiceShape {
    */
   readonly listKeyed: (
     queue: string,
-  ) => Effect.Effect<ReadonlyArray<KeyedQueueEntry>, InvalidQueueNameError>
+  ) => Effect.Effect<
+    ReadonlyArray<KeyedQueueEntry>,
+    InvalidQueueNameError | QueueReadError
+  >
 
   /**
    * Postpone a claimed keyed entry in place: preserve identity, release claim,
@@ -242,7 +246,7 @@ export interface QueueServiceShape {
    */
   readonly getStats: (
     queue: string,
-  ) => Effect.Effect<QueueStats, InvalidQueueNameError>
+  ) => Effect.Effect<QueueStats, InvalidQueueNameError | QueueReadError>
 
   /**
    * Move all jobs whose payload `_tag` matches from one queue to another.
@@ -264,42 +268,36 @@ export class QueueService extends Context.Service<
    * Claim the next available job from the queue with type-safe payload parsing.
    * Returns None if no jobs are available.
    */
-  static claim = <A>(
+  static claim = Effect.fn("QueueService.claim")(function* <A>(
     queue: string,
     schema: Schema.Decoder<A>,
     visibilityTimeout?: Duration.Duration,
-  ): Effect.Effect<
-    Option.Option<Job<A>>,
-    ClaimError | InvalidQueueNameError | PayloadParseError,
-    QueueService
-  > =>
-    Effect.gen(function* () {
-      const service = yield* QueueService
-      const rawJobOption = yield* service.rawClaim(queue, visibilityTimeout)
+  ) {
+    const service = yield* QueueService
+    const rawJobOption = yield* service.rawClaim(queue, visibilityTimeout)
 
-      if (Option.isNone(rawJobOption)) {
-        return Option.none()
-      }
+    if (Option.isNone(rawJobOption)) {
+      return Option.none()
+    }
 
-      const rawJob = rawJobOption.value
-      const payload = yield* Schema.decodeUnknownEffect(schema)(
-        rawJob.payload,
-      ).pipe(
-        Effect.mapError(
-          (error) =>
-            new PayloadParseError({ queue, jobId: rawJob.jobId, error }),
-        ),
-      )
+    const rawJob = rawJobOption.value
+    const payload = yield* Schema.decodeUnknownEffect(schema)(
+      rawJob.payload,
+    ).pipe(
+      Effect.mapError(
+        (error) => new PayloadParseError({ queue, jobId: rawJob.jobId, error }),
+      ),
+    )
 
-      return Option.some<Job<A>>({
-        jobId: rawJob.jobId,
-        queue: rawJob.queue,
-        key: rawJob.key,
-        payload,
-        attempts: rawJob.attempts,
-        maxAttempts: rawJob.maxAttempts,
-        availableAt: rawJob.availableAt,
-        lockedUntil: rawJob.lockedUntil,
-      })
+    return Option.some<Job<A>>({
+      jobId: rawJob.jobId,
+      queue: rawJob.queue,
+      key: rawJob.key,
+      payload,
+      attempts: rawJob.attempts,
+      maxAttempts: rawJob.maxAttempts,
+      availableAt: rawJob.availableAt,
+      lockedUntil: rawJob.lockedUntil,
     })
+  })
 }

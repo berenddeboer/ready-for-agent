@@ -1,6 +1,8 @@
 import { DateTime, Duration, Effect, Layer, Option } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
+  ClaimError,
   InvalidQueueNameError,
   QueueService,
 } from "@ready-for-agent/queue-service"
@@ -227,6 +229,38 @@ describe("SqliteQueueService", () => {
 
           const job6 = yield* queue.rawClaim(queueName)
           expect(Option.isNone(job6)).toBe(true)
+        }),
+      ))
+
+    it("should fail with ClaimError when job payload is corrupt JSON", () =>
+      runTest(
+        Effect.gen(function* () {
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const queueName = `corrupt-payload-queue-${Date.now()}`
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO job_queue (id, queue, job_payload, job_retry_limit, available_at, locked_until, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+            [
+              "qjob-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+              queueName,
+              "{not-json",
+              5,
+              now,
+              now,
+              now,
+            ],
+          )
+
+          const result = yield* Effect.result(queue.rawClaim(queueName))
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure).toBeInstanceOf(ClaimError)
+            expect(result.failure.message).toContain(
+              "Failed to parse job payload",
+            )
+          }
         }),
       ))
   })

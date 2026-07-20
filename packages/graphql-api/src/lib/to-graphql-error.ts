@@ -144,6 +144,8 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       return gql(error.message ?? "Database error", "DATABASE_ERROR")
     case "EnqueueError":
       return gql(error.message ?? "Enqueue error", "ENQUEUE_ERROR")
+    case "QueueReadError":
+      return gql(error.message ?? "Queue read error", "QUEUE_READ_ERROR")
     case "ResetCleanupError":
       return gql(
         error.message ?? "Reset cleanup failed",
