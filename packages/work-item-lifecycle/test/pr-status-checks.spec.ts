@@ -464,7 +464,47 @@ describe("PR status check steps", () => {
       "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
     )
     expect(prompts[0]).not.toContain("automated reviews may have completed")
+    expect(prompts[0]).toContain("restart the failed checks when appropriate")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
+    expect(prompts[1]).toContain(
+      "If this handoff contained red checks and you made no commit, push, check restart",
+    )
+  })
+
+  it("returns failed when OpenCode reports FAILED for red checks with no action", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith([
+              "No code changes, commit, push, or PR comment were made.",
+              "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed twice on GitHub 503; restart did not help",
+            ]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "failed",
+      reason: "ActionLint failed twice on GitHub 503; restart did not help",
+      handledCheckIds: [expect.any(String)],
+    })
   })
 
   it("fails the investigate step when harness diagnostics cannot load", async () => {
@@ -566,6 +606,40 @@ describe("PR status check steps", () => {
     expect(prompts[0]).toContain(
       "Do not post this summary comment when you did not create a commit",
     )
+  })
+
+  it("allows PROCESSED for a green-only review handoff with nothing to address", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "succeeded",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "review", outcome: "green" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith([
+              "No review feedback needed changes.",
+              "READY_FOR_AGENT_RESULT: PROCESSED",
+            ]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "processed",
+      handledCheckIds: [expect.any(String)],
+    })
   })
 
   it("returns OpenCode's structured human intervention reason", async () => {

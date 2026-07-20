@@ -50,6 +50,11 @@ export type PrStatusCheckInvestigationResult =
       readonly reason: string
       readonly handledCheckIds: readonly string[]
     }
+  | {
+      readonly _tag: "failed"
+      readonly reason: string
+      readonly handledCheckIds: readonly string[]
+    }
 
 interface ObservedPrStatusCheckRow {
   readonly id: string
@@ -188,9 +193,14 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
     return status._tag satisfies PrStatusCheckResult
   })
 
+type ParsedInvestigationResult =
+  | "processed"
+  | { readonly _tag: "needs_human"; readonly reason: string }
+  | { readonly _tag: "failed"; readonly reason: string }
+
 const parseInvestigationResult = (
   output: string,
-): "processed" | { readonly reason: string } | null => {
+): ParsedInvestigationResult | null => {
   const lines = output.split("\n").map((line) => line.trim())
   const nonEmptyLines = lines.filter((line) => line !== "")
   const resultLines = lines.filter((line) =>
@@ -211,7 +221,19 @@ const parseInvestigationResult = (
     /^READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*(.+)$/i,
   )
   if (needsHuman?.[1] !== undefined && needsHuman[1].trim() !== "") {
-    return { reason: needsHuman[1].trim().slice(0, 500) }
+    return {
+      _tag: "needs_human",
+      reason: needsHuman[1].trim().slice(0, 500),
+    }
+  }
+  const failed = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*FAILED\s*:\s*(.+)$/i,
+  )
+  if (failed?.[1] !== undefined && failed[1].trim() !== "") {
+    return {
+      _tag: "failed",
+      reason: failed[1].trim().slice(0, 500),
+    }
   }
   return null
 }
@@ -272,6 +294,7 @@ const buildInvestigationWorkPrompt = (
       ...redChecks.map(formatRedCheckLine),
       "Fine-grained GitHub PATs often cannot use the Checks API; HTTP 403 on Checks endpoints is expected and is not a credential failure by itself. Prefer Actions job logs for external ids of the form actions-job:<id>.",
       "When calling `gh api` with query parameters on GET endpoints, pass `--method GET` with `-f` (or use a GET-safe invocation). Bare `-f` defaults to POST and can produce misleading 404 responses.",
+      "For transient infrastructure failures (for example GitHub 503, runner outages, or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
     )
     if (diagnostics.length > 0) {
       lines.push(
@@ -304,6 +327,9 @@ const buildInvestigationVerdictPrompt = (): string =>
     "Do not make further code changes unless required to answer accurately.",
     "Reply with exactly one machine-readable result line (and optional brief prose before it):",
     "READY_FOR_AGENT_RESULT: PROCESSED",
+    "Use PROCESSED only when you took an action expected to produce new check executions (for example a commit and push, or restarting failed checks), or when the handoff was green-only review feedback with nothing to address.",
+    "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED. Report:",
+    "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
     "or, only when the handoff cannot be processed autonomously or requires a human decision:",
     "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
   ].join("\n")
@@ -413,18 +439,26 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
     const investigation = parseInvestigationResult(verdict.assistantText)
     if (investigation === null) {
       return yield* new PrStatusChecksOpenCodeError({
-        message: "OpenCode did not report PROCESSED or NEEDS_HUMAN",
+        message: "OpenCode did not report PROCESSED, FAILED, or NEEDS_HUMAN",
       })
     }
     const handledCheckIds = unhandled.map((check) => check.id)
-    return investigation === "processed"
-      ? ({
-          _tag: "processed",
-          handledCheckIds,
-        } satisfies PrStatusCheckInvestigationResult)
-      : ({
-          _tag: "needs_human",
-          reason: investigation.reason,
-          handledCheckIds,
-        } satisfies PrStatusCheckInvestigationResult)
+    if (investigation === "processed") {
+      return {
+        _tag: "processed",
+        handledCheckIds,
+      } satisfies PrStatusCheckInvestigationResult
+    }
+    if (investigation._tag === "needs_human") {
+      return {
+        _tag: "needs_human",
+        reason: investigation.reason,
+        handledCheckIds,
+      } satisfies PrStatusCheckInvestigationResult
+    }
+    return {
+      _tag: "failed",
+      reason: investigation.reason,
+      handledCheckIds,
+    } satisfies PrStatusCheckInvestigationResult
   })
