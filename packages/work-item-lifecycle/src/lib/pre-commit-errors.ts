@@ -1,53 +1,59 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class PreCommitWorktreeContextMissingError extends Data.TaggedError(
+export class PreCommitWorktreeContextMissingError extends Schema.TaggedErrorClass<PreCommitWorktreeContextMissingError>()(
   "PreCommitWorktreeContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class PreCommitInvalidWorktreeContextError extends Data.TaggedError(
+export class PreCommitInvalidWorktreeContextError extends Schema.TaggedErrorClass<PreCommitInvalidWorktreeContextError>()(
   "PreCommitInvalidWorktreeContextError",
-)<{
-  readonly workItemId: string
-  readonly worktreePath: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    worktreePath: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class PreCommitStageError extends Data.TaggedError(
+export class PreCommitStageError extends Schema.TaggedErrorClass<PreCommitStageError>()(
   "PreCommitStageError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly exitCode: number
-  readonly output: string
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    exitCode: Schema.Finite,
+    output: Schema.String,
+  },
+) {}
 
-export class PreCommitHookFailedError extends Data.TaggedError(
+export class PreCommitHookFailedError extends Schema.TaggedErrorClass<PreCommitHookFailedError>()(
   "PreCommitHookFailedError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly exitCode: number
-  readonly output: string
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    exitCode: Schema.Finite,
+    output: Schema.String,
+  },
+) {}
 
-export class PreCommitSessionContextMissingError extends Data.TaggedError(
+export class PreCommitSessionContextMissingError extends Schema.TaggedErrorClass<PreCommitSessionContextMissingError>()(
   "PreCommitSessionContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class PreCommitOpenCodeError extends Data.TaggedError(
+export class PreCommitOpenCodeError extends Schema.TaggedErrorClass<PreCommitOpenCodeError>()(
   "PreCommitOpenCodeError",
-)<{
-  readonly message: string
-  readonly worktreePath: string
-  readonly sessionId: string
-  readonly cause?: unknown
-}> {}
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    sessionId: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type PreCommitError =
   | PreCommitWorktreeContextMissingError

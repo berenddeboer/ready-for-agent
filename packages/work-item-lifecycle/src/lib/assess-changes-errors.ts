@@ -1,48 +1,54 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class AssessChangesWorktreeContextMissingError extends Data.TaggedError(
+export class AssessChangesWorktreeContextMissingError extends Schema.TaggedErrorClass<AssessChangesWorktreeContextMissingError>()(
   "AssessChangesWorktreeContextMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class AssessChangesInvalidWorktreeContextError extends Data.TaggedError(
+export class AssessChangesInvalidWorktreeContextError extends Schema.TaggedErrorClass<AssessChangesInvalidWorktreeContextError>()(
   "AssessChangesInvalidWorktreeContextError",
-)<{
-  readonly workItemId: string
-  readonly worktreePath: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    worktreePath: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class AssessChangesStartingCommitMissingError extends Data.TaggedError(
+export class AssessChangesStartingCommitMissingError extends Schema.TaggedErrorClass<AssessChangesStartingCommitMissingError>()(
   "AssessChangesStartingCommitMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class AssessChangesSessionMissingError extends Data.TaggedError(
+export class AssessChangesSessionMissingError extends Schema.TaggedErrorClass<AssessChangesSessionMissingError>()(
   "AssessChangesSessionMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class AssessChangesOpenCodeError extends Data.TaggedError(
+export class AssessChangesOpenCodeError extends Schema.TaggedErrorClass<AssessChangesOpenCodeError>()(
   "AssessChangesOpenCodeError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-  readonly cause?: unknown
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
-export class AssessChangesResultError extends Data.TaggedError(
+export class AssessChangesResultError extends Schema.TaggedErrorClass<AssessChangesResultError>()(
   "AssessChangesResultError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
 export type AssessChangesError =
   | AssessChangesWorktreeContextMissingError

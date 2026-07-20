@@ -1,26 +1,29 @@
-import { Data } from "effect"
+import { Schema } from "effect"
 
-export class CloseIssueSummaryMissingError extends Data.TaggedError(
+export class CloseIssueSummaryMissingError extends Schema.TaggedErrorClass<CloseIssueSummaryMissingError>()(
   "CloseIssueSummaryMissingError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CloseIssueContextError extends Data.TaggedError(
+export class CloseIssueContextError extends Schema.TaggedErrorClass<CloseIssueContextError>()(
   "CloseIssueContextError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
 
-export class CloseIssueEligibilityError extends Data.TaggedError(
+export class CloseIssueEligibilityError extends Schema.TaggedErrorClass<CloseIssueEligibilityError>()(
   "CloseIssueEligibilityError",
-)<{
-  readonly workItemId: string
-  readonly message: string
-  readonly failureCode: string
-}> {}
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+    failureCode: Schema.String,
+  },
+) {}
 
 export type CloseIssueError =
   | CloseIssueSummaryMissingError

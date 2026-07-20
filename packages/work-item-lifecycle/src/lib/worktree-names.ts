@@ -74,7 +74,7 @@ export const worktreeParentPath = (input: {
     return `${dirname(localPath)}/${repositoryStem(localPath)}-worktrees`
   }
 
-  const temporaryDirectory = (input.tmpDir ?? process.env.TMPDIR ?? "/tmp")
+  const temporaryDirectory = (input.tmpDir ?? "/tmp")
     .trim()
     .replace(/[/\\]+$/, "")
   return `${temporaryDirectory}/ready-for-agent/${sanitizeSegment(input.githubOwner)}/${sanitizeSegment(input.githubRepo)}`

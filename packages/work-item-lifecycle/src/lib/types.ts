@@ -17,38 +17,49 @@ export type StepRunId = typeof StepRunId.Type
 
 export const makeStepRunId = (): StepRunId => StepRunId.make(`srun-${ulid()}`)
 
-export type OperationalLifecycleStep =
-  | "create_worktree"
-  | "install_dependencies"
-  | "implement"
-  | "assess_changes"
-  | "pre_commit"
-  | "review"
-  | "commit"
-  | "create_pr"
-  | "watch_pr_status_checks"
-  | "resolve_pr_merge_conflict"
-  | "investigate_pr_status_checks"
-  | "mark_pr_ready_for_review"
-  | "decide_pr_merge"
-  | "merge_pr"
-  | "close_issue"
-  | "local_cleanup"
+export const OperationalLifecycleStep = Schema.Literals([
+  "create_worktree",
+  "install_dependencies",
+  "implement",
+  "assess_changes",
+  "pre_commit",
+  "review",
+  "commit",
+  "create_pr",
+  "watch_pr_status_checks",
+  "resolve_pr_merge_conflict",
+  "investigate_pr_status_checks",
+  "mark_pr_ready_for_review",
+  "decide_pr_merge",
+  "merge_pr",
+  "close_issue",
+  "local_cleanup",
+])
+export type OperationalLifecycleStep = typeof OperationalLifecycleStep.Type
 
-export type WorkItemState =
-  | OperationalLifecycleStep
-  | "complete"
-  | "failed"
-  | "abandoned"
-  | "needs_human"
+export const TerminalWorkItemState = Schema.Literals([
+  "complete",
+  "failed",
+  "abandoned",
+  "needs_human",
+])
+export type TerminalWorkItemState = typeof TerminalWorkItemState.Type
 
-export type StepRunStatus =
-  | "queued"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "interrupted"
-  | "cancelled"
+export const WorkItemState = Schema.Union([
+  OperationalLifecycleStep,
+  TerminalWorkItemState,
+])
+export type WorkItemState = typeof WorkItemState.Type
+
+export const StepRunStatus = Schema.Literals([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "interrupted",
+  "cancelled",
+])
+export type StepRunStatus = typeof StepRunStatus.Type
 
 export interface StepRunRecord {
   readonly id: StepRunId
@@ -117,16 +128,11 @@ export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
 })
 export type WorkItemStepJob = typeof WorkItemStepJob.Type
 
-export const TERMINAL_WORK_ITEM_STATES = [
-  "complete",
-  "failed",
-  "abandoned",
-  "needs_human",
-] as const satisfies readonly WorkItemState[]
+export const TERMINAL_WORK_ITEM_STATES = TerminalWorkItemState.literals
 
 export const isTerminalWorkItemState = (
   state: WorkItemState,
-): state is (typeof TERMINAL_WORK_ITEM_STATES)[number] =>
+): state is TerminalWorkItemState =>
   (TERMINAL_WORK_ITEM_STATES as readonly string[]).includes(state)
 
 /**

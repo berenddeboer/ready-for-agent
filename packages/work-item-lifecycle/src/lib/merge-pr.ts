@@ -1,14 +1,15 @@
-import { Data, Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { workItemBranchName } from "./worktree-names.js"
 
-export class MergePrContextError extends Data.TaggedError(
+export class MergePrContextError extends Schema.TaggedErrorClass<MergePrContextError>()(
   "MergePrContextError",
-)<{
-  readonly message: string
-}> {}
+  {
+    message: Schema.String,
+  },
+) {}
 
 /**
  * Production Merge PR Lifecycle Step.

@@ -35,6 +35,7 @@ import {
   IssueNotFoundError,
   IssueNotOpenError,
   type LifecycleStepContext,
+  LifecycleStepFailedError,
   LifecycleSteps,
   type LifecycleStepsShape,
   NonTransactionalQueueError,
@@ -929,7 +930,10 @@ describe("WorkItemLifecycle", () => {
     it("derives timings across retries, interruption, and currently running work", async () => {
       const failingSteps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.fail(new Error("first attempt")),
+        createWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "first attempt" }),
+          ),
       }
 
       return Effect.runPromise(
@@ -1299,7 +1303,9 @@ describe("WorkItemLifecycle", () => {
         localCleanup: () => {
           cleanupAttempts += 1
           return cleanupAttempts === 1
-            ? Effect.fail(new Error("worktree is locked"))
+            ? Effect.fail(
+                new LifecycleStepFailedError({ message: "worktree is locked" }),
+              )
             : Effect.void
         },
       }
@@ -2258,7 +2264,10 @@ describe("WorkItemLifecycle", () => {
             _tag: "needs_human",
             reason: "Auto-merge is disabled for this repository",
           }),
-        localCleanup: () => Effect.fail(new Error("worktree locked")),
+        localCleanup: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "worktree locked" }),
+          ),
       }
 
       return runWithSteps(
@@ -2786,7 +2795,11 @@ describe("WorkItemLifecycle", () => {
           Effect.gen(function* () {
             closeAttempts += 1
             if (closeAttempts === 1) {
-              return yield* Effect.fail(new Error("GitHub temporary failure"))
+              return yield* Effect.fail(
+                new LifecycleStepFailedError({
+                  message: "GitHub temporary failure",
+                }),
+              )
             }
           }),
       }
@@ -2985,7 +2998,10 @@ describe("WorkItemLifecycle", () => {
     it("records typed handler failure as Failed Step Run and leaves the pending step", () => {
       const failingSteps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.fail(new Error("worktree path busy")),
+        createWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "worktree path busy" }),
+          ),
       }
 
       return runWithSteps(
@@ -3205,7 +3221,9 @@ describe("WorkItemLifecycle", () => {
         createWorktree: () => {
           attempts += 1
           if (attempts === 1) {
-            return Effect.fail(new Error("first attempt failed"))
+            return Effect.fail(
+              new LifecycleStepFailedError({ message: "first attempt failed" }),
+            )
           }
           return Effect.succeed({
             worktreePath: "/tmp/worktrees/retry-success",
@@ -3270,7 +3288,10 @@ describe("WorkItemLifecycle", () => {
     it("retains every prior Step Run across multiple retries", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.fail(new Error("still failing")),
+        createWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "still failing" }),
+          ),
       }
 
       return runWithSteps(
@@ -3442,7 +3463,11 @@ describe("WorkItemLifecycle", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         createWorktree: () =>
-          Effect.fail(new Error("fail for concurrent retry")),
+          Effect.fail(
+            new LifecycleStepFailedError({
+              message: "fail for concurrent retry",
+            }),
+          ),
       }
 
       return runWithSteps(
@@ -3909,7 +3934,10 @@ describe("WorkItemLifecycle", () => {
     it("abandons after Failed or Interrupted runs while preserving Step Run history", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.fail(new Error("fail then abandon")),
+        createWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "fail then abandon" }),
+          ),
       }
 
       return runWithSteps(
@@ -4143,7 +4171,10 @@ describe("WorkItemLifecycle", () => {
     it("removes queued and Failed history with the Repository when nothing is Running", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.fail(new Error("failed before removal")),
+        createWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "failed before removal" }),
+          ),
       }
 
       return runWithSteps(
@@ -4363,7 +4394,10 @@ describe("WorkItemLifecycle", () => {
     it("preserves the Work Item when worktree cleanup fails", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        removeWorktree: () => Effect.fail(new Error("worktree is locked")),
+        removeWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "worktree is locked" }),
+          ),
       }
 
       return runWithSteps(
@@ -4612,7 +4646,10 @@ describe("WorkItemLifecycle", () => {
     it("rejects Retry while paused and allows it after Start", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        createWorktree: () => Effect.fail(new Error("fail for retry")),
+        createWorktree: () =>
+          Effect.fail(
+            new LifecycleStepFailedError({ message: "fail for retry" }),
+          ),
       }
 
       return runWithSteps(
@@ -4906,7 +4943,8 @@ describe("WorkItemLifecycle", () => {
       runWithSteps(
         {
           ...successfulSteps,
-          createWorktree: () => Effect.fail(new Error("boom")),
+          createWorktree: () =>
+            Effect.fail(new LifecycleStepFailedError({ message: "boom" })),
         },
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle

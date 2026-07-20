@@ -1,4 +1,4 @@
-import { Clock, Data, Effect } from "effect"
+import { Clock, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ulid } from "ulidx"
 import { DbService } from "@ready-for-agent/db-service"
@@ -13,13 +13,20 @@ import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemBranchName } from "./worktree-names.js"
 
-export class PrStatusChecksContextError extends Data.TaggedError(
+export class PrStatusChecksContextError extends Schema.TaggedErrorClass<PrStatusChecksContextError>()(
   "PrStatusChecksContextError",
-)<{ readonly message: string }> {}
+  {
+    message: Schema.String,
+  },
+) {}
 
-export class PrStatusChecksOpenCodeError extends Data.TaggedError(
+export class PrStatusChecksOpenCodeError extends Schema.TaggedErrorClass<PrStatusChecksOpenCodeError>()(
   "PrStatusChecksOpenCodeError",
-)<{ readonly message: string; readonly cause?: unknown }> {}
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
 
 export type PrStatusCheckResult =
   | "pending"
