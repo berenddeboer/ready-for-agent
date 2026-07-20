@@ -265,10 +265,7 @@ type WorkItemsQueryOptions = {
 
 /** Completed history window (successful finished outcomes). */
 const JOBS_COMPLETED_LIMIT = 15
-/**
- * Failed history window (terminal failed + retriable stoppages).
- * Explicit product choice, independent of JOBS_COMPLETED_LIMIT.
- */
+/** Failed history window, independent of JOBS_COMPLETED_LIMIT. */
 const JOBS_FAILED_LIMIT = 15
 
 const workItemsQuery = (

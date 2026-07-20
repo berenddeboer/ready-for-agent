@@ -12,8 +12,10 @@ const item = (
   state: WorkItemState,
   createdAtMs: number,
   latestStepStatus?: StepRunStatus,
+  failureCode: string | null = null,
 ) => ({
   state,
+  failureCode,
   createdAt: new Date(createdAtMs),
   stepRuns:
     latestStepStatus === undefined
@@ -44,12 +46,23 @@ describe("Jobs list membership", () => {
     expect(isJobsCompletedWorkItemState("failed")).toBe(false)
   })
 
-  it("places nonterminal failed/interrupted Step Runs only on Failed", () => {
+  it("keeps nonterminal failed/interrupted Step Runs on Working", () => {
     for (const status of ["failed", "interrupted"] as const) {
       const stopped = item("implement", 1, status)
-      expect(isJobsFailedWorkItem(stopped)).toBe(true)
-      expect(isJobsWorkingWorkItem(stopped)).toBe(false)
+      expect(isJobsFailedWorkItem(stopped)).toBe(false)
+      expect(isJobsWorkingWorkItem(stopped)).toBe(true)
     }
+  })
+
+  it("keeps the persisted retryable terminal failure on Working", () => {
+    const retryable = item(
+      "failed",
+      1,
+      "succeeded",
+      "pr_status_checks_unresolved",
+    )
+    expect(isJobsFailedWorkItem(retryable)).toBe(false)
+    expect(isJobsWorkingWorkItem(retryable)).toBe(true)
   })
 
   it("places unfinished lifecycle states on Working when not stopped on failure", () => {
@@ -78,16 +91,22 @@ describe("filterWorkItemsByListKind", () => {
     expect(filterWorkItemsByListKind(items, undefined)).toEqual(items)
   })
 
-  it("filters Working to unfinished plus Needs Human, excluding failures", () => {
+  it("filters Working to unfinished, retryable stoppages, and Needs Human", () => {
     expect(
       filterWorkItemsByListKind(items, "working").map((i) => i.state),
-    ).toEqual(["implement", "needs_human", "create_worktree"])
+    ).toEqual([
+      "implement",
+      "needs_human",
+      "create_worktree",
+      "pre_commit",
+      "review",
+    ])
   })
 
-  it("filters Failed to terminal failed plus retriable stoppages, newest-first", () => {
+  it("filters Failed to non-retryable terminal failures only", () => {
     expect(
       filterWorkItemsByListKind(items, "failed").map((i) => i.state),
-    ).toEqual(["review", "pre_commit", "failed"])
+    ).toEqual(["failed"])
   })
 
   it("filters Completed to Complete/Abandoned newest-first without terminal failed", () => {
@@ -98,7 +117,7 @@ describe("filterWorkItemsByListKind", () => {
 
   it("limits Failed to the newest N by createdAt", () => {
     const many = Array.from({ length: 20 }, (_, index) =>
-      item(index % 2 === 0 ? "failed" : "implement", index * 100, "failed"),
+      item("failed", index * 100, "failed"),
     )
     const limited = filterWorkItemsByListKind(many, "failed", 15)
     expect(limited).toHaveLength(15)
@@ -129,7 +148,7 @@ describe("filterWorkItemsByListKind", () => {
     ).toEqual(["complete", "abandoned"])
   })
 
-  it("does not put Failed under Working", () => {
+  it("puts retryable failures under Working, not terminal failures", () => {
     const mixed = [
       item("implement", 1000, "failed"),
       item("failed", 2000, "failed"),
@@ -137,9 +156,9 @@ describe("filterWorkItemsByListKind", () => {
     ]
     expect(
       filterWorkItemsByListKind(mixed, "working").map((i) => i.state),
-    ).toEqual(["implement"])
+    ).toEqual(["implement", "implement"])
     expect(
       filterWorkItemsByListKind(mixed, "working")[0]!.stepRuns[0]!.status,
-    ).toBe("running")
+    ).toBe("failed")
   })
 })
