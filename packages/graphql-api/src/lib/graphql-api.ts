@@ -19,6 +19,7 @@ import {
   type WorkItemRecord,
   type WorkItemsListKind,
   filterWorkItemsByListKind,
+  isJobsCompletedWorkItemState,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
@@ -287,6 +288,7 @@ export const createGraphqlApi = (
                 )
                 const visible = workItems.filter(
                   (workItem) =>
+                    isJobsCompletedWorkItemState(workItem.state) ||
                     !isTerminalWorkItemState(workItem.state) ||
                     relevantIssueNumbers.has(workItem.githubIssueNumber),
                 )

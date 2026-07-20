@@ -65,6 +65,8 @@ describe("JobsCard live updates", () => {
     expect(jobsCard).toContain("issueTitle")
     expect(jobsCard).toContain("issuesQuery(repository.id)")
     expect(jobsCard).toContain("title={issueIdentity}")
+    expect(jobsCard).toContain("issueTitle === undefined")
+    expect(jobsCard).toContain("`#${workItem.githubIssueNumber}`")
     const pauseIndex = jobsCard.indexOf(
       "<WorkItemPauseButton workItem={workItem} />",
     )
