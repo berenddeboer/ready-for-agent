@@ -206,6 +206,7 @@ type WorkItem = {
   id: string
   repositoryId: string
   githubIssueNumber: number
+  issueTitle: string | null
   githubPullRequestNumber: number | null
   state: WorkItemState
   stateLabel: string
@@ -232,6 +233,7 @@ const workItemFields = {
   id: true,
   repositoryId: true,
   githubIssueNumber: true,
+  issueTitle: true,
   githubPullRequestNumber: true,
   state: true,
   stateLabel: true,
@@ -1826,7 +1828,8 @@ function JobsCard() {
               const issue = issueByRepoAndNumber.get(
                 `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
               )
-              const issueTitle = issue?.title
+              const issueTitle =
+                issue?.title ?? workItem.issueTitle ?? undefined
               const issueUrl =
                 issue?.url !== undefined && issue.url !== ""
                   ? issue.url

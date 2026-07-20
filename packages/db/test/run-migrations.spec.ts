@@ -84,6 +84,7 @@ describe("runMigrations", () => {
         expect(applied).toEqual([
           { name: "20260718055957_baseline" },
           { name: "20260718061640_right_black_bird" },
+          { name: "20260720081709_cold_gladiator" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

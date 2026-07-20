@@ -195,6 +195,7 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.id).toMatch(/^wi-[0-9A-HJKMNP-TV-Z]{26}$/)
           expect(workItem.repositoryId).toBe(repository.id)
           expect(workItem.githubIssueNumber).toBe(42)
+          expect(workItem.issueTitle).toBe(sampleIssueFields.title)
           expect(workItem.state).toBe("create_worktree")
           expect(workItem.model).toBe("opencode/deepseek-v4-flash-free")
           expect(workItem.variant).toBe("low")
@@ -230,6 +231,10 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.variant).toBe(config.defaultVariant)
           expect(workItem.reviewModel).toBe(config.defaultModel)
           expect(workItem.reviewVariant).toBe(config.defaultVariant)
+
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          const reloaded = yield* lifecycle.getWorkItem(workItem.id)
+          expect(reloaded.issueTitle).toBe(sampleIssueFields.title)
         }),
       ))
 
