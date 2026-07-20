@@ -668,7 +668,7 @@ describe("PR status check steps", () => {
     }
   })
 
-  it("adds automated-review instructions when the batch contains a green check", async () => {
+  it("distinguishes terminal, active, stale, and completed automated reviews for a green check", async () => {
     const prompts: string[] = []
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -705,7 +705,34 @@ describe("PR status check steps", () => {
     )
     expect(prompts[0]).toContain("automated reviews may have completed")
     expect(prompts[0]).toContain(
-      "disregard reviews that are visibly still in progress",
+      "stop semantically incomplete even when GitHub reports its check and workflow as successful",
+    )
+    expect(prompts[0]).toContain(
+      "finished banner combined with unchecked substantive review tasks",
+    )
+    expect(prompts[0]).toContain("remaining working spinner")
+    expect(prompts[0]).toContain("no final findings or synthesis")
+    expect(prompts[0]).toContain(
+      "Do not treat arbitrary Markdown checkboxes in unrelated pull-request comments",
+    )
+    expect(prompts[0]).toContain(
+      "latest relevant comment with the latest relevant run attempt",
+    )
+    expect(prompts[0]).toContain(
+      "stale incomplete comment when a newer attempt completed its review successfully",
+    )
+    expect(prompts[0]).toContain(
+      "linked latest review run is still active, leave it alone and do not start a duplicate",
+    )
+    expect(prompts[0]).toContain(
+      "run is terminal and its latest relevant comment remains visibly incomplete, rerun the whole review workflow even when the run concluded success",
+    )
+    expect(prompts[0]).toContain("do not use a failed-jobs-only rerun")
+    expect(prompts[0]).toContain(
+      "cannot be restarted autonomously, report NEEDS_HUMAN",
+    )
+    expect(prompts[0]).toContain(
+      "completed review with no worthwhile feedback still needs no changes or rerun",
     )
     expect(prompts[0]).toContain(
       "If review feedback requires changes, verify them, commit them, and push the commit",
@@ -722,6 +749,7 @@ describe("PR status check steps", () => {
   })
 
   it("allows PROCESSED for a green-only review handoff with nothing to address", async () => {
+    const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
@@ -739,10 +767,13 @@ describe("PR status check steps", () => {
               ],
             }),
             keymaxxer,
-            opencodeWith([
-              "No review feedback needed changes.",
-              "READY_FOR_AGENT_RESULT: PROCESSED",
-            ]),
+            opencodeWith(
+              [
+                "No review feedback needed changes.",
+                "READY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
             DatabaseTest,
           ),
         ),
@@ -753,6 +784,16 @@ describe("PR status check steps", () => {
       _tag: "processed",
       handledCheckIds: [expect.any(String)],
     })
+    expect(prompts[1]).toContain("rerunning a terminal incomplete reviewer")
+    expect(prompts[1]).toContain(
+      "Rerunning the whole workflow for a terminal incomplete review creates a replacement execution and supports PROCESSED",
+    )
+    expect(prompts[1]).toContain(
+      "terminal incomplete review is not green-only completed feedback with nothing to address",
+    )
+    expect(prompts[1]).toContain(
+      "genuinely completed review with nothing to address",
+    )
   })
 
   it("returns OpenCode's structured human intervention reason", async () => {
