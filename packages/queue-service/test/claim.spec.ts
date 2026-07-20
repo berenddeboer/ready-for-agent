@@ -33,6 +33,7 @@ const makeFakeQueue = (
   enqueueWithDelay: () => Effect.die("unused"),
   ensureKeyed: () => Effect.die("unused"),
   listKeyed: () => Effect.die("unused"),
+  reviveExhaustedKeyed: () => Effect.die("unused"),
   postponeKeyed: () => Effect.die("unused"),
   removeKeyed: () => Effect.die("unused"),
   rawClaim,

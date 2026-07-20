@@ -584,6 +584,9 @@ export const startJobWorker = Effect.fn("JobWorker.startJobWorker")(function* (
     ),
   )
   yield* transferPersistedRefreshJobs
+  const queue = yield* QueueService
+  yield* queue.reviveExhaustedKeyed(ISSUE_REFRESH_QUEUE)
+  yield* queue.reviveExhaustedKeyed(ISSUE_POLL_QUEUE)
   yield* enqueuePollingAutoHealJob
   yield* runJobWorker(options).pipe(
     Effect.forkScoped({ startImmediately: true }),

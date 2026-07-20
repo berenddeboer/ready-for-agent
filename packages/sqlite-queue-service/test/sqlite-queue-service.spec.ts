@@ -499,6 +499,67 @@ describe("SqliteQueueService", () => {
         }),
       ))
 
+    it("revives an exhausted keyed entry", () =>
+      runTest(
+        Effect.gen(function* () {
+          const queue = yield* QueueService
+          const first = yield* queue.ensureKeyed(
+            "revive-keyed-queue",
+            "polling-auto-heal",
+            { kind: "poll" },
+            Duration.zero,
+            { retryLimit: 0 },
+          )
+          expect(
+            Option.isSome(yield* queue.rawClaim("revive-keyed-queue")),
+          ).toBe(true)
+
+          yield* queue.reviveExhaustedKeyed("revive-keyed-queue")
+
+          const reclaimed = yield* queue.rawClaim("revive-keyed-queue")
+          expect(Option.isSome(reclaimed)).toBe(true)
+          if (Option.isSome(reclaimed)) {
+            expect(reclaimed.value.jobId).toBe(first.jobId)
+            expect(reclaimed.value.attempts).toBe(1)
+          }
+        }),
+      ))
+
+    it("does not revive an actively claimed final attempt by default", () =>
+      runTest(
+        Effect.gen(function* () {
+          const queue = yield* QueueService
+          const first = yield* queue.ensureKeyed(
+            "active-keyed-queue",
+            "repo-1",
+            { kind: "poll" },
+            Duration.zero,
+            { retryLimit: 0 },
+          )
+          const claimed = yield* queue.rawClaim(
+            "active-keyed-queue",
+            Duration.minutes(5),
+          )
+          expect(Option.isSome(claimed)).toBe(true)
+
+          const ensured = yield* queue.ensureKeyed(
+            "active-keyed-queue",
+            "repo-1",
+            { kind: "poll" },
+            Duration.zero,
+            { retryLimit: 0 },
+          )
+          expect(ensured).toEqual({ jobId: first.jobId, created: false })
+          expect(
+            Option.isNone(yield* queue.rawClaim("active-keyed-queue")),
+          ).toBe(true)
+
+          const entries = yield* queue.listKeyed("active-keyed-queue")
+          expect(entries[0]?.attempts).toBe(1)
+          expect(entries[0]?.lockedUntil).not.toBeNull()
+        }),
+      ))
+
     it("allows the same key in different queues", () =>
       runTest(
         Effect.gen(function* () {

@@ -36,6 +36,7 @@ const unusedQueue: QueueServiceShape = {
   enqueueWithDelay: () => Effect.die("not used"),
   ensureKeyed: () => Effect.die("not used"),
   listKeyed: () => Effect.die("not used"),
+  reviveExhaustedKeyed: () => Effect.die("not used"),
   postponeKeyed: () => Effect.die("not used"),
   removeKeyed: () => Effect.die("not used"),
   rawClaim: () => Effect.die("not used"),

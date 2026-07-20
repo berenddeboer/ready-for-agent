@@ -420,6 +420,24 @@ export const SqliteQueueServiceLive = Layer.effect(
             ),
           )
         }),
+      reviveExhaustedKeyed: (queue: string) =>
+        Effect.gen(function* () {
+          yield* validateQueueName(queue)
+          const now = yield* Clock.currentTimeMillis
+          yield* retrySqliteBusy(
+            sql.unsafe(
+              `UPDATE job_queue
+               SET locked_until = NULL,
+                   job_attempts = 0,
+                   available_at = ?,
+                   updated_at = ?
+               WHERE queue = ?
+                 AND key IS NOT NULL
+                 AND job_attempts >= job_retry_limit`,
+              [now, now, queue],
+            ),
+          ).pipe(Effect.mapError((error) => toEnqueueError(queue, error)))
+        }),
       postponeKeyed: (jobId: string, delay: Duration.Duration) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis

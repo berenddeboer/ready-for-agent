@@ -102,7 +102,7 @@ export interface RepairPollingSchedulesInput {
 /**
  * Make keyed Issue Poll schedules exactly match credentialed Repositories:
  * remove orphans, add missing entries (with a high-priority first refresh each),
- * preserve existing correct entries and due times.
+ * preserve existing entries and due times.
  */
 export const repairPollingSchedules = Effect.fn(
   "graphql-api.repairPollingSchedules",
@@ -118,9 +118,8 @@ export const repairPollingSchedules = Effect.fn(
     }
   }
 
-  const existingKeys = new Set(
-    (yield* queue.listKeyed(ISSUE_POLL_QUEUE)).map((entry) => entry.key),
-  )
+  const current = yield* queue.listKeyed(ISSUE_POLL_QUEUE)
+  const existingKeys = new Set(current.map((entry) => entry.key))
   const missing = input.credentialedRepositoryIds.filter(
     (id) => !existingKeys.has(id),
   )
