@@ -179,6 +179,7 @@ const queueLayer = (
       enqueueWithDelay: unused,
       ensureKeyed: unused,
       listKeyed: unused,
+      reviveExhaustedKeyed: () => Effect.void,
       postponeKeyed: (jobId, delay) =>
         onPostponeKeyed(jobId, delay).pipe(Effect.asVoid),
       removeKeyed: unused,
@@ -273,6 +274,7 @@ describe("Job worker", () => {
       enqueueWithDelay: unused,
       ensureKeyed: unused,
       listKeyed: unused,
+      reviveExhaustedKeyed: () => Effect.void,
       postponeKeyed: unused,
       removeKeyed: unused,
       rawClaim: unused,

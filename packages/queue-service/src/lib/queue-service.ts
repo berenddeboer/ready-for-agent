@@ -156,7 +156,7 @@ export interface QueueServiceShape {
   /**
    * Idempotently ensure a durable keyed entry exists for the queue.
    * Concurrent or repeated ensures for the same (queue, key) produce exactly
-   * one entry. Existing entries are left unchanged (payload and availability).
+   * one entry. Existing entries are left unchanged.
    * Reports whether this call created the entry.
    */
   readonly ensureKeyed: <P extends Payload>(
@@ -179,6 +179,11 @@ export interface QueueServiceShape {
     ReadonlyArray<KeyedQueueEntry>,
     InvalidQueueNameError | QueueReadError
   >
+
+  /** Reset exhausted keyed entries in a queue for immediate delivery. */
+  readonly reviveExhaustedKeyed: (
+    queue: string,
+  ) => Effect.Effect<void, EnqueueError | InvalidQueueNameError>
 
   /**
    * Postpone a claimed keyed entry in place: preserve identity, release claim,

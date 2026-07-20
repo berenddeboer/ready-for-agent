@@ -48,7 +48,7 @@ The autonomous recurring initiation of Issue reconciliation for every credential
 _Avoid_: Issue synchronization (suggests bidirectional updates), refresh interval (ambiguous about eligibility and execution)
 
 **Polling Auto-heal Job**:
-A durable high-priority startup request that makes the active Issue Polling set exactly match the Harness's credentialed Repositories, adding missing polling schedules and removing schedules for deleted or uncredentialed Repositories. It retries with backoff until reconciliation succeeds without delaying Harness startup.
+A durable high-priority startup request that makes the active Issue Polling set exactly match the Harness's credentialed Repositories, adding missing polling schedules and removing schedules for deleted or uncredentialed Repositories. Startup resets all exhausted polling-lane jobs before accepting new claims. The Auto-heal Job retries with backoff until reconciliation succeeds without delaying Harness startup.
 _Avoid_: Issue reconciliation (changes the Issue store), startup migration (runs on every startup and may depend on external credentials)
 
 **Keymaxxer Service**:

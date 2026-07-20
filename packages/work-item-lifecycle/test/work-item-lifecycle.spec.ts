@@ -568,6 +568,7 @@ describe("WorkItemLifecycle", () => {
             never
           >,
         listKeyed: () => Effect.succeed([]),
+        reviveExhaustedKeyed: () => Effect.die("unused"),
         postponeKeyed: () => Effect.void,
         removeKeyed: () => Effect.void,
         rawClaim: () => Effect.succeed(Option.none()),
@@ -1051,6 +1052,7 @@ describe("WorkItemLifecycle", () => {
             never
           >,
         listKeyed: () => Effect.succeed([]),
+        reviveExhaustedKeyed: () => Effect.die("unused"),
         postponeKeyed: () => Effect.void,
         removeKeyed: () => Effect.void,
         rawClaim: () => Effect.succeed(Option.none()),
@@ -3419,6 +3421,7 @@ describe("WorkItemLifecycle", () => {
             never
           >,
         listKeyed: () => Effect.succeed([]),
+        reviveExhaustedKeyed: () => Effect.die("unused"),
         postponeKeyed: () => Effect.void,
         removeKeyed: () => Effect.void,
         rawClaim: () => Effect.succeed(Option.none()),
