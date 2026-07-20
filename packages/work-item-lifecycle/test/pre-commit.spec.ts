@@ -94,7 +94,7 @@ const run = <A, E>(
 
 const initGitRepo = async (root: string) => {
   const runGit = async (...args: string[]) => {
-    const proc = Bun.spawn(["git", ...args], {
+    const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
       cwd: root,
       stdout: "ignore",
       stderr: "pipe",
@@ -108,7 +108,7 @@ const initGitRepo = async (root: string) => {
   await runGit("init")
   await runGit("config", "user.email", "test@example.com")
   await runGit("config", "user.name", "Test")
-  await runGit("commit", "--allow-empty", "-m", "init")
+  await runGit("commit", "--no-verify", "--allow-empty", "-m", "init")
 }
 
 const withTempGit = async (assert: (root: string) => Promise<void>) => {

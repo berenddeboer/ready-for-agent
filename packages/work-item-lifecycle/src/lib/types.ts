@@ -258,6 +258,8 @@ export const STEP_RUN_REASON = {
   paused: "paused",
   /** Mid-run: Step Run is Running but blocked on maxConcurrentOpencodeSessions. */
   waitingForOpencodeSession: "waiting_for_opencode_session",
+  /** Successful Merge PR run that returned to Watch for fresh validation. */
+  mergeRevalidation: "merge_revalidation",
 } as const
 
 export type StepRunReasonCode =

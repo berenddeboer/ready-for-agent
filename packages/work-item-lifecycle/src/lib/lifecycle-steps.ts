@@ -8,6 +8,7 @@ import type {
 import type {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
+  MergePullRequestResult,
 } from "@ready-for-agent/github-service"
 import type { KeymaxxerError } from "@ready-for-agent/keymaxxer-service"
 import type { AssessChangesResult } from "./assess-changes.js"
@@ -156,7 +157,7 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<DecidePrMergeResult, LifecycleStepError>
   readonly mergePr: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, LifecycleStepError>
+  ) => Effect.Effect<MergePullRequestResult, LifecycleStepError>
   readonly closeIssue: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, LifecycleStepError>

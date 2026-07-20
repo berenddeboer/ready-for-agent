@@ -62,7 +62,7 @@ const unusedGithub = {
   getPullRequestLifecycleStatus: () =>
     Effect.succeed({ _tag: "open" as const }),
   markPullRequestReadyForReview: () => Effect.void,
-  mergePullRequest: () => Effect.void,
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
   ensureIssueCompletedWithSummary: () => Effect.void,
 } satisfies GitHubServiceShape
 

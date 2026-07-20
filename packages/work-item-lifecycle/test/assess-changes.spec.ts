@@ -42,7 +42,7 @@ const run = <A, E>(effect: Effect.Effect<A, E, never>): Promise<A> =>
   Effect.runPromise(effect)
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -66,7 +66,7 @@ const initRepo = async (root: string) => {
   await git(root, ["config", "user.name", "Test"])
   await writeFile(join(root, "README.md"), "# start\n")
   await git(root, ["add", "README.md"])
-  await git(root, ["commit", "-m", "initial"])
+  await git(root, ["commit", "--no-verify", "-m", "initial"])
   return git(root, ["rev-parse", "HEAD"])
 }
 
@@ -224,7 +224,7 @@ describe("assessChanges", () => {
     await withTempGit(async (root, startingOid) => {
       await writeFile(join(root, "README.md"), "# committed\n")
       await git(root, ["add", "README.md"])
-      await git(root, ["commit", "-m", "after start"])
+      await git(root, ["commit", "--no-verify", "-m", "after start"])
       const result = await run(
         assessChanges(
           baseContext(root, { startingCommitOid: startingOid }),

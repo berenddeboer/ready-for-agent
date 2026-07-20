@@ -34,7 +34,7 @@ const run = <A, E>(
   )
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
-  const proc = Bun.spawn(["git", ...args], {
+  const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
@@ -61,7 +61,7 @@ const initBareRepository = async (root: string) => {
   await git(source, ["config", "user.name", "Test"])
   await writeFile(join(source, "README.md"), "# widgets\n")
   await git(source, ["add", "README.md"])
-  await git(source, ["commit", "-m", "initial"])
+  await git(source, ["commit", "--no-verify", "-m", "initial"])
   await git(root, ["clone", "--bare", source, bare])
   return bare
 }
@@ -77,7 +77,7 @@ const initDotBareRepository = async (root: string) => {
   await git(source, ["config", "user.name", "Test"])
   await writeFile(join(source, "README.md"), "# monorepo\n")
   await git(source, ["add", "README.md"])
-  await git(source, ["commit", "-m", "initial"])
+  await git(source, ["commit", "--no-verify", "-m", "initial"])
   await git(root, ["clone", "--bare", source, bare])
   return bare
 }
@@ -97,7 +97,7 @@ const initNonBareRepository = async (root: string) => {
   await git(repo, ["config", "user.name", "Test"])
   await writeFile(join(repo, "README.md"), "# widgets\n")
   await git(repo, ["add", "README.md"])
-  await git(repo, ["commit", "-m", "initial"])
+  await git(repo, ["commit", "--no-verify", "-m", "initial"])
   return repo
 }
 
@@ -171,12 +171,12 @@ describe("createWorktree", () => {
       await git(source, ["config", "user.name", "Test"])
       await writeFile(join(source, "README.md"), "# stale-local\n")
       await git(source, ["add", "README.md"])
-      await git(source, ["commit", "-m", "initial on trunk"])
+      await git(source, ["commit", "--no-verify", "-m", "initial on trunk"])
       await git(root, ["clone", "--bare", source, bare])
 
       await writeFile(join(source, "README.md"), "# trunk-default\n")
       await git(source, ["add", "README.md"])
-      await git(source, ["commit", "-m", "remote tip on trunk"])
+      await git(source, ["commit", "--no-verify", "-m", "remote tip on trunk"])
 
       const workItemId = makeWorkItemId()
       const path = await run(

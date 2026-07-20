@@ -63,14 +63,17 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () => Effect.succeed(status),
       markPullRequestReadyForReview: () => Effect.void,
-      mergePullRequest: () => Effect.void,
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
       ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
-  const makeLayer = (status: PullRequestLifecycleStatus) =>
+  const makeLayer = (
+    status: PullRequestLifecycleStatus,
+    steps: LifecycleStepsShape = successfulSteps,
+  ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(
-        Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
+        Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
@@ -135,6 +138,47 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     return { repository, created, lifecycle }
   })
 
+  const driveToMergeNeedsHuman = Effect.gen(function* () {
+    const db = yield* DbService
+    const lifecycle = yield* WorkItemLifecycle
+    yield* db.updateConfig({
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultVariant: "low",
+      reviewModel: null,
+      reviewVariant: null,
+      maxConcurrentOpencodeSessions: 2,
+      maxConcurrentWorkItems: 5,
+    })
+    const repository = yield* db.addRepository({
+      githubOwner: "acme",
+      githubRepo: "widgets",
+      localPath: "/repos/acme/widgets.git",
+      isBare: true,
+    })
+    yield* db.storeIssue({
+      repositoryId: repository.id,
+      githubIssueNumber: 42,
+      title: "Implement feature",
+      body: "Issue body",
+      url: "https://github.com/acme/widgets/issues/42",
+      state: "OPEN",
+      githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+      parent: null,
+      parentPosition: null,
+      hasChildren: false,
+      blockedBy: [],
+    })
+    const created = yield* lifecycle.implementNow(repository.id, 42)
+    for (let index = 0; index < 13; index += 1) {
+      yield* makeQueuedJobsAvailable
+      yield* claimAndRunPending
+    }
+    const needsHuman = yield* lifecycle.getWorkItem(created.id)
+    expect(needsHuman.state).toBe("needs_human")
+    expect(needsHuman.stepRuns.at(-1)?.step).toBe("merge_pr")
+    return { repository, created, lifecycle }
+  })
+
   it("resumes local cleanup when GitHub reports the PR merged", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -170,6 +214,52 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         expect(abandoned.state).toBe("abandoned")
         expect(abandoned.worktreePath).toBeNull()
       }).pipe(Effect.provide(makeLayer({ _tag: "closed" }))),
+    )
+  })
+
+  it("completes cleanup for a Merge PR Needs Human handoff after Refresh sees a merge", async () => {
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
+      mergePr: () =>
+        Effect.succeed({
+          _tag: "needs_human",
+          reason: "merge_rejected",
+          message: "GitHub rejected the unchanged mergeable pull request",
+        }),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } = yield* driveToMergeNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+        expect((yield* lifecycle.getWorkItem(created.id)).state).toBe(
+          "complete",
+        )
+      }).pipe(Effect.provide(makeLayer({ _tag: "merged" }, steps))),
+    )
+  })
+
+  it("abandons a Merge PR Needs Human handoff after Refresh sees a close", async () => {
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
+      mergePr: () =>
+        Effect.succeed({
+          _tag: "needs_human",
+          reason: "closed_unmerged",
+          message: "Pull request was concurrently closed",
+        }),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } = yield* driveToMergeNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        expect((yield* lifecycle.getWorkItem(created.id)).state).toBe(
+          "abandoned",
+        )
+      }).pipe(Effect.provide(makeLayer({ _tag: "closed" }, steps))),
     )
   })
 })

@@ -138,7 +138,9 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
         ? "Human review before merge"
         : phase === "decide_pr_merge" && status === "succeeded"
           ? "Clanker may merge"
-          : phase === "merge_pr" && status === "succeeded"
+          : phase === "merge_pr" &&
+              status === "succeeded" &&
+              stepRun.reasonCode !== STEP_RUN_REASON.mergeRevalidation
             ? "Merged"
             : statusLabel(status)
     return {
