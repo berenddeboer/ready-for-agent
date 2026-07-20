@@ -42,15 +42,16 @@ export const sampleIssuePollingDelay: Effect.Effect<Duration.Duration> =
     ),
   )
 
-export const enqueueRefreshRepositoryJob = (repositoryId: string) =>
-  Effect.gen(function* () {
-    const queue = yield* QueueService
-    return yield* queue.enqueue(
-      ISSUE_REFRESH_QUEUE,
-      RefreshRepositoryJobPayload(repositoryId),
-      { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-    )
-  })
+export const enqueueRefreshRepositoryJob = Effect.fn(
+  "graphql-api.enqueueRefreshRepositoryJob",
+)(function* (repositoryId: string) {
+  const queue = yield* QueueService
+  return yield* queue.enqueue(
+    ISSUE_REFRESH_QUEUE,
+    RefreshRepositoryJobPayload(repositoryId),
+    { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+  )
+})
 
 /**
  * Durably ensure one high-priority Polling Auto-heal Job without awaiting repair.
@@ -65,31 +66,33 @@ export const enqueuePollingAutoHealJob = Effect.gen(function* () {
     Duration.zero,
     { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
   )
-})
+}).pipe(Effect.withSpan("graphql-api.enqueuePollingAutoHealJob"))
 
 /**
  * Ensure one keyed recurring schedule and enqueue a high-priority first refresh.
  * Idempotent for the schedule; every activation enqueues a distinct first refresh.
  */
-export const activateRepositoryPolling = (repositoryId: string) =>
-  Effect.gen(function* () {
-    const queue = yield* QueueService
-    const delay = yield* sampleIssuePollingDelay
-    const payload = RefreshRepositoryJobPayload(repositoryId)
-    yield* queue.ensureKeyed(ISSUE_POLL_QUEUE, repositoryId, payload, delay, {
-      retryLimit: JOB_RECOVERY_RETRY_LIMIT,
-    })
-    return yield* queue.enqueue(ISSUE_REFRESH_QUEUE, payload, {
-      retryLimit: JOB_RECOVERY_RETRY_LIMIT,
-    })
+export const activateRepositoryPolling = Effect.fn(
+  "graphql-api.activateRepositoryPolling",
+)(function* (repositoryId: string) {
+  const queue = yield* QueueService
+  const delay = yield* sampleIssuePollingDelay
+  const payload = RefreshRepositoryJobPayload(repositoryId)
+  yield* queue.ensureKeyed(ISSUE_POLL_QUEUE, repositoryId, payload, delay, {
+    retryLimit: JOB_RECOVERY_RETRY_LIMIT,
   })
+  return yield* queue.enqueue(ISSUE_REFRESH_QUEUE, payload, {
+    retryLimit: JOB_RECOVERY_RETRY_LIMIT,
+  })
+})
 
 /** Suspend the recurring schedule without cancelling accepted manual Refresh Jobs. */
-export const suspendRepositoryPolling = (repositoryId: string) =>
-  Effect.gen(function* () {
-    const queue = yield* QueueService
-    yield* queue.removeKeyed(ISSUE_POLL_QUEUE, repositoryId)
-  })
+export const suspendRepositoryPolling = Effect.fn(
+  "graphql-api.suspendRepositoryPolling",
+)(function* (repositoryId: string) {
+  const queue = yield* QueueService
+  yield* queue.removeKeyed(ISSUE_POLL_QUEUE, repositoryId)
+})
 
 export interface RepairPollingSchedulesInput {
   readonly credentialedRepositoryIds: ReadonlyArray<string>
@@ -101,37 +104,38 @@ export interface RepairPollingSchedulesInput {
  * remove orphans, add missing entries (with a high-priority first refresh each),
  * preserve existing correct entries and due times.
  */
-export const repairPollingSchedules = (input: RepairPollingSchedulesInput) =>
-  Effect.gen(function* () {
-    const queue = yield* QueueService
-    const sampleDelay = input.sampleDelay ?? sampleIssuePollingDelay
-    const credentialed = new Set(input.credentialedRepositoryIds)
-    const existing = yield* queue.listKeyed(ISSUE_POLL_QUEUE)
+export const repairPollingSchedules = Effect.fn(
+  "graphql-api.repairPollingSchedules",
+)(function* (input: RepairPollingSchedulesInput) {
+  const queue = yield* QueueService
+  const sampleDelay = input.sampleDelay ?? sampleIssuePollingDelay
+  const credentialed = new Set(input.credentialedRepositoryIds)
+  const existing = yield* queue.listKeyed(ISSUE_POLL_QUEUE)
 
-    for (const entry of existing) {
-      if (!credentialed.has(entry.key)) {
-        yield* queue.removeKeyed(ISSUE_POLL_QUEUE, entry.key)
-      }
+  for (const entry of existing) {
+    if (!credentialed.has(entry.key)) {
+      yield* queue.removeKeyed(ISSUE_POLL_QUEUE, entry.key)
     }
+  }
 
-    const existingKeys = new Set(
-      (yield* queue.listKeyed(ISSUE_POLL_QUEUE)).map((entry) => entry.key),
-    )
-    const missing = input.credentialedRepositoryIds.filter(
-      (id) => !existingKeys.has(id),
-    )
+  const existingKeys = new Set(
+    (yield* queue.listKeyed(ISSUE_POLL_QUEUE)).map((entry) => entry.key),
+  )
+  const missing = input.credentialedRepositoryIds.filter(
+    (id) => !existingKeys.has(id),
+  )
 
-    for (const repositoryId of missing) {
-      const delay = yield* sampleDelay
-      const payload = RefreshRepositoryJobPayload(repositoryId)
-      // Enqueue first refresh before ensure so a crash between steps still
-      // leaves the Repository in the missing set on the next auto-heal attempt
-      // (duplicate first refreshes are allowed; schedules are unique).
-      yield* queue.enqueue(ISSUE_REFRESH_QUEUE, payload, {
-        retryLimit: JOB_RECOVERY_RETRY_LIMIT,
-      })
-      yield* queue.ensureKeyed(ISSUE_POLL_QUEUE, repositoryId, payload, delay, {
-        retryLimit: JOB_RECOVERY_RETRY_LIMIT,
-      })
-    }
-  })
+  for (const repositoryId of missing) {
+    const delay = yield* sampleDelay
+    const payload = RefreshRepositoryJobPayload(repositoryId)
+    // Enqueue first refresh before ensure so a crash between steps still
+    // leaves the Repository in the missing set on the next auto-heal attempt
+    // (duplicate first refreshes are allowed; schedules are unique).
+    yield* queue.enqueue(ISSUE_REFRESH_QUEUE, payload, {
+      retryLimit: JOB_RECOVERY_RETRY_LIMIT,
+    })
+    yield* queue.ensureKeyed(ISSUE_POLL_QUEUE, repositoryId, payload, delay, {
+      retryLimit: JOB_RECOVERY_RETRY_LIMIT,
+    })
+  }
+})

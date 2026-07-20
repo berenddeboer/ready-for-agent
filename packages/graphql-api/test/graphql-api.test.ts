@@ -5,10 +5,6 @@ import {
   stubDbService,
 } from "@ready-for-agent/db-service/test"
 import {
-  IssueReconciler,
-  type IssueReconcilerShape,
-} from "@ready-for-agent/issue-reconciler"
-import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
@@ -109,7 +105,6 @@ const workItem = {
 
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
-  reconcilerOverrides: Partial<IssueReconcilerShape> = {},
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
   queueOverrides: Partial<QueueServiceShape> = {},
   lifecycleOverrides: Partial<WorkItemLifecycleShape> = {},
@@ -144,10 +139,6 @@ const makeRuntime = (
     listRepositories: Effect.succeed([repository]),
     ...dbOverrides,
   })
-  const reconciler: IssueReconcilerShape = {
-    reconcile: () => Effect.die("not used"),
-    ...reconcilerOverrides,
-  }
   const keymaxxer: KeymaxxerServiceShape = {
     initialize: Effect.void,
     findSecret: () => Effect.succeed(null),
@@ -213,7 +204,6 @@ const makeRuntime = (
   return ManagedRuntime.make(
     Layer.mergeAll(
       Layer.succeed(DbService, db),
-      Layer.succeed(IssueReconciler, reconciler),
       Layer.succeed(KeymaxxerService, keymaxxer),
       Layer.succeed(Opencode, opencode),
       Layer.succeed(QueueService, queue),
@@ -323,7 +313,6 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {},
       {
         findSecret: ({ account, provider }) =>
           Effect.succeed(
@@ -397,7 +386,6 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {},
       {
         enabled: false,
         findSecret: () => Effect.die("must not inspect the vault"),
@@ -429,7 +417,6 @@ describe("GraphQL API", () => {
     let enqueued = false
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {
         findSecret: () => Effect.succeed(null),
@@ -467,7 +454,6 @@ describe("GraphQL API", () => {
   test("keeps the added repository when automatic Issue Polling activation fails", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {
         findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -568,7 +554,6 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {},
       {
         findSecrets: (inputs) =>
           Effect.succeed(
@@ -622,7 +607,6 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {},
       {
         enabled: false,
         findSecrets: () => Effect.die("must not inspect the vault"),
@@ -655,7 +639,6 @@ describe("GraphQL API", () => {
     const enqueued: string[] = []
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {
         findSecret: () => Effect.succeed(tokenName),
@@ -732,7 +715,6 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {},
       {
         findSecret: () => Effect.succeed(null),
       },
@@ -772,7 +754,6 @@ describe("GraphQL API", () => {
         },
       },
       {},
-      {},
       {
         removeKeyed: () =>
           Effect.sync(() => {
@@ -805,7 +786,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         reset: (id) => {
           resetWorkItemId = id
@@ -833,7 +813,6 @@ describe("GraphQL API", () => {
     const workItemId = "wi-01AAAAAAAAAAAAAAAAAAAAAAAA"
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
@@ -1009,7 +988,6 @@ describe("GraphQL API", () => {
     let listCount = 0
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
@@ -1218,7 +1196,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         listWorkItemsForIssue: (repositoryId, githubIssueNumber) => {
           receivedArgs = [repositoryId, githubIssueNumber]
@@ -1286,7 +1263,6 @@ describe("GraphQL API", () => {
     } as WorkItemRecord
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
@@ -1370,7 +1346,6 @@ describe("GraphQL API", () => {
     } as WorkItemRecord
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
@@ -1467,7 +1442,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         listWorkItemsForIssue: () => Effect.succeed([pausedAtCommit]),
       },
@@ -1549,7 +1523,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         listWorkItemsForIssue: () => Effect.succeed([operatorPaused]),
       },
@@ -1601,7 +1574,6 @@ describe("GraphQL API", () => {
     } as WorkItemRecord
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
@@ -1660,7 +1632,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         listWorkItemsForIssue: () => Effect.succeed([waiting]),
       },
@@ -1711,7 +1682,6 @@ describe("GraphQL API", () => {
       },
       {},
       {},
-      {},
       {
         listWorkItemsForRepository: (repositoryId) => {
           receivedRepositoryId = repositoryId
@@ -1760,7 +1730,6 @@ describe("GraphQL API", () => {
       {
         listIssues: () => Effect.succeed([issue]),
       },
-      {},
       {},
       {},
       {
@@ -1841,7 +1810,6 @@ describe("GraphQL API", () => {
       },
       {},
       {},
-      {},
       {
         listWorkItemsForRepository: () =>
           Effect.succeed([
@@ -1911,7 +1879,6 @@ describe("GraphQL API", () => {
       {
         listIssues: () => Effect.succeed([issue]),
       },
-      {},
       {},
       {},
       {
@@ -2025,7 +1992,6 @@ describe("GraphQL API", () => {
       },
       {},
       {},
-      {},
       {
         listWorkItemsForRepository: () =>
           Effect.succeed([retriable, terminalFailed, complete, running]),
@@ -2092,7 +2058,6 @@ describe("GraphQL API", () => {
       },
       {},
       {},
-      {},
       {
         listWorkItemsForRepository: () =>
           Effect.succeed([terminalOrphan, unfinishedOrphan, terminalRelevant]),
@@ -2132,7 +2097,6 @@ describe("GraphQL API", () => {
     let receivedArgs: readonly [string, number] | undefined
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
@@ -2184,7 +2148,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         implementLocally: (repositoryId, githubIssueNumber) => {
           receivedArgs = [repositoryId, githubIssueNumber]
@@ -2225,7 +2188,6 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      {},
       {
         retry: (workItemId) => {
           receivedWorkItemId = workItemId
@@ -2256,7 +2218,6 @@ describe("GraphQL API", () => {
 
   test("accepts a Refresh Job for a Paused Repository without reconciling", async () => {
     const jobId = makeJobId()
-    let reconcilerCalled = false
     let enqueued:
       | {
           queue: string
@@ -2267,12 +2228,6 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {
-        reconcile: () => {
-          reconcilerCalled = true
-          return Effect.die("not used")
-        },
-      },
       {
         findSecret: ({ account, provider }) =>
           Effect.succeed(
@@ -2318,7 +2273,6 @@ describe("GraphQL API", () => {
       },
     })
     expect(repository.paused).toBe(true)
-    expect(reconcilerCalled).toBe(false)
     expect(enqueued).toEqual({
       queue: "issue-refresh",
       payload: {
@@ -2334,7 +2288,6 @@ describe("GraphQL API", () => {
     let enqueued = false
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {
         enabled: false,
@@ -2372,16 +2325,9 @@ describe("GraphQL API", () => {
 
   test("rejects refresh for an unknown repository without enqueueing", async () => {
     let enqueued = false
-    let reconcilerCalled = false
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {
-        reconcile: () => {
-          reconcilerCalled = true
-          return Effect.die("not used")
-        },
-      },
       {},
       {
         enqueue: () => {
@@ -2409,14 +2355,12 @@ describe("GraphQL API", () => {
       ],
     })
     expect(enqueued).toBe(false)
-    expect(reconcilerCalled).toBe(false)
   })
 
   test("rejects refresh when the Repository has no GitHub credential", async () => {
     let enqueued = false
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {
         findSecret: () => Effect.succeed(null),
@@ -2456,7 +2400,6 @@ describe("GraphQL API", () => {
   test("reports enqueue failure without accepting a Refresh Job", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {
         findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -2602,7 +2545,6 @@ describe("GraphQL API", () => {
     const calls: Array<{ fromMs: number; toMs: number }> = []
     await runtime.dispose()
     runtime = makeRuntime(
-      {},
       {},
       {},
       {},
