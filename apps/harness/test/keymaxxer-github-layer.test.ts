@@ -461,4 +461,52 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(runs[0]?.command).toContain('"--conditions"')
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
   })
+
+  test("rejects malformed Ready Issue fields through Schema", async () => {
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              number: 0,
+              title: " ",
+              body: "Issue body",
+              url: "not-a-url",
+              createdAt: "not-a-date",
+              state: "OPEN",
+              hierarchySupported: true,
+              hasChildren: false,
+              parentPosition: -1,
+              parent: null,
+              blockedBy: [],
+              closingPullRequests: [],
+            },
+          ]),
+          stderr: "",
+        }),
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github
+          .listReadyIssues({ owner: "acme", name: "widgets" })
+          .pipe(Effect.flip)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.message).toBe(
+      "Failed to list Ready-labeled Issues for acme/widgets",
+    )
+  })
 })

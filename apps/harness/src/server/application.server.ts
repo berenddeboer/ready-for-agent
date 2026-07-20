@@ -1,5 +1,4 @@
 import "@tanstack/react-start/server-only"
-import { homedir } from "node:os"
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
@@ -21,29 +20,12 @@ import {
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../application-request-context.js"
 import { ambientGitHubLayer } from "./ambient-github-layer.js"
+import {
+  environmentConfigLayer,
+  loadApplicationConfig,
+} from "./application-config.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
-
-/**
- * Directory for host tools that need a cwd but are not scoped to a Repository
- * or Work Item. Never derived from compiled module locations.
- */
-const hostToolCwd = () => process.env.HOME?.trim() || homedir()
-
-const keymaxxerSidecarUrlFromEnvironment = (
-  environment: Partial<Record<string, string | undefined>>,
-) => {
-  if (environment.KEYMAXXER_ENABLED?.trim().toLowerCase() === "false") {
-    return undefined
-  }
-  const sidecarUrl = environment.KEYMAXXER_SIDECAR_URL?.trim()
-  if (sidecarUrl === undefined || sidecarUrl === "") {
-    throw new Error(
-      "KEYMAXXER_SIDECAR_URL is required (capability URL from the Keymaxxer Sidecar bootstrap line)",
-    )
-  }
-  return sidecarUrl
-}
 
 export interface Application {
   readonly context: ApplicationRequestContext
@@ -58,16 +40,23 @@ export const createApplication = async (
   environment: Partial<Record<string, string | undefined>> = process.env,
   options: CreateApplicationOptions = {},
 ): Promise<Application> => {
-  const sidecarUrl = keymaxxerSidecarUrlFromEnvironment(environment)
+  const configLayer = environmentConfigLayer(environment)
+  const config = await Effect.runPromise(loadApplicationConfig(environment))
+  const sidecarUrl = config.keymaxxerSidecarUrl
   const databaseLayer = DbServiceLive.pipe(Layer.provideMerge(DatabaseLive))
   const keymaxxerLayer =
     sidecarUrl === undefined
       ? disabledKeymaxxerLayer
       : sidecarKeymaxxerLayer(sidecarUrl)
-  const toolCwd = hostToolCwd()
+  const toolCwd = config.hostToolCwd
+  const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
+    Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
+  )
   const githubLayer =
     sidecarUrl === undefined
-      ? ambientGitHubLayer({ workspaceRoot: toolCwd })
+      ? ambientGitHubLayer({ workspaceRoot: toolCwd }).pipe(
+          Layer.provide(opencodePlatformLayer),
+        )
       : keymaxxerGitHubLayer({ workspaceRoot: toolCwd }).pipe(
           Layer.provide(keymaxxerLayer),
         )
@@ -77,9 +66,6 @@ export const createApplication = async (
   )
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
-  )
-  const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
-    Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
   const opencodeLayer = Opencode.layer({
     ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
@@ -100,7 +86,7 @@ export const createApplication = async (
     Layer.provideMerge(keymaxxerLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
-  const appLayer =
+  const applicationServices =
     options.startWorker === false
       ? Layer.mergeAll(
           reconcilerLayer,
@@ -119,6 +105,7 @@ export const createApplication = async (
           lifecycleLayer,
           loggingLayer,
         )
+  const appLayer = applicationServices.pipe(Layer.provide(configLayer))
   const runtime = ManagedRuntime.make(appLayer)
 
   try {

@@ -12,34 +12,58 @@ import {
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 
+const PositiveInt = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
+const NonNegativeInt = Schema.Int.pipe(
+  Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+)
+const RequiredString = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((value: string) =>
+      value.trim() === "" ? "Expected a non-empty string" : undefined,
+    ),
+  ),
+)
+const UrlString = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((value: string) => {
+      try {
+        new URL(value)
+        return undefined
+      } catch {
+        return "Invalid URL"
+      }
+    }),
+  ),
+)
+
 const SerializedIssue = Schema.Struct({
-  number: Schema.Finite,
-  title: Schema.String,
+  number: PositiveInt,
+  title: RequiredString,
   body: Schema.String,
-  url: Schema.String,
-  createdAt: Schema.String,
+  url: UrlString,
+  createdAt: Schema.DateFromString,
   state: Schema.Literals(["OPEN", "CLOSED"]),
   hierarchySupported: Schema.Boolean,
   hasChildren: Schema.Boolean,
-  parentPosition: Schema.NullOr(Schema.Finite),
+  parentPosition: Schema.NullOr(NonNegativeInt),
   parent: Schema.NullOr(
     Schema.Struct({
-      number: Schema.Finite,
-      url: Schema.String,
+      number: PositiveInt,
+      url: UrlString,
       state: Schema.Literals(["OPEN", "CLOSED"]),
       isReadyLabeled: Schema.Boolean,
     }),
   ),
   blockedBy: Schema.Array(
     Schema.Struct({
-      number: Schema.Finite,
-      url: Schema.String,
+      number: PositiveInt,
+      url: UrlString,
     }),
   ),
   closingPullRequests: Schema.Array(
     Schema.Struct({
-      number: Schema.Finite,
-      repository: Schema.String,
+      number: PositiveInt,
+      repository: RequiredString,
       state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
       isDraft: Schema.Boolean,
     }),
@@ -144,70 +168,11 @@ const parseIssues = (
   stdout: string,
   repository: { owner: string; name: string },
 ): Effect.Effect<readonly ReadyLabeledIssue[], GitHubRequestError> =>
-  Effect.try({
-    try: () => JSON.parse(stdout) as unknown,
-    catch: () => requestError(repository, "list Ready-labeled Issues"),
-  }).pipe(
-    Effect.flatMap((value) =>
-      Schema.decodeUnknownEffect(SerializedIssues)(value).pipe(
-        Effect.mapError(() =>
-          requestError(repository, "list Ready-labeled Issues"),
-        ),
-      ),
-    ),
-    Effect.flatMap((issues) =>
-      Effect.try({
-        try: () =>
-          issues.map((issue) => {
-            if (!Number.isSafeInteger(issue.number) || issue.number <= 0) {
-              throw new Error("Invalid Issue number")
-            }
-            if (issue.title.trim() === "") {
-              throw new Error("Invalid Issue title")
-            }
-            const createdAt = new Date(issue.createdAt)
-            if (Number.isNaN(createdAt.getTime())) {
-              throw new Error("Invalid Issue creation time")
-            }
-            new URL(issue.url)
-            if (issue.parent !== null) {
-              if (
-                !Number.isSafeInteger(issue.parent.number) ||
-                issue.parent.number <= 0
-              ) {
-                throw new Error("Invalid parent Issue number")
-              }
-              new URL(issue.parent.url)
-            }
-            if (
-              issue.parentPosition !== null &&
-              (!Number.isSafeInteger(issue.parentPosition) ||
-                issue.parentPosition < 0)
-            ) {
-              throw new Error("Invalid parent position")
-            }
-            for (const dependency of issue.blockedBy) {
-              if (
-                !Number.isSafeInteger(dependency.number) ||
-                dependency.number <= 0
-              ) {
-                throw new Error("Invalid dependency Issue number")
-              }
-              new URL(dependency.url)
-            }
-            for (const pullRequest of issue.closingPullRequests) {
-              if (
-                !Number.isSafeInteger(pullRequest.number) ||
-                pullRequest.number <= 0 ||
-                pullRequest.repository.trim() === ""
-              ) {
-                throw new Error("Invalid closing pull request identity")
-              }
-            }
-            return { ...issue, createdAt }
-          }),
-        catch: () => requestError(repository, "list Ready-labeled Issues"),
-      }),
+  Schema.decodeUnknownEffect(Schema.fromJsonString(SerializedIssues))(
+    stdout,
+  ).pipe(
+    Effect.mapError(() =>
+      requestError(repository, "list Ready-labeled Issues"),
     ),
   )
 
@@ -218,29 +183,35 @@ export const keymaxxerGitHubLayer = (options: {
     GitHubService,
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
-      const ensureToken = (repository: { owner: string; name: string }) =>
-        keymaxxer.findSecret({
-          provider: "github",
-          account: `${repository.owner}/${repository.name}`,
-        })
-      const runGitHubCommand = (tokenName: string, command: string) =>
-        keymaxxer.runWithSecrets({
-          command: `GITHUB_TOKEN="$${tokenName}" ${command}`,
-          cwd: options.workspaceRoot,
-          secrets: [tokenName],
-          timeoutMs: 60_000,
-        })
-      const runGitHubBin = (
-        tokenName: string,
-        operation: GitHubHelperOperation,
-        args: readonly string[],
-      ) =>
-        runGitHubCommand(
-          tokenName,
-          formatGitHubHelperShellCommand(
-            resolveGitHubHelperChildSpawn({ operation, args }),
+      const ensureToken = Effect.fn("KeymaxxerGitHub.ensureToken")(
+        (repository: { owner: string; name: string }) =>
+          keymaxxer.findSecret({
+            provider: "github",
+            account: `${repository.owner}/${repository.name}`,
+          }),
+      )
+      const runGitHubCommand = Effect.fn("KeymaxxerGitHub.runCommand")(
+        (tokenName: string, command: string) =>
+          keymaxxer.runWithSecrets({
+            command: `GITHUB_TOKEN="$${tokenName}" ${command}`,
+            cwd: options.workspaceRoot,
+            secrets: [tokenName],
+            timeoutMs: 60_000,
+          }),
+      )
+      const runGitHubBin = Effect.fn("KeymaxxerGitHub.runHelper")(
+        (
+          tokenName: string,
+          operation: GitHubHelperOperation,
+          args: readonly string[],
+        ) =>
+          runGitHubCommand(
+            tokenName,
+            formatGitHubHelperShellCommand(
+              resolveGitHubHelperChildSpawn({ operation, args }),
+            ),
           ),
-        )
+      )
 
       const service: GitHubServiceShape = {
         getOpenPullRequestNumber: (repository, headRefName) =>

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process"
 import { resolve } from "node:path"
 import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { DatabaseLive, runConfiguredMigrations } from "@ready-for-agent/db"
 import {
   KEYMAXXER_SIDECAR_URL_PREFIX,
@@ -12,6 +12,7 @@ import {
 } from "@ready-for-agent/keymaxxer-service"
 import type { ApplicationRequestContext } from "../application-request-context.js"
 import { type Application, createApplication } from "./application.server.js"
+import { environmentConfigLayer, loadPort } from "./application-config.js"
 import {
   browserOpenCommand,
   hasNoOpenFlag,
@@ -133,11 +134,13 @@ export const resolveKeymaxxerMode = (
 }
 
 const applyProductionMigrations = async (
-  _environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> => {
   await Effect.runPromise(
     runConfiguredMigrations().pipe(
-      Effect.provide(DatabaseLive),
+      Effect.provide(
+        DatabaseLive.pipe(Layer.provide(environmentConfigLayer(environment))),
+      ),
       Effect.tap(() =>
         Effect.sync(() => {
           console.info("Database migrations applied")
@@ -276,8 +279,9 @@ const defaultInstallSignalHandlers = (
 }
 
 /**
- * One production owner for database preparation, Keymaxxer Sidecar
- * coordination, application runtime, HTTP listen, browser open, and cleanup.
+ * Intentional Promise host boundary for Bun HTTP, process signals, detached
+ * browser launch, owned Sidecar bootstrap, dynamic imports, and shutdown.
+ * Effect owns the application runtime and migrations inside this outer host.
  */
 export const startProductionLifecycle = async (
   options: ProductionLifecycleOptions = {},
@@ -285,7 +289,7 @@ export const startProductionLifecycle = async (
   const environment = { ...(options.environment ?? process.env) }
   const argv = options.argv ?? process.argv
   const hostname = options.hostname ?? "127.0.0.1"
-  const port = options.port ?? Number(environment.PORT ?? 4200)
+  const port = options.port ?? (await Effect.runPromise(loadPort(environment)))
   const clientDirectory = options.clientDirectory ?? defaultClientDirectory
   const serverEntryPath = options.serverEntryPath ?? defaultServerEntryPath
   const embeddedClientAssets = options.embeddedClientAssets

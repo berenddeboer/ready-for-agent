@@ -1,4 +1,7 @@
-import { Effect } from "effect"
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
+import { Effect, Layer } from "effect"
 import {
   GitHubRequestError,
   GitHubService,
@@ -6,6 +9,10 @@ import {
 } from "@ready-for-agent/github-service"
 import { ambientGitHubLayer } from "../src/server/ambient-github-layer.js"
 import { expect, test } from "bun:test"
+
+const processLayer = BunChildProcessSpawner.layer.pipe(
+  Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
+)
 
 const serviceWithList = (
   listReadyIssues: GitHubServiceShape["listReadyIssues"],
@@ -40,7 +47,7 @@ test("ambient GitHub authentication is resolved once", async () => {
       const github = yield* GitHubService
       yield* github.listReadyIssues({ owner: "acme", name: "one" })
       yield* github.listReadyIssues({ owner: "acme", name: "two" })
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 
   expect(resolutions).toBe(1)
@@ -70,7 +77,7 @@ test("ambient GitHub authentication refreshes once after a 401", async () => {
     Effect.gen(function* () {
       const github = yield* GitHubService
       yield* github.listReadyIssues({ owner: "acme", name: "widgets" })
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 
   expect(resolutions).toBe(2)
@@ -115,7 +122,7 @@ test("concurrent 401 responses share one refreshed token", async () => {
         ],
         { concurrency: "unbounded" },
       )
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 
   expect(expiredCalls).toBe(2)
@@ -147,8 +154,34 @@ test("ambient GitHub authentication is not refreshed after a 403", async () => {
       return yield* Effect.exit(
         github.listReadyIssues({ owner: "acme", name: "widgets" }),
       )
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 
   expect(resolutions).toBe(1)
+})
+
+test("failed authentication acquisition is cleared for a later retry", async () => {
+  let resolutions = 0
+  const layer = ambientGitHubLayer({
+    workspaceRoot: "/workspace",
+    resolveToken: async () => {
+      resolutions += 1
+      if (resolutions === 1) throw new Error("gh unavailable")
+      return "recovered-token"
+    },
+    makeService: () => serviceWithList(() => Effect.succeed([])),
+  })
+
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const github = yield* GitHubService
+      const first = yield* Effect.exit(
+        github.listReadyIssues({ owner: "acme", name: "widgets" }),
+      )
+      expect(first._tag).toBe("Failure")
+      yield* github.listReadyIssues({ owner: "acme", name: "widgets" })
+    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+  )
+
+  expect(resolutions).toBe(2)
 })

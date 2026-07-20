@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process"
-import { Effect, Layer } from "effect"
+import { Deferred, Duration, Effect, Layer, Ref } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   type GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -10,135 +10,195 @@ import {
 
 type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
 
-const resolveGhToken = (cwd: string): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const child = spawn("gh", ["auth", "token"], {
-      cwd,
-      env: process.env,
-      timeout: 60_000,
-    })
-    let stdout = ""
-    let stderr = ""
-    child.stdout.setEncoding("utf8")
-    child.stderr.setEncoding("utf8")
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk
-    })
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk
-    })
-    child.once("error", reject)
-    child.once("close", (exitCode) => {
-      const token = stdout.trim()
-      if (exitCode === 0 && token !== "") {
-        resolve(token)
-        return
-      }
-      reject(
-        new Error(
-          stderr.trim() || "GitHub CLI did not return an authentication token",
-        ),
-      )
-    })
+const authenticationError = (cause: unknown) =>
+  new GitHubRequestError({
+    message: "Failed to resolve GitHub CLI authentication",
+    cause,
   })
 
 export const ambientGitHubLayer = (options: {
   readonly workspaceRoot: string
   readonly resolveToken?: () => Promise<string>
   readonly makeService?: (token: string) => GitHubServiceShape
-}): Layer.Layer<GitHubService> =>
-  Layer.sync(GitHubService, () => {
-    const resolveToken =
-      options.resolveToken ?? (() => resolveGhToken(options.workspaceRoot))
-    const makeService = options.makeService ?? makeGitHubServiceFromToken
-    type TokenEntry = { readonly promise: Promise<string> }
-    let cachedToken: TokenEntry | undefined
+}): Layer.Layer<
+  GitHubService,
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Layer.effect(
+    GitHubService,
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const makeService = options.makeService ?? makeGitHubServiceFromToken
+      const tokenCache = yield* Ref.make<
+        Deferred.Deferred<string, GitHubRequestError> | undefined
+      >(undefined)
 
-    const acquireToken = () => {
-      const source = cachedToken ?? { promise: resolveToken() }
-      cachedToken = source
-      return source.promise.then(
-        (token) => ({ source, token }),
-        (error) => {
-          if (cachedToken === source) cachedToken = undefined
-          throw error
+      const resolveGhToken = Effect.fn("AmbientGitHub.resolveGhToken")(
+        function* () {
+          const output = yield* spawner
+            .string(
+              ChildProcess.make("gh", ["auth", "token"], {
+                cwd: options.workspaceRoot,
+                stdin: "ignore",
+                stderr: "inherit",
+              }),
+            )
+            .pipe(Effect.timeout(Duration.seconds(60)))
+          const token = output.trim()
+          if (token === "") {
+            return yield* authenticationError(
+              "GitHub CLI did not return an authentication token",
+            )
+          }
+          return token
+        },
+        Effect.mapError(authenticationError),
+      )
+
+      const injectedResolveToken = options.resolveToken
+      const resolveToken =
+        injectedResolveToken === undefined
+          ? resolveGhToken
+          : Effect.fn("AmbientGitHub.resolveInjectedToken")(function* () {
+              return yield* Effect.tryPromise({
+                try: injectedResolveToken,
+                catch: authenticationError,
+              })
+            })
+
+      const acquireToken = Effect.fn("AmbientGitHub.acquireToken")(
+        function* () {
+          const candidate = yield* Deferred.make<string, GitHubRequestError>()
+          type SelectedToken = {
+            readonly source: Deferred.Deferred<string, GitHubRequestError>
+            readonly owner: boolean
+          }
+          const selected = yield* Ref.modify<
+            Deferred.Deferred<string, GitHubRequestError> | undefined,
+            SelectedToken
+          >(tokenCache, (current) =>
+            current === undefined
+              ? [{ source: candidate, owner: true }, candidate]
+              : [{ source: current, owner: false }, current],
+          )
+
+          if (selected.owner) {
+            yield* resolveToken().pipe(
+              Effect.result,
+              Effect.flatMap((result) =>
+                (result._tag === "Failure"
+                  ? Ref.update(tokenCache, (current) =>
+                      current === candidate ? undefined : current,
+                    )
+                  : Effect.void
+                ).pipe(
+                  Effect.andThen(
+                    Deferred.complete(candidate, Effect.fromResult(result)),
+                  ),
+                ),
+              ),
+              Effect.forkDetach({ startImmediately: true }),
+            )
+          }
+
+          return {
+            source: selected.source,
+            token: yield* Deferred.await(selected.source),
+          }
         },
       )
-    }
 
-    const run = <A>(
-      operation: (
-        service: GitHubServiceShape,
-      ) => Effect.Effect<A, GitHubServiceError>,
-      refreshAuthentication: boolean,
-    ): Effect.Effect<A, GitHubServiceError> =>
-      Effect.tryPromise({
-        try: acquireToken,
-        catch: (cause) =>
-          new GitHubRequestError({
-            message: "Failed to resolve GitHub CLI authentication",
-            cause,
-          }),
-      }).pipe(
-        Effect.flatMap(({ source, token }) =>
-          operation(makeService(token)).pipe(
-            Effect.catchTag("GitHubRequestError", (error) => {
-              if (!refreshAuthentication || error.statusCode !== 401) {
-                return Effect.fail(error)
-              }
-              if (cachedToken === source) cachedToken = undefined
-              return run(operation, false)
-            }),
+      const run = Effect.fn("AmbientGitHub.runAuthenticated")(function* <A>(
+        operation: (
+          service: GitHubServiceShape,
+        ) => Effect.Effect<A, GitHubServiceError>,
+      ) {
+        const { source, token } = yield* acquireToken()
+        const first = yield* Effect.result(operation(makeService(token)))
+        if (
+          first._tag !== "Failure" ||
+          first.failure._tag !== "GitHubRequestError" ||
+          first.failure.statusCode !== 401
+        ) {
+          return yield* Effect.fromResult(first)
+        }
+
+        yield* Ref.update(tokenCache, (current) =>
+          current === source ? undefined : current,
+        )
+        const refreshed = yield* acquireToken()
+        return yield* operation(makeService(refreshed.token))
+      })
+
+      const authenticated = <A>(
+        operation: (
+          service: GitHubServiceShape,
+        ) => Effect.Effect<A, GitHubServiceError>,
+      ): Effect.Effect<A, GitHubServiceError> => run(operation)
+
+      return {
+        getOpenPullRequestNumber: Effect.fn(
+          "AmbientGitHub.getOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          authenticated((service) =>
+            service.getOpenPullRequestNumber(repository, headRefName),
           ),
         ),
-      )
-
-    const authenticated = <A>(
-      operation: (
-        service: GitHubServiceShape,
-      ) => Effect.Effect<A, GitHubServiceError>,
-    ): Effect.Effect<A, GitHubServiceError> => run(operation, true)
-
-    return {
-      getOpenPullRequestNumber: (repository, headRefName) =>
-        authenticated((service) =>
-          service.getOpenPullRequestNumber(repository, headRefName),
-        ),
-      getPullRequestCheckStatus: (repository, headRefName) =>
-        authenticated((service) =>
-          service.getPullRequestCheckStatus(repository, headRefName),
-        ),
-      getPrStatusCheckDiagnostics: (repository, checks, options) =>
-        authenticated((service) =>
-          service.getPrStatusCheckDiagnostics(repository, checks, options),
-        ),
-      getPullRequestLifecycleStatus: (repository, headRefName) =>
-        authenticated((service) =>
-          service.getPullRequestLifecycleStatus(repository, headRefName),
-        ),
-      markPullRequestReadyForReview: (repository, headRefName) =>
-        authenticated((service) =>
-          service.markPullRequestReadyForReview(repository, headRefName),
-        ),
-      mergePullRequest: (repository, headRefName) =>
-        authenticated((service) =>
-          service.mergePullRequest(repository, headRefName),
-        ),
-      ensureIssueCompletedWithSummary: (
-        repository,
-        issueNumber,
-        workItemId,
-        summaryMarkdown,
-      ) =>
-        authenticated((service) =>
-          service.ensureIssueCompletedWithSummary(
-            repository,
-            issueNumber,
-            workItemId,
-            summaryMarkdown,
+        getPullRequestCheckStatus: Effect.fn(
+          "AmbientGitHub.getPullRequestCheckStatus",
+        )((repository, headRefName) =>
+          authenticated((service) =>
+            service.getPullRequestCheckStatus(repository, headRefName),
           ),
         ),
-      listReadyIssues: (repository) =>
-        authenticated((service) => service.listReadyIssues(repository)),
-    } satisfies GitHubServiceShape
-  })
+        getPrStatusCheckDiagnostics: Effect.fn(
+          "AmbientGitHub.getPrStatusCheckDiagnostics",
+        )((repository, checks, requestOptions) =>
+          authenticated((service) =>
+            service.getPrStatusCheckDiagnostics(
+              repository,
+              checks,
+              requestOptions,
+            ),
+          ),
+        ),
+        getPullRequestLifecycleStatus: Effect.fn(
+          "AmbientGitHub.getPullRequestLifecycleStatus",
+        )((repository, headRefName) =>
+          authenticated((service) =>
+            service.getPullRequestLifecycleStatus(repository, headRefName),
+          ),
+        ),
+        markPullRequestReadyForReview: Effect.fn(
+          "AmbientGitHub.markPullRequestReadyForReview",
+        )((repository, headRefName) =>
+          authenticated((service) =>
+            service.markPullRequestReadyForReview(repository, headRefName),
+          ),
+        ),
+        mergePullRequest: Effect.fn("AmbientGitHub.mergePullRequest")(
+          (repository, headRefName) =>
+            authenticated((service) =>
+              service.mergePullRequest(repository, headRefName),
+            ),
+        ),
+        ensureIssueCompletedWithSummary: Effect.fn(
+          "AmbientGitHub.ensureIssueCompletedWithSummary",
+        )((repository, issueNumber, workItemId, summaryMarkdown) =>
+          authenticated((service) =>
+            service.ensureIssueCompletedWithSummary(
+              repository,
+              issueNumber,
+              workItemId,
+              summaryMarkdown,
+            ),
+          ),
+        ),
+        listReadyIssues: Effect.fn("AmbientGitHub.listReadyIssues")(
+          (repository) =>
+            authenticated((service) => service.listReadyIssues(repository)),
+        ),
+      } satisfies GitHubServiceShape
+    }),
+  )
