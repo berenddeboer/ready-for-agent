@@ -247,6 +247,7 @@ export const filterWorkItemsByListKind = <
 export const STEP_RUN_REASON = {
   handlerFailed: "handler_failed",
   handlerDefect: "handler_defect",
+  prStatusChecksUnresolved: "pr_status_checks_unresolved",
   timeout: "timeout",
   interrupted: "interrupted",
   /** Prior harness/job-worker process ended while the Step Run was still Running. */

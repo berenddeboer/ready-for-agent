@@ -144,7 +144,7 @@ A current, open Leaf Issue with no listed blockers. A Work Item revalidates this
 _Avoid_: Ready-labeled Issue, Relevant Issue, Leaf Issue
 
 **Actionable Issue**:
-An Implementable Issue with no unfinished Work Item, including no Needs Human Work Item for that Issue. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability.
+An Implementable Issue with no unfinished Work Item, including no Needs Human Work Item or retryable persisted status-check failure for that Issue. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability.
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
@@ -160,7 +160,7 @@ An individual GitHub check run or commit status context associated with a pull r
 _Avoid_: Aggregate status-check rollup, workflow run
 
 **Status Check Handoff**:
-A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks. The prompt names each red check by display name and external id (and source when known), includes harness-loaded log diagnostics when available, and instructs Actions-job log fallback when Checks is forbidden; when any check is green, it also asks OpenCode to inspect the latest pull-request review comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback. OpenCode should restart transient infrastructure failures when appropriate. If processing the handoff produces a commit, OpenCode pushes it and comments on the existing pull request with the commit, verification, feedback addressed, and feedback declined with reasons. A structured `PROCESSED` verdict means OpenCode took an action expected to produce new check executions (or a green-only review handoff needed no change); a structured `FAILED: <reason>` verdict means the handoff contained red checks and OpenCode took no such action, leaving the PR red, and moves the Work Item to terminal Failed with code `pr_status_checks_unresolved`. Genuine human decisions still use `NEEDS_HUMAN`.
+A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks. The prompt names each red check by display name and external id (and source when known), includes harness-loaded log diagnostics when available, and instructs Actions-job log fallback when Checks is forbidden; when any check is green, it also asks OpenCode to inspect the latest pull-request review comments, disregard reviews visibly still in progress, and address worthwhile completed feedback. OpenCode should restart transient infrastructure failures when appropriate. If processing the handoff produces a commit, OpenCode pushes it and comments on the existing pull request with the commit, verification, feedback addressed, and feedback declined with reasons. A structured `PROCESSED` verdict means OpenCode took an action expected to produce new check executions (or a green-only review handoff needed no change). A first `FAILED: <reason>` verdict triggers one focused recovery attempt and a second verdict; if that also reports `FAILED`, Investigate stops as a retryable failed Step Run with reason code `pr_status_checks_unresolved`, leaves the checks unhandled, and tells the operator to fix or rerun them on GitHub before choosing Retry checks. After `PROCESSED`, two consecutive failed aggregate polls with no new unhandled execution stop Watch with the same retryable reason instead of polling forever. Genuine human decisions still use `NEEDS_HUMAN`.
 _Avoid_: Check classification, one prompt per check
 
 **Merge Conflict Handoff**:
@@ -172,7 +172,7 @@ A durable record of one scheduled execution attempt for a Work Item's Lifecycle 
 _Avoid_: Step duration, job attempt
 
 **Retry**:
-An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. Retry is not allowed while a Work Item is paused; the operator must Start first.
+An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior are the sole terminal exception: Retry clears that failure and restores Watch PR Status Checks. Retry is not allowed while a Work Item is paused; the operator must Start first.
 _Avoid_: Queue redelivery, resume
 
 **Pause Work Item**:
@@ -192,7 +192,7 @@ An operator-directed erasure of a Work Item that stops queued or running Step Ru
 _Avoid_: Abandon, Retry, cancel
 
 **Failed Work Item**:
-A terminal Work Item that cannot advance because a lifecycle precondition, such as the referenced Issue still existing and remaining Relevant, was not met, or because Investigate PR Status Checks completed with a structured failed verdict (`pr_status_checks_unresolved`) after a red Status Check Handoff produced no action capable of new check executions. Its Step Run retains the outcome of the Effect itself (including a successful Step Run when the failure is a semantic investigation verdict), and the Work Item records the separate failure reason.
+A terminal Work Item that cannot advance because a lifecycle precondition, such as the referenced Issue still existing and remaining Relevant, was not met. Its Step Run retains the outcome of the Effect itself, and the Work Item records the separate failure reason. Unresolved status checks stop on a retryable failed Step Run rather than producing a Failed Work Item.
 _Avoid_: Failed Step Run, Abandoned
 
 **Needs Human Work Item**:

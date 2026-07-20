@@ -362,6 +362,65 @@ describe("PR status check steps", () => {
     expect(second).toBe("handoff_needed")
   })
 
+  it("retires a failed execution after a manually rerun check makes the aggregate green", async () => {
+    const statuses: PullRequestCheckStatus[] = [
+      {
+        _tag: "failed",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:1", name: "lint", outcome: "red" },
+        ],
+      },
+      {
+        _tag: "succeeded",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:1", name: "lint", outcome: "red" },
+          { externalId: "checkrun:2", name: "lint", outcome: "green" },
+        ],
+      },
+    ]
+    let index = 0
+    const github = Layer.succeed(GitHubService, {
+      listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed(statuses[index++] ?? statuses[1]!),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
+      markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
+    } satisfies GitHubServiceShape)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        expect(yield* watchPrStatusChecks(context)).toBe("handoff_needed")
+        const status = yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, handled_at
+           FROM pr_status_check
+           WHERE work_item_id = ?
+           ORDER BY external_id`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly handled_at: number | null
+        }[]
+        return { status, rows }
+      }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
+    )
+
+    expect(result.status).toBe("handoff_needed")
+    expect(result.rows).toEqual([
+      { external_id: "checkrun:1", handled_at: expect.any(Number) },
+      { external_id: "checkrun:2", handled_at: null },
+    ])
+  })
+
   it("processes a red batch in a work turn followed by a verdict turn", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
@@ -470,9 +529,11 @@ describe("PR status check steps", () => {
     expect(prompts[1]).toContain(
       "If this handoff contained red checks and you made no commit, push, check restart",
     )
+    expect(prompts[1]).toContain("replacement execution")
   })
 
-  it("returns failed when OpenCode reports FAILED for red checks with no action", async () => {
+  it("makes a focused recovery attempt after FAILED and accepts recovered progress", async () => {
+    const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
@@ -490,10 +551,15 @@ describe("PR status check steps", () => {
               ],
             }),
             keymaxxer,
-            opencodeWith([
-              "No code changes, commit, push, or PR comment were made.",
-              "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed twice on GitHub 503; restart did not help",
-            ]),
+            opencodeWith(
+              [
+                "No code changes, commit, push, or PR comment were made.",
+                "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
+                "Reran the failed workflow; a replacement execution is queued.",
+                "READY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
             DatabaseTest,
           ),
         ),
@@ -501,10 +567,57 @@ describe("PR status check steps", () => {
     )
 
     expect(result).toEqual({
-      _tag: "failed",
-      reason: "ActionLint failed twice on GitHub 503; restart did not help",
+      _tag: "processed",
       handledCheckIds: [expect.any(String)],
     })
+    expect(prompts).toHaveLength(4)
+    expect(prompts[2]).toContain("focused recovery attempt")
+    expect(prompts[2]).toContain("ActionLint failed on GitHub 503")
+    expect(prompts[2]).toContain("get the pull request out of its red state")
+    expect(prompts[2]).toContain("Do not create an empty or no-op commit")
+    expect(prompts[3]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
+  })
+
+  it("fails retryably after the focused recovery attempt still cannot act", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* Effect.result(investigatePrStatusChecks(context))
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith([
+              "No safe action was available.",
+              "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
+              "I checked the current PR and cannot safely restart or change it.",
+              "READY_FOR_AGENT_RESULT: FAILED: No autonomous recovery action remains",
+            ]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") {
+      expect(String(result.failure)).toContain("Manual fixing may be required")
+      expect(String(result.failure)).toContain(
+        "fix or rerun the checks on GitHub, then click Retry checks",
+      )
+      expect(String(result.failure)).toContain(
+        "No autonomous recovery action remains",
+      )
+    }
   })
 
   it("fails the investigate step when harness diagnostics cannot load", async () => {

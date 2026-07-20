@@ -1951,12 +1951,17 @@ describe("GraphQL API", () => {
       ...workItem,
       id: terminalFailedId,
       state: "failed" as const,
+      failureCode: "pr_status_checks_unresolved",
+      failureMessage: "Manual fixing may be required",
       createdAt: new Date(baseTime + 2000),
       stepRuns: [
         {
           ...failedStep,
           id: "srun-01J0000000000000000000TERM",
           workItemId: terminalFailedId,
+          status: "succeeded" as const,
+          reasonCode: null,
+          reasonMessage: null,
         },
       ],
     }
@@ -2015,7 +2020,7 @@ describe("GraphQL API", () => {
           {
             id: terminalFailed.id,
             state: "FAILED",
-            canRetry: false,
+            canRetry: true,
             isTerminal: true,
           },
           {
