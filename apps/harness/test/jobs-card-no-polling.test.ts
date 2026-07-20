@@ -58,6 +58,17 @@ describe("JobsCard live updates", () => {
     expect(completedTabIndex).toBeGreaterThan(failedTabIndex)
   })
 
+  test("shows live counts for Working and Failed, but not Completed", () => {
+    const { jobsCard } = jobsCardSource()
+    expect(jobsCard).toMatch(
+      /\{tab\.id === "working" && ` \(\$\{workingItems\.length\}\)`\}/,
+    )
+    expect(jobsCard).toMatch(
+      /\{tab\.id === "failed" && ` \(\$\{failedItems\.length\}\)`\}/,
+    )
+    expect(jobsCard).not.toContain('tab.id === "completed" &&')
+  })
+
   test("shows issue number with title and top-right pause control", () => {
     const { source, jobsCard } = jobsCardSource()
     expect(jobsCard).not.toContain("Issue #")
