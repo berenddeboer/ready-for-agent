@@ -2072,7 +2072,9 @@ function WorkItemLifecycleStatus({
   const retriesStatusChecks =
     workItem.failureCode === "pr_status_checks_unresolved" ||
     workItem.state === "WATCH_PR_STATUS_CHECKS" ||
-    workItem.state === "INVESTIGATE_PR_STATUS_CHECKS"
+    workItem.state === "INVESTIGATE_PR_STATUS_CHECKS" ||
+    (workItem.canRetry &&
+      workItem.lifecycleLabels.at(-1)?.phase === "GITHUB_STATUS_CHECKS")
   const canReset = compact
   const dataUpdatedAt = queryClient
     .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })

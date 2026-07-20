@@ -375,6 +375,9 @@ export const prStatusCheck = snakeCase.table(
     name: text().notNull(),
     outcome: text({ enum: ["green", "red"] }).notNull(),
     handledAt: integer({ mode: "number" }),
+    handledByStepRunId: text().references(() => stepRun.id, {
+      onDelete: "set null",
+    }),
     observedAt: integer({ mode: "number" }).notNull(),
     createdAt: integer({ mode: "number" })
       .notNull()
@@ -392,5 +395,6 @@ export const prStatusCheck = snakeCase.table(
       t.workItemId,
       t.handledAt,
     ),
+    index("pr_status_check_handled_by_step_run_idx").on(t.handledByStepRunId),
   ],
 )

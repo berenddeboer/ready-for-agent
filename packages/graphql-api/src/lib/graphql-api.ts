@@ -21,6 +21,7 @@ import {
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
   isRetryableFailedWorkItem,
+  isRetryableNeedsHumanWorkItem,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
@@ -351,6 +352,7 @@ export const createGraphqlApi = (
               workItem.waitingSince == null &&
               !workItem.paused &&
               (recoverableStatusCheckFailure ||
+                isRetryableNeedsHumanWorkItem(workItem) ||
                 (!isTerminalWorkItemState(workItem.state) &&
                   (latestStatus === "failed" ||
                     latestStatus === "interrupted")))

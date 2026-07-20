@@ -85,6 +85,76 @@ describe("runMigrations", () => {
           { name: "20260718055957_baseline" },
           { name: "20260718061640_right_black_bird" },
           { name: "20260720081709_cold_gladiator" },
+          { name: "20260720220839_simple_rick_jones" },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("backfills the Step Run that handled an existing Needs Human handoff", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260720220839_simple_rick_jones/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE work_item (id text PRIMARY KEY, state text NOT NULL)`,
+        )
+        yield* sql.unsafe(
+          `CREATE TABLE step_run (
+             id text PRIMARY KEY,
+             work_item_id text NOT NULL,
+             step text NOT NULL,
+             status text NOT NULL,
+             queued_at integer NOT NULL,
+             finished_at integer
+           )`,
+        )
+        yield* sql.unsafe(
+          `CREATE TABLE pr_status_check (
+             id text PRIMARY KEY,
+             work_item_id text NOT NULL,
+             handled_at integer
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO work_item VALUES ('wi-existing', 'needs_human')`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO step_run VALUES
+             ('srun-existing', 'wi-existing', 'investigate_pr_status_checks', 'succeeded', 100, 200)`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check VALUES
+             ('psc-handoff', 'wi-existing', 200),
+             ('psc-unrelated', 'wi-existing', 150)`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const checks = yield* sql.unsafe(
+          `SELECT id, handled_by_step_run_id
+           FROM pr_status_check
+           ORDER BY id`,
+        )
+        expect(checks).toEqual([
+          {
+            id: "psc-handoff",
+            handled_by_step_run_id: "srun-existing",
+          },
+          { id: "psc-unrelated", handled_by_step_run_id: null },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

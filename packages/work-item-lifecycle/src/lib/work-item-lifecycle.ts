@@ -1554,9 +1554,9 @@ export const makeWorkItemLifecycleLive = (
                 for (const checkId of output.handledCheckIds ?? []) {
                   yield* sql.unsafe(
                     `UPDATE pr_status_check
-                     SET handled_at = ?, updated_at = ?
-                     WHERE id = ? AND work_item_id = ? AND handled_at IS NULL`,
-                    [now, now, checkId, workItem.id],
+                       SET handled_at = ?, handled_by_step_run_id = ?, updated_at = ?
+                       WHERE id = ? AND work_item_id = ? AND handled_at IS NULL`,
+                    [now, stepRun.id, now, checkId, workItem.id],
                   )
                 }
 
@@ -2588,7 +2588,7 @@ export const makeWorkItemLifecycleLive = (
                 `SELECT status FROM step_run
                  WHERE work_item_id = ?
                    AND step = ?
-                 ORDER BY queued_at DESC, id DESC
+                 ORDER BY queued_at DESC, rowid DESC
                  LIMIT 1`,
                 [workItemId, pendingStep],
               )) as readonly { readonly status: string }[]
@@ -2846,7 +2846,7 @@ export const makeWorkItemLifecycleLive = (
                 const runningRows = (yield* sql.unsafe(
                   `SELECT id FROM step_run
                    WHERE work_item_id = ? AND status = 'running'
-                   ORDER BY queued_at DESC, id DESC
+                   ORDER BY queued_at DESC, rowid DESC
                    LIMIT 1`,
                   [workItemId],
                 )) as readonly { readonly id: string }[]
@@ -3251,9 +3251,27 @@ export const makeWorkItemLifecycleLive = (
           workItem.state === "failed" &&
           workItem.failure_code === "pr_status_checks_unresolved"
 
+        const latestRows = (yield* sql
+          .unsafe(
+            `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
+                    started_at, finished_at, reason_code, reason_message
+             FROM step_run
+             WHERE work_item_id = ?
+             ORDER BY queued_at DESC, rowid DESC
+             LIMIT 1`,
+            [workItemId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
+        const latest = latestRows[0]
+        const retryableNeedsHumanHandoff =
+          workItem.state === "needs_human" &&
+          latest?.step === "investigate_pr_status_checks" &&
+          latest.status === "succeeded"
+
         if (
           isTerminalWorkItemState(workItem.state) &&
-          !recoverableStatusCheckFailure
+          !recoverableStatusCheckFailure &&
+          !retryableNeedsHumanHandoff
         ) {
           return yield* new WorkItemTerminalError({
             workItemId,
@@ -3271,7 +3289,9 @@ export const makeWorkItemLifecycleLive = (
         const pendingStep: OperationalLifecycleStep =
           recoverableStatusCheckFailure
             ? "watch_pr_status_checks"
-            : (workItem.state as OperationalLifecycleStep)
+            : retryableNeedsHumanHandoff
+              ? "investigate_pr_status_checks"
+              : (workItem.state as OperationalLifecycleStep)
 
         const activeRows = (yield* sql
           .unsafe(
@@ -3280,7 +3300,7 @@ export const makeWorkItemLifecycleLive = (
            FROM step_run
            WHERE work_item_id = ?
              AND status IN ('queued', 'running')
-           ORDER BY queued_at DESC, id DESC
+           ORDER BY queued_at DESC, rowid DESC
            LIMIT 1`,
             [workItemId],
           )
@@ -3295,7 +3315,7 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        if (!recoverableStatusCheckFailure) {
+        if (!recoverableStatusCheckFailure && !retryableNeedsHumanHandoff) {
           const latestPendingRows = (yield* sql
             .unsafe(
               `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
@@ -3303,7 +3323,7 @@ export const makeWorkItemLifecycleLive = (
              FROM step_run
              WHERE work_item_id = ?
                AND step = ?
-             ORDER BY queued_at DESC, id DESC
+             ORDER BY queued_at DESC, rowid DESC
              LIMIT 1`,
               [workItemId, pendingStep],
             )
@@ -3330,16 +3350,29 @@ export const makeWorkItemLifecycleLive = (
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              if (recoverableStatusCheckFailure) {
+              if (recoverableStatusCheckFailure || retryableNeedsHumanHandoff) {
                 yield* sql.unsafe(
                   `UPDATE work_item
-                   SET state = 'watch_pr_status_checks',
+                   SET state = ?,
                        state_ready_at = ?,
                        failure_code = NULL,
                        failure_message = NULL,
                        updated_at = ?
                    WHERE id = ?`,
-                  [now, now, workItemId],
+                  [pendingStep, now, now, workItemId],
+                )
+              }
+
+              if (
+                retryableNeedsHumanHandoff &&
+                latest !== undefined &&
+                latest.finished_at !== null
+              ) {
+                yield* sql.unsafe(
+                  `UPDATE pr_status_check
+                   SET handled_at = NULL, handled_by_step_run_id = NULL, updated_at = ?
+                   WHERE work_item_id = ? AND handled_by_step_run_id = ?`,
+                  [now, workItemId, latest.id],
                 )
               }
 
@@ -3383,7 +3416,7 @@ export const makeWorkItemLifecycleLive = (
                         `SELECT id, status FROM step_run
                        WHERE work_item_id = ?
                          AND status IN ('queued', 'running')
-                       ORDER BY queued_at DESC, id DESC
+                       ORDER BY queued_at DESC, rowid DESC
                        LIMIT 1`,
                         [workItemId],
                       )

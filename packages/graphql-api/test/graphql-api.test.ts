@@ -1408,7 +1408,7 @@ describe("GraphQL API", () => {
             status: "NEEDS_HUMAN",
             statusLabel: "Needs human",
             statusMessage: "The pull request was closed",
-            canRetry: false,
+            canRetry: true,
             isTerminal: true,
             lifecycleLabels: [
               {
@@ -1772,6 +1772,18 @@ describe("GraphQL API", () => {
       state: "needs_human" as const,
       stepRuns: [],
     }
+    const retryableNeedsHuman = {
+      ...needsHuman,
+      id: makeWorkItemId(),
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          step: "investigate_pr_status_checks" as const,
+          status: "succeeded" as const,
+          finishedAt: new Date("2026-07-14T08:00:02.000Z"),
+        },
+      ],
+    }
     const complete = {
       ...workItem,
       id: makeWorkItemId(),
@@ -1820,6 +1832,7 @@ describe("GraphQL API", () => {
         listWorkItemsForRepository: () =>
           Effect.succeed([
             needsHuman,
+            retryableNeedsHuman,
             complete,
             implementing,
             retriableFailed,
@@ -1847,6 +1860,12 @@ describe("GraphQL API", () => {
             id: needsHuman.id,
             state: "NEEDS_HUMAN",
             canRetry: false,
+            isTerminal: true,
+          },
+          {
+            id: retryableNeedsHuman.id,
+            state: "NEEDS_HUMAN",
+            canRetry: true,
             isTerminal: true,
           },
           {

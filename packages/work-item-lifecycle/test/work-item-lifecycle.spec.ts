@@ -1804,7 +1804,7 @@ describe("WorkItemLifecycle", () => {
           Effect.succeed({
             _tag: "needs_human",
             reason: "A repository owner must approve the workflow",
-            handledCheckIds: [],
+            handledCheckIds: ["psc-needs-human"],
           }),
       }
 
@@ -1844,7 +1844,34 @@ describe("WorkItemLifecycle", () => {
           expect(failed._tag).toBe("processed")
           if (failed._tag === "processed") {
             expect(failed.workItem.state).toBe("investigate_pr_status_checks")
+            const investigation = failed.workItem.stepRuns.at(-1)!
+            const preceding = failed.workItem.stepRuns.at(-2)!
+            const tiedQueuedAt = investigation.queuedAt.getTime()
+            yield* sql.unsafe(
+              `UPDATE step_run SET queued_at = ? WHERE id IN (?, ?)`,
+              [tiedQueuedAt, investigation.id, preceding.id],
+            )
+            yield* sql.unsafe(`UPDATE step_run SET id = ? WHERE id = ?`, [
+              "srun-ZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+              preceding.id,
+            ])
           }
+
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES ('psc-needs-human', ?, 'checkrun:needs-human', 'deploy', 'red', NULL, ?, ?, ?)`,
+            [created.id, now, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES ('psc-other-handoff', ?, 'checkrun:other', 'test', 'green', NULL, ?, ?, ?)`,
+            [created.id, now, now, now],
+          )
 
           const investigated = yield* claimAndRunPending
           expect(investigated._tag).toBe("processed")
@@ -1862,6 +1889,64 @@ describe("WorkItemLifecycle", () => {
             lifecycle.implementNow(repository.id, issue.githubIssueNumber),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
+
+          const handledChecks = (yield* sql.unsafe(
+            `SELECT id, handled_at, handled_by_step_run_id
+             FROM pr_status_check
+             WHERE id IN ('psc-needs-human', 'psc-other-handoff')
+             ORDER BY id`,
+          )) as readonly {
+            readonly id: string
+            readonly handled_at: number | null
+            readonly handled_by_step_run_id: string | null
+          }[]
+          const targetCheck = handledChecks.find(
+            (check) => check.id === "psc-needs-human",
+          )
+          expect(targetCheck?.handled_at).not.toBeNull()
+          expect(targetCheck?.handled_by_step_run_id).toBe(
+            final.stepRuns.at(-1)?.id,
+          )
+          yield* sql.unsafe(
+            `UPDATE pr_status_check
+             SET handled_at = ?,
+                 handled_by_step_run_id = ?,
+                 updated_at = ?
+             WHERE id = 'psc-other-handoff'`,
+            [
+              targetCheck!.handled_at,
+              created.stepRuns[0]?.id,
+              targetCheck!.handled_at,
+            ],
+          )
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("investigate_pr_status_checks")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.failureMessage).toBeNull()
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "investigate_pr_status_checks",
+            status: "queued",
+          })
+          const reopenedChecks = (yield* sql.unsafe(
+            `SELECT id, handled_at, handled_by_step_run_id
+             FROM pr_status_check
+             WHERE id IN ('psc-needs-human', 'psc-other-handoff')
+             ORDER BY id`,
+          )) as readonly {
+            readonly id: string
+            readonly handled_at: number | null
+            readonly handled_by_step_run_id: string | null
+          }[]
+          expect(
+            reopenedChecks.find((check) => check.id === "psc-needs-human"),
+          ).toMatchObject({ handled_at: null, handled_by_step_run_id: null })
+          expect(
+            reopenedChecks.find((check) => check.id === "psc-other-handoff"),
+          ).toMatchObject({
+            handled_at: targetCheck!.handled_at,
+            handled_by_step_run_id: created.stepRuns[0]?.id,
+          })
         }),
       )
     })
