@@ -4,6 +4,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { buildRunArgs } from "./build-args.js"
 import { makeOpencodeEnvironment } from "./environment.js"
 import {
+  type OpencodeConfigError,
   OpencodeExitError,
   OpencodeTimeoutError,
   SessionIdNotFoundError,
@@ -27,6 +28,8 @@ export type OpencodeError =
   | SessionIdNotFoundError
   | PlatformError
 
+export type OpencodeLayerError = OpencodeConfigError
+
 export class Opencode extends Context.Service<
   Opencode,
   {
@@ -49,7 +52,7 @@ export class Opencode extends Context.Service<
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
-        const environment = makeOpencodeEnvironment({
+        const environment = yield* makeOpencodeEnvironment({
           keymaxxerMcpUrl: options.keymaxxerMcpUrl,
         })
 

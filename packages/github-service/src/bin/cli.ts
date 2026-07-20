@@ -1,9 +1,14 @@
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
-import { Effect, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { GitHubRepositoryUnavailableError } from "../lib/errors.js"
 import type { GitHubService } from "../lib/github-service.js"
 import { GitHubServiceLive } from "../lib/github-service-live.js"
 import { formatUserFacingError } from "../lib/user-facing-error.js"
+
+const GitHubServiceCliLive = GitHubServiceLive.pipe(
+  Layer.provide(BunFileSystem.layer),
+)
 
 export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
   "CliArgumentError",
@@ -25,7 +30,7 @@ export const runGitHubCli = <A, E>(
   program: Effect.Effect<A, E, GitHubService>,
 ): void =>
   program.pipe(
-    Effect.provide(GitHubServiceLive),
+    Effect.provide(GitHubServiceCliLive),
     Effect.catch((error) =>
       Effect.sync(() => {
         if (error instanceof GitHubRepositoryUnavailableError) {

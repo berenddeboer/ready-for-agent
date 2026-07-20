@@ -1,6 +1,16 @@
-import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { Config, Duration, Effect, Layer, Redacted, Schedule } from "effect"
+import {
+  Config,
+  Duration,
+  Effect,
+  FileSystem,
+  Layer,
+  Redacted,
+  Result,
+  Schedule,
+  Schema,
+} from "effect"
+import type { PlatformError } from "effect/PlatformError"
 import {
   type FieldsSelection,
   createClient,
@@ -159,9 +169,102 @@ export type LoadPrStatusCheckDiagnostics = (
   checks: readonly PrStatusCheckDiagnosticsRequest[],
   options: PrStatusCheckDiagnosticsOptions,
   signal?: AbortSignal,
-) => Promise<readonly PrStatusCheckDiagnostic[]>
+) => Effect.Effect<readonly PrStatusCheckDiagnostic[], GitHubRequestError>
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
+
+const PositiveInt = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
+const NonNegativeInt = Schema.Int.pipe(
+  Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+)
+/** Non-blank string without trimming the decoded value. */
+const RequiredString = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((value: string) =>
+      value.trim() === "" ? "Expected a non-empty string" : undefined,
+    ),
+  ),
+)
+const HttpUrlString = Schema.String.pipe(
+  Schema.check(
+    Schema.makeFilter((value: string) => {
+      try {
+        new URL(value)
+        return undefined
+      } catch {
+        return "Invalid URL"
+      }
+    }),
+  ),
+)
+
+/** Schema-decode unknown API values; SchemaError is reified at Effect.try boundaries. */
+const decodeSync = <S extends { readonly Type: unknown }>(
+  schema: S & Parameters<typeof Schema.decodeUnknownSync>[0],
+  value: unknown,
+): S["Type"] => Schema.decodeUnknownSync(schema)(value)
+
+const GitHubIssueStateSchema = Schema.Literals(["OPEN", "CLOSED"])
+const GitHubMergeableSchema = Schema.Literals([
+  "MERGEABLE",
+  "CONFLICTING",
+  "UNKNOWN",
+])
+const GitHubStatusCheckStateSchema = Schema.Literals([
+  "SUCCESS",
+  "FAILURE",
+  "ERROR",
+  "EXPECTED",
+  "PENDING",
+])
+const GitHubIssueReferenceSchema = Schema.Struct({
+  number: PositiveInt,
+  url: HttpUrlString,
+})
+const GitHubRepositoryNameSchema = Schema.Struct({
+  nameWithOwner: RequiredString,
+})
+const GitHubPullRequestCheckFieldsSchema = Schema.Struct({
+  baseRefName: RequiredString,
+  mergeable: GitHubMergeableSchema,
+  merged: Schema.Boolean,
+  state: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
+  statusCheckRollup: Schema.NullOr(
+    Schema.Struct({
+      state: GitHubStatusCheckStateSchema,
+    }),
+  ),
+})
+const RestCheckExecutionSchema = Schema.Struct({
+  id: Schema.Int,
+  name: RequiredString,
+  status: Schema.Unknown,
+  conclusion: Schema.optionalKey(Schema.Unknown),
+})
+const RestCommitStatusSchema = Schema.Struct({
+  context: RequiredString,
+  state: Schema.Unknown,
+  id: Schema.optionalKey(Schema.Unknown),
+  node_id: Schema.optionalKey(Schema.Unknown),
+})
+const ClosingPullRequestSchema = Schema.Struct({
+  number: PositiveInt,
+  isDraft: Schema.Boolean,
+  state: Schema.Unknown,
+  merged: Schema.Unknown,
+  repository: GitHubRepositoryNameSchema,
+})
+const ReadyLabeledIssueFieldsSchema = Schema.Struct({
+  number: PositiveInt,
+  title: RequiredString,
+  body: Schema.String,
+  url: HttpUrlString,
+  createdAt: Schema.DateFromString,
+  state: GitHubIssueStateSchema,
+  subIssuesSummary: Schema.Struct({
+    total: NonNegativeInt,
+  }),
+})
 
 const uniqueTerminalChecks = (
   checks: readonly TerminalPrStatusCheck[],
@@ -223,58 +326,35 @@ const toPullRequestCheckStatus = (
       headPushedAt: null,
     }
   }
-  if (
-    typeof pullRequest.baseRefName !== "string" ||
-    pullRequest.baseRefName.trim() === ""
-  ) {
-    throw new Error("Invalid GitHub pull request base ref name")
-  }
+  const decoded = decodeSync(GitHubPullRequestCheckFieldsSchema, pullRequest)
   const mergeability =
-    pullRequest.mergeable === "MERGEABLE"
+    decoded.mergeable === "MERGEABLE"
       ? "mergeable"
-      : pullRequest.mergeable === "CONFLICTING"
+      : decoded.mergeable === "CONFLICTING"
         ? "conflicting"
-        : pullRequest.mergeable === "UNKNOWN"
-          ? "unknown"
-          : null
-  if (mergeability === null) {
-    throw new Error(
-      `Invalid GitHub pull request mergeability: ${pullRequest.mergeable}`,
-    )
-  }
+        : "unknown"
   const snapshot = {
     mergeability,
-    baseRefName: pullRequest.baseRefName,
+    baseRefName: decoded.baseRefName,
     headPushedAt: parseHeadPushedAt(pullRequest),
   } as const
-  if (pullRequest.merged === true) {
+  if (decoded.merged) {
     return { _tag: "succeeded", terminalChecks, ...snapshot }
   }
-  if (pullRequest.merged !== false) {
-    throw new Error(
-      `Invalid GitHub pull request merged value: ${pullRequest.merged}`,
-    )
-  }
-  if (pullRequest.state === "CLOSED") {
+  if (decoded.state === "CLOSED") {
     return { _tag: "closed", ...snapshot }
   }
-  if (pullRequest.state !== "OPEN") {
-    throw new Error(`Invalid GitHub pull request state: ${pullRequest.state}`)
-  }
-  if (pullRequest.statusCheckRollup === null) {
+  if (decoded.statusCheckRollup === null) {
     return { _tag: "no_checks", ...snapshot }
   }
-  const state = pullRequest.statusCheckRollup.state
+  const state = decoded.statusCheckRollup.state
   if (state === "SUCCESS") {
     return { _tag: "succeeded", terminalChecks, ...snapshot }
   }
   if (state === "FAILURE" || state === "ERROR") {
     return { _tag: "failed", terminalChecks, ...snapshot }
   }
-  if (state === "EXPECTED" || state === "PENDING") {
-    return { _tag: "pending", terminalChecks, ...snapshot }
-  }
-  throw new Error(`Invalid GitHub status check state: ${state}`)
+  return { _tag: "pending", terminalChecks, ...snapshot }
 }
 
 const normalizeRestToken = (value: unknown): string | null => {
@@ -293,17 +373,12 @@ const mapRestCheckExecution = (check: {
   if (normalizeRestToken(check.status) !== "COMPLETED") {
     return null
   }
-  if (typeof check.id !== "number" || !Number.isSafeInteger(check.id)) {
-    throw new Error("Invalid GitHub check execution identity")
-  }
-  if (typeof check.name !== "string" || check.name.trim() === "") {
-    throw new Error("Invalid GitHub check execution name")
-  }
-  const conclusion = normalizeRestToken(check.conclusion)
+  const decoded = decodeSync(RestCheckExecutionSchema, check)
+  const conclusion = normalizeRestToken(decoded.conclusion)
   if (conclusion === "SUCCESS") {
     return {
-      externalId: `actions-job:${check.id}`,
-      name: check.name,
+      externalId: `actions-job:${decoded.id}`,
+      name: decoded.name,
       outcome: "green",
     }
   }
@@ -314,8 +389,8 @@ const mapRestCheckExecution = (check: {
     conclusion === "STARTUP_FAILURE"
   ) {
     return {
-      externalId: `actions-job:${check.id}`,
-      name: check.name,
+      externalId: `actions-job:${decoded.id}`,
+      name: decoded.name,
       outcome: "red",
     }
   }
@@ -325,34 +400,36 @@ const mapRestCheckExecution = (check: {
 const mapRestCommitStatus = (
   status: GitHubRestCommitStatus,
 ): TerminalPrStatusCheck | null => {
-  if (typeof status.context !== "string" || status.context.trim() === "") {
-    throw new Error("Invalid GitHub commit status context")
-  }
-  const state = normalizeRestToken(status.state)
+  const decoded = decodeSync(RestCommitStatusSchema, status)
+  const state = normalizeRestToken(decoded.state)
   if (state === "PENDING" || state === "EXPECTED") {
     return null
   }
   const identity =
-    typeof status.node_id === "string" && status.node_id.trim() !== ""
-      ? status.node_id
-      : typeof status.id === "number" && Number.isSafeInteger(status.id)
-        ? String(status.id)
-        : status.context
+    typeof decoded.node_id === "string" && decoded.node_id.trim() !== ""
+      ? decoded.node_id
+      : typeof decoded.id === "number" && Number.isSafeInteger(decoded.id)
+        ? String(decoded.id)
+        : decoded.context
   if (state === "SUCCESS") {
     return {
       externalId: `status:${identity}`,
-      name: status.context,
+      name: decoded.context,
       outcome: "green",
     }
   }
   if (state === "FAILURE" || state === "ERROR") {
     return {
       externalId: `status:${identity}`,
-      name: status.context,
+      name: decoded.context,
       outcome: "red",
     }
   }
-  throw new Error(`Invalid GitHub commit status state: ${status.state}`)
+  decodeSync(
+    Schema.Literals(["SUCCESS", "FAILURE", "ERROR", "PENDING", "EXPECTED"]),
+    state,
+  )
+  return null
 }
 
 interface GitHubApiIssue {
@@ -449,19 +526,8 @@ interface InternalReadyLabeledIssue
 const toIssueReference = (
   issue: GitHubApiIssueReference,
 ): GitHubIssueReference => {
-  if (!Number.isSafeInteger(issue.number) || Number(issue.number) <= 0) {
-    throw new Error(`Invalid GitHub dependency issue number: ${issue.number}`)
-  }
-  if (typeof issue.url !== "string") {
-    throw new Error(`Invalid GitHub dependency issue URL: ${issue.url}`)
-  }
-  try {
-    new URL(issue.url)
-  } catch {
-    throw new Error(`Invalid GitHub dependency issue URL: ${issue.url}`)
-  }
-
-  return { number: Number(issue.number), url: issue.url }
+  const decoded = decodeSync(GitHubIssueReferenceSchema, issue)
+  return { number: decoded.number, url: decoded.url }
 }
 
 const mapBlockedByPage = (
@@ -479,16 +545,8 @@ const toClosingPullRequestState = (
   if (merged === true || state === "MERGED") {
     return "MERGED"
   }
-  if (merged !== false) {
-    throw new Error(`Invalid GitHub pull request merged value: ${merged}`)
-  }
-  if (state === "OPEN") {
-    return "OPEN"
-  }
-  if (state === "CLOSED") {
-    return "CLOSED"
-  }
-  throw new Error(`Invalid GitHub pull request state: ${state}`)
+  decodeSync(Schema.Literal(false), merged)
+  return decodeSync(Schema.Literals(["OPEN", "CLOSED"]), state)
 }
 
 const mapClosingPullRequestPage = (
@@ -497,43 +555,20 @@ const mapClosingPullRequestPage = (
   (connection?.nodes ?? [])
     .filter((pullRequest) => pullRequest !== null)
     .map((pullRequest) => {
-      if (
-        !Number.isSafeInteger(pullRequest.number) ||
-        Number(pullRequest.number) <= 0
-      ) {
-        throw new Error(
-          `Invalid GitHub pull request number: ${pullRequest.number}`,
-        )
-      }
-      if (typeof pullRequest.isDraft !== "boolean") {
-        throw new Error(
-          `Invalid GitHub pull request draft flag: ${pullRequest.isDraft}`,
-        )
-      }
+      const decoded = decodeSync(ClosingPullRequestSchema, pullRequest)
       return {
-        number: Number(pullRequest.number),
-        repository: toRepositoryName(pullRequest.repository),
-        state: toClosingPullRequestState(pullRequest.state, pullRequest.merged),
-        isDraft: pullRequest.isDraft,
+        number: decoded.number,
+        repository: decoded.repository.nameWithOwner,
+        state: toClosingPullRequestState(decoded.state, decoded.merged),
+        isDraft: decoded.isDraft,
       }
     })
 
-const toRepositoryName = (repository: GitHubApiRepositoryReference): string => {
-  if (
-    typeof repository.nameWithOwner !== "string" ||
-    repository.nameWithOwner.trim() === ""
-  ) {
-    throw new Error("Invalid GitHub Issue repository")
-  }
-  return repository.nameWithOwner
-}
+const toRepositoryName = (repository: GitHubApiRepositoryReference): string =>
+  decodeSync(GitHubRepositoryNameSchema, repository).nameWithOwner
 
-const toIssueState = (state: unknown): GitHubIssueState => {
-  if (state !== "OPEN" && state !== "CLOSED") {
-    throw new Error(`Invalid GitHub issue state: ${state}`)
-  }
-  return state
-}
+const toIssueState = (state: unknown): GitHubIssueState =>
+  decodeSync(GitHubIssueStateSchema, state)
 
 const toIssueParent = (parent: GitHubApiIssueParent): InternalIssueParent => ({
   ...toIssueReference(parent),
@@ -558,15 +593,13 @@ const pageHasUnsupportedSubIssue = (
     if (issue === null) return true
     toIssueReference(issue)
     const childRepository = toRepositoryName(issue.repository)
-    if (
-      !Number.isSafeInteger(issue.subIssuesSummary.total) ||
-      Number(issue.subIssuesSummary.total) < 0
-    ) {
-      throw new Error("Invalid GitHub sub-issue count")
-    }
+    const total = decodeSync(
+      Schema.Struct({ total: NonNegativeInt }),
+      issue.subIssuesSummary,
+    ).total
     return (
       childRepository.toLowerCase() !== repositoryName.toLowerCase() ||
-      Number(issue.subIssuesSummary.total) > 0
+      total > 0
     )
   })
 }
@@ -588,44 +621,25 @@ const toReadyLabeledIssue = (
   issue: GitHubApiIssue,
   repositoryName: string,
 ): InternalReadyLabeledIssue => {
-  if (!Number.isSafeInteger(issue.number) || Number(issue.number) <= 0) {
-    throw new Error(`Invalid GitHub issue number: ${issue.number}`)
-  }
-  if (typeof issue.title !== "string" || issue.title.trim().length === 0) {
-    throw new Error("Invalid GitHub issue title")
-  }
-  if (typeof issue.body !== "string") {
-    throw new Error("Invalid GitHub issue body")
-  }
-  if (typeof issue.url !== "string") {
-    throw new Error(`Invalid GitHub issue URL: ${issue.url}`)
-  }
-  try {
-    new URL(issue.url)
-  } catch {
-    throw new Error(`Invalid GitHub issue URL: ${issue.url}`)
-  }
-  const state = toIssueState(issue.state)
-  if (
-    !Number.isSafeInteger(issue.subIssuesSummary.total) ||
-    Number(issue.subIssuesSummary.total) < 0
-  ) {
-    throw new Error("Invalid GitHub sub-issue count")
-  }
-  const createdAt = new Date(String(issue.createdAt))
-  if (Number.isNaN(createdAt.getTime())) {
-    throw new Error(`Invalid GitHub issue creation time: ${issue.createdAt}`)
-  }
-
-  return {
-    number: Number(issue.number),
+  const decoded = decodeSync(ReadyLabeledIssueFieldsSchema, {
+    number: issue.number,
     title: issue.title,
     body: issue.body,
     url: issue.url,
-    createdAt,
-    state,
+    createdAt: issue.createdAt,
+    state: issue.state,
+    subIssuesSummary: issue.subIssuesSummary,
+  })
+
+  return {
+    number: decoded.number,
+    title: decoded.title,
+    body: decoded.body,
+    url: decoded.url,
+    createdAt: decoded.createdAt,
+    state: decoded.state,
     parent: issue.parent === null ? null : toIssueParent(issue.parent),
-    hasChildren: Number(issue.subIssuesSummary.total) > 0,
+    hasChildren: decoded.subIssuesSummary.total > 0,
     hasUnsupportedDescendants: pageHasUnsupportedSubIssue(
       issue.subIssues,
       repositoryName,
@@ -787,10 +801,20 @@ export const makeGitHubService = (
         }
       })
     }
-    return yield* githubRequest(
-      `Failed to load PR Status Check diagnostics for ${repository.owner}/${repository.name}`,
-      (signal) =>
-        loadPrStatusCheckDiagnostics(repository, checks, options, signal),
+    return yield* loadPrStatusCheckDiagnostics(
+      repository,
+      checks,
+      options,
+    ).pipe(
+      Effect.timeout(REQUEST_TIMEOUT),
+      Effect.catchTag("TimeoutError", (cause) =>
+        Effect.fail(
+          new GitHubRequestError({
+            message: `Failed to load PR Status Check diagnostics for ${repository.owner}/${repository.name} timed out`,
+            cause,
+          }),
+        ),
+      ),
     )
   }),
   getPullRequestLifecycleStatus: Effect.fn(
@@ -1944,66 +1968,100 @@ const fetchActionsJobDiagnostic = async (
   return { htmlUrl, logText }
 }
 
-const makeLoadPrStatusCheckDiagnostics =
-  (token: string, fetchImpl: GitHubFetch): LoadPrStatusCheckDiagnostics =>
-  async (repository, checks, options, signal) => {
-    const maxExcerptChars =
-      typeof options.maxExcerptChars === "number" &&
-      Number.isSafeInteger(options.maxExcerptChars) &&
-      options.maxExcerptChars > 0
-        ? options.maxExcerptChars
-        : DEFAULT_MAX_EXCERPT_CHARS
-    const logDirectory =
-      typeof options.logDirectory === "string" &&
-      options.logDirectory.trim() !== ""
-        ? options.logDirectory
-        : undefined
-    if (logDirectory !== undefined) {
-      await mkdir(logDirectory, { recursive: true })
-    }
+const toDiagnosticsFileError = (cause: PlatformError) =>
+  new GitHubRequestError({
+    message: `Failed to write PR Status Check diagnostic logs: ${cause.message}`,
+    cause,
+  })
 
-    const diagnostics: PrStatusCheckDiagnostic[] = []
-    for (const check of checks) {
-      const { source, actionsJobId } = parseDiagnosticSource(check.externalId)
-      if (source === "status") {
-        diagnostics.push({
-          externalId: check.externalId,
-          name: check.name,
-          source,
-          htmlUrl: null,
-          logFetch: {
-            _tag: "unavailable",
-            reason:
-              "Commit status contexts do not expose Actions job logs; inspect the status target URL if present",
-          },
-        })
-        continue
+const makeLoadPrStatusCheckDiagnostics =
+  (
+    token: string,
+    fetchImpl: GitHubFetch,
+    fs: FileSystem.FileSystem | undefined,
+  ): LoadPrStatusCheckDiagnostics =>
+  (repository, checks, options) =>
+    Effect.gen(function* () {
+      const maxExcerptChars =
+        typeof options.maxExcerptChars === "number" &&
+        Number.isSafeInteger(options.maxExcerptChars) &&
+        options.maxExcerptChars > 0
+          ? options.maxExcerptChars
+          : DEFAULT_MAX_EXCERPT_CHARS
+      const logDirectory =
+        typeof options.logDirectory === "string" &&
+        options.logDirectory.trim() !== ""
+          ? options.logDirectory
+          : undefined
+      if (logDirectory !== undefined && fs !== undefined) {
+        yield* fs
+          .makeDirectory(logDirectory, { recursive: true })
+          .pipe(Effect.mapError(toDiagnosticsFileError))
       }
-      if (source !== "actions-job" || actionsJobId === null) {
-        diagnostics.push({
-          externalId: check.externalId,
-          name: check.name,
-          source,
-          htmlUrl: null,
-          logFetch: {
-            _tag: "unavailable",
-            reason: `No Actions job id available for external id ${check.externalId}`,
-          },
-        })
-        continue
-      }
-      try {
-        const { htmlUrl, logText } = await fetchActionsJobDiagnostic(
-          token,
-          repository,
-          actionsJobId,
-          fetchImpl,
-          signal,
-        )
+
+      const diagnostics: PrStatusCheckDiagnostic[] = []
+      for (const check of checks) {
+        const { source, actionsJobId } = parseDiagnosticSource(check.externalId)
+        if (source === "status") {
+          diagnostics.push({
+            externalId: check.externalId,
+            name: check.name,
+            source,
+            htmlUrl: null,
+            logFetch: {
+              _tag: "unavailable",
+              reason:
+                "Commit status contexts do not expose Actions job logs; inspect the status target URL if present",
+            },
+          })
+          continue
+        }
+        if (source !== "actions-job" || actionsJobId === null) {
+          diagnostics.push({
+            externalId: check.externalId,
+            name: check.name,
+            source,
+            htmlUrl: null,
+            logFetch: {
+              _tag: "unavailable",
+              reason: `No Actions job id available for external id ${check.externalId}`,
+            },
+          })
+          continue
+        }
+        const fetched = yield* githubRequest(
+          `Failed to load Actions job logs for ${repository.owner}/${repository.name}`,
+          (signal) =>
+            fetchActionsJobDiagnostic(
+              token,
+              repository,
+              actionsJobId,
+              fetchImpl,
+              signal,
+            ),
+        ).pipe(Effect.result)
+
+        if (Result.isFailure(fetched)) {
+          diagnostics.push({
+            externalId: check.externalId,
+            name: check.name,
+            source,
+            htmlUrl: null,
+            logFetch: {
+              _tag: "unavailable",
+              reason: fetched.failure.message,
+            },
+          })
+          continue
+        }
+
+        const { htmlUrl, logText } = fetched.success
         let localPath: string | null = null
-        if (logDirectory !== undefined) {
+        if (logDirectory !== undefined && fs !== undefined) {
           localPath = join(logDirectory, safeLogFileName(check.externalId))
-          await writeFile(localPath, logText, "utf8")
+          yield* fs
+            .writeFileString(localPath, logText)
+            .pipe(Effect.mapError(toDiagnosticsFileError))
         }
         diagnostics.push({
           externalId: check.externalId,
@@ -2016,27 +2074,9 @@ const makeLoadPrStatusCheckDiagnostics =
             localPath,
           },
         })
-      } catch (cause) {
-        const reason =
-          cause instanceof GitHubHttpError
-            ? cause.message
-            : cause instanceof Error
-              ? cause.message
-              : "Failed to load Actions job logs"
-        diagnostics.push({
-          externalId: check.externalId,
-          name: check.name,
-          source,
-          htmlUrl: null,
-          logFetch: {
-            _tag: "unavailable",
-            reason,
-          },
-        })
       }
-    }
-    return diagnostics
-  }
+      return diagnostics
+    })
 
 const makeGitHubGraphqlClient = (
   token: string,
@@ -2070,16 +2110,19 @@ const makeGitHubGraphqlClient = (
 export const makeGitHubServiceFromToken = (
   token: string,
   fetchImpl: GitHubFetch = fetch,
+  fs?: FileSystem.FileSystem,
 ): GitHubServiceShape =>
   makeGitHubService(
     makeGitHubGraphqlClient(token, fetchImpl),
     makeListTerminalChecksForCommit(token, fetchImpl),
-    makeLoadPrStatusCheckDiagnostics(token, fetchImpl),
+    makeLoadPrStatusCheckDiagnostics(token, fetchImpl, fs),
   )
 
 export const GitHubServiceLive = Layer.effect(
   GitHubService,
-  Config.redacted("GITHUB_TOKEN").pipe(
-    Effect.map((token) => makeGitHubServiceFromToken(Redacted.value(token))),
-  ),
+  Effect.gen(function* () {
+    const token = yield* Config.redacted("GITHUB_TOKEN")
+    const fs = yield* FileSystem.FileSystem
+    return makeGitHubServiceFromToken(Redacted.value(token), fetch, fs)
+  }),
 )
