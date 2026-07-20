@@ -1,13 +1,18 @@
 import { Effect, Layer, Stream } from "effect"
 import { DbService, type DbServiceShape } from "./db-service.js"
-import type { RepositoryRecord } from "./types.js"
+import { RepositoryId, type RepositoryRecord } from "./types.js"
 
 const unused = () => Effect.die("not used")
+
+/** Default fixture repository id (valid `RepositoryId` brand). */
+export const testRepositoryId = RepositoryId.make(
+  "repo-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+)
 
 export const makeRepositoryRecord = (
   overrides: Partial<RepositoryRecord> = {},
 ): RepositoryRecord => ({
-  id: "repo-test",
+  id: testRepositoryId,
   githubOwner: "acme",
   githubRepo: "widgets",
   localPath: "/repos/acme/widgets",
