@@ -1803,6 +1803,8 @@ function JobsCard() {
               }}
             >
               {tab.label}
+              {tab.id === "working" && ` (${workingItems.length})`}
+              {tab.id === "failed" && ` (${failedItems.length})`}
             </button>
           )
         })}
