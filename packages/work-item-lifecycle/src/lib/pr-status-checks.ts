@@ -327,7 +327,12 @@ const buildInvestigationWorkPrompt = (
   }
   if (hasGreen) {
     lines.push(
-      "One or more automated reviews may have completed. Inspect the latest pull-request comments, disregard reviews that are visibly still in progress, and address worthwhile completed feedback.",
+      "One or more automated reviews may have completed, but an automated reviewer can stop semantically incomplete even when GitHub reports its check and workflow as successful. Inspect the latest relevant automated-review comment and its linked review run before deciding what to do.",
+      "Use provider-specific progress artifacts as evidence of incompleteness. Strong evidence can include a finished banner combined with unchecked substantive review tasks, a remaining working spinner, and no final findings or synthesis. Do not treat arbitrary Markdown checkboxes in unrelated pull-request comments as an automated-review progress list.",
+      "Correlate the latest relevant comment with the latest relevant run attempt. Do not rerun because of a stale incomplete comment when a newer attempt completed its review successfully.",
+      "If the linked latest review run is still active, leave it alone and do not start a duplicate. If that run is terminal and its latest relevant comment remains visibly incomplete, rerun the whole review workflow even when the run concluded success. For a technically successful run, do not use a failed-jobs-only rerun because GitHub considers no job failed.",
+      "Rerunning a terminal incomplete review is required recovery, not optional feedback handling. If it cannot be restarted autonomously, report NEEDS_HUMAN with a concise reason in the verdict turn.",
+      "For a genuinely completed latest review, address worthwhile feedback. A completed review with no worthwhile feedback still needs no changes or rerun.",
       "If review feedback requires changes, verify them, commit them, and push the commit to the existing PR branch.",
     )
   }
@@ -346,7 +351,8 @@ const buildInvestigationVerdictPrompt = (): string =>
     "Do not make further code changes unless required to answer accurately.",
     "Reply with exactly one machine-readable result line (and optional brief prose before it):",
     "READY_FOR_AGENT_RESULT: PROCESSED",
-    "Use PROCESSED only when you took an action expected to produce new check executions or a replacement execution (for example a commit and push, or restarting failed checks), or when the handoff was green-only review feedback with nothing to address.",
+    "Use PROCESSED only when you took an action expected to produce new check executions or a replacement execution (for example a commit and push, restarting failed checks, or rerunning a terminal incomplete reviewer), or when the handoff was green-only feedback from a genuinely completed review with nothing to address.",
+    "Rerunning the whole workflow for a terminal incomplete review creates a replacement execution and supports PROCESSED. A terminal incomplete review is not green-only completed feedback with nothing to address, even when GitHub reported success.",
     "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED. Report:",
     "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
     "or, only when the handoff cannot be processed autonomously or requires a human decision:",
