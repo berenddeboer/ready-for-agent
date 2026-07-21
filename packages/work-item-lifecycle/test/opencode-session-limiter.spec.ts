@@ -163,7 +163,7 @@ describe("limitOpencodeSessions", () => {
             Effect.gen(function* () {
               listModelsWhileStartActive = startActive
               yield* Deferred.succeed(listModelsStarted, undefined)
-              return ["model-a"]
+              return [{ id: "model-a", variants: ["low"] }]
             }),
         })
         const limited = yield* limitOpencodeSessions(inner, db, sql)
@@ -177,7 +177,7 @@ describe("limitOpencodeSessions", () => {
         yield* Deferred.succeed(releaseStart, undefined)
         yield* Fiber.join(startFiber)
 
-        expect(models).toEqual(["model-a"])
+        expect(models).toEqual([{ id: "model-a", variants: ["low"] }])
         expect(listModelsWhileStartActive).toBe(true)
       }),
     ))

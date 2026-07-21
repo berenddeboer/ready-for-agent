@@ -8,7 +8,12 @@ type Query {
   repositories: [Repository!]!
   repositoryCredentials: [RepositoryCredential!]!
   config: Config!
-  models: [String!]!
+  """
+  OpenCode models available to the harness, each with that model's thinking-level
+  (variant) keys from `opencode models --verbose`. Empty variants means the model
+  has no thinking levels.
+  """
+  models: [OpencodeModel!]!
   issues(repositoryId: ID!): [Issue!]!
   """
   Work Items for a repository (or one issue when githubIssueNumber is set).
@@ -52,6 +57,14 @@ type Config {
   reviewVariant: String
   maxConcurrentOpencodeSessions: Int!
   maxConcurrentWorkItems: Int!
+}
+
+type OpencodeModel {
+  id: String!
+  """
+  Thinking-level keys supported by this model (OpenCode variants), e.g. low, high, xhigh.
+  """
+  variants: [String!]!
 }
 
 type Repository {

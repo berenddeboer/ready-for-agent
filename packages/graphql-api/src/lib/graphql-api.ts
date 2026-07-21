@@ -11,7 +11,7 @@ import { createSchema, createYoga } from "graphql-yoga"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
+import { Opencode, type OpencodeModel } from "@ready-for-agent/opencode"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
   WAITING_FOR_WORKER_SLOT_MESSAGE,
@@ -176,7 +176,7 @@ export const createGraphqlApi = (
   const commandExists = options.commandExists ?? commandExistsOnPath
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
   const modelsCache = Effect.runSync(
-    Ref.make<ReadonlyArray<string> | null>(null),
+    Ref.make<ReadonlyArray<OpencodeModel> | null>(null),
   )
   const modelsLock = Effect.runSync(Semaphore.make(1))
 

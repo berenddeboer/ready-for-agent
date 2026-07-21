@@ -42,15 +42,39 @@ const configQuery = {
   },
 }
 
+type OpencodeModelOption = {
+  id: string
+  variants: readonly string[]
+}
+
 const modelsQuery = {
   queryKey: ["models"],
   staleTime: Number.POSITIVE_INFINITY,
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
-    const result = await graphql.query({ models: true })
+    const result = await graphql.query({
+      models: { id: true, variants: true },
+    })
     return result.models
   },
 }
+
+const variantsForModel = (
+  models: readonly OpencodeModelOption[] | undefined,
+  modelId: string,
+): readonly string[] => {
+  if (modelId.length === 0 || models === undefined) return []
+  return models.find((model) => model.id === modelId)?.variants ?? []
+}
+
+const formatVariantLabel = (variant: string): string =>
+  `${variant[0]?.toUpperCase() ?? ""}${variant.slice(1)}`
+
+const reconcileVariantForModel = (
+  variant: string,
+  modelVariants: readonly string[],
+): string =>
+  variant.length > 0 && modelVariants.includes(variant) ? variant : ""
 
 const repositoriesQuery = {
   queryKey: ["repositories"],
@@ -721,7 +745,6 @@ function RepositoryCard({
     })
   }
 
-  const standardVariants = ["low", "medium", "high", "max"]
   const harnessDefaultModel = config.data?.defaultModel ?? "not configured"
   const harnessDefaultVariant = config.data?.defaultVariant ?? "not configured"
   const resolvedBuildModel = repository.defaultModel ?? harnessDefaultModel
@@ -731,14 +754,33 @@ function RepositoryCard({
     config.data?.reviewModel ?? `Build (${resolvedBuildModel})`
   const harnessReviewVariant =
     config.data?.reviewVariant ?? `Build (${resolvedBuildVariant})`
+  const modelIds = (models.data ?? []).map((model) => model.id)
+  const buildVariantSourceModel =
+    defaultModel.length > 0 ? defaultModel : (config.data?.defaultModel ?? "")
+  const reviewVariantSourceModel =
+    reviewModel.length > 0
+      ? reviewModel
+      : defaultModel.length > 0
+        ? defaultModel
+        : (config.data?.reviewModel ?? config.data?.defaultModel ?? "")
+  const buildVariants = variantsForModel(models.data, buildVariantSourceModel)
+  const reviewVariants = variantsForModel(models.data, reviewVariantSourceModel)
   const hasUnavailableBuildModel =
-    defaultModel.length > 0 && !models.data?.includes(defaultModel)
+    defaultModel.length > 0 && !modelIds.includes(defaultModel)
   const hasUnavailableReviewModel =
-    reviewModel.length > 0 && !models.data?.includes(reviewModel)
+    reviewModel.length > 0 && !modelIds.includes(reviewModel)
+  const buildVariantSourceUnavailable =
+    buildVariantSourceModel.length > 0 &&
+    !modelIds.includes(buildVariantSourceModel)
+  const reviewVariantSourceUnavailable =
+    reviewVariantSourceModel.length > 0 &&
+    !modelIds.includes(reviewVariantSourceModel)
   const hasCustomBuildVariant =
-    defaultVariant.length > 0 && !standardVariants.includes(defaultVariant)
+    defaultVariant.length > 0 &&
+    (buildVariantSourceUnavailable || !buildVariants.includes(defaultVariant))
   const hasCustomReviewVariant =
-    reviewVariant.length > 0 && !standardVariants.includes(reviewVariant)
+    reviewVariant.length > 0 &&
+    (reviewVariantSourceUnavailable || !reviewVariants.includes(reviewVariant))
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -1131,7 +1173,35 @@ function RepositoryCard({
                   <select
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     value={defaultModel}
-                    onChange={(event) => setDefaultModel(event.target.value)}
+                    onChange={(event) => {
+                      const nextModel = event.target.value
+                      setDefaultModel(nextModel)
+                      const sourceModel =
+                        nextModel.length > 0
+                          ? nextModel
+                          : (config.data?.defaultModel ?? "")
+                      const nextVariants = variantsForModel(
+                        models.data,
+                        sourceModel,
+                      )
+                      setDefaultVariant((current) =>
+                        reconcileVariantForModel(current, nextVariants),
+                      )
+                      if (reviewModel.length === 0) {
+                        const reviewSource =
+                          nextModel.length > 0
+                            ? nextModel
+                            : (config.data?.reviewModel ??
+                              config.data?.defaultModel ??
+                              "")
+                        setReviewVariant((current) =>
+                          reconcileVariantForModel(
+                            current,
+                            variantsForModel(models.data, reviewSource),
+                          ),
+                        )
+                      }
+                    }}
                   >
                     <option value="">
                       Harness default ({harnessDefaultModel})
@@ -1140,39 +1210,72 @@ function RepositoryCard({
                       <option value={defaultModel}>{defaultModel}</option>
                     )}
                     {models.data.map((model) => (
-                      <option key={model} value={model}>
-                        {model}
+                      <option key={model.id} value={model.id}>
+                        {model.id}
                       </option>
                     ))}
                   </select>
                 </label>
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Build thinking level
-                  <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    value={defaultVariant}
-                    onChange={(event) => setDefaultVariant(event.target.value)}
-                  >
-                    <option value="">
-                      Harness default ({harnessDefaultVariant})
-                    </option>
-                    {hasCustomBuildVariant && (
-                      <option value={defaultVariant}>{defaultVariant}</option>
-                    )}
-                    {standardVariants.map((variant) => (
-                      <option key={variant} value={variant}>
-                        {variant[0]?.toUpperCase()}
-                        {variant.slice(1)}
+                {buildVariantSourceModel.length > 0 &&
+                !buildVariantSourceUnavailable &&
+                buildVariants.length === 0 ? (
+                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                    Build thinking level override is unavailable — this model
+                    has no OpenCode variants. Use harness default or pick
+                    another model.
+                  </p>
+                ) : (
+                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                    Build thinking level
+                    <select
+                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      value={defaultVariant}
+                      onChange={(event) =>
+                        setDefaultVariant(event.target.value)
+                      }
+                      disabled={
+                        buildVariantSourceModel.length > 0 &&
+                        !buildVariantSourceUnavailable &&
+                        buildVariants.length === 0
+                      }
+                    >
+                      <option value="">
+                        Harness default ({harnessDefaultVariant})
                       </option>
-                    ))}
-                  </select>
-                </label>
+                      {hasCustomBuildVariant && (
+                        <option value={defaultVariant}>{defaultVariant}</option>
+                      )}
+                      {buildVariants.map((variant) => (
+                        <option key={variant} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Review model
                   <select
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     value={reviewModel}
-                    onChange={(event) => setReviewModel(event.target.value)}
+                    onChange={(event) => {
+                      const nextModel = event.target.value
+                      setReviewModel(nextModel)
+                      const sourceModel =
+                        nextModel.length > 0
+                          ? nextModel
+                          : defaultModel.length > 0
+                            ? defaultModel
+                            : (config.data?.reviewModel ??
+                              config.data?.defaultModel ??
+                              "")
+                      setReviewVariant((current) =>
+                        reconcileVariantForModel(
+                          current,
+                          variantsForModel(models.data, sourceModel),
+                        ),
+                      )
+                    }}
                   >
                     <option value="">
                       Harness default ({harnessReviewModel})
@@ -1181,33 +1284,47 @@ function RepositoryCard({
                       <option value={reviewModel}>{reviewModel}</option>
                     )}
                     {models.data.map((model) => (
-                      <option key={`review-${model}`} value={model}>
-                        {model}
+                      <option key={`review-${model.id}`} value={model.id}>
+                        {model.id}
                       </option>
                     ))}
                   </select>
                 </label>
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Review thinking level
-                  <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    value={reviewVariant}
-                    onChange={(event) => setReviewVariant(event.target.value)}
-                  >
-                    <option value="">
-                      Harness default ({harnessReviewVariant})
-                    </option>
-                    {hasCustomReviewVariant && (
-                      <option value={reviewVariant}>{reviewVariant}</option>
-                    )}
-                    {standardVariants.map((variant) => (
-                      <option key={`review-${variant}`} value={variant}>
-                        {variant[0]?.toUpperCase()}
-                        {variant.slice(1)}
+                {reviewVariantSourceModel.length > 0 &&
+                !reviewVariantSourceUnavailable &&
+                reviewVariants.length === 0 ? (
+                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                    Review thinking level override is unavailable — this model
+                    has no OpenCode variants. Use harness default or pick
+                    another model.
+                  </p>
+                ) : (
+                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                    Review thinking level
+                    <select
+                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      value={reviewVariant}
+                      onChange={(event) => setReviewVariant(event.target.value)}
+                      disabled={
+                        reviewVariantSourceModel.length > 0 &&
+                        !reviewVariantSourceUnavailable &&
+                        reviewVariants.length === 0
+                      }
+                    >
+                      <option value="">
+                        Harness default ({harnessReviewVariant})
                       </option>
-                    ))}
-                  </select>
-                </label>
+                      {hasCustomReviewVariant && (
+                        <option value={reviewVariant}>{reviewVariant}</option>
+                      )}
+                      {reviewVariants.map((variant) => (
+                        <option key={`review-${variant}`} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </>
             )}
             {updateSettings.isError && (

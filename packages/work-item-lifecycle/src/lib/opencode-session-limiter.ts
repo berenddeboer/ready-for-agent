@@ -5,6 +5,7 @@ import type {
   ContinueInput,
   ListModelsInput,
   OpencodeError,
+  OpencodeModel,
   OpencodeRunResult,
   StartInput,
 } from "@ready-for-agent/opencode"
@@ -26,7 +27,7 @@ export interface OpencodeService {
   ) => Effect.Effect<OpencodeRunResult, OpencodeError>
   readonly listModels: (
     input: ListModelsInput,
-  ) => Effect.Effect<ReadonlyArray<string>, OpencodeError>
+  ) => Effect.Effect<ReadonlyArray<OpencodeModel>, OpencodeError>
 }
 
 /**
