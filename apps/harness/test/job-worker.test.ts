@@ -37,10 +37,10 @@ import { Opencode } from "@ready-for-agent/opencode"
 import {
   ClaimError,
   QueueService,
-  type QueueServiceShape,
   type RawJob,
   makeJobId,
 } from "@ready-for-agent/queue-service"
+import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   WorkItemLifecycle,
@@ -173,38 +173,34 @@ const queueLayer = (
 ) =>
   Layer.mergeAll(
     defaultGithubLayer,
-    Layer.succeed(QueueService, {
-      queueInTransaction: true,
-      enqueue: unused,
-      enqueueWithDelay: unused,
-      ensureKeyed: unused,
-      listKeyed: unused,
-      reviveExhaustedKeyed: () => Effect.void,
-      postponeKeyed: (jobId, delay) =>
-        onPostponeKeyed(jobId, delay).pipe(Effect.asVoid),
-      removeKeyed: unused,
-      rawClaim: (queueName, visibilityTimeout) =>
-        Effect.gen(function* () {
-          expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
-            Duration.toMillis(JOB_VISIBILITY_TIMEOUT),
-          )
-          if (onClaim !== undefined) return yield* onClaim(queueName)
-          const index = jobs.findIndex((job) => job.queue === queueName)
-          if (index === -1) return Option.none()
-          const [job] = jobs.splice(index, 1)
-          return Option.some(job)
-        }),
-      acknowledge: (jobId) => onAcknowledge(jobId).pipe(Effect.asVoid),
-      fail: (jobId, options) =>
-        Effect.gen(function* () {
-          expect(options?.retryable).toBe(false)
-          yield* onFail(jobId)
-        }),
-      extendVisibility: (jobId, timeout) =>
-        onExtendVisibility(jobId, timeout).pipe(Effect.asVoid),
-      getStats: unused,
-      requeueByPayloadTag: () => Effect.succeed(0),
-    } satisfies QueueServiceShape),
+    Layer.succeed(
+      QueueService,
+      stubQueueService({
+        reviveExhaustedKeyed: () => Effect.void,
+        postponeKeyed: (jobId, delay) =>
+          onPostponeKeyed(jobId, delay).pipe(Effect.asVoid),
+        rawClaim: (queueName, visibilityTimeout) =>
+          Effect.gen(function* () {
+            expect(Duration.toMillis(visibilityTimeout ?? Duration.zero)).toBe(
+              Duration.toMillis(JOB_VISIBILITY_TIMEOUT),
+            )
+            if (onClaim !== undefined) return yield* onClaim(queueName)
+            const index = jobs.findIndex((job) => job.queue === queueName)
+            if (index === -1) return Option.none()
+            const [job] = jobs.splice(index, 1)
+            return Option.some(job)
+          }),
+        acknowledge: (jobId) => onAcknowledge(jobId).pipe(Effect.asVoid),
+        fail: (jobId, options) =>
+          Effect.gen(function* () {
+            expect(options?.retryable).toBe(false)
+            yield* onFail(jobId)
+          }),
+        extendVisibility: (jobId, timeout) =>
+          onExtendVisibility(jobId, timeout).pipe(Effect.asVoid),
+        requeueByPayloadTag: () => Effect.succeed(0),
+      }),
+    ),
     Layer.succeed(WorkItemLifecycle, {
       maxDurations: {
         create_worktree: Duration.minutes(5),
@@ -260,30 +256,20 @@ describe("Job worker", () => {
           retryLimit: number | undefined
         }
       | undefined
-    const queue = Layer.succeed(QueueService, {
-      queueInTransaction: true,
-      enqueue: (queueName, payload, options) =>
-        Effect.sync(() => {
-          enqueued = {
-            queue: queueName,
-            payload,
-            retryLimit: options?.retryLimit,
-          }
-          return makeJobId()
-        }),
-      enqueueWithDelay: unused,
-      ensureKeyed: unused,
-      listKeyed: unused,
-      reviveExhaustedKeyed: () => Effect.void,
-      postponeKeyed: unused,
-      removeKeyed: unused,
-      rawClaim: unused,
-      acknowledge: unused,
-      fail: unused,
-      extendVisibility: unused,
-      getStats: unused,
-      requeueByPayloadTag: () => Effect.succeed(0),
-    } satisfies QueueServiceShape)
+    const queue = Layer.succeed(
+      QueueService,
+      stubQueueService({
+        enqueue: (queueName, payload, options) =>
+          Effect.sync(() => {
+            enqueued = {
+              queue: queueName,
+              payload,
+              retryLimit: options?.retryLimit,
+            }
+            return makeJobId()
+          }),
+      }),
+    )
 
     await Effect.runPromise(
       enqueueRefreshRepositoryJob(refreshPayload.repositoryId).pipe(
