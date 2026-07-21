@@ -298,6 +298,53 @@ describe("removeWorktree", () => {
     }
   })
 
+  it("reports Git's diagnostic when a locked worktree cannot be removed", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-locked-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+
+      const error = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = {
+            workItemId,
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            model: "opencode/test",
+            variant: "low",
+            reviewModel: "opencode/test",
+            reviewVariant: "low",
+            worktreePath: null,
+            startingCommitOid: null,
+            completionSummary: null,
+            sessionId: null,
+          } as const
+
+          const created = yield* createWorktree(context)
+          yield* Effect.promise(() =>
+            git(bare, ["worktree", "lock", created.worktreePath]),
+          )
+          return yield* localCleanup(context).pipe(Effect.flip)
+        }),
+      )
+
+      expect(error._tag).toBe("GitCommandError")
+      expect(error.message).toContain("locked working tree")
+      if (error._tag === "GitCommandError") {
+        expect(error.stderr).toContain("locked working tree")
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("closes an open remote PR for the Work Item branch and drops the remote branch", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-remote-"))
     try {

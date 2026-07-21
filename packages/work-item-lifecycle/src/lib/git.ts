@@ -43,8 +43,12 @@ export const runGit = (
     )
 
     if (result.exitCode !== 0) {
+      const diagnostic = result.stderr.trim()
       return yield* new GitCommandError({
-        message: `git ${args.join(" ")} failed with exit ${result.exitCode}`,
+        message:
+          diagnostic === ""
+            ? `git ${args.join(" ")} failed with exit ${result.exitCode}`
+            : `git ${args.join(" ")} failed with exit ${result.exitCode}: ${diagnostic}`,
         command: "git",
         args: fullArgs,
         cwd: repository.localPath,
