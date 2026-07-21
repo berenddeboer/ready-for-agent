@@ -11,7 +11,8 @@
         {
           "projects": ["graphql-client"],
           "target": "generate"
-        }
+        },
+        "generate-embed"
       ],
       "options": {
         "cwd": "{projectRoot}",
