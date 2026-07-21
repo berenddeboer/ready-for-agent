@@ -111,7 +111,10 @@ const makeRuntime = (
   queueOverrides: Partial<QueueServiceShape> = {},
   lifecycleOverrides: Partial<WorkItemLifecycleShape> = {},
   opencodeOverrides: {
-    listModels?: () => Effect.Effect<ReadonlyArray<string>, never>
+    listModels?: () => Effect.Effect<
+      ReadonlyArray<{ id: string; variants: ReadonlyArray<string> }>,
+      never
+    >
   } = {},
 ) => {
   const opencode = {
@@ -119,8 +122,14 @@ const makeRuntime = (
     continue: () => Effect.die("not used"),
     listModels: () =>
       Effect.succeed([
-        "opencode/deepseek-v4-flash-free",
-        "anthropic/claude-sonnet-4-5",
+        {
+          id: "opencode/deepseek-v4-flash-free",
+          variants: ["high", "max"],
+        },
+        {
+          id: "anthropic/claude-sonnet-4-5",
+          variants: ["low", "medium", "high", "max"],
+        },
       ]),
     ...opencodeOverrides,
   }
@@ -987,32 +996,56 @@ describe("GraphQL API", () => {
         listModels: () => {
           listCount += 1
           return Effect.succeed([
-            "opencode/deepseek-v4-flash-free",
-            "anthropic/claude-sonnet-4-5",
+            {
+              id: "opencode/deepseek-v4-flash-free",
+              variants: ["high", "max"],
+            },
+            {
+              id: "anthropic/claude-sonnet-4-5",
+              variants: ["low", "medium", "high", "max"],
+            },
           ])
         },
       },
     )
 
     const api = createGraphqlApi(runtime)
-    const first = await api.fetch(graphqlRequest({ query: `query { models }` }))
+    const first = await api.fetch(
+      graphqlRequest({
+        query: `query { models { id variants } }`,
+      }),
+    )
     const second = await api.fetch(
-      graphqlRequest({ query: `query { models }` }),
+      graphqlRequest({
+        query: `query { models { id variants } }`,
+      }),
     )
 
     expect(await first.json()).toEqual({
       data: {
         models: [
-          "opencode/deepseek-v4-flash-free",
-          "anthropic/claude-sonnet-4-5",
+          {
+            id: "opencode/deepseek-v4-flash-free",
+            variants: ["high", "max"],
+          },
+          {
+            id: "anthropic/claude-sonnet-4-5",
+            variants: ["low", "medium", "high", "max"],
+          },
         ],
       },
     })
     expect(await second.json()).toEqual({
       data: {
         models: [
-          "opencode/deepseek-v4-flash-free",
-          "anthropic/claude-sonnet-4-5",
+          {
+            id: "opencode/deepseek-v4-flash-free",
+            variants: ["high", "max"],
+          },
+          {
+            id: "anthropic/claude-sonnet-4-5",
+            variants: ["low", "medium", "high", "max"],
+          },
         ],
       },
     })

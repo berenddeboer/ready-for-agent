@@ -24,8 +24,11 @@ describe("Opencode integration", () => {
     )
 
     expect(models.length).toBeGreaterThan(0)
-    expect(models).toContain("opencode/deepseek-v4-flash-free")
-    expect(models.every((model) => model.includes("/"))).toBe(true)
+    expect(
+      models.some((model) => model.id === "opencode/deepseek-v4-flash-free"),
+    ).toBe(true)
+    expect(models.every((model) => model.id.includes("/"))).toBe(true)
+    expect(models.every((model) => Array.isArray(model.variants))).toBe(true)
   }, 35_000)
 
   it("starts and continues a real Session", async () => {

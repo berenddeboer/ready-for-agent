@@ -46,15 +46,39 @@ const configQuery = {
   },
 }
 
+type OpencodeModelOption = {
+  id: string
+  variants: readonly string[]
+}
+
 const modelsQuery = {
   queryKey: ["models"],
   staleTime: Number.POSITIVE_INFINITY,
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
-    const result = await graphql.query({ models: true })
+    const result = await graphql.query({
+      models: { id: true, variants: true },
+    })
     return result.models
   },
 }
+
+const variantsForModel = (
+  models: readonly OpencodeModelOption[] | undefined,
+  modelId: string,
+): readonly string[] => {
+  if (modelId.length === 0 || models === undefined) return []
+  return models.find((model) => model.id === modelId)?.variants ?? []
+}
+
+const formatVariantLabel = (variant: string): string =>
+  `${variant[0]?.toUpperCase() ?? ""}${variant.slice(1)}`
+
+const reconcileVariantForModel = (
+  variant: string,
+  modelVariants: readonly string[],
+): string =>
+  variant.length > 0 && modelVariants.includes(variant) ? variant : ""
 
 const isBuildModelConfigured = (
   config:
@@ -231,15 +255,23 @@ function SettingsButton() {
     })
   }
 
-  const standardVariants = ["low", "medium", "high", "max"]
+  const modelIds = (models.data ?? []).map((model) => model.id)
+  const buildVariants = variantsForModel(models.data, defaultModel)
+  const reviewVariantSourceModel =
+    reviewModel.length > 0 ? reviewModel : defaultModel
+  const reviewVariants = variantsForModel(models.data, reviewVariantSourceModel)
   const hasUnavailableBuildModel =
-    defaultModel.length > 0 && !models.data?.includes(defaultModel)
+    defaultModel.length > 0 && !modelIds.includes(defaultModel)
   const hasUnavailableReviewModel =
-    reviewModel.length > 0 && !models.data?.includes(reviewModel)
+    reviewModel.length > 0 && !modelIds.includes(reviewModel)
   const hasCustomBuildVariant =
-    defaultVariant.length > 0 && !standardVariants.includes(defaultVariant)
+    defaultVariant.length > 0 &&
+    (hasUnavailableBuildModel || !buildVariants.includes(defaultVariant))
   const hasCustomReviewVariant =
-    reviewVariant.length > 0 && !standardVariants.includes(reviewVariant)
+    reviewVariant.length > 0 &&
+    (hasUnavailableReviewModel ||
+      (reviewModel.length === 0 && hasUnavailableBuildModel) ||
+      !reviewVariants.includes(reviewVariant))
   const showUnconfiguredGuidance = config.isSuccess && !buildConfigured
 
   return (
@@ -322,7 +354,22 @@ function SettingsButton() {
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="defaultModel"
                     value={defaultModel}
-                    onChange={(event) => setDefaultModel(event.target.value)}
+                    onChange={(event) => {
+                      const nextModel = event.target.value
+                      setDefaultModel(nextModel)
+                      const nextVariants = variantsForModel(
+                        models.data,
+                        nextModel,
+                      )
+                      setDefaultVariant((current) =>
+                        reconcileVariantForModel(current, nextVariants),
+                      )
+                      if (reviewModel.length === 0) {
+                        setReviewVariant((current) =>
+                          reconcileVariantForModel(current, nextVariants),
+                        )
+                      }
+                    }}
                     required
                   >
                     {!buildConfigured && defaultModel.length === 0 && (
@@ -334,8 +381,8 @@ function SettingsButton() {
                       <option value={defaultModel}>{defaultModel}</option>
                     )}
                     {(models.data ?? []).map((model) => (
-                      <option key={model} value={model}>
-                        {model}
+                      <option key={model.id} value={model.id}>
+                        {model.id}
                       </option>
                     ))}
                   </select>
@@ -344,34 +391,50 @@ function SettingsButton() {
                   </span>
                 </label>
 
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Build thinking level
-                  <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    name="defaultVariant"
-                    value={defaultVariant}
-                    onChange={(event) => setDefaultVariant(event.target.value)}
-                    required
-                  >
-                    {!buildConfigured && defaultVariant.length === 0 && (
-                      <option value="" disabled>
-                        Select a thinking level
-                      </option>
-                    )}
-                    {hasCustomBuildVariant && (
-                      <option value={defaultVariant}>{defaultVariant}</option>
-                    )}
-                    {standardVariants.map((variant) => (
-                      <option key={variant} value={variant}>
-                        {variant[0]?.toUpperCase()}
-                        {variant.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-xs font-normal text-slate-500">
-                    OpenCode calls this the model variant.
-                  </span>
-                </label>
+                {defaultModel.length > 0 &&
+                !hasUnavailableBuildModel &&
+                buildVariants.length === 0 ? (
+                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                    Build thinking level is unavailable — this model has no
+                    OpenCode variants.
+                  </p>
+                ) : (
+                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                    Build thinking level
+                    <select
+                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      name="defaultVariant"
+                      value={defaultVariant}
+                      onChange={(event) =>
+                        setDefaultVariant(event.target.value)
+                      }
+                      required
+                      disabled={
+                        defaultModel.length === 0 ||
+                        (!hasUnavailableBuildModel &&
+                          buildVariants.length === 0)
+                      }
+                    >
+                      {(!buildConfigured || defaultVariant.length === 0) && (
+                        <option value="" disabled>
+                          Select a thinking level
+                        </option>
+                      )}
+                      {hasCustomBuildVariant && (
+                        <option value={defaultVariant}>{defaultVariant}</option>
+                      )}
+                      {buildVariants.map((variant) => (
+                        <option key={variant} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-xs font-normal text-slate-500">
+                      OpenCode calls this the model variant. Options come from
+                      the selected model.
+                    </span>
+                  </label>
+                )}
 
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Review model
@@ -379,15 +442,25 @@ function SettingsButton() {
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                     name="reviewModel"
                     value={reviewModel}
-                    onChange={(event) => setReviewModel(event.target.value)}
+                    onChange={(event) => {
+                      const nextModel = event.target.value
+                      setReviewModel(nextModel)
+                      const nextVariants = variantsForModel(
+                        models.data,
+                        nextModel.length > 0 ? nextModel : defaultModel,
+                      )
+                      setReviewVariant((current) =>
+                        reconcileVariantForModel(current, nextVariants),
+                      )
+                    }}
                   >
                     <option value="">Same as build model</option>
                     {hasUnavailableReviewModel && (
                       <option value={reviewModel}>{reviewModel}</option>
                     )}
                     {(models.data ?? []).map((model) => (
-                      <option key={`review-${model}`} value={model}>
-                        {model}
+                      <option key={`review-${model.id}`} value={model.id}>
+                        {model.id}
                       </option>
                     ))}
                   </select>
@@ -396,26 +469,46 @@ function SettingsButton() {
                   </span>
                 </label>
 
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Review thinking level
-                  <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    name="reviewVariant"
-                    value={reviewVariant}
-                    onChange={(event) => setReviewVariant(event.target.value)}
-                  >
-                    <option value="">Same as build thinking level</option>
-                    {hasCustomReviewVariant && (
-                      <option value={reviewVariant}>{reviewVariant}</option>
-                    )}
-                    {standardVariants.map((variant) => (
-                      <option key={`review-${variant}`} value={variant}>
-                        {variant[0]?.toUpperCase()}
-                        {variant.slice(1)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {reviewVariantSourceModel.length > 0 &&
+                !(
+                  (reviewModel.length > 0 && hasUnavailableReviewModel) ||
+                  (reviewModel.length === 0 && hasUnavailableBuildModel)
+                ) &&
+                reviewVariants.length === 0 ? (
+                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                    Review thinking level is unavailable — this model has no
+                    OpenCode variants.
+                  </p>
+                ) : (
+                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                    Review thinking level
+                    <select
+                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      name="reviewVariant"
+                      value={reviewVariant}
+                      onChange={(event) => setReviewVariant(event.target.value)}
+                      disabled={
+                        reviewVariantSourceModel.length === 0 ||
+                        (!(
+                          (reviewModel.length > 0 &&
+                            hasUnavailableReviewModel) ||
+                          (reviewModel.length === 0 && hasUnavailableBuildModel)
+                        ) &&
+                          reviewVariants.length === 0)
+                      }
+                    >
+                      <option value="">Same as build thinking level</option>
+                      {hasCustomReviewVariant && (
+                        <option value={reviewVariant}>{reviewVariant}</option>
+                      )}
+                      {reviewVariants.map((variant) => (
+                        <option key={`review-${variant}`} value={variant}>
+                          {formatVariantLabel(variant)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
 
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Max concurrent OpenCode sessions

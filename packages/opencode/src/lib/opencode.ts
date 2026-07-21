@@ -11,10 +11,12 @@ import {
 } from "./errors.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
+import { parseVerboseModelsOutput } from "./parse-verbose-models.js"
 import type {
   ContinueInput,
   ListModelsInput,
   OpencodeLayerOptions,
+  OpencodeModel,
   OpencodeRunResult,
   StartInput,
 } from "./types.js"
@@ -39,10 +41,10 @@ export class Opencode extends Context.Service<
     readonly continue: (
       input: ContinueInput,
     ) => Effect.Effect<OpencodeRunResult, OpencodeError>
-    /** Lists models from OpenCode's active providers for the working directory. */
+    /** Lists models (with variants) from OpenCode's active providers. */
     readonly listModels: (
       input: ListModelsInput,
-    ) => Effect.Effect<ReadonlyArray<string>, OpencodeError>
+    ) => Effect.Effect<ReadonlyArray<OpencodeModel>, OpencodeError>
   }
 >()("@ready-for-agent/opencode/Opencode") {
   static layer = (options: OpencodeLayerOptions) =>
@@ -61,7 +63,7 @@ export class Opencode extends Context.Service<
         ) {
           const timeout = input.timeout ?? defaultTimeout
           const timeoutMs = Duration.toMillis(timeout)
-          const command = ChildProcess.make(binary, ["models"], {
+          const command = ChildProcess.make(binary, ["models", "--verbose"], {
             cwd: input.cwd,
             env: environment,
             extendEnv: false,
@@ -72,23 +74,22 @@ export class Opencode extends Context.Service<
           const result = yield* Effect.scoped(
             Effect.gen(function* () {
               const handle = yield* spawner.spawn(command)
-              const collectModels = Stream.decodeText(handle.stdout).pipe(
-                Stream.splitLines,
+              const collectStdout = Stream.decodeText(handle.stdout).pipe(
                 Stream.runFold(
-                  (): ReadonlyArray<string> => [],
-                  (models, line) => {
-                    const model = line.trim()
-                    return model.length === 0 ? models : [...models, model]
-                  },
+                  () => "",
+                  (acc, chunk) => acc + chunk,
                 ),
               )
 
-              const [exitCode, models] = yield* Effect.all(
-                [handle.exitCode, collectModels],
+              const [exitCode, stdout] = yield* Effect.all(
+                [handle.exitCode, collectStdout],
                 { concurrency: 2 },
               )
 
-              return { exitCode: Number(exitCode), models }
+              return {
+                exitCode: Number(exitCode),
+                models: parseVerboseModelsOutput(stdout),
+              }
             }),
           ).pipe(
             Effect.timeout(timeout),

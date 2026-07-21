@@ -160,4 +160,56 @@ describe("Opencode Effect service", () => {
       },
     )
   })
+
+  it("lists models with variants from verbose OpenCode output", async () => {
+    await withExecutable(
+      [
+        'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
+        `  printf '%s\\n' 'xai/grok-4.5'`,
+        `  printf '%s\\n' '{'`,
+        `  printf '%s\\n' '  "variants": {'`,
+        `  printf '%s\\n' '    "low": {},'`,
+        `  printf '%s\\n' '    "medium": {},'`,
+        `  printf '%s\\n' '    "high": {}'`,
+        `  printf '%s\\n' '  }'`,
+        `  printf '%s\\n' '}'`,
+        `  printf '%s\\n' 'xai/empty-variants'`,
+        `  printf '%s\\n' '{'`,
+        `  printf '%s\\n' '  "variants": {}'`,
+        `  printf '%s\\n' '}'`,
+        "  exit 0",
+        "fi",
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const models = await Effect.runPromise(
+          Effect.gen(function* () {
+            const opencode = yield* Opencode
+            return yield* opencode.listModels({
+              cwd: process.cwd(),
+              timeout: "2 seconds",
+            })
+          }).pipe(
+            Effect.provide(
+              Opencode.layer({
+                binary,
+                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+              }).pipe(Layer.provide(BunServices.layer)),
+            ),
+          ),
+        )
+
+        expect(models).toEqual([
+          {
+            id: "xai/grok-4.5",
+            variants: ["low", "medium", "high"],
+          },
+          {
+            id: "xai/empty-variants",
+            variants: [],
+          },
+        ])
+      },
+    )
+  })
 })

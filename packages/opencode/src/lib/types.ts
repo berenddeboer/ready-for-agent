@@ -10,6 +10,12 @@ export interface ListModelsInput {
   readonly timeout?: Duration.Input
 }
 
+/** One OpenCode model id with its supported thinking-level (variant) keys. */
+export interface OpencodeModel {
+  readonly id: string
+  readonly variants: ReadonlyArray<string>
+}
+
 /**
  * Optional observer invoked with the first non-empty sessionID parsed from
  * OpenCode stdout while the process is still running. Failures must not fail
