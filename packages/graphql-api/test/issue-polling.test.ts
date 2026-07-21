@@ -11,6 +11,7 @@ import {
   type QueueServiceShape,
   makeJobId,
 } from "@ready-for-agent/queue-service"
+import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   ISSUE_POLLING_BASE_SECONDS,
   ISSUE_POLLING_JITTER_SECONDS,
@@ -30,23 +31,6 @@ const repoKeep = "repo-01J00000000000000000000002"
 const repoOrphan = "repo-01J00000000000000000000003"
 const repoAdded = "repo-01J00000000000000000000004"
 
-const unusedQueue: QueueServiceShape = {
-  queueInTransaction: true,
-  enqueue: () => Effect.die("not used"),
-  enqueueWithDelay: () => Effect.die("not used"),
-  ensureKeyed: () => Effect.die("not used"),
-  listKeyed: () => Effect.die("not used"),
-  reviveExhaustedKeyed: () => Effect.die("not used"),
-  postponeKeyed: () => Effect.die("not used"),
-  removeKeyed: () => Effect.die("not used"),
-  rawClaim: () => Effect.die("not used"),
-  acknowledge: () => Effect.die("not used"),
-  fail: () => Effect.die("not used"),
-  extendVisibility: () => Effect.die("not used"),
-  getStats: () => Effect.die("not used"),
-  requeueByPayloadTag: () => Effect.succeed(0),
-}
-
 describe("issue-polling", () => {
   test("activateRepositoryPolling ensures keyed schedule and first refresh", async () => {
     const ensured: Array<{
@@ -55,19 +39,20 @@ describe("issue-polling", () => {
       delay: Duration.Duration
     }> = []
     const enqueued: Array<{ queue: string; payload: unknown }> = []
-    const runtime = makeQueueRuntime({
-      ...unusedQueue,
-      enqueue: (queueName, payload) =>
-        Effect.sync(() => {
-          enqueued.push({ queue: queueName, payload })
-          return makeJobId()
-        }),
-      ensureKeyed: (queueName, key, _payload, delay) =>
-        Effect.sync(() => {
-          ensured.push({ queue: queueName, key, delay })
-          return { jobId: makeJobId(), created: true }
-        }),
-    })
+    const runtime = makeQueueRuntime(
+      stubQueueService({
+        enqueue: (queueName, payload) =>
+          Effect.sync(() => {
+            enqueued.push({ queue: queueName, payload })
+            return makeJobId()
+          }),
+        ensureKeyed: (queueName, key, _payload, delay) =>
+          Effect.sync(() => {
+            ensured.push({ queue: queueName, key, delay })
+            return { jobId: makeJobId(), created: true }
+          }),
+      }),
+    )
 
     try {
       await runtime.runPromise(
@@ -95,13 +80,14 @@ describe("issue-polling", () => {
 
   test("suspendRepositoryPolling removes the keyed schedule", async () => {
     const removed: Array<{ queue: string; key: string }> = []
-    const runtime = makeQueueRuntime({
-      ...unusedQueue,
-      removeKeyed: (queueName, key) =>
-        Effect.sync(() => {
-          removed.push({ queue: queueName, key })
-        }),
-    })
+    const runtime = makeQueueRuntime(
+      stubQueueService({
+        removeKeyed: (queueName, key) =>
+          Effect.sync(() => {
+            removed.push({ queue: queueName, key })
+          }),
+      }),
+    )
 
     try {
       await runtime.runPromise(suspendRepositoryPolling(repo1))
@@ -116,39 +102,43 @@ describe("issue-polling", () => {
     const removed: string[] = []
     const ensured: string[] = []
     const enqueued: string[] = []
-    const runtime = makeQueueRuntime({
-      ...unusedQueue,
-      enqueue: (_queue, payload) =>
-        Effect.sync(() => {
-          const body = payload as { repositoryId: string }
-          enqueued.push(body.repositoryId)
-          return makeJobId()
-        }),
-      ensureKeyed: (_queue, key) =>
-        Effect.sync(() => {
-          ensured.push(key)
-          keyed.add(key)
-          return { jobId: makeJobId(), created: true }
-        }),
-      listKeyed: () =>
-        Effect.sync(() =>
-          [...keyed].map((key) => ({
-            jobId: makeJobId(),
-            queue: ISSUE_POLL_QUEUE,
-            key,
-            payload: { _tag: "refresh-repository" as const, repositoryId: key },
-            attempts: 0,
-            maxAttempts: 2,
-            availableAt: DateTime.makeUnsafe(0),
-            lockedUntil: null,
-          })),
-        ),
-      removeKeyed: (_queue, key) =>
-        Effect.sync(() => {
-          removed.push(key)
-          keyed.delete(key)
-        }),
-    })
+    const runtime = makeQueueRuntime(
+      stubQueueService({
+        enqueue: (_queue, payload) =>
+          Effect.sync(() => {
+            const body = payload as { repositoryId: string }
+            enqueued.push(body.repositoryId)
+            return makeJobId()
+          }),
+        ensureKeyed: (_queue, key) =>
+          Effect.sync(() => {
+            ensured.push(key)
+            keyed.add(key)
+            return { jobId: makeJobId(), created: true }
+          }),
+        listKeyed: () =>
+          Effect.sync(() =>
+            [...keyed].map((key) => ({
+              jobId: makeJobId(),
+              queue: ISSUE_POLL_QUEUE,
+              key,
+              payload: {
+                _tag: "refresh-repository" as const,
+                repositoryId: key,
+              },
+              attempts: 0,
+              maxAttempts: 2,
+              availableAt: DateTime.makeUnsafe(0),
+              lockedUntil: null,
+            })),
+          ),
+        removeKeyed: (_queue, key) =>
+          Effect.sync(() => {
+            removed.push(key)
+            keyed.delete(key)
+          }),
+      }),
+    )
 
     try {
       await runtime.runPromise(

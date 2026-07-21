@@ -22,8 +22,8 @@ import {
   EnqueueError,
   type JobId,
   QueueService,
-  type QueueServiceShape,
 } from "@ready-for-agent/queue-service"
+import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
@@ -546,8 +546,7 @@ describe("WorkItemLifecycle", () => {
 
     it("rolls back when enqueue fails mid-transaction", () => {
       let enqueueCalls = 0
-      const failingEnqueueQueue: QueueServiceShape = {
-        queueInTransaction: true,
+      const failingEnqueueQueue = stubQueueService({
         enqueue: () => {
           enqueueCalls += 1
           return Effect.fail(
@@ -557,28 +556,7 @@ describe("WorkItemLifecycle", () => {
             }),
           )
         },
-        enqueueWithDelay: () =>
-          Effect.die("enqueueWithDelay should not be called") as Effect.Effect<
-            JobId,
-            never
-          >,
-        ensureKeyed: () =>
-          Effect.die("ensureKeyed should not be called") as Effect.Effect<
-            never,
-            never
-          >,
-        listKeyed: () => Effect.succeed([]),
-        reviveExhaustedKeyed: () => Effect.die("unused"),
-        postponeKeyed: () => Effect.void,
-        removeKeyed: () => Effect.void,
-        rawClaim: () => Effect.succeed(Option.none()),
-        acknowledge: () => Effect.void,
-        fail: () => Effect.void,
-        extendVisibility: () => Effect.void,
-        getStats: () =>
-          Effect.succeed({ pending: 0, processing: 0, deadLetter: 0 }),
-        requeueByPayloadTag: () => Effect.succeed(0),
-      }
+      })
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(SuccessfulStepsLive),
@@ -1034,35 +1012,9 @@ describe("WorkItemLifecycle", () => {
 
   describe("queue requirements", () => {
     it("rejects construction when QueueService is not transactional", async () => {
-      const nonTransactionalQueue: QueueServiceShape = {
+      const nonTransactionalQueue = stubQueueService({
         queueInTransaction: false,
-        enqueue: () =>
-          Effect.die("enqueue should not be called") as Effect.Effect<
-            JobId,
-            never
-          >,
-        enqueueWithDelay: () =>
-          Effect.die("enqueueWithDelay should not be called") as Effect.Effect<
-            JobId,
-            never
-          >,
-        ensureKeyed: () =>
-          Effect.die("ensureKeyed should not be called") as Effect.Effect<
-            never,
-            never
-          >,
-        listKeyed: () => Effect.succeed([]),
-        reviveExhaustedKeyed: () => Effect.die("unused"),
-        postponeKeyed: () => Effect.void,
-        removeKeyed: () => Effect.void,
-        rawClaim: () => Effect.succeed(Option.none()),
-        acknowledge: () => Effect.void,
-        fail: () => Effect.void,
-        extendVisibility: () => Effect.void,
-        getStats: () =>
-          Effect.succeed({ pending: 0, processing: 0, deadLetter: 0 }),
-        requeueByPayloadTag: () => Effect.succeed(0),
-      }
+      })
 
       const NonTransactionalQueueLive = Layer.succeed(
         QueueService,
@@ -3465,8 +3417,7 @@ describe("WorkItemLifecycle", () => {
 
     it("rolls back advancement when next-step enqueue fails", () => {
       let enqueueCalls = 0
-      const queueShape: QueueServiceShape = {
-        queueInTransaction: true,
+      const queueShape = stubQueueService({
         enqueue: (_queue, _payload) => {
           enqueueCalls += 1
           // First enqueue is implementNow; second is advancement after create worktree.
@@ -3480,28 +3431,7 @@ describe("WorkItemLifecycle", () => {
             }),
           )
         },
-        enqueueWithDelay: () =>
-          Effect.die("enqueueWithDelay should not be called") as Effect.Effect<
-            JobId,
-            never
-          >,
-        ensureKeyed: () =>
-          Effect.die("ensureKeyed should not be called") as Effect.Effect<
-            never,
-            never
-          >,
-        listKeyed: () => Effect.succeed([]),
-        reviveExhaustedKeyed: () => Effect.die("unused"),
-        postponeKeyed: () => Effect.void,
-        removeKeyed: () => Effect.void,
-        rawClaim: () => Effect.succeed(Option.none()),
-        acknowledge: () => Effect.void,
-        fail: () => Effect.void,
-        extendVisibility: () => Effect.void,
-        getStats: () =>
-          Effect.succeed({ pending: 0, processing: 0, deadLetter: 0 }),
-        requeueByPayloadTag: () => Effect.succeed(0),
-      }
+      })
 
       // Real DB + fake queue so we can fail the post-success enqueue.
       // Step run is started via runStep using the id from implementNow.

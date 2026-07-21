@@ -15,6 +15,7 @@ import {
   type QueueServiceShape,
   makeJobId,
 } from "@ready-for-agent/queue-service"
+import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   STEP_RUN_REASON,
   WAITING_FOR_OPENCODE_SESSION_MESSAGE,
@@ -149,23 +150,11 @@ const makeRuntime = (
     runWithSecrets: () => Effect.die("not used"),
     ...keymaxxerOverrides,
   }
-  const queue: QueueServiceShape = {
-    queueInTransaction: true,
+  const queue = stubQueueService({
     enqueue: () => Effect.succeed(makeJobId()),
-    enqueueWithDelay: () => Effect.die("not used"),
-    ensureKeyed: () => Effect.die("not used"),
-    listKeyed: () => Effect.die("not used"),
-    reviveExhaustedKeyed: () => Effect.die("not used"),
-    postponeKeyed: () => Effect.die("not used"),
-    removeKeyed: () => Effect.die("not used"),
-    rawClaim: () => Effect.die("not used"),
-    acknowledge: () => Effect.die("not used"),
-    fail: () => Effect.die("not used"),
-    extendVisibility: () => Effect.die("not used"),
-    getStats: () => Effect.die("not used"),
     requeueByPayloadTag: () => Effect.succeed(0),
     ...queueOverrides,
-  }
+  })
   const lifecycle: WorkItemLifecycleShape = {
     maxDurations: {
       create_worktree: Duration.minutes(5),

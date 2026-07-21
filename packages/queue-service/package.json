@@ -13,6 +13,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./test": {
+      "@ready-for-agent/source": "./src/lib/test-fixtures.ts",
+      "types": "./dist/lib/test-fixtures.d.ts",
+      "import": "./dist/lib/test-fixtures.js",
+      "default": "./dist/lib/test-fixtures.js"
     }
   },
   "nx": {

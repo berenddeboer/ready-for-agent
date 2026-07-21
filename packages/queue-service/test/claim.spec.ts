@@ -3,9 +3,10 @@ import {
   JobId,
   PayloadParseError,
   QueueService,
-  type QueueServiceShape,
   type RawJob,
 } from "../src/index.js"
+import type { QueueServiceShape } from "../src/lib/queue-service.js"
+import { stubQueueService } from "../src/lib/test-fixtures.js"
 import { describe, expect, it } from "bun:test"
 
 const TestPayload = Schema.Struct({
@@ -27,22 +28,11 @@ const makeRawJob = (payload: unknown): RawJob => ({
 
 const makeFakeQueue = (
   rawClaim: QueueServiceShape["rawClaim"],
-): QueueServiceShape => ({
-  queueInTransaction: false,
-  enqueue: () => Effect.die("unused"),
-  enqueueWithDelay: () => Effect.die("unused"),
-  ensureKeyed: () => Effect.die("unused"),
-  listKeyed: () => Effect.die("unused"),
-  reviveExhaustedKeyed: () => Effect.die("unused"),
-  postponeKeyed: () => Effect.die("unused"),
-  removeKeyed: () => Effect.die("unused"),
-  rawClaim,
-  acknowledge: () => Effect.die("unused"),
-  fail: () => Effect.die("unused"),
-  extendVisibility: () => Effect.die("unused"),
-  getStats: () => Effect.die("unused"),
-  requeueByPayloadTag: () => Effect.die("unused"),
-})
+): QueueServiceShape =>
+  stubQueueService({
+    queueInTransaction: false,
+    rawClaim,
+  })
 
 const runWithQueue = <A, E>(
   queue: QueueServiceShape,
@@ -51,6 +41,14 @@ const runWithQueue = <A, E>(
   Effect.runPromise(
     Effect.provide(effect, Layer.succeed(QueueService, QueueService.of(queue))),
   )
+
+describe("stubQueueService", () => {
+  it("identifies unexpected operation calls", async () => {
+    await expect(
+      Effect.runPromise(stubQueueService().enqueue("test-queue", {})),
+    ).rejects.toThrow("Unexpected QueueService.enqueue call")
+  })
+})
 
 describe("QueueService.claim", () => {
   it("returns None when rawClaim returns None", async () => {
