@@ -1,8 +1,16 @@
 import { accessSync, constants } from "node:fs"
-import { delimiter, join } from "node:path"
+import { basename, delimiter, dirname, join, normalize } from "node:path"
 
 export const OPERATOR_BINARY = "ready-for-agent"
 export const ADD_REPOSITORY_PATH_PLACEHOLDER = "/path/to/local/repo"
+
+const isPackageRunnerBinDirectory = (directory: string): boolean => {
+  const normalized = normalize(directory)
+  return (
+    basename(normalized) === ".bin" &&
+    basename(dirname(normalized)) === "node_modules"
+  )
+}
 
 export const commandExistsOnPath = (
   command: string,
@@ -12,7 +20,7 @@ export const commandExistsOnPath = (
     return false
   }
   for (const directory of pathEnv.split(delimiter)) {
-    if (directory.length === 0) {
+    if (directory.length === 0 || isPackageRunnerBinDirectory(directory)) {
       continue
     }
     try {
