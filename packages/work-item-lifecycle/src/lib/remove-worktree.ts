@@ -301,7 +301,19 @@ const removeLocalArtifacts = (
           "remove",
           "--force",
           worktreePath,
-        ])
+        ]).pipe(
+          Effect.catchTag("GitCommandError", (error) =>
+            Effect.gen(function* () {
+              // Git can remove the worktree before reporting a late cleanup error.
+              const [stillListed, stillPresent] = yield* Effect.all([
+                worktreeListContains(gitRepository, worktreePath),
+                pathExists(worktreePath),
+              ])
+              if (!stillListed && !stillPresent) return
+              return yield* error
+            }),
+          ),
+        )
       }
 
       const stillPresent = yield* pathExists(worktreePath)
