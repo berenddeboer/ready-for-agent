@@ -1,9 +1,20 @@
-# Ready for Agent
+# Ready for Agent: Clanker Harness
 
-Opinionated agentic software engineering harness that works GitHub issues into
-PRs for configured repositories.
+Agentic software engineering harness which watches the GitHub issue
+queue for issues marked with `ready-for-agent`. Select an issue in the
+UI to start working on it.
 
-## Install
+It does this by creating a new worktree, installing packages, and
+asking [OpenCode](https://opencode.ai/) to implement the issue, review
+the issue, create a PR, and merge if allowed.
+
+The goal of this clanker harness is to get you to that 50+ PRs merged
+a day nirvana. You focus on design, creating specifications, and
+turning them into GitHub tickets as per [the Matt Pocock
+workflow](https://www.youtube.com/watch?v=M6mYodf0dJM). The harness
+allows you to drop that baby-sitting of your agent.
+
+# Usage
 
 Requires a supported platform (Linux or macOS, x64 or arm64). Windows is not
 supported in v1.
@@ -19,22 +30,14 @@ npm install -g ready-for-agent
 ready-for-agent
 ```
 
-You do not need Bun on PATH; the package ships a compiled binary for your host.
+This opens the UI in the browser
+([http://127.0.0.1:6056/](http://127.0.0.1:6056/)). This shows the
+configured state. If you open this for the first time, you will be
+prompted to set a default build model and thinking level, and configure repos.
 
-## Start
+## Stop opening a browser window
 
-Default command (and `start`) boots the full Harness (UI + backend) on loopback:
-
-```bash
-ready-for-agent
-# same as
-ready-for-agent start
-```
-
-- UI: `http://127.0.0.1:6056/`
-- GraphQL: `http://127.0.0.1:6056/graphql`
-
-On successful start the default browser opens to the UI. Disable with:
+Disable opening a browser window with:
 
 ```bash
 ready-for-agent --no-open
@@ -42,61 +45,60 @@ ready-for-agent --no-open
 NO_BROWSER=1 ready-for-agent
 ```
 
-Use different Harness and Keymaxxer Sidecar ports when needed:
+## Use a different port
+
+Use a different port than 6056:
 
 ```bash
-# Harness on a non-default port
 PORT=7000 ready-for-agent
-
-# Point CLI commands at that harness
-READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
-  ready-for-agent add /path/to/local/repo
-
-# Keymaxxer Sidecar on a non-default port
-KEYMAXXER_SIDECAR_PORT=7001 ready-for-agent
 ```
 
-### Application data
+## Configuring a repo
 
-Product state defaults to the platform data directory:
-
-- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
-- macOS: `~/Library/Application Support/ready-for-agent/`
-
-The SQLite database is `ready-for-agent.db` in that directory. Set
-`SQLITE_DATABASE_PATH` to use another file. Stop the harness completely before
-opening the database with external write tooling (single-writer SQLite).
-
-## Add a repository
-
-With the Harness running, register a local checkout that has a GitHub remote:
+If you open ready-for-agent without any repo configured, it will prompt. Add with:
 
 ```bash
 ready-for-agent add /path/to/local/repo
 ```
 
-New repositories start **paused**. Unpause in the UI when you want autonomous
-work. Issues labeled `ready-for-agent` appear after reconciliation.
-
-If GraphQL is unreachable, the command fails with a hint to start the Harness
-first. Point at a non-default endpoint with:
+If you use a non-default port:
 
 ```bash
 READY_FOR_AGENT_GRAPHQL_URL=http://127.0.0.1:7000/graphql \
   ready-for-agent add /path/to/local/repo
 ```
 
-### Other commands
+## Working on issues
 
-```bash
-ready-for-agent --help
-ready-for-agent start --help
-ready-for-agent add --help
-```
+Currently the harness does not automatically pick issues to work
+on. Click on the kebab menu and implement this end to end via
+"Implement now".
 
-To delete a stored GitHub token, use the Keymaxxer CLI (`keymaxxer rm <SECRET_NAME>`), then reload the Harness so it detects the missing credential.
+You can configure your repo to automatically merge the PR. Default is
+for human review to take place. If auto-merge is enabled, the harness
+will ask the AI about the risk of auto-merge. Only low risk PRs are
+auto-merged, higher risk still require human review.
 
-## Requirements
+Pick the "Implement locally" option to implement the issue in the new
+worktree, but withoutr creating a PR yet. This allows you to test and verify.
+
+![Clanker Harness Console](docs/screenshot.png)
+
+## Assumptions
+
+- You use GitHub.
+- You have a repo cloned locally, either "normally" or as a bare clone
+  (recommended). Install the [git-bare-worktree
+  skill](https://github.com/berenddeboer/git-bare-worktree) and let
+  your agent create this setup for you: `npx skills@latest add
+  berenddeboer/git-bare-worktree --global`
+- The harness is designed to run on your local laptop. This avoids
+  cloud costs, and you already paid for an extensive
+  machine. Secondly, your machine will be setup for your repo, so we
+  avoid the setup issues you get with running compute in the cloud.
+- Ideally you have setup a CI pipeline with automated build/test and an AI code review.
+
+# Requirements
 
 **Required on PATH** (start fails fast if missing):
 
@@ -112,30 +114,54 @@ To delete a stored GitHub token, use the Keymaxxer CLI (`keymaxxer rm <SECRET_NA
    ambient GitHub authentication. Set `KEYMAXXER_ENABLED=false` to force that
    mode.
 
-Also assume:
+# KeyMaxxer
 
-- You use GitHub.
-- Local checkouts for repositories you add are set up for development.
-- Ideally AI code review runs via GitHub Actions on those repositories.
+Ready for Agent supports
+[keymaxxer](https://github.com/glommer/keymaxxer), but does not
+require it. With KeyMaxxer secrets stay encrypted, and are only
+granted to agents when they need them.
 
-## How it works
+Keymaxxer is automatically enabled if keymaxxer is in your path. Disable with:
 
-1. You install and start the Harness, then `ready-for-agent add` a local repo.
-2. Ready-labeled issues (`ready-for-agent`) show up after reconciliation.
-3. You implement a single issue from the UI to start.
+```
+KEYMAXXER_ENABLED=false npx ready-for-agent@latest
+```
 
-For each Work Item the harness creates a worktree and branch, implements the
-issue, runs a local review, and opens a draft PR. It watches status checks,
-addresses review comments, marks the PR ready for review, then either
-auto-merges low-risk changes or asks a human.
+# Frequently Asked Questions
+
+1. Is there support for agents other than OpenCode?
+
+Not yet, but open for properly structured PRs. Currently everything is
+hard-coded for opencode, so the first step would be to make this more
+generalisable.
+
+2. Does the harness support any other backend than GitHub?
+
+Not yet. GitLab might be coming soon though.
+
+# Architecture
+
+## GitHub is source of truth
 
 GitHub issues remain the source of truth; the local database is book-keeping.
 Style and guidelines come from the target repository—this harness steers an
-agent swarm on Ready-labeled work.
+agent swarm on `ready-for-agent` labeled work.
+
+## Graphql API
+
+The backend is served as graphql api: `http://127.0.0.1:6056/graphql`
+
+## Application data
+
+Product state defaults to the platform data directory:
+
+- Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
+- macOS: `~/Library/Application Support/ready-for-agent/`
+
+The SQLite database is `ready-for-agent.db` in that directory. Set
+`SQLITE_DATABASE_PATH` to use another file. Stop the harness completely before
+opening the database with external write tooling (single-writer SQLite).
 
 ## Contributing
 
-Monorepo setup, Nx targets, and development workflow live in
-[CONTRIBUTING.md](CONTRIBUTING.md). Architecture notes are in
-[ARCHITECTURE.md](ARCHITECTURE.md) and domain language in
-[CONTEXT.md](CONTEXT.md).
+Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
