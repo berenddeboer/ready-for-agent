@@ -421,13 +421,22 @@ function CommittedPullRequestsDashboard() {
   const yesterdayQuery = useQuery(
     committedPullRequestsCountQuery(bounds.yesterdayFrom, bounds.yesterdayTo),
   )
+  const thisWeekQuery = useQuery(
+    committedPullRequestsCountQuery(bounds.thisWeekFrom, bounds.thisWeekTo),
+  )
   const lastWeekQuery = useQuery(
     committedPullRequestsCountQuery(bounds.lastWeekFrom, bounds.lastWeekTo),
   )
   const loading =
-    todayQuery.isLoading || yesterdayQuery.isLoading || lastWeekQuery.isLoading
+    todayQuery.isLoading ||
+    yesterdayQuery.isLoading ||
+    thisWeekQuery.isLoading ||
+    lastWeekQuery.isLoading
   const failed =
-    todayQuery.isError || yesterdayQuery.isError || lastWeekQuery.isError
+    todayQuery.isError ||
+    yesterdayQuery.isError ||
+    thisWeekQuery.isError ||
+    lastWeekQuery.isError
 
   if (loading) {
     return (
@@ -437,7 +446,8 @@ function CommittedPullRequestsDashboard() {
         aria-label="Loading committed pull requests"
         aria-busy="true"
       >
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
+          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
           <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
           <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
           <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
@@ -458,11 +468,12 @@ function CommittedPullRequestsDashboard() {
 
   const today = todayQuery.data ?? 0
   const yesterday = yesterdayQuery.data ?? 0
+  const thisWeek = thisWeekQuery.data ?? 0
   const lastWeek = lastWeekQuery.data ?? 0
 
   return (
     <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
             Today
@@ -477,6 +488,14 @@ function CommittedPullRequestsDashboard() {
           </p>
           <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
             {yesterday}
+          </p>
+        </div>
+        <div>
+          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            This week
+          </p>
+          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+            {thisWeek}
           </p>
         </div>
         <div>
