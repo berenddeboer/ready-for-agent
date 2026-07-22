@@ -174,12 +174,14 @@ const makeGitHubLayer = (
         mergeability: "mergeable",
         baseRefName: "main",
         headPushedAt: null,
+        headSha: null,
       }),
     getPrStatusCheckDiagnostics: () => Effect.succeed([]),
     getPullRequestLifecycleStatus: () =>
       Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+    rerunWorkflowRun: () => Effect.void,
     ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: ({ owner, name }) => {
       actions.push(`github:${owner}/${name}`)

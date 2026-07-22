@@ -81,6 +81,18 @@ export interface GitHubServiceShape {
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
   /**
+   * Rerun an entire GitHub Actions workflow run (not failed-jobs-only).
+   * Used by Investigate PR Status Checks for terminal incomplete automated
+   * reviews after a durable rerun permit is reserved.
+   */
+  readonly rerunWorkflowRun: (
+    repository: GitHubRepository,
+    workflowRunId: number,
+  ) => Effect.Effect<
+    void,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
+  /**
    * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)
    * and the Issue is closed with state reason COMPLETED. Idempotent across
    * retries and already-closed Issues.

@@ -1,7 +1,7 @@
 ---
-status: accepted
+status: superseded
+superseded-by: 0027-bound-automated-review-reruns
 ---
-
 # Hand Off Individual PR Status Checks
 
 Extend Watch PR Status Checks to poll the individual CheckRun and StatusContext entries behind the aggregate GraphQL status-check rollup. Persist each observed CheckRun execution and StatusContext that reaches an explicit green result (`SUCCESS`) or red result (`FAILURE`, `ERROR`, `TIMED_OUT`, `ACTION_REQUIRED`, or `STARTUP_FAILURE`) and whether it has been handed to OpenCode; neutral, skipped, cancelled, stale, and pending results do not trigger a handoff.

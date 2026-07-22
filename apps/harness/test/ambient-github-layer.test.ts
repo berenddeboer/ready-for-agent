@@ -25,6 +25,7 @@ const serviceWithList = (
   getPullRequestLifecycleStatus: () => Effect.die("not used"),
   markPullRequestReadyForReview: () => Effect.die("not used"),
   mergePullRequest: () => Effect.die("not used"),
+  rerunWorkflowRun: () => Effect.void,
   ensureIssueCompletedWithSummary: () => Effect.die("not used"),
 })
 

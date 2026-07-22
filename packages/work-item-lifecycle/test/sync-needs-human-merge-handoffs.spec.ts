@@ -60,11 +60,13 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           mergeability: "mergeable",
           baseRefName: "main",
           headPushedAt: null,
+          headSha: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () => Effect.succeed(status),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+      rerunWorkflowRun: () => Effect.void,
       ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 

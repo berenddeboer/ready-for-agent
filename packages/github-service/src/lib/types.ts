@@ -83,6 +83,11 @@ export type PullRequestCheckStatus = (
    * valid head-commit push time. Used only as a restart freshness signal.
    */
   readonly headPushedAt: Date | null
+  /**
+   * Current PR head commit OID, or null when GitHub omitted a valid head SHA.
+   * Used to scope automated-review rerun budgets.
+   */
+  readonly headSha: string | null
 }
 
 export type GitHubIssueState = "OPEN" | "CLOSED"

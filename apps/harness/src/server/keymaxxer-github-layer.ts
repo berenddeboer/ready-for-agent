@@ -105,6 +105,7 @@ const SerializedPullRequestCheckStatusFields = {
   mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
   baseRefName: Schema.NullOr(Schema.String),
   headPushedAt: Schema.NullOr(Schema.String),
+  headSha: Schema.NullOr(Schema.String),
 } as const
 
 const SerializedPullRequestCheckStatus = Schema.Union([
@@ -542,6 +543,35 @@ export const keymaxxerGitHubLayer = (options: {
           }).pipe(
             Effect.catchTag("KeymaxxerError", () =>
               Effect.fail(requestError(repository, "merge pull request")),
+            ),
+          ),
+        rerunWorkflowRun: (repository, workflowRunId) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(repository, "rerun workflow run")
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const runId = encodeArgument(String(workflowRunId))
+            const result = yield* runGitHubBin(
+              tokenName,
+              "rerun-workflow-run",
+              [owner, name, runId],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "rerun workflow run",
+                result.stderr || result.stdout,
+              )
+            }
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(requestError(repository, "rerun workflow run")),
             ),
           ),
         ensureIssueCompletedWithSummary: (

@@ -46,11 +46,13 @@ export const makeGitHubServiceTest = (
         mergeability: "mergeable",
         baseRefName: "main",
         headPushedAt: null,
+        headSha: null,
       }),
     getPrStatusCheckDiagnostics: () => Effect.succeed([]),
     getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "open" }),
     markPullRequestReadyForReview: () => Effect.void,
     mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+    rerunWorkflowRun: () => Effect.void,
     ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: (repository) => {
       const fixture = fixturesByRepository.get(repositoryKey(repository))

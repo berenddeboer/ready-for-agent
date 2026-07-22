@@ -172,6 +172,7 @@ interface GitHubRestCheckRun {
 
 interface GitHubRestWorkflowRun {
   readonly id?: unknown
+  readonly name?: unknown
 }
 
 interface GitHubRestJob {
@@ -202,6 +203,13 @@ export type LoadPrStatusCheckDiagnostics = (
   options: PrStatusCheckDiagnosticsOptions,
   signal?: AbortSignal,
 ) => Effect.Effect<readonly PrStatusCheckDiagnostic[], GitHubRequestError>
+
+/** Rerun an entire GitHub Actions workflow run. */
+export type RerunWorkflowRun = (
+  repository: { owner: string; name: string },
+  workflowRunId: number,
+  signal?: AbortSignal,
+) => Promise<void>
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
 
@@ -355,6 +363,18 @@ const parseHeadPushedAt = (pullRequest: GitHubApiPullRequest): Date | null => {
   return parsed
 }
 
+const headShaFromPullRequest = (
+  pullRequest: GitHubApiPullRequest | null | undefined,
+): string | null => {
+  if (pullRequest === null || pullRequest === undefined) {
+    return null
+  }
+  return typeof pullRequest.headRefOid === "string" &&
+    pullRequest.headRefOid.trim() !== ""
+    ? pullRequest.headRefOid
+    : null
+}
+
 const toPullRequestCheckStatus = (
   pullRequest: GitHubApiPullRequest | null | undefined,
   terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks,
@@ -366,6 +386,7 @@ const toPullRequestCheckStatus = (
       mergeability: "unknown",
       baseRefName: null,
       headPushedAt: null,
+      headSha: null,
     }
   }
   const decoded = decodeSync(GitHubPullRequestCheckFieldsSchema, pullRequest)
@@ -379,6 +400,7 @@ const toPullRequestCheckStatus = (
     mergeability,
     baseRefName: decoded.baseRefName,
     headPushedAt: parseHeadPushedAt(pullRequest),
+    headSha: headShaFromPullRequest(pullRequest),
   } as const
   if (decoded.merged) {
     return { _tag: "succeeded", terminalChecks, ...snapshot }
@@ -756,6 +778,7 @@ export const makeGitHubService = (
   client: GitHubGraphqlClient,
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
   loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
+  rerunWorkflowRunImpl?: RerunWorkflowRun,
 ): GitHubServiceShape => ({
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
@@ -834,6 +857,7 @@ export const makeGitHubService = (
         mergeability: "unknown",
         baseRefName: null,
         headPushedAt: null,
+        headSha: null,
       }
     }
 
@@ -1328,6 +1352,26 @@ export const makeGitHubService = (
         reason: "merge_rejected",
         message: `GitHub rejected the unchanged, open, green, mergeable pull request for ${repository.owner}/${repository.name}:${headRefName}`,
       } satisfies MergePullRequestResult
+    },
+  ),
+  rerunWorkflowRun: Effect.fn("GitHubService.rerunWorkflowRun")(
+    function* (repository, workflowRunId) {
+      if (
+        !Number.isSafeInteger(workflowRunId) ||
+        workflowRunId <= 0 ||
+        rerunWorkflowRunImpl === undefined
+      ) {
+        return yield* new GitHubRequestError({
+          message:
+            rerunWorkflowRunImpl === undefined
+              ? `Workflow rerun is not configured for ${repository.owner}/${repository.name}`
+              : `Invalid workflow run id ${String(workflowRunId)} for ${repository.owner}/${repository.name}`,
+        })
+      }
+      yield* githubRequest(
+        `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}`,
+        (signal) => rerunWorkflowRunImpl(repository, workflowRunId, signal),
+      )
     },
   ),
   ensureIssueCompletedWithSummary: Effect.fn(
@@ -2009,7 +2053,7 @@ const listTerminalChecksViaActions = async (
   signal?: AbortSignal,
 ): Promise<readonly TerminalPrStatusCheck[]> => {
   const checks: TerminalPrStatusCheck[] = []
-  const runIds: number[] = []
+  const runs: { readonly id: number; readonly name: string | null }[] = []
   for (let page = 1; ; page += 1) {
     const url = new URL(
       `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs`,
@@ -2027,20 +2071,26 @@ const listTerminalChecksViaActions = async (
       response,
       `Failed to list workflow runs for ${repository.owner}/${repository.name}@${headSha}`,
     )
-    const runs = body.workflow_runs ?? []
-    for (const run of runs) {
+    const pageRuns = body.workflow_runs ?? []
+    for (const run of pageRuns) {
       if (typeof run.id === "number" && Number.isSafeInteger(run.id)) {
-        runIds.push(run.id)
+        runs.push({
+          id: run.id,
+          name:
+            typeof run.name === "string" && run.name.trim() !== ""
+              ? run.name
+              : null,
+        })
       }
     }
-    if (runs.length < PAGE_SIZE) {
+    if (pageRuns.length < PAGE_SIZE) {
       break
     }
   }
-  for (const runId of runIds) {
+  for (const run of runs) {
     for (let page = 1; ; page += 1) {
       const url = new URL(
-        `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs/${runId}/jobs`,
+        `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs/${run.id}/jobs`,
       )
       url.searchParams.set("per_page", String(PAGE_SIZE))
       url.searchParams.set("page", String(page))
@@ -2052,14 +2102,22 @@ const listTerminalChecksViaActions = async (
         readonly jobs?: readonly GitHubRestJob[] | null
       }>(
         response,
-        `Failed to list workflow jobs for ${repository.owner}/${repository.name} run ${runId}`,
+        `Failed to list workflow jobs for ${repository.owner}/${repository.name} run ${run.id}`,
       )
       const jobs = body.jobs ?? []
       for (const job of jobs) {
         const mapped = mapRestCheckExecution(job)
-        if (mapped !== null) {
-          checks.push(mapped)
+        if (mapped === null) {
+          continue
         }
+        checks.push(
+          run.name === null
+            ? mapped
+            : {
+                ...mapped,
+                name: `${run.name}/${mapped.name}`,
+              },
+        )
       }
       if (jobs.length < PAGE_SIZE) {
         break
@@ -2068,6 +2126,25 @@ const listTerminalChecksViaActions = async (
   }
   return checks
 }
+
+const makeRerunWorkflowRun =
+  (token: string, fetchImpl: GitHubFetch): RerunWorkflowRun =>
+  async (repository, workflowRunId, signal) => {
+    const response = await fetchImpl(
+      `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/runs/${workflowRunId}/rerun`,
+      {
+        method: "POST",
+        headers: githubRestHeaders(token),
+        signal,
+      },
+    )
+    if (!response.ok) {
+      throw new GitHubHttpError(
+        response.status,
+        `Failed to rerun workflow run ${workflowRunId} for ${repository.owner}/${repository.name}: ${response.statusText}: ${await response.text()}`,
+      )
+    }
+  }
 
 const listTerminalCommitStatuses = async (
   token: string,
@@ -2340,6 +2417,7 @@ export const makeGitHubServiceFromToken = (
     makeGitHubGraphqlClient(token, fetchImpl),
     makeListTerminalChecksForCommit(token, fetchImpl),
     makeLoadPrStatusCheckDiagnostics(token, fetchImpl, fs),
+    makeRerunWorkflowRun(token, fetchImpl),
   )
 
 export const GitHubServiceLive = Layer.effect(

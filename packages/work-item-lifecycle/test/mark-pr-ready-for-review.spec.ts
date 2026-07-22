@@ -48,6 +48,7 @@ describe("markPrReadyForReview", () => {
           mergeability: "mergeable",
           baseRefName: "main",
           headPushedAt: null,
+          headSha: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
@@ -57,6 +58,7 @@ describe("markPrReadyForReview", () => {
         return Effect.void
       },
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+      rerunWorkflowRun: () => Effect.void,
       ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
@@ -81,12 +83,14 @@ describe("markPrReadyForReview", () => {
           mergeability: "mergeable",
           baseRefName: "main",
           headPushedAt: null,
+          headSha: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+      rerunWorkflowRun: () => Effect.void,
       ensureIssueCompletedWithSummary: () => Effect.void,
     } satisfies GitHubServiceShape)
 
