@@ -29,9 +29,10 @@ const githubTokenCreationUrl = (repository: Repository) => {
   url.searchParams.set("issues", "write")
   url.searchParams.set("contents", "write")
   url.searchParams.set("pull_requests", "write")
-  // Actions + commit statuses help with CI visibility. Per-check CheckRun nodes
-  // need Checks API access, which fine-grained PATs cannot grant — see AGENTS.md.
-  url.searchParams.set("actions", "read")
+  // Actions write enables workflow reruns; read covers CI visibility and job logs.
+  // Commit statuses help with CI visibility. Per-check CheckRun nodes need Checks
+  // API access, which fine-grained PATs cannot grant — see AGENTS.md.
+  url.searchParams.set("actions", "write")
   url.searchParams.set("statuses", "read")
   return url.toString()
 }

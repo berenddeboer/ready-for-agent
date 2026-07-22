@@ -13,7 +13,8 @@ not need to use Keymaxxer themselves; use normally authenticated tools such as
 Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
 `statusCheckRollup.contexts`). That 403 is expected: the harness falls back to
 Actions jobs for terminal PR Status Check identity and downloads Actions job
-logs for Status Check Handoff diagnostics (`actions=read`, `statuses=read`).
+logs for Status Check Handoff diagnostics (`actions=write` for workflow
+reruns and job-log reads, `statuses=read`).
 
 ### Triage labels
 

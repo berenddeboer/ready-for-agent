@@ -1416,13 +1416,19 @@ function RepositoryCard({
               <code className="font-bold">
                 {repository.credential.githubTokenSecretName}
               </code>{" "}
-              in Keymaxxer.
+              in Keymaxxer. Already-created tokens are not upgraded
+              automatically — edit the token on GitHub or recreate it, then
+              store the replacement.
             </p>
           ) : (
             <p className="m-0">
               Create a fine-grained token, choose{" "}
-              <strong>Only select repositories</strong>, and select{" "}
-              <code className="font-bold">{repository.githubRepo}</code>.
+              <strong>Only select repositories</strong>, select{" "}
+              <code className="font-bold">{repository.githubRepo}</code>, and
+              allow <strong>Actions: Read and write</strong> (required for
+              workflow reruns and CI logs). Already-created tokens are not
+              upgraded automatically — edit or recreate them if Actions is still
+              read-only.
             </p>
           )}
           {githubTokenCreated ? (

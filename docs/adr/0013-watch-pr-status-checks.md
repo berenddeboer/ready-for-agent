@@ -7,7 +7,7 @@ Investigate PR Status Checks continues the Implement OpenCode Session with the R
 ## Consequences
 
 - Every poll and investigation is a separate Step Run, preserving durable execution history and at-least-once queue behavior.
-- New Repository credentials request Actions read and Commit statuses read (not Checks; fine-grained PATs cannot grant Checks). Terminal PR Status Checks load via REST Checks with Actions-jobs fallback on 403, plus commit statuses. Actions read also lets the harness download job logs for Status Check Handoff diagnostics.
+- New Repository credentials request Actions read and write and Commit statuses read (not Checks; fine-grained PATs cannot grant Checks). Terminal PR Status Checks load via REST Checks with Actions-jobs fallback on 403, plus commit statuses. Actions write lets agents rerun terminal incomplete review workflows; Actions read also lets the harness download job logs for Status Check Handoff diagnostics. Already-created repository tokens are not upgraded automatically — operators must edit the token on GitHub or recreate it and store the replacement in Keymaxxer.
 - A newly created PR that is not yet visible through GitHub is treated as pending; a visible PR with a null rollup is `no_checks` (not green) until the 60-second grace elapses.
 - Same-state watch requeues preserve `state_ready_at` so residence time (and the `no_checks` grace) accumulate across polls.
 - A merged PR is treated as green and advances to Mark PR Ready for Review (a no-op if already non-draft); a closed, unmerged PR enters Needs Human instead of polling forever.
