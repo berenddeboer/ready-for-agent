@@ -136,6 +136,7 @@ const issuesQuery = (repositoryId: string) => ({
         title: true,
         url: true,
         state: true,
+        issueAuthor: true,
         parent: {
           githubIssueNumber: true,
           githubIssueUrl: true,
@@ -182,6 +183,7 @@ type RepositoryIssue = {
   title: string
   url: string
   state: "OPEN" | "CLOSED"
+  issueAuthor: string | null
   parent: {
     githubIssueNumber: number
     githubIssueUrl: string
@@ -691,6 +693,9 @@ function RepositoryCard({
     repository.reviewVariant ?? "",
   )
   const [autoMerge, setAutoMerge] = useState(repository.autoMerge)
+  const [includeAllIssueAuthors, setIncludeAllIssueAuthors] = useState(
+    repository.includeAllIssueAuthors,
+  )
   const jobsQuery = workItemsQuery(repository.id)
   const { data: workItems = [], isLoading: workItemsLoading } =
     useQuery(jobsQuery)
@@ -749,6 +754,7 @@ function RepositoryCard({
     setReviewModel(repository.reviewModel ?? "")
     setReviewVariant(repository.reviewVariant ?? "")
     setAutoMerge(repository.autoMerge)
+    setIncludeAllIssueAuthors(repository.includeAllIssueAuthors)
     updateSettings.reset()
     if (config.isError) void config.refetch()
     if (models.isError) void models.refetch()
@@ -765,7 +771,7 @@ function RepositoryCard({
       reviewModel: reviewModel.trim() === "" ? null : reviewModel,
       reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
       autoMerge,
-      includeAllIssueAuthors: repository.includeAllIssueAuthors,
+      includeAllIssueAuthors,
     })
   }
 
@@ -1133,6 +1139,14 @@ function RepositoryCard({
             {repository.autoMerge ? "Enabled" : "Disabled"}
           </dd>
         </div>
+        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            Include all Issue Authors:
+          </dt>
+          <dd className="m-0 text-slate-700">
+            {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
+          </dd>
+        </div>
       </dl>
       <dialog
         ref={settingsDialogRef}
@@ -1182,6 +1196,20 @@ function RepositoryCard({
               Auto-merge
               <span className="font-normal text-slate-500">
                 Allow clanker merge when risk is low
+              </span>
+            </label>
+            <label className="flex items-center gap-3 text-sm font-semibold">
+              <input
+                type="checkbox"
+                className="size-4 rounded border-slate-300"
+                checked={includeAllIssueAuthors}
+                onChange={(event) =>
+                  setIncludeAllIssueAuthors(event.target.checked)
+                }
+              />
+              Include all Issue Authors
+              <span className="font-normal text-slate-500">
+                Relevant Issues from every author after Refresh
               </span>
             </label>
             {models.isPending ? (
@@ -1543,13 +1571,20 @@ function RepositoryIssues({
                 <span className="font-mono text-xs leading-5 font-semibold text-blue-600">
                   #{issue.githubIssueNumber}
                 </span>
-                <a
-                  className="min-w-0 font-semibold text-slate-800 hover:text-blue-700 hover:underline"
-                  href={issue.url}
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {issue.title}
-                </a>
+                <span className="min-w-0">
+                  <a
+                    className="font-semibold text-slate-800 hover:text-blue-700 hover:underline"
+                    href={issue.url}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {issue.title}
+                  </a>
+                  {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
+                    <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                      {issue.issueAuthor}
+                    </span>
+                  )}
+                </span>
                 <span className="flex shrink-0 items-center gap-1.5 text-[0.65rem] font-bold tracking-wide text-slate-500 uppercase">
                   {closedChildren}/{children.length} closed
                   <svg
@@ -1674,12 +1709,19 @@ function RepositoryIssueRow({
         <span className="font-mono text-xs leading-5 text-slate-400">
           #{issue.githubIssueNumber}
         </span>
-        <a
-          className="min-w-0 text-slate-700 hover:text-blue-700 hover:underline"
-          href={issue.url}
-        >
-          {issue.title}
-        </a>
+        <span className="min-w-0">
+          <a
+            className="text-slate-700 hover:text-blue-700 hover:underline"
+            href={issue.url}
+          >
+            {issue.title}
+          </a>
+          {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
+            <span className="mt-0.5 block text-xs text-slate-500">
+              {issue.issueAuthor}
+            </span>
+          )}
+        </span>
         <span className="flex shrink-0 items-center gap-1">
           {issue.state === "CLOSED" && (
             <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-500 uppercase">
