@@ -1,4 +1,7 @@
-import { parseVerboseModelsOutput } from "../src/lib/parse-verbose-models.js"
+import {
+  parseVerboseModelsOutput,
+  parseVerboseModelsOutputDetailed,
+} from "../src/lib/parse-verbose-models.js"
 import { describe, expect, it } from "bun:test"
 
 describe("parseVerboseModelsOutput", () => {
@@ -79,5 +82,40 @@ describe("parseVerboseModelsOutput", () => {
 
   it("ignores lines that are not provider/model ids", () => {
     expect(parseVerboseModelsOutput("not-a-model\n{\n}\n")).toEqual([])
+  })
+
+  it("marks mid-object truncation as incomplete", () => {
+    const stdout = [
+      "opencode/kimi-k2.5",
+      "{",
+      '  "variants": {',
+      '    "low": {}',
+      // truncated before closing braces
+    ].join("\n")
+
+    expect(parseVerboseModelsOutputDetailed(stdout)).toEqual({
+      complete: false,
+      models: [{ id: "opencode/kimi-k2.5", variants: [] }],
+    })
+  })
+
+  it("marks a trailing model id without JSON as incomplete", () => {
+    const stdout = [
+      "opencode/complete",
+      "{",
+      '  "variants": {',
+      '    "low": {}',
+      "  }",
+      "}",
+      "xai/grok-4.5",
+    ].join("\n")
+
+    expect(parseVerboseModelsOutputDetailed(stdout)).toEqual({
+      complete: false,
+      models: [
+        { id: "opencode/complete", variants: ["low"] },
+        { id: "xai/grok-4.5", variants: [] },
+      ],
+    })
   })
 })

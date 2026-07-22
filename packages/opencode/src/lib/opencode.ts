@@ -2,16 +2,18 @@ import { Context, Duration, Effect, Layer, Ref, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { buildRunArgs } from "./build-args.js"
+import { collectChildStdout } from "./collect-child-stdout.js"
 import { makeOpencodeEnvironment } from "./environment.js"
 import {
   type OpencodeConfigError,
   OpencodeExitError,
+  OpencodeIncompleteOutputError,
   OpencodeTimeoutError,
   SessionIdNotFoundError,
 } from "./errors.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
-import { parseVerboseModelsOutput } from "./parse-verbose-models.js"
+import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
 import type {
   ContinueInput,
   ListModelsInput,
@@ -26,6 +28,7 @@ const DEFAULT_BINARY = "opencode"
 
 export type OpencodeError =
   | OpencodeExitError
+  | OpencodeIncompleteOutputError
   | OpencodeTimeoutError
   | SessionIdNotFoundError
   | PlatformError
@@ -74,22 +77,7 @@ export class Opencode extends Context.Service<
           const result = yield* Effect.scoped(
             Effect.gen(function* () {
               const handle = yield* spawner.spawn(command)
-              const collectStdout = Stream.decodeText(handle.stdout).pipe(
-                Stream.runFold(
-                  () => "",
-                  (acc, chunk) => acc + chunk,
-                ),
-              )
-
-              const [exitCode, stdout] = yield* Effect.all(
-                [handle.exitCode, collectStdout],
-                { concurrency: 2 },
-              )
-
-              return {
-                exitCode: Number(exitCode),
-                models: parseVerboseModelsOutput(stdout),
-              }
+              return yield* collectChildStdout(handle)
             }),
           ).pipe(
             Effect.timeout(timeout),
@@ -107,7 +95,15 @@ export class Opencode extends Context.Service<
             })
           }
 
-          return result.models
+          const parsed = parseVerboseModelsOutputDetailed(result.stdout)
+          if (!parsed.complete) {
+            return yield* new OpencodeIncompleteOutputError({
+              cwd: input.cwd,
+              byteLength: Buffer.byteLength(result.stdout, "utf8"),
+            })
+          }
+
+          return parsed.models
         })
 
         const run = (input: {

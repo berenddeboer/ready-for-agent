@@ -1259,7 +1259,9 @@ function RepositoryCard({
                       Harness default ({harnessDefaultModel})
                     </option>
                     {hasUnavailableBuildModel && (
-                      <option value={defaultModel}>{defaultModel}</option>
+                      <option value={defaultModel}>
+                        {defaultModel} (not in OpenCode catalog)
+                      </option>
                     )}
                     {models.data.map((model) => (
                       <option key={model.id} value={model.id}>
@@ -1269,8 +1271,14 @@ function RepositoryCard({
                   </select>
                 </label>
                 {buildVariantSourceModel.length > 0 &&
-                !buildVariantSourceUnavailable &&
-                buildVariants.length === 0 ? (
+                buildVariantSourceUnavailable ? (
+                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                    Build thinking level override is unavailable — the selected
+                    model is not in the OpenCode catalog. Use harness default or
+                    pick another model.
+                  </p>
+                ) : buildVariantSourceModel.length > 0 &&
+                  buildVariants.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Build thinking level override is unavailable — this model
                     has no OpenCode variants. Use harness default or pick
@@ -1287,7 +1295,6 @@ function RepositoryCard({
                       }
                       disabled={
                         buildVariantSourceModel.length > 0 &&
-                        !buildVariantSourceUnavailable &&
                         buildVariants.length === 0
                       }
                     >
@@ -1295,7 +1302,9 @@ function RepositoryCard({
                         Harness default ({harnessDefaultVariant})
                       </option>
                       {hasCustomBuildVariant && (
-                        <option value={defaultVariant}>{defaultVariant}</option>
+                        <option value={defaultVariant}>
+                          {formatVariantLabel(defaultVariant)}
+                        </option>
                       )}
                       {buildVariants.map((variant) => (
                         <option key={variant} value={variant}>
@@ -1333,7 +1342,9 @@ function RepositoryCard({
                       Harness default ({harnessReviewModel})
                     </option>
                     {hasUnavailableReviewModel && (
-                      <option value={reviewModel}>{reviewModel}</option>
+                      <option value={reviewModel}>
+                        {reviewModel} (not in OpenCode catalog)
+                      </option>
                     )}
                     {models.data.map((model) => (
                       <option key={`review-${model.id}`} value={model.id}>
@@ -1343,8 +1354,14 @@ function RepositoryCard({
                   </select>
                 </label>
                 {reviewVariantSourceModel.length > 0 &&
-                !reviewVariantSourceUnavailable &&
-                reviewVariants.length === 0 ? (
+                reviewVariantSourceUnavailable ? (
+                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                    Review thinking level override is unavailable — the selected
+                    model is not in the OpenCode catalog. Use harness default or
+                    pick another model.
+                  </p>
+                ) : reviewVariantSourceModel.length > 0 &&
+                  reviewVariants.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Review thinking level override is unavailable — this model
                     has no OpenCode variants. Use harness default or pick
@@ -1359,7 +1376,6 @@ function RepositoryCard({
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
                         reviewVariantSourceModel.length > 0 &&
-                        !reviewVariantSourceUnavailable &&
                         reviewVariants.length === 0
                       }
                     >
@@ -1367,7 +1383,9 @@ function RepositoryCard({
                         Harness default ({harnessReviewVariant})
                       </option>
                       {hasCustomReviewVariant && (
-                        <option value={reviewVariant}>{reviewVariant}</option>
+                        <option value={reviewVariant}>
+                          {formatVariantLabel(reviewVariant)}
+                        </option>
                       )}
                       {reviewVariants.map((variant) => (
                         <option key={`review-${variant}`} value={variant}>
