@@ -11,6 +11,7 @@ import {
   resolveKeymaxxerSidecarChildSpawn,
 } from "@ready-for-agent/keymaxxer-service"
 import type { ApplicationRequestContext } from "../application-request-context.js"
+import { READY_FOR_AGENT_VERSION } from "../generated/version.js"
 import { type Application, createApplication } from "./application.server.js"
 import { environmentConfigLayer, loadPort } from "./application-config.js"
 import {
@@ -95,6 +96,11 @@ export type ProductionLifecycleOptions = {
   readonly exitProcess?: (code: number) => void
   /** When false, return after HTTP readiness instead of waiting for signals. */
   readonly waitForShutdown?: boolean
+  /**
+   * Build-time product version shown in the readiness log (`v<semver>`).
+   * Defaults to the launcher package version embedded at build time.
+   */
+  readonly version?: string
 }
 
 export type ProductionLifecycleHandle = {
@@ -397,7 +403,10 @@ export const startProductionLifecycle = async (
   }
 
   const listenUrl = `http://${hostname}:${server.port}/`
-  logInfo(`Ready for Agent listening on ${listenUrl.slice(0, -1)}`)
+  const releaseVersion = options.version ?? READY_FOR_AGENT_VERSION
+  logInfo(
+    `Ready for Agent v${releaseVersion} listening on ${listenUrl.slice(0, -1)}`,
+  )
   onEvent("http-ready")
 
   if (

@@ -8,6 +8,10 @@
         {
           "projects": ["graphql-schema", "db"],
           "target": "generate"
+        },
+        {
+          "projects": ["ready-for-agent"],
+          "target": "generate-version"
         }
       ]
     },
