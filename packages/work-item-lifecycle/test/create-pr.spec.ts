@@ -92,6 +92,7 @@ const stubGitHub = (
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       ...overrides,
     }),

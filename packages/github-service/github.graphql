@@ -10,6 +10,7 @@ scalar GitObjectID
 
 type Query {
   repository(owner: String!, name: String!): Repository
+  viewer: User!
 }
 
 type Mutation {
@@ -205,6 +206,14 @@ type PageInfo {
   hasNextPage: Boolean!
 }
 
+type Actor {
+  login: String!
+}
+
+type User {
+  login: String!
+}
+
 type Issue {
   id: ID!
   number: Int!
@@ -213,6 +222,7 @@ type Issue {
   url: URI!
   createdAt: DateTime!
   state: IssueState!
+  author: Actor
   repository: Repository!
   parent: Issue
   comments(first: Int, after: String): IssueCommentConnection!

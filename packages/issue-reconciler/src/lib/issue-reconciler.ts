@@ -67,6 +67,7 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
   local.url === remote.url &&
   local.state === remote.state &&
   local.githubCreatedAt.getTime() === remote.createdAt.getTime() &&
+  local.issueAuthor === remote.author &&
   local.hasChildren === remote.hasChildren &&
   local.parentPosition === remote.parentPosition &&
   local.parent?.githubIssueNumber === remote.parent?.number &&
@@ -86,15 +87,25 @@ const isActiveClosingPullRequest = (
   pullRequest.state === "MERGED" ||
   (pullRequest.state === "OPEN" && !pullRequest.isDraft)
 
+const matchesOperatorAuthor = (
+  issueAuthor: string | null,
+  operatorLogin: string,
+): boolean =>
+  issueAuthor !== null &&
+  issueAuthor.toLowerCase() === operatorLogin.toLowerCase()
+
 const isRelevant = (
   issue: ReadyLabeledIssue,
   repositoryName: string,
   workItemPullRequestNumbers: ReadonlySet<number>,
+  authorScope:
+    | { readonly includeAll: true }
+    | { readonly includeAll: false; readonly operatorLogin: string },
 ): boolean => {
   const activeClosingPullRequests = issue.closingPullRequests.filter(
     isActiveClosingPullRequest,
   )
-  return (
+  const hierarchyAndClosingPrs =
     issue.hierarchySupported &&
     (issue.parent === null
       ? issue.state === "OPEN"
@@ -105,7 +116,13 @@ const isRelevant = (
           pullRequest.repository.toLowerCase() === repositoryName &&
           workItemPullRequestNumbers.has(pullRequest.number),
       ))
-  )
+  if (!hierarchyAndClosingPrs) {
+    return false
+  }
+  if (authorScope.includeAll) {
+    return true
+  }
+  return matchesOperatorAuthor(issue.author, authorScope.operatorLogin)
 }
 
 export const IssueReconcilerLive = Layer.effect(
@@ -121,6 +138,15 @@ export const IssueReconcilerLive = Layer.effect(
       const workItemPullRequests = yield* db.listWorkItemPullRequests(
         repository.id,
       )
+      const authorScope = repository.includeAllIssueAuthors
+        ? ({ includeAll: true } as const)
+        : ({
+            includeAll: false,
+            operatorLogin: yield* github.getAuthenticatedUserLogin({
+              owner: repository.githubOwner,
+              name: repository.githubRepo,
+            }),
+          } as const)
       const remoteIssues = yield* github.listReadyIssues({
         owner: repository.githubOwner,
         name: repository.githubRepo,
@@ -150,6 +176,7 @@ export const IssueReconcilerLive = Layer.effect(
               issue,
               repositoryName,
               workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
+              authorScope,
             ),
           )
           .map((issue) => [issue.number, issue]),
@@ -203,7 +230,7 @@ export const IssueReconcilerLive = Layer.effect(
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.createdAt,
-            issueAuthor: null,
+            issueAuthor: issue.author,
             parentPosition: issue.parentPosition,
             hasChildren: issue.hasChildren,
             parent:

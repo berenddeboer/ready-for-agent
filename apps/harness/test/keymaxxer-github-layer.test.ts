@@ -105,6 +105,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
               url: "https://github.com/acme/widgets/issues/7",
               createdAt: "2026-07-07T12:00:00.000Z",
               state: "OPEN",
+              author: "octocat",
               hierarchySupported: true,
               closingPullRequests: [],
               hasChildren: false,

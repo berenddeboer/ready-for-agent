@@ -85,6 +85,7 @@ const githubWith = (
   overrides: Partial<GitHubServiceShape> = {},
 ) =>
   Layer.succeed(GitHubService, {
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () => Effect.succeed(status),
@@ -121,6 +122,7 @@ describe("PR status check steps", () => {
   it("checks the deterministic Work Item branch", async () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: (_repository, branch) => {
@@ -259,6 +261,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
@@ -334,6 +337,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
@@ -382,6 +386,7 @@ describe("PR status check steps", () => {
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>

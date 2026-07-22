@@ -18,6 +18,7 @@ const serviceWithList = (
   listReadyIssues: GitHubServiceShape["listReadyIssues"],
 ): GitHubServiceShape => ({
   listReadyIssues,
+  getAuthenticatedUserLogin: () => Effect.die("not used"),
   getOpenPullRequestNumber: () => Effect.die("not used"),
   getPullRequestCheckStatus: () => Effect.die("not used"),
   getPrStatusCheckDiagnostics: () => Effect.die("not used"),

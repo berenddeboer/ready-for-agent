@@ -293,9 +293,19 @@ const ReadyLabeledIssueFieldsSchema = Schema.Struct({
   url: HttpUrlString,
   createdAt: Schema.DateFromString,
   state: GitHubIssueStateSchema,
+  author: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        login: Schema.String,
+      }),
+    ),
+  ),
   subIssuesSummary: Schema.Struct({
     total: NonNegativeInt,
   }),
+})
+const AuthenticatedUserLoginSchema = Schema.Struct({
+  login: RequiredString,
 })
 
 const uniqueTerminalChecks = (
@@ -471,6 +481,7 @@ interface GitHubApiIssue {
   readonly url: unknown
   readonly createdAt: unknown
   readonly state: unknown
+  readonly author?: { readonly login: unknown } | null
   readonly parent: GitHubApiIssueParent | null
   readonly subIssuesSummary: { readonly total: unknown }
   readonly subIssues: GitHubApiSubIssueConnection
@@ -649,6 +660,16 @@ const recordSubIssuePositions = (
   return offset + (connection.nodes?.length ?? 0)
 }
 
+const toIssueAuthor = (
+  author: { readonly login: string } | null | undefined,
+): string | null => {
+  if (author === null || author === undefined) {
+    return null
+  }
+  const login = author.login.trim()
+  return login === "" ? null : login
+}
+
 const toReadyLabeledIssue = (
   issue: GitHubApiIssue,
   repositoryName: string,
@@ -660,6 +681,7 @@ const toReadyLabeledIssue = (
     url: issue.url,
     createdAt: issue.createdAt,
     state: issue.state,
+    ...(issue.author === undefined ? {} : { author: issue.author }),
     subIssuesSummary: issue.subIssuesSummary,
   })
 
@@ -670,6 +692,7 @@ const toReadyLabeledIssue = (
     url: decoded.url,
     createdAt: decoded.createdAt,
     state: decoded.state,
+    author: toIssueAuthor(decoded.author),
     parent: issue.parent === null ? null : toIssueParent(issue.parent),
     hasChildren: decoded.subIssuesSummary.total > 0,
     hasUnsupportedDescendants: pageHasUnsupportedSubIssue(
@@ -734,6 +757,31 @@ export const makeGitHubService = (
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
   loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
 ): GitHubServiceShape => ({
+  getAuthenticatedUserLogin: Effect.fn(
+    "GitHubService.getAuthenticatedUserLogin",
+  )(function* (_repository) {
+    const result = yield* githubQuery(
+      "Failed to resolve authenticated GitHub user",
+      (signal) =>
+        client.query(
+          {
+            viewer: {
+              login: true,
+            },
+          },
+          signal,
+        ),
+    )
+    const decoded = yield* Effect.try({
+      try: () => decodeSync(AuthenticatedUserLoginSchema, result.viewer),
+      catch: (cause) =>
+        new GitHubRequestError({
+          message: "GitHub returned invalid authenticated user data",
+          cause,
+        }),
+    })
+    return decoded.login
+  }),
   getPullRequestCheckStatus: Effect.fn(
     "GitHubService.getPullRequestCheckStatus",
   )(function* (repository, headRefName) {
@@ -1512,6 +1560,9 @@ export const makeGitHubService = (
                       url: true,
                       createdAt: true,
                       state: true,
+                      author: {
+                        login: true,
+                      },
                       parent: {
                         number: true,
                         url: true,
@@ -1862,6 +1913,7 @@ export const makeGitHubService = (
             url: issue.url,
             createdAt: issue.createdAt,
             state: issue.state,
+            author: issue.author,
             hasChildren: issue.hasChildren,
             parentPosition:
               issue.parent === null
