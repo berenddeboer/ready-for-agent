@@ -14,6 +14,8 @@ turning them into GitHub tickets as per [the Matt Pocock
 workflow](https://www.youtube.com/watch?v=M6mYodf0dJM). The harness
 allows you to drop that baby-sitting of your agent.
 
+See [the introduction video](https://www.youtube.com/watch?v=bj_aPnjS3d0) to see the tool in action.
+
 # Usage
 
 Requires a supported platform (Linux or macOS, x64 or arm64). Windows is not
