@@ -180,6 +180,7 @@ describe("GitHubService live implementation", () => {
         mergeability: "mergeable",
         baseRefName: "main",
         headPushedAt: null,
+        headSha: "abc123",
       })
     })
   }
@@ -217,6 +218,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "unknown",
       baseRefName: null,
       headPushedAt: null,
+      headSha: null,
     })
     expect(
       await Effect.runPromise(
@@ -227,6 +229,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "conflicting",
       baseRefName: "develop",
       headPushedAt: null,
+      headSha: null,
     })
   })
 
@@ -273,6 +276,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: new Date("2026-07-17T12:00:00.000Z"),
+      headSha: "abc123",
     })
     expect(request).toMatchObject({
       repository: {
@@ -360,6 +364,7 @@ describe("GitHubService live implementation", () => {
         mergeability: "mergeable",
         baseRefName: "main",
         headPushedAt: null,
+        headSha: "abc123",
       })
     }
   })
@@ -465,6 +470,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "unknown",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: null,
     })
     expect(
       await Effect.runPromise(
@@ -476,6 +482,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "unknown",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: null,
     })
   })
 
@@ -521,6 +528,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: "sha-head",
       terminalChecks: [
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
         { externalId: "actions-job:101", name: "lint", outcome: "red" },
@@ -569,6 +577,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: "sha-head",
       terminalChecks: [
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
       ],
@@ -611,6 +620,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: "sha-head",
       terminalChecks: [
         { externalId: "actions-job:100", name: "lint", outcome: "red" },
         { externalId: "actions-job:101", name: "lint", outcome: "green" },
@@ -656,7 +666,7 @@ describe("GitHubService live implementation", () => {
         return new Response(
           JSON.stringify({
             total_count: 1,
-            workflow_runs: [{ id: 55 }],
+            workflow_runs: [{ id: 55, name: "CI" }],
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         )
@@ -694,10 +704,136 @@ describe("GitHubService live implementation", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: "sha-head",
       terminalChecks: [
-        { externalId: "actions-job:200", name: "lint", outcome: "red" },
+        { externalId: "actions-job:200", name: "CI/lint", outcome: "red" },
       ],
     })
+  })
+
+  it("maps the production success+skipped Actions fallback shape and excludes skipped jobs", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("api.github.com/graphql")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              repository: {
+                pullRequests: {
+                  nodes: [
+                    {
+                      state: "OPEN",
+                      merged: false,
+                      headRefOid: "sha-head",
+                      baseRefName: "main",
+                      mergeable: "MERGEABLE",
+                      statusCheckRollup: { state: "SUCCESS" },
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/check-runs")) {
+        return new Response(
+          JSON.stringify({
+            message: "Resource not accessible by personal access token",
+          }),
+          { status: 403, statusText: "Forbidden" },
+        )
+      }
+      if (url.includes("/actions/runs?") || url.includes("/actions/runs&")) {
+        return new Response(
+          JSON.stringify({
+            total_count: 2,
+            workflow_runs: [
+              { id: 29906669357, name: "PR Review" },
+              { id: 29906669358, name: "Claude Code Review" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/actions/runs/29906669357/jobs")) {
+        return new Response(
+          JSON.stringify({
+            jobs: [
+              {
+                id: 1001,
+                name: "main",
+                status: "completed",
+                conclusion: "success",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/actions/runs/29906669358/jobs")) {
+        return new Response(
+          JSON.stringify({
+            jobs: [
+              {
+                id: 1002,
+                name: "claude-review",
+                status: "completed",
+                conclusion: "skipped",
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/statuses")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "branch"),
+    )
+
+    expect(status).toEqual({
+      _tag: "succeeded",
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: "sha-head",
+      terminalChecks: [
+        {
+          externalId: "actions-job:1001",
+          name: "PR Review/main",
+          outcome: "green",
+        },
+      ],
+    })
+  })
+
+  it("reruns a whole Actions workflow run via REST", async () => {
+    const calls: string[] = []
+    const service = makeGitHubServiceFromToken("token", async (input, init) => {
+      const url = String(input)
+      calls.push(`${init?.method ?? "GET"} ${url}`)
+      if (
+        url.includes("/actions/runs/29906669357/rerun") &&
+        init?.method === "POST"
+      ) {
+        return new Response(null, { status: 201 })
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    await Effect.runPromise(service.rerunWorkflowRun(repository, 29906669357))
+    expect(calls).toEqual([
+      "POST https://api.github.com/repos/acme/widgets/actions/runs/29906669357/rerun",
+    ])
   })
 
   it("loads Actions job log diagnostics for actions-job external ids", async () => {
@@ -883,6 +1019,7 @@ describe("GitHubService live implementation", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: null,
     })
     expect(attempts).toBe(3)
   })

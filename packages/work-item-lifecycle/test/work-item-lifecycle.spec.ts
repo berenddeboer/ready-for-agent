@@ -1600,6 +1600,7 @@ describe("WorkItemLifecycle", () => {
             return {
               _tag: "no_checks" as const,
               headPushedAt: new Date(now - 120_000),
+              headSha: null,
             }
           }),
       }
@@ -1645,6 +1646,7 @@ describe("WorkItemLifecycle", () => {
             return {
               _tag: "no_checks" as const,
               headPushedAt: new Date(now - 119_999),
+              headSha: null,
             }
           }),
       }
@@ -1716,6 +1718,7 @@ describe("WorkItemLifecycle", () => {
             return {
               _tag: "no_checks" as const,
               headPushedAt: new Date(now + 1),
+              headSha: null,
             }
           }),
       }
@@ -1904,6 +1907,72 @@ describe("WorkItemLifecycle", () => {
             handled_at: targetCheck!.handled_at,
             handled_by_step_run_id: created.stepRuns[0]?.id,
           })
+        }),
+      )
+    })
+
+    it("enters Needs Human when automated review rerun budget is exhausted and releases the Worker Slot", () => {
+      const checkId = "psc-rerun-exhausted"
+      const reason =
+        "Automated review rerun limit reached (3) for Claude Code Review; inspect or run the review manually, then Retry checks."
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "needs_human",
+            reason,
+            handledCheckIds: [checkId],
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+          const watched = yield* claimAndRunPending
+          expect(watched._tag).toBe("processed")
+          if (watched._tag === "processed") {
+            expect(watched.workItem.state).toBe("investigate_pr_status_checks")
+          }
+
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES (?, ?, 'actions-job:review', 'Claude Code Review/claude-review', 'green', NULL, ?, ?, ?)`,
+            [checkId, created.id, now, now, now],
+          )
+
+          const investigated = yield* claimAndRunPending
+          expect(investigated._tag).toBe("processed")
+          if (investigated._tag === "processed") {
+            expect(investigated.workItem.state).toBe("needs_human")
+            expect(investigated.workItem.failureMessage).toBe(reason)
+            expect(investigated.workItem.holdsWorkerSlot).toBe(false)
+          }
+
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+            [checkId],
+          )) as readonly { handled_at: number | null }[]
+          expect(checks[0]?.handled_at).not.toBeNull()
+
+          const queued = (yield* sql.unsafe(
+            `SELECT COUNT(*) AS count FROM job_queue`,
+          )) as readonly { count: number }[]
+          expect(Number(queued[0]?.count)).toBe(0)
         }),
       )
     })

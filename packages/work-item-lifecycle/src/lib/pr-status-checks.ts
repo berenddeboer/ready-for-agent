@@ -59,6 +59,14 @@ export type PrStatusCheckInvestigationResult =
       readonly handledCheckIds: readonly string[]
     }
 
+/** Autonomous whole-review workflow reruns allowed after the initial attempt. */
+export const AUTOMATED_REVIEW_RERUN_LIMIT = 3
+
+export const automatedReviewRerunLimitReason = (
+  workflowLabel: string,
+): string =>
+  `Automated review rerun limit reached (${AUTOMATED_REVIEW_RERUN_LIMIT}) for ${workflowLabel}; inspect or run the review manually, then Retry checks.`
+
 interface ObservedPrStatusCheckRow {
   readonly id: string
   readonly external_id: string
@@ -218,8 +226,13 @@ type ParsedInvestigationResult =
   | "waiting"
   | { readonly _tag: "needs_human"; readonly reason: string }
   | { readonly _tag: "failed"; readonly reason: string }
+  | {
+      readonly _tag: "rerun_review"
+      readonly workflowRunId: number
+      readonly workflowName: string | null
+    }
 
-const parseInvestigationResult = (
+export const parseInvestigationResult = (
   output: string,
 ): ParsedInvestigationResult | null => {
   const lines = output.split("\n").map((line) => line.trim())
@@ -241,6 +254,23 @@ const parseInvestigationResult = (
   if (/^READY_FOR_AGENT_RESULT:\s*WAITING$/i.test(finalLine)) {
     return "waiting"
   }
+  const rerunReview = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*RERUN_REVIEW\s*:\s*(\d+)(?:\s+(.+))?$/i,
+  )
+  if (rerunReview?.[1] !== undefined) {
+    const workflowRunId = Number(rerunReview[1])
+    if (Number.isSafeInteger(workflowRunId) && workflowRunId > 0) {
+      const workflowName =
+        rerunReview[2] !== undefined && rerunReview[2].trim() !== ""
+          ? rerunReview[2].trim().slice(0, 200)
+          : null
+      return {
+        _tag: "rerun_review",
+        workflowRunId,
+        workflowName,
+      }
+    }
+  }
   const needsHuman = finalLine.match(
     /^READY_FOR_AGENT_RESULT:\s*NEEDS_HUMAN\s*:\s*(.+)$/i,
   )
@@ -261,6 +291,63 @@ const parseInvestigationResult = (
   }
   return null
 }
+
+const countAutomatedReviewReruns = (
+  workItemId: string,
+  headSha: string,
+  workflowRunId: number,
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = (yield* sql.unsafe(
+      `SELECT COUNT(*) AS count FROM automated_review_rerun
+       WHERE work_item_id = ?
+         AND head_sha = ?
+         AND workflow_run_id = ?`,
+      [workItemId, headSha, String(workflowRunId)],
+    )) as readonly { readonly count: number }[]
+    return Number(rows[0]?.count ?? 0)
+  })
+
+const reserveAutomatedReviewRerun = (
+  workItemId: string,
+  headSha: string,
+  workflowRunId: number,
+  workflowName: string | null,
+) =>
+  Effect.gen(function* () {
+    const used = yield* countAutomatedReviewReruns(
+      workItemId,
+      headSha,
+      workflowRunId,
+    )
+    if (used >= AUTOMATED_REVIEW_RERUN_LIMIT) {
+      return { _tag: "exhausted" as const }
+    }
+    const sql = yield* SqlClient.SqlClient
+    const now = yield* Clock.currentTimeMillis
+    const id = `arr-${ulid()}`
+    yield* sql.unsafe(
+      `INSERT INTO automated_review_rerun (
+         id, work_item_id, head_sha, workflow_run_id, workflow_name,
+         status, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)`,
+      [id, workItemId, headSha, String(workflowRunId), workflowName, now, now],
+    )
+    return { _tag: "reserved" as const, id }
+  })
+
+const completeAutomatedReviewRerun = (id: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = yield* Clock.currentTimeMillis
+    yield* sql.unsafe(
+      `UPDATE automated_review_rerun
+       SET status = 'completed', updated_at = ?
+       WHERE id = ?`,
+      [now, id],
+    )
+  })
 
 const sourceLabel = (externalId: string): string => {
   if (externalId.startsWith("actions-job:")) {
@@ -333,12 +420,14 @@ const buildInvestigationWorkPrompt = (
   if (hasGreen) {
     lines.push(
       "One or more automated reviews may have completed, but an automated reviewer can stop semantically incomplete even when GitHub reports its check and workflow as successful. Inspect the latest relevant automated-review run and comment, when either exists, before deciding what to do.",
-      "Do not assume an automated review exists merely because CI is present. Positive evidence is a relevant review run or a comment from a recognized automated reviewer; ordinary CI, repository configuration, and generic bot activity are not review evidence. If no relevant automated-review run or comment exists, that is a normal no-op and does not require proof that review automation is unconfigured.",
+      'Do not assume an automated review exists merely because CI is present. Workflow or job names alone (including names containing "review" or "PR Review") are not positive review evidence. Positive evidence requires an executed reviewer job or step, or a comment from a recognized automated reviewer; ordinary CI, repository configuration, and generic bot activity are not review evidence.',
+      "A skipped workflow or job with no executed reviewer steps and no recognized automated-review comment is not an incomplete review and is not review evidence. Treat it as not applicable: there is no review output to process.",
+      "If no relevant automated-review run or comment exists, that is a normal no-op and does not require proof that review automation is unconfigured. Do not request a review workflow rerun solely because a skipped reviewer produced no comment.",
       "Use provider-specific progress artifacts as evidence of incompleteness. Strong evidence can include a finished banner combined with unchecked substantive review tasks, a remaining working spinner, and no final findings or synthesis. Do not treat arbitrary Markdown checkboxes in unrelated pull-request comments as an automated-review progress list.",
       "Correlate the latest relevant comment with the latest relevant run attempt. Do not rerun because of a stale incomplete comment when a newer attempt completed its review successfully.",
       "If the latest review attempt is still active, leave it alone and do not start a duplicate. Unless this handoff produced another replacement execution or left red checks unresolved, report WAITING in the verdict turn so the review can be polled again.",
-      "A terminal review attempt is incomplete when it produced no relevant review comment or its latest relevant comment remains visibly partial. Rerun the whole review workflow in either case, even when the run concluded success. For a technically successful run, do not use a failed-jobs-only rerun because GitHub considers no job failed.",
-      "Rerunning a terminal incomplete review is required recovery, not optional feedback handling. Report FAILED for a technical inability to inspect or retry it. Report NEEDS_HUMAN only when evidence shows that an operator must perform or decide the required action.",
+      "A terminal review attempt is incomplete only when positive review evidence shows it produced no relevant review comment or its latest relevant comment remains visibly partial. When that is true, request a whole-review workflow rerun in the verdict turn (even when the run concluded success). Do not call GitHub workflow rerun APIs yourself; the harness authorizes and executes reruns. Do not use a failed-jobs-only rerun for a technically successful run.",
+      "Requesting a terminal incomplete review rerun is required recovery, not optional feedback handling. Report FAILED for a technical inability to inspect the relevant review state. Report NEEDS_HUMAN only when evidence shows that an operator must perform or decide the required action.",
       "For a genuinely completed latest review, address worthwhile feedback. A completed review with no worthwhile feedback still needs no changes or rerun.",
       "If review feedback requires changes, verify them, commit them, and push the commit to the existing PR branch.",
     )
@@ -358,13 +447,16 @@ const buildInvestigationVerdictPrompt = (): string =>
     "Do not make further code changes unless required to answer accurately.",
     "Reply with exactly one machine-readable result line (and optional brief prose before it):",
     "READY_FOR_AGENT_RESULT: PROCESSED",
-    "Use PROCESSED only when you took an action expected to produce new check executions or a replacement execution (for example a commit and push, restarting failed checks, or rerunning a terminal incomplete reviewer), or when the handoff was green-only and either no relevant automated-review run or comment existed or a genuinely completed review had nothing to address.",
-    "Rerunning the whole workflow for a terminal incomplete review creates a replacement execution and supports PROCESSED. A terminal incomplete review is not a green-only no-action success, even when GitHub reported success. A replacement-producing action takes precedence over WAITING in a mixed handoff.",
+    "Use PROCESSED only when you took an action expected to produce new check executions or a replacement execution (for example a commit and push, or restarting failed checks), or when the handoff was green-only and either no relevant automated-review run or comment existed (including a skipped reviewer with no review output) or a genuinely completed review had nothing to address.",
+    "Do not report PROCESSED for a terminal incomplete review that still needs a whole-workflow rerun. Request the rerun instead. A replacement-producing action takes precedence over WAITING in a mixed handoff.",
+    "When positive review evidence shows a terminal incomplete automated review that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
+    "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
+    "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id> <workflow_name>",
     "If positive review evidence exists, the latest review attempt is still active, you took no replacement-producing action, and no red checks remain unresolved, report:",
     "READY_FOR_AGENT_RESULT: WAITING",
     "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED. Report:",
     "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
-    "Also use FAILED when a technical or observability failure prevented you from determining or recovering the relevant review state.",
+    "Also use FAILED when a technical or observability failure prevented you from determining the relevant review state.",
     "Use NEEDS_HUMAN only when evidence shows that an operator must perform or decide a required action:",
     "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
   ].join("\n")
@@ -380,7 +472,7 @@ const buildInvestigationRecoveryPrompt = (reason: string): string =>
 
 export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
-    const { repository, worktreePath, sessionId } =
+    const { repository, branch, worktreePath, sessionId } =
       yield* resolveContext(context)
     const unhandled = yield* listUnhandledChecks(context.workItemId)
     if (unhandled.length === 0) {
@@ -485,7 +577,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
               ? Effect.fail(
                   new PrStatusChecksOpenCodeError({
                     message:
-                      "OpenCode did not report PROCESSED, WAITING, FAILED, or NEEDS_HUMAN",
+                      "OpenCode did not report PROCESSED, WAITING, RERUN_REVIEW, FAILED, or NEEDS_HUMAN",
                   }),
                 )
               : Effect.succeed(result)
@@ -531,14 +623,93 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         handledCheckIds: [],
       } satisfies PrStatusCheckInvestigationResult
     }
-    if (investigation._tag === "needs_human") {
+    if (
+      typeof investigation !== "string" &&
+      investigation._tag === "rerun_review"
+    ) {
+      const workflowLabel =
+        investigation.workflowName ??
+        `workflow run ${investigation.workflowRunId}`
+      const github = yield* GitHubService
+      const status = yield* github
+        .getPullRequestCheckStatus(
+          { owner: repository.githubOwner, name: repository.githubRepo },
+          branch,
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new PrStatusChecksContextError({
+                message:
+                  "message" in cause &&
+                  typeof cause.message === "string" &&
+                  cause.message.trim() !== ""
+                    ? `Failed to resolve PR head for review rerun: ${cause.message}`
+                    : "Failed to resolve PR head for review rerun",
+              }),
+          ),
+        )
+      const headSha = status.headSha
+      if (headSha === null || headSha.trim() === "") {
+        return yield* new PrStatusChecksUnresolvedError({
+          message:
+            "Manual fixing may be required. Could not resolve the pull request head SHA to authorize an automated review rerun. Please fix or rerun the checks on GitHub, then click Retry checks.",
+        })
+      }
+      const permit = yield* reserveAutomatedReviewRerun(
+        context.workItemId,
+        headSha,
+        investigation.workflowRunId,
+        investigation.workflowName,
+      )
+      if (permit._tag === "exhausted") {
+        return {
+          _tag: "needs_human",
+          reason: automatedReviewRerunLimitReason(workflowLabel),
+          handledCheckIds,
+        } satisfies PrStatusCheckInvestigationResult
+      }
+      const rerunResult = yield* Effect.result(
+        github.rerunWorkflowRun(
+          { owner: repository.githubOwner, name: repository.githubRepo },
+          investigation.workflowRunId,
+        ),
+      )
+      if (rerunResult._tag === "Failure") {
+        // Reservation remains so a crash or indeterminate response cannot
+        // unlock unbounded extra GitHub rerun calls after restart.
+        const detail =
+          "_tag" in rerunResult.failure &&
+          "message" in rerunResult.failure &&
+          typeof rerunResult.failure.message === "string" &&
+          rerunResult.failure.message.trim() !== ""
+            ? rerunResult.failure.message
+            : "GitHub workflow rerun failed"
+        return yield* new PrStatusChecksUnresolvedError({
+          message: `Manual fixing may be required. ${detail}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
+        })
+      }
+      yield* completeAutomatedReviewRerun(permit.id)
+      return {
+        _tag: "processed",
+        handledCheckIds,
+      } satisfies PrStatusCheckInvestigationResult
+    }
+    if (
+      typeof investigation !== "string" &&
+      investigation._tag === "needs_human"
+    ) {
       return {
         _tag: "needs_human",
         reason: investigation.reason,
         handledCheckIds,
       } satisfies PrStatusCheckInvestigationResult
     }
+    const failedReason =
+      typeof investigation !== "string" && investigation._tag === "failed"
+        ? investigation.reason
+        : "Unknown investigation outcome"
     return yield* new PrStatusChecksUnresolvedError({
-      message: `Manual fixing may be required. ${investigation.reason}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
+      message: `Manual fixing may be required. ${failedReason}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
     })
   })

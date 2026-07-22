@@ -196,6 +196,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
             mergeability: "conflicting",
             baseRefName: "develop",
             headPushedAt: null,
+            headSha: null,
             terminalChecks: [
               {
                 externalId: "checkrun:1",
@@ -227,6 +228,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       mergeability: "conflicting",
       baseRefName: "develop",
       headPushedAt: null,
+      headSha: null,
       terminalChecks: [
         {
           externalId: "checkrun:1",
@@ -279,12 +281,14 @@ describe("Keymaxxer-backed GitHub layer", () => {
         mergeability: "mergeable",
         baseRefName: "main",
         headPushedAt: null,
+        headSha: null,
       }),
       JSON.stringify({
         _tag: "pending",
         mergeability: "unknown",
         baseRefName: "main",
         headPushedAt: null,
+        headSha: null,
         terminalChecks: [
           {
             externalId: "status:SC_ci",
@@ -325,6 +329,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       mergeability: "mergeable",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: null,
     })
 
     const pending = await Effect.runPromise(
@@ -341,6 +346,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
       mergeability: "unknown",
       baseRefName: "main",
       headPushedAt: null,
+      headSha: null,
       terminalChecks: [
         {
           externalId: "status:SC_ci",

@@ -402,3 +402,41 @@ export const prStatusCheck = snakeCase.table(
     index("pr_status_check_handled_by_step_run_idx").on(t.handledByStepRunId),
   ],
 )
+
+/**
+ * Durable autonomous whole-review workflow rerun permits for a Work Item.
+ * Scoped by PR head SHA and workflow run identity; initial execution is free.
+ * See xplain: type automated review rerun "arr"
+ */
+export const automatedReviewRerun = snakeCase.table(
+  "automated_review_rerun",
+  {
+    id: text()
+      .primaryKey()
+      .$defaultFn(() => `arr-${ulid()}`),
+    workItemId: text()
+      .notNull()
+      .references(() => workItem.id, { onDelete: "cascade" }),
+    headSha: text().notNull(),
+    workflowRunId: text().notNull(),
+    workflowName: text(),
+    /**
+     * `reserved` counts against the budget before/without a confirmed GitHub
+     * response; `completed` means the harness observed a successful rerun call.
+     */
+    status: text({ enum: ["reserved", "completed"] }).notNull(),
+    createdAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+    updatedAt: integer({ mode: "number" })
+      .notNull()
+      .$defaultFn(() => Date.now()),
+  },
+  (t) => [
+    index("automated_review_rerun_budget_idx").on(
+      t.workItemId,
+      t.headSha,
+      t.workflowRunId,
+    ),
+  ],
+)

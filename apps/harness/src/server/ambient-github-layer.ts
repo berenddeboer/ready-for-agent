@@ -190,6 +190,12 @@ export const ambientGitHubLayer = (options: {
               service.mergePullRequest(repository, headRefName),
             ),
         ),
+        rerunWorkflowRun: Effect.fn("AmbientGitHub.rerunWorkflowRun")(
+          (repository, workflowRunId) =>
+            authenticated((service) =>
+              service.rerunWorkflowRun(repository, workflowRunId),
+            ),
+        ),
         ensureIssueCompletedWithSummary: Effect.fn(
           "AmbientGitHub.ensureIssueCompletedWithSummary",
         )((repository, issueNumber, workItemId, summaryMarkdown) =>
