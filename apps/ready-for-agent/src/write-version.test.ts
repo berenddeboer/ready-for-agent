@@ -26,15 +26,23 @@ describe("ready-for-agent version generation", () => {
     expect(version).toBe(nonPlaceholder)
     expect(paths).toHaveLength(2)
 
-    for (const path of [launcherVersionPath, harnessVersionPath]) {
-      const source = readFileSync(path, "utf8")
-      expect(source).toContain(`READY_FOR_AGENT_VERSION = "${nonPlaceholder}"`)
-      expect(source).toContain(
-        `READY_FOR_AGENT_VERSION_LABEL = "v${nonPlaceholder}"`,
-      )
-      expect(source).toContain("apps/ready-for-agent/package.json")
-      expect(source).not.toContain("apps/harness/package.json")
-    }
+    const launcherSource = readFileSync(launcherVersionPath, "utf8")
+    expect(launcherSource).toContain(
+      `READY_FOR_AGENT_VERSION = "${nonPlaceholder}"`,
+    )
+    expect(launcherSource).not.toContain("READY_FOR_AGENT_VERSION_LABEL")
+    expect(launcherSource).toContain("apps/ready-for-agent/package.json")
+    expect(launcherSource).not.toContain("apps/harness/package.json")
+
+    const harnessSource = readFileSync(harnessVersionPath, "utf8")
+    expect(harnessSource).toContain(
+      `READY_FOR_AGENT_VERSION = "${nonPlaceholder}"`,
+    )
+    expect(harnessSource).toContain(
+      `READY_FOR_AGENT_VERSION_LABEL = "v${nonPlaceholder}"`,
+    )
+    expect(harnessSource).toContain("apps/ready-for-agent/package.json")
+    expect(harnessSource).not.toContain("apps/harness/package.json")
   })
 
   test("defaults to the launcher package.json version", () => {

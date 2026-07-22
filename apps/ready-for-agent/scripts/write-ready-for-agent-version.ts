@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url"
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
 
-const versionModuleContent = (version: string): string =>
+const launcherVersionModuleContent = (version: string): string =>
+  `/** Injected at build time from apps/ready-for-agent/package.json. */
+export const READY_FOR_AGENT_VERSION = ${JSON.stringify(version)}
+`
+
+const harnessVersionModuleContent = (version: string): string =>
   `/** Injected at build time from apps/ready-for-agent/package.json. */
 export const READY_FOR_AGENT_VERSION = ${JSON.stringify(version)}
 export const READY_FOR_AGENT_VERSION_LABEL = ${JSON.stringify(`v${version}`)}
@@ -25,14 +30,16 @@ export const readLauncherVersion = (): string => {
 export const writeReadyForAgentVersionFiles = (
   version: string = readLauncherVersion(),
 ): { readonly version: string; readonly paths: readonly string[] } => {
-  const paths = [
-    join(appRoot, "src/generated/version.ts"),
-    join(workspaceRoot, "apps/harness/src/generated/version.ts"),
-  ]
-  for (const path of paths) {
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, versionModuleContent(version))
-  }
+  const launcherPath = join(appRoot, "src/generated/version.ts")
+  const harnessPath = join(
+    workspaceRoot,
+    "apps/harness/src/generated/version.ts",
+  )
+  const paths = [launcherPath, harnessPath]
+  mkdirSync(dirname(launcherPath), { recursive: true })
+  mkdirSync(dirname(harnessPath), { recursive: true })
+  writeFileSync(launcherPath, launcherVersionModuleContent(version))
+  writeFileSync(harnessPath, harnessVersionModuleContent(version))
   return { version, paths }
 }
 
