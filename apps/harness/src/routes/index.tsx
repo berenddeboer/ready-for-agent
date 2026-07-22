@@ -8,6 +8,12 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import {
+  jobsCardCollapseId,
+  repositoryCardCollapseId,
+  useCardCollapsed,
+} from "../card-collapse.js"
+import { CardCollapseToggle } from "../card-collapse-toggle.js"
 import { Copy } from "../copy.js"
 import {
   formatDuration,
@@ -390,6 +396,9 @@ function HomePage() {
 
 function HomeBody() {
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
+  const { collapsed: jobsCollapsed, toggleCollapsed: toggleJobsCollapsed } =
+    useCardCollapsed(jobsCardCollapseId())
+  const jobsBodyId = "jobs-card-body"
 
   if (repositories.length === 0) {
     return <RepositoryCards />
@@ -401,12 +410,24 @@ function HomeBody() {
         <CommittedPullRequestsDashboard />
       </section>
       <section aria-label="Jobs">
-        <h2 className="mb-4 text-lg font-bold tracking-[-0.02em] text-slate-900">
-          Jobs
-        </h2>
-        <Suspense fallback={<JobsCardSkeleton />}>
-          <JobsCard />
-        </Suspense>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="m-0 text-lg font-bold tracking-[-0.02em] text-slate-900">
+            Jobs
+          </h2>
+          <CardCollapseToggle
+            collapsed={jobsCollapsed}
+            onToggle={toggleJobsCollapsed}
+            controlsId={jobsBodyId}
+            label="Jobs"
+          />
+        </div>
+        {!jobsCollapsed && (
+          <div id={jobsBodyId}>
+            <Suspense fallback={<JobsCardSkeleton />}>
+              <JobsCard />
+            </Suspense>
+          </div>
+        )}
       </section>
       <div className="mt-8">
         <RepositoryCards />
@@ -964,19 +985,33 @@ function RepositoryCard({
   const pauseButtonClass = repository.paused
     ? "border-blue-300 text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
     : "border-amber-300 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+  const repositoryLabel = `${repository.githubOwner}/${repository.githubRepo}`
+  const {
+    collapsed: repositoryCollapsed,
+    toggleCollapsed: toggleRepositoryCollapsed,
+  } = useCardCollapsed(repositoryCardCollapseId(repository.id))
+  const repositoryBodyId = `repository-card-body-${repository.id}`
 
   return (
     <article className="relative min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-      <div className="mb-[1.4rem] flex items-center justify-between gap-4">
+      <div
+        className={`flex items-center justify-between gap-4 ${repositoryCollapsed ? "" : "mb-[1.4rem]"}`}
+      >
         <h2 className="m-0 min-w-0 truncate text-2xl tracking-[-0.025em]">
           <a
             className="text-slate-900 hover:underline"
             href={`https://github.com/${repository.githubOwner}/${repository.githubRepo}`}
           >
-            {repository.githubOwner}/{repository.githubRepo}
+            {repositoryLabel}
           </a>
         </h2>
         <div className="flex shrink-0 items-center gap-1">
+          <CardCollapseToggle
+            collapsed={repositoryCollapsed}
+            onToggle={toggleRepositoryCollapsed}
+            controlsId={repositoryBodyId}
+            label={repositoryLabel}
+          />
           <button
             type="button"
             className={`inline-flex size-8 items-center justify-center rounded-full border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "border-red-300 text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : pauseButtonClass}`}
@@ -1091,63 +1126,6 @@ function RepositoryCard({
           </span>
         </div>
       </div>
-      <dl className="m-0 grid gap-1">
-        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
-            Path:
-          </dt>
-          <dd
-            className="m-0 min-w-0 truncate font-mono text-slate-700"
-            title={repository.localPath}
-          >
-            {repository.localPath}
-          </dd>
-        </div>
-        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
-            Checkout:
-          </dt>
-          <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
-            {repository.isBare ? "Bare repository" : "Working tree"}
-          </dd>
-        </div>
-        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
-            Build model:
-          </dt>
-          <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
-            {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
-            {" · "}
-            {repository.defaultVariant ?? `Default (${harnessDefaultVariant})`}
-          </dd>
-        </div>
-        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
-            Review model:
-          </dt>
-          <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
-            {repository.reviewModel ?? `Default (${harnessReviewModel})`}
-            {" · "}
-            {repository.reviewVariant ?? `Default (${harnessReviewVariant})`}
-          </dd>
-        </div>
-        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
-            Auto-merge:
-          </dt>
-          <dd className="m-0 text-slate-700">
-            {repository.autoMerge ? "Enabled" : "Disabled"}
-          </dd>
-        </div>
-        <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-          <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
-            Include all Issue Authors:
-          </dt>
-          <dd className="m-0 text-slate-700">
-            {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
-          </dd>
-        </div>
-      </dl>
       <dialog
         ref={settingsDialogRef}
         className="m-auto w-[min(92vw,31rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
@@ -1425,114 +1403,177 @@ function RepositoryCard({
           </div>
         </form>
       </dialog>
-      {!repository.credential.configured && (
-        <div className="mt-5 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-950">
-          <strong>GitHub token required</strong>
-          {githubTokenCreated ? (
-            <p className="m-0">
-              Store the generated token as{" "}
-              <code className="font-bold">
-                {repository.credential.githubTokenSecretName}
-              </code>{" "}
-              in Keymaxxer. Already-created tokens are not upgraded
-              automatically — edit the token on GitHub or recreate it, then
-              store the replacement.
-            </p>
-          ) : (
-            <p className="m-0">
-              Create a fine-grained token, choose{" "}
-              <strong>Only select repositories</strong>, select{" "}
-              <code className="font-bold">{repository.githubRepo}</code>, and
-              allow <strong>Actions: Read and write</strong> (required for
-              workflow reruns and CI logs). Already-created tokens are not
-              upgraded automatically — edit or recreate them if Actions is still
-              read-only.
-            </p>
+      {!repositoryCollapsed && (
+        <div id={repositoryBodyId}>
+          <dl className="m-0 grid gap-1">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+                Path:
+              </dt>
+              <dd
+                className="m-0 min-w-0 truncate font-mono text-slate-700"
+                title={repository.localPath}
+              >
+                {repository.localPath}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+                Checkout:
+              </dt>
+              <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
+                {repository.isBare ? "Bare repository" : "Working tree"}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+                Build model:
+              </dt>
+              <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
+                {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
+                {" · "}
+                {repository.defaultVariant ??
+                  `Default (${harnessDefaultVariant})`}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+                Review model:
+              </dt>
+              <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
+                {repository.reviewModel ?? `Default (${harnessReviewModel})`}
+                {" · "}
+                {repository.reviewVariant ??
+                  `Default (${harnessReviewVariant})`}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+                Auto-merge:
+              </dt>
+              <dd className="m-0 text-slate-700">
+                {repository.autoMerge ? "Enabled" : "Disabled"}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
+              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+                Include all Issue Authors:
+              </dt>
+              <dd className="m-0 text-slate-700">
+                {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
+              </dd>
+            </div>
+          </dl>
+          {!repository.credential.configured && (
+            <div className="mt-5 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-950">
+              <strong>GitHub token required</strong>
+              {githubTokenCreated ? (
+                <p className="m-0">
+                  Store the generated token as{" "}
+                  <code className="font-bold">
+                    {repository.credential.githubTokenSecretName}
+                  </code>{" "}
+                  in Keymaxxer. Already-created tokens are not upgraded
+                  automatically — edit the token on GitHub or recreate it, then
+                  store the replacement.
+                </p>
+              ) : (
+                <p className="m-0">
+                  Create a fine-grained token, choose{" "}
+                  <strong>Only select repositories</strong>, select{" "}
+                  <code className="font-bold">{repository.githubRepo}</code>,
+                  and allow <strong>Actions: Read and write</strong> (required
+                  for workflow reruns and CI logs). Already-created tokens are
+                  not upgraded automatically — edit or recreate them if Actions
+                  is still read-only.
+                </p>
+              )}
+              {githubTokenCreated ? (
+                <button
+                  type="button"
+                  className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900 disabled:cursor-wait disabled:opacity-60"
+                  disabled={addGitHubToken.isPending}
+                  onClick={() => addGitHubToken.mutate()}
+                >
+                  {addGitHubToken.isPending
+                    ? "Waiting for Keymaxxer"
+                    : "Store in Keymaxxer"}
+                </button>
+              ) : (
+                <a
+                  className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white no-underline transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900"
+                  href={repository.credential.githubTokenCreationUrl}
+                  onClick={() => setGithubTokenCreated(true)}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Create GitHub token
+                </a>
+              )}
+              {addGitHubToken.isError && (
+                <p className="m-0 text-red-700" role="alert">
+                  Keymaxxer setup was cancelled or failed.
+                </p>
+              )}
+            </div>
           )}
-          {githubTokenCreated ? (
-            <button
-              type="button"
-              className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900 disabled:cursor-wait disabled:opacity-60"
-              disabled={addGitHubToken.isPending}
-              onClick={() => addGitHubToken.mutate()}
-            >
-              {addGitHubToken.isPending
-                ? "Waiting for Keymaxxer"
-                : "Store in Keymaxxer"}
-            </button>
-          ) : (
-            <a
-              className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white no-underline transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900"
-              href={repository.credential.githubTokenCreationUrl}
-              onClick={() => setGithubTokenCreated(true)}
-              rel="noreferrer"
-              target="_blank"
-            >
-              Create GitHub token
-            </a>
-          )}
-          {addGitHubToken.isError && (
-            <p className="m-0 text-red-700" role="alert">
-              Keymaxxer setup was cancelled or failed.
+          <div className="mt-5 border-t border-slate-100 pt-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h3 className="m-0 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+                Relevant issues
+              </h3>
+              <button
+                type="button"
+                className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-wait disabled:opacity-60"
+                disabled={refreshingIssues || !repository.credential.configured}
+                onClick={() => refreshIssues.mutate()}
+                aria-label={
+                  refreshingIssues ? "Refreshing issues" : "Refresh issues"
+                }
+                title={
+                  repository.credential.configured
+                    ? "Refresh issues"
+                    : "Add a GitHub token before refreshing issues"
+                }
+              >
+                <svg
+                  aria-hidden="true"
+                  className={`size-4 ${refreshingIssues ? "animate-spin motion-reduce:animate-none" : ""}`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
+                  <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
+                </svg>
+              </button>
+            </div>
+            {refreshIssues.isError && (
+              <p className="mb-2 text-sm text-red-700" role="alert">
+                Failed to refresh issues.
+              </p>
+            )}
+            {repository.issuesReconciledAt === null ? (
+              <p className="m-0 text-sm text-slate-500">Not refreshed yet.</p>
+            ) : (
+              <Suspense fallback={<RepositoryIssuesSkeleton />}>
+                <RepositoryIssues
+                  repository={repository}
+                  workItems={workItems}
+                  workItemsLoading={workItemsLoading}
+                />
+              </Suspense>
+            )}
+          </div>
+          {removeRepository.isError && (
+            <p className="mt-3 mb-0 text-sm text-red-700" role="alert">
+              Could not remove repository. Please try again.
             </p>
           )}
         </div>
-      )}
-      <div className="mt-5 border-t border-slate-100 pt-4">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="m-0 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
-            Relevant issues
-          </h3>
-          <button
-            type="button"
-            className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-wait disabled:opacity-60"
-            disabled={refreshingIssues || !repository.credential.configured}
-            onClick={() => refreshIssues.mutate()}
-            aria-label={
-              refreshingIssues ? "Refreshing issues" : "Refresh issues"
-            }
-            title={
-              repository.credential.configured
-                ? "Refresh issues"
-                : "Add a GitHub token before refreshing issues"
-            }
-          >
-            <svg
-              aria-hidden="true"
-              className={`size-4 ${refreshingIssues ? "animate-spin motion-reduce:animate-none" : ""}`}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 4v5h5" />
-              <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 20v-5h-5" />
-            </svg>
-          </button>
-        </div>
-        {refreshIssues.isError && (
-          <p className="mb-2 text-sm text-red-700" role="alert">
-            Failed to refresh issues.
-          </p>
-        )}
-        {repository.issuesReconciledAt === null ? (
-          <p className="m-0 text-sm text-slate-500">Not refreshed yet.</p>
-        ) : (
-          <Suspense fallback={<RepositoryIssuesSkeleton />}>
-            <RepositoryIssues
-              repository={repository}
-              workItems={workItems}
-              workItemsLoading={workItemsLoading}
-            />
-          </Suspense>
-        )}
-      </div>
-      {removeRepository.isError && (
-        <p className="mt-3 mb-0 text-sm text-red-700" role="alert">
-          Could not remove repository. Please try again.
-        </p>
       )}
     </article>
   )
