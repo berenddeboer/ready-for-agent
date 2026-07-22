@@ -385,7 +385,9 @@ function SettingsButton() {
                       </option>
                     )}
                     {hasUnavailableBuildModel && (
-                      <option value={defaultModel}>{defaultModel}</option>
+                      <option value={defaultModel}>
+                        {defaultModel} (not in OpenCode catalog)
+                      </option>
                     )}
                     {(models.data ?? []).map((model) => (
                       <option key={model.id} value={model.id}>
@@ -398,9 +400,12 @@ function SettingsButton() {
                   </span>
                 </label>
 
-                {defaultModel.length > 0 &&
-                !hasUnavailableBuildModel &&
-                buildVariants.length === 0 ? (
+                {defaultModel.length > 0 && hasUnavailableBuildModel ? (
+                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                    Build thinking level is unavailable — the selected model is
+                    not in the OpenCode catalog. Choose another build model.
+                  </p>
+                ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Build thinking level is unavailable — this model has no
                     OpenCode variants.
@@ -417,9 +422,7 @@ function SettingsButton() {
                       }
                       required
                       disabled={
-                        defaultModel.length === 0 ||
-                        (!hasUnavailableBuildModel &&
-                          buildVariants.length === 0)
+                        defaultModel.length === 0 || buildVariants.length === 0
                       }
                     >
                       {(!buildConfigured || defaultVariant.length === 0) && (
@@ -428,7 +431,9 @@ function SettingsButton() {
                         </option>
                       )}
                       {hasCustomBuildVariant && (
-                        <option value={defaultVariant}>{defaultVariant}</option>
+                        <option value={defaultVariant}>
+                          {formatVariantLabel(defaultVariant)}
+                        </option>
                       )}
                       {buildVariants.map((variant) => (
                         <option key={variant} value={variant}>
@@ -463,7 +468,9 @@ function SettingsButton() {
                   >
                     <option value="">Same as build model</option>
                     {hasUnavailableReviewModel && (
-                      <option value={reviewModel}>{reviewModel}</option>
+                      <option value={reviewModel}>
+                        {reviewModel} (not in OpenCode catalog)
+                      </option>
                     )}
                     {(models.data ?? []).map((model) => (
                       <option key={`review-${model.id}`} value={model.id}>
@@ -477,11 +484,15 @@ function SettingsButton() {
                 </label>
 
                 {reviewVariantSourceModel.length > 0 &&
-                !(
-                  (reviewModel.length > 0 && hasUnavailableReviewModel) ||
-                  (reviewModel.length === 0 && hasUnavailableBuildModel)
-                ) &&
-                reviewVariants.length === 0 ? (
+                ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
+                  (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
+                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                    Review thinking level is unavailable — the selected model is
+                    not in the OpenCode catalog. Choose another model or use the
+                    build model.
+                  </p>
+                ) : reviewVariantSourceModel.length > 0 &&
+                  reviewVariants.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Review thinking level is unavailable — this model has no
                     OpenCode variants.
@@ -496,17 +507,14 @@ function SettingsButton() {
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
                         reviewVariantSourceModel.length === 0 ||
-                        (!(
-                          (reviewModel.length > 0 &&
-                            hasUnavailableReviewModel) ||
-                          (reviewModel.length === 0 && hasUnavailableBuildModel)
-                        ) &&
-                          reviewVariants.length === 0)
+                        reviewVariants.length === 0
                       }
                     >
                       <option value="">Same as build thinking level</option>
                       {hasCustomReviewVariant && (
-                        <option value={reviewVariant}>{reviewVariant}</option>
+                        <option value={reviewVariant}>
+                          {formatVariantLabel(reviewVariant)}
+                        </option>
                       )}
                       {reviewVariants.map((variant) => (
                         <option key={`review-${variant}`} value={variant}>
@@ -590,7 +598,9 @@ function SettingsButton() {
                 models.isError ||
                 updateConfig.isPending ||
                 defaultModel.length === 0 ||
-                defaultVariant.length === 0
+                defaultVariant.length === 0 ||
+                hasUnavailableBuildModel ||
+                (defaultModel.length > 0 && buildVariants.length === 0)
               }
             >
               {updateConfig.isPending ? "Saving..." : "Save settings"}

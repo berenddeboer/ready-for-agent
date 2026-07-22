@@ -25,6 +25,14 @@ export class SessionIdNotFoundError extends Schema.TaggedErrorClass<SessionIdNot
   },
 ) {}
 
+export class OpencodeIncompleteOutputError extends Schema.TaggedErrorClass<OpencodeIncompleteOutputError>()(
+  "OpencodeIncompleteOutputError",
+  {
+    cwd: Schema.String,
+    byteLength: Schema.Finite,
+  },
+) {}
+
 export class OpencodeConfigError extends Schema.TaggedErrorClass<OpencodeConfigError>()(
   "OpencodeConfigError",
   {
