@@ -37,6 +37,7 @@ export const makeGitHubServiceTest = (
   )
 
   return Layer.succeed(GitHubService, {
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () =>
       Effect.succeed({

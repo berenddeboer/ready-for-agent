@@ -29,12 +29,16 @@ A Repository setting that, when enabled, lets Decide PR Merge ask whether a clan
 _Avoid_: Automerge (GitHub product), auto-approve
 
 **Include all Issue Authors**:
-A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, relevance is intended to prefer Issues whose Issue Author matches the Operator GitHub User (author filtering is applied by the Issue Reconciler in a later change; persistence and API exposure of this setting do not by themselves filter the Issue store).
+A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, the Issue Reconciler keeps only Issues whose Issue Author matches the Operator GitHub User (case-insensitive); missing or ghost authors never match. When true, author does not filter relevance.
 _Avoid_: Show all authors, mine only toggle (as a separate UI control)
 
 **Issue Author**:
-The GitHub login of the user who opened an Issue, when GitHub provides one; otherwise null. Stored on the local Issue record for display and (later) author-scoped relevance.
+The GitHub login of the user who opened an Issue, when GitHub provides one; otherwise null. Fetched with Ready-labeled Issues, stored on the local Issue record, and used for author-scoped relevance when Include all Issue Authors is off.
 _Avoid_: Assignee, reporter (unless matching GitHub’s author field)
+
+**Operator GitHub User**:
+The GitHub login of the authenticated principal for a Repository’s GitHub credential path (Keymaxxer-injected token or ambient `gh` auth). Resolved via the GitHub API viewer for that token during reconciliation when Include all Issue Authors is off; not a separate harness user account.
+_Avoid_: Harness user, local operator account
 
 **Issue**:
 A GitHub issue belonging to a Repository, identified within that Repository by a positive integer GitHub issue number and represented locally with its title, body, web URL, creation time, GitHub state, and optional Issue Author. The harness may retain a local representation for later use, but GitHub remains authoritative.
@@ -72,7 +76,7 @@ An opencode conversation identified by opencode’s session id, scoped to a work
 _Avoid_: chat, thread, conversation (in formal docs)
 
 **Ready-labeled Issue**:
-An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, and GitHub state so consumers can decide whether it is actionable.
+An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, GitHub state, and Issue Author (login when GitHub provides one) so consumers can decide whether it is actionable.
 _Avoid_: Ready Issue (can imply that the Issue is open and actionable)
 
 **Issue-closing PR**:
@@ -212,5 +216,5 @@ A terminal Work Item whose remote outcome is finished and whose local cleanup ha
 _Avoid_: Approved, done Issue
 
 **Relevant Issue**:
-A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no open or merged Issue-closing PR, or have at least one open or merged Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. Closed unmerged (abandoned) Issue-closing PRs are ignored for this test. An Issue-closing PR affects only its own Issue rather than the Issue's parent or children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned open or merged Issue-closing PRs is not relevant.
+A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no open or merged Issue-closing PR, or have at least one open or merged Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. Closed unmerged (abandoned) Issue-closing PRs are ignored for this test. An Issue-closing PR affects only its own Issue rather than the Issue's parent or children. Unless Include all Issue Authors is on for the Repository, the Issue’s own Issue Author must match the Operator GitHub User (case-insensitive); missing or ghost authors never match, and parent authorship does not include or exclude children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned open or merged Issue-closing PRs is not relevant.
 _Avoid_: Active Issue (a Relevant Issue may be closed), Actionable Issue (actionability also depends on workflow constraints), Visible Issue (presentation-specific)

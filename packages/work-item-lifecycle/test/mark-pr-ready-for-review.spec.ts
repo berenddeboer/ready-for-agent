@@ -38,6 +38,7 @@ describe("markPrReadyForReview", () => {
   it("marks the deterministic Work Item branch PR ready for review", async () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
@@ -70,6 +71,7 @@ describe("markPrReadyForReview", () => {
 
   it("requires a worktree path", async () => {
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>

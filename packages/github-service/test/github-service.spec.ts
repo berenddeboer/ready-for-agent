@@ -32,6 +32,7 @@ const issue = (
   url: `https://github.com/acme/widgets/issues/${number}`,
   createdAt: new Date(`2026-07-${String(number).padStart(2, "0")}T12:00:00Z`),
   state,
+  author: null,
   parent: null,
   parentPosition: null,
   hasChildren: false,
@@ -2067,6 +2068,7 @@ describe("GitHubService live implementation", () => {
       url: "https://github.com/acme/widgets/issues/2",
       createdAt: new Date("2026-07-02T12:00:00Z"),
       state: "CLOSED",
+      author: null,
       parent: null,
       parentPosition: null,
       hasChildren: false,
@@ -2118,6 +2120,9 @@ describe("GitHubService live implementation", () => {
       url: true,
       createdAt: true,
       state: true,
+      author: {
+        login: true,
+      },
       parent: {
         number: true,
         url: true,
@@ -2713,6 +2718,83 @@ describe("CLI arguments", () => {
     expect(result.stderr).toContain("Missing owner argument")
     expect(result.stderr.includes(`${String.fromCharCode(0x1b)}[`)).toBe(false)
     expect(result.stderr).not.toMatch(/_tag/)
+  })
+})
+
+describe("GitHubService identity and Issue Author", () => {
+  it("returns the authenticated viewer login", async () => {
+    const client = {
+      query: async () => ({
+        viewer: { login: "OctoCat" },
+      }),
+    } as GitHubGraphqlClient
+
+    const login = await Effect.runPromise(
+      makeGitHubService(client).getAuthenticatedUserLogin(repository),
+    )
+
+    expect(login).toBe("OctoCat")
+  })
+
+  it("maps Issue Author login and null/ghost authors", async () => {
+    const client = {
+      query: async () => ({
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Mine",
+                body: "body",
+                url: "https://github.com/acme/widgets/issues/1",
+                createdAt: "2026-07-01T12:00:00Z",
+                state: "OPEN",
+                author: { login: "octocat" },
+                parent: null,
+                subIssuesSummary: { total: 0 },
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+              {
+                number: 2,
+                title: "Ghost",
+                body: "body",
+                url: "https://github.com/acme/widgets/issues/2",
+                createdAt: "2026-07-02T12:00:00Z",
+                state: "OPEN",
+                author: null,
+                parent: null,
+                subIssuesSummary: { total: 0 },
+                subIssues: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+                blockedBy: {
+                  nodes: [],
+                  pageInfo: { endCursor: null, hasNextPage: false },
+                },
+              },
+            ],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      }),
+    } as GitHubGraphqlClient
+
+    const result = await Effect.runPromise(
+      makeGitHubService(client).listReadyIssues(repository),
+    )
+
+    expect(result.map(({ number, author }) => ({ number, author }))).toEqual([
+      { number: 1, author: "octocat" },
+      { number: 2, author: null },
+    ])
   })
 })
 

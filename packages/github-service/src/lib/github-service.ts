@@ -15,6 +15,16 @@ import type {
 } from "./types.js"
 
 export interface GitHubServiceShape {
+  /**
+   * Login of the authenticated principal for this Repository's credential
+   * (Operator GitHub User). Same token path as other GitHub API calls.
+   */
+  readonly getAuthenticatedUserLogin: (
+    repository: GitHubRepository,
+  ) => Effect.Effect<
+    string,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
   readonly listReadyIssues: (
     repository: GitHubRepository,
   ) => Effect.Effect<

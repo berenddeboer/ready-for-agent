@@ -22,7 +22,10 @@ import {
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
-const repository = makeRepositoryRecord({ id: "repo-1" })
+const repository = makeRepositoryRecord({
+  id: "repo-1",
+  includeAllIssueAuthors: true,
+})
 
 const remoteIssue = (
   number: number,
@@ -36,6 +39,7 @@ const remoteIssue = (
     `2026-07-${String(number).padStart(2, "0")}T00:00:00.000Z`,
   ),
   state: "OPEN",
+  author: null,
   parent: null,
   parentPosition: null,
   hasChildren: false,
@@ -59,6 +63,7 @@ const localIssue = (
     url: remote.url,
     githubCreatedAt: remote.createdAt,
     state: remote.state,
+    issueAuthor: remote.author,
     parentPosition: remote.parentPosition,
     hasChildren: remote.hasChildren,
     parent:
@@ -148,9 +153,19 @@ const makeDbFixture = (options: DbFixtureOptions) => {
 const makeGitHubLayer = (
   issues: readonly ReadyLabeledIssue[],
   actions: string[],
-  error?: GitHubRequestError,
+  options: {
+    readonly error?: GitHubRequestError
+    readonly operatorLogin?: string
+    readonly identityError?: GitHubRequestError
+  } = {},
 ) =>
   Layer.succeed(GitHubService, {
+    getAuthenticatedUserLogin: ({ owner, name }) => {
+      actions.push(`identity:${owner}/${name}`)
+      return options.identityError
+        ? Effect.fail(options.identityError)
+        : Effect.succeed(options.operatorLogin ?? "operator")
+    },
     getOpenPullRequestNumber: () => Effect.succeed(1),
     getPullRequestCheckStatus: () =>
       Effect.succeed({
@@ -168,7 +183,7 @@ const makeGitHubLayer = (
     ensureIssueCompletedWithSummary: () => Effect.void,
     listReadyIssues: ({ owner, name }) => {
       actions.push(`github:${owner}/${name}`)
-      return error ? Effect.fail(error) : Effect.succeed(issues)
+      return options.error ? Effect.fail(options.error) : Effect.succeed(issues)
     },
   } satisfies GitHubServiceShape)
 
@@ -556,7 +571,7 @@ describe("IssueReconciler", () => {
         expect(db.reconciledAt).toBeUndefined()
       }),
       db.layer,
-      makeGitHubLayer([], db.actions, githubError),
+      makeGitHubLayer([], db.actions, { error: githubError }),
     )
   })
 
@@ -651,6 +666,149 @@ describe("IssueReconciler", () => {
       }),
       db.layer,
       makeGitHubLayer([remoteIssue(1)], db.actions),
+    )
+  })
+
+  it("keeps only operator-authored Issues when Include all is off", () => {
+    const scoped = makeRepositoryRecord({
+      id: "repo-1",
+      includeAllIssueAuthors: false,
+    })
+    const db = makeDbFixture({
+      issues: [
+        localIssue(1, { issueAuthor: "operator" }),
+        localIssue(2, { issueAuthor: "teammate" }),
+      ],
+    })
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(scoped)
+
+        expect(summary).toEqual({
+          fetched: 6,
+          inserted: 2,
+          updated: 0,
+          deleted: 1,
+          unchanged: 1,
+        })
+        expect(
+          db.stored.map((issue) => ({
+            number: issue.githubIssueNumber,
+            author: issue.issueAuthor,
+          })),
+        ).toEqual([
+          { number: 1, author: "operator" },
+          { number: 3, author: "Operator" },
+          { number: 5, author: "operator" },
+        ])
+        expect(db.actions).toContain("identity:acme/widgets")
+      }),
+      db.layer,
+      makeGitHubLayer(
+        [
+          remoteIssue(1, { author: "operator" }),
+          remoteIssue(2, { author: "teammate" }),
+          remoteIssue(3, { author: "Operator" }),
+          remoteIssue(4, { author: null }),
+          remoteIssue(5, {
+            author: "operator",
+            parent: {
+              number: 99,
+              url: "https://github.com/acme/widgets/issues/99",
+              state: "OPEN",
+              isReadyLabeled: true,
+            },
+            parentPosition: 0,
+          }),
+          remoteIssue(6, {
+            author: "teammate",
+            parent: {
+              number: 1,
+              url: "https://github.com/acme/widgets/issues/1",
+              state: "OPEN",
+              isReadyLabeled: true,
+            },
+            parentPosition: 0,
+          }),
+        ],
+        db.actions,
+        { operatorLogin: "operator" },
+      ),
+    )
+  })
+
+  it("does not filter by author when Include all is on", () => {
+    const db = makeDbFixture({ issues: [] })
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(repository)
+
+        expect(summary).toEqual({
+          fetched: 2,
+          inserted: 2,
+          updated: 0,
+          deleted: 0,
+          unchanged: 0,
+        })
+        expect(
+          db.stored.map((issue) => issue.githubIssueNumber).sort(),
+        ).toEqual([1, 2])
+        expect(db.actions).not.toContain("identity:acme/widgets")
+      }),
+      db.layer,
+      makeGitHubLayer(
+        [
+          remoteIssue(1, { author: "operator" }),
+          remoteIssue(2, { author: "teammate" }),
+        ],
+        db.actions,
+      ),
+    )
+  })
+
+  it("stores Issue Author from the Ready-labeled fetch", () => {
+    const db = makeDbFixture({ issues: [] })
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        yield* reconciler.reconcile(repository)
+        expect(db.stored[0]?.issueAuthor).toBe("octocat")
+      }),
+      db.layer,
+      makeGitHubLayer([remoteIssue(1, { author: "octocat" })], db.actions),
+    )
+  })
+
+  it("fails without mutating the store when identity cannot be resolved", () => {
+    const scoped = makeRepositoryRecord({
+      id: "repo-1",
+      includeAllIssueAuthors: false,
+    })
+    const db = makeDbFixture({ issues: [localIssue(1, { issueAuthor: "op" })] })
+    const identityError = new GitHubRequestError({
+      message: "Failed to resolve authenticated GitHub user",
+    })
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const error = yield* Effect.flip(reconciler.reconcile(scoped))
+
+        expect(error).toBe(identityError)
+        expect(db.actions).toEqual(["list", "identity:acme/widgets"])
+        expect(db.stored).toHaveLength(1)
+        expect(db.reconciledAt).toBeUndefined()
+      }),
+      db.layer,
+      makeGitHubLayer([remoteIssue(1, { author: "op" })], db.actions, {
+        identityError,
+        operatorLogin: "op",
+      }),
     )
   })
 })

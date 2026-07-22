@@ -1,6 +1,7 @@
 import type { Effect } from "effect"
 import { runGitHubCli } from "../bin/cli.js"
 import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
+import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
 import { getOpenPullRequestNumberProgram } from "../bin/get-open-pr-number.js"
 import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
 import { getPrLifecycleStatusProgram } from "../bin/get-pr-lifecycle-status.js"
@@ -17,6 +18,7 @@ export const INTERNAL_GITHUB_HELPER_ARG =
 
 export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
+  "get-authenticated-user-login",
   "get-open-pr-number",
   "get-pr-check-status",
   "get-pr-status-check-diagnostics",
@@ -117,6 +119,7 @@ const programs: Record<
   (args: ReadonlyArray<string>) => Effect.Effect<void, unknown, GitHubService>
 > = {
   "list-ready-issues": listReadyIssuesProgram,
+  "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "get-open-pr-number": getOpenPullRequestNumberProgram,
   "get-pr-check-status": getPrCheckStatusProgram,
   "get-pr-status-check-diagnostics": getPrStatusCheckDiagnosticsProgram,

@@ -48,6 +48,7 @@ const context: LifecycleStepContext = {
 }
 
 const unusedGithub = {
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
   getOpenPullRequestNumber: () => Effect.succeed(1),
   getPullRequestCheckStatus: () =>

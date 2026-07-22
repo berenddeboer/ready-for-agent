@@ -138,6 +138,13 @@ export const ambientGitHubLayer = (options: {
       ): Effect.Effect<A, GitHubServiceError> => run(operation)
 
       return {
+        getAuthenticatedUserLogin: Effect.fn(
+          "AmbientGitHub.getAuthenticatedUserLogin",
+        )((repository) =>
+          authenticated((service) =>
+            service.getAuthenticatedUserLogin(repository),
+          ),
+        ),
         getOpenPullRequestNumber: Effect.fn(
           "AmbientGitHub.getOpenPullRequestNumber",
         )((repository, headRefName) =>

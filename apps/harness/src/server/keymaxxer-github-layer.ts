@@ -44,6 +44,7 @@ const SerializedIssue = Schema.Struct({
   url: UrlString,
   createdAt: Schema.DateFromString,
   state: Schema.Literals(["OPEN", "CLOSED"]),
+  author: Schema.NullOr(RequiredString),
   hierarchySupported: Schema.Boolean,
   hasChildren: Schema.Boolean,
   parentPosition: Schema.NullOr(NonNegativeInt),
@@ -231,6 +232,48 @@ export const keymaxxerGitHubLayer = (options: {
       )
 
       const service: GitHubServiceShape = {
+        getAuthenticatedUserLogin: (repository) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "resolve authenticated GitHub user",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const result = yield* runGitHubBin(
+              tokenName,
+              "get-authenticated-user-login",
+              [owner, name],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "resolve authenticated GitHub user",
+                result.stderr || result.stdout,
+              )
+            }
+            const login = result.stdout.trim()
+            if (login === "") {
+              return yield* requestError(
+                repository,
+                "resolve authenticated GitHub user",
+                "empty login",
+              )
+            }
+            return login
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "resolve authenticated GitHub user"),
+              ),
+            ),
+          ),
         getOpenPullRequestNumber: (repository, headRefName) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

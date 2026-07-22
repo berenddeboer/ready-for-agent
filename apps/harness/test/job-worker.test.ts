@@ -146,6 +146,7 @@ const defaultGithubLayer = Layer.succeed(GitHubService, {
   markPullRequestReadyForReview: () => Effect.void,
   mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
   ensureIssueCompletedWithSummary: () => Effect.void,
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
 } satisfies GitHubServiceShape)
 
@@ -398,6 +399,7 @@ describe("Job worker", () => {
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
       ensureIssueCompletedWithSummary: () => Effect.void,
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () =>
         Effect.succeed([
           {
@@ -407,6 +409,7 @@ describe("Job worker", () => {
             url: "https://github.com/acme/widgets/issues/57",
             createdAt: new Date("2026-07-14T00:00:00.000Z"),
             state: "OPEN" as const,
+            author: "test-operator",
             parent: null,
             parentPosition: null,
             hasChildren: false,

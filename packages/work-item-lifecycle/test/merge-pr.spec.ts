@@ -38,6 +38,7 @@ describe("mergePr", () => {
   it("merges the deterministic Work Item branch PR", async () => {
     let requestedBranch = ""
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
@@ -68,6 +69,7 @@ describe("mergePr", () => {
 
   it("requires a worktree path", async () => {
     const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>

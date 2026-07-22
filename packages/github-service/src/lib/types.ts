@@ -142,6 +142,8 @@ export interface ReadyLabeledIssue {
   readonly url: string
   readonly createdAt: Date
   readonly state: GitHubIssueState
+  /** GitHub login of the Issue Author when provided; otherwise null. */
+  readonly author: string | null
   readonly parent: GitHubIssueParent | null
   readonly parentPosition: number | null
   readonly hasChildren: boolean
