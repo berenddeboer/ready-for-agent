@@ -55,13 +55,13 @@ database ready_for_agent.
 
 type repository = github owner, github repo, local path, is bare, paused,
                   default model, default variant, review model, review variant,
-                  auto merge, issues reconciled at.
+                  auto merge, include all issue authors, issues reconciled at.
 
 type config = default model, default variant, review model, review variant,
               max concurrent opencode sessions, max concurrent work items.
 
 type issue = repository, github issue number, title, body, url, state,
-             github created at, parent github issue number,
+             github created at, issue author, parent github issue number,
              parent github issue url, parent position, has children.
 
 type issue dependency = issue, blocking github issue number,

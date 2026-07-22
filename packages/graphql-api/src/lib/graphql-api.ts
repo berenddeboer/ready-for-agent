@@ -90,6 +90,7 @@ type UpdateRepositorySettingsArgs = {
     reviewModel: string | null
     reviewVariant: string | null
     autoMerge: boolean
+    includeAllIssueAuthors: boolean
   }
 }
 
@@ -461,6 +462,7 @@ export const createGraphqlApi = (
                   reviewModel: args.input.reviewModel ?? null,
                   reviewVariant: args.input.reviewVariant ?? null,
                   autoMerge: args.input.autoMerge,
+                  includeAllIssueAuthors: args.input.includeAllIssueAuthors,
                 })
               }).pipe(Effect.withSpan("graphql-api.updateRepositorySettings")),
             ),

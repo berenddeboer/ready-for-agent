@@ -92,6 +92,7 @@ const repositoriesQuery = {
         reviewModel: true,
         reviewVariant: true,
         autoMerge: true,
+        includeAllIssueAuthors: true,
         issuesReconciledAt: true,
       },
       repositoryCredentials: {
@@ -162,6 +163,7 @@ type Repository = {
   reviewModel: string | null
   reviewVariant: string | null
   autoMerge: boolean
+  includeAllIssueAuthors: boolean
   issuesReconciledAt: string | null
   credential: RepositoryCredential
 }
@@ -683,6 +685,7 @@ function RepositoryCard({
       reviewModel: string | null
       reviewVariant: string | null
       autoMerge: boolean
+      includeAllIssueAuthors: boolean
     }) => {
       const result = await graphql.mutation({
         updateRepositorySettings: {
@@ -698,6 +701,7 @@ function RepositoryCard({
           reviewModel: true,
           reviewVariant: true,
           autoMerge: true,
+          includeAllIssueAuthors: true,
           issuesReconciledAt: true,
         },
       })
@@ -742,6 +746,7 @@ function RepositoryCard({
       reviewModel: reviewModel.trim() === "" ? null : reviewModel,
       reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
       autoMerge,
+      includeAllIssueAuthors: repository.includeAllIssueAuthors,
     })
   }
 

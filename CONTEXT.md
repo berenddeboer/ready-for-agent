@@ -17,7 +17,7 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults; if those are also unset the empty option is labeled as harness default not configured), optional review model and variant (null falls back to harness review settings, then the resolved build model/variant), and Auto-merge. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created. A repository build override alone is enough to create Work Items even when harness defaults are still unset.
+Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults; if those are also unset the empty option is labeled as harness default not configured), optional review model and variant (null falls back to harness review settings, then the resolved build model/variant), Auto-merge, and Include all Issue Authors. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created. A repository build override alone is enough to create Work Items even when harness defaults are still unset.
 _Avoid_: Project config, repo config file
 
 **Harness Config**:
@@ -28,8 +28,16 @@ _Avoid_: Default model seed, product default model
 A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge. It applies only when a Work Item has a pull request and does not gate Close Issue for a No-Change Outcome.
 _Avoid_: Automerge (GitHub product), auto-approve
 
+**Include all Issue Authors**:
+A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, relevance is intended to prefer Issues whose Issue Author matches the Operator GitHub User (author filtering is applied by the Issue Reconciler in a later change; persistence and API exposure of this setting do not by themselves filter the Issue store).
+_Avoid_: Show all authors, mine only toggle (as a separate UI control)
+
+**Issue Author**:
+The GitHub login of the user who opened an Issue, when GitHub provides one; otherwise null. Stored on the local Issue record for display and (later) author-scoped relevance.
+_Avoid_: Assignee, reporter (unless matching GitHub’s author field)
+
 **Issue**:
-A GitHub issue belonging to a Repository, identified within that Repository by a positive integer GitHub issue number and represented locally with its title, body, web URL, creation time, and GitHub state. The harness may retain a local representation for later use, but GitHub remains authoritative.
+A GitHub issue belonging to a Repository, identified within that Repository by a positive integer GitHub issue number and represented locally with its title, body, web URL, creation time, GitHub state, and optional Issue Author. The harness may retain a local representation for later use, but GitHub remains authoritative.
 _Avoid_: Ticket, task (unless referring to a broader concept)
 
 **Issue store**:

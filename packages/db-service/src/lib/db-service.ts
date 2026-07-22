@@ -146,10 +146,11 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
   )
 
 const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
-             default_model, default_variant, review_model, review_variant, auto_merge, issues_reconciled_at`
+             default_model, default_variant, review_model, review_variant, auto_merge,
+             include_all_issue_authors, issues_reconciled_at`
 
 const issueSelectColumns = `id, repository_id, github_issue_number, title, body, url, state,
-                github_created_at, parent_github_issue_number,
+                github_created_at, issue_author, parent_github_issue_number,
                 parent_github_issue_url, parent_position, has_children`
 
 const toIssueRecord = (
@@ -164,6 +165,7 @@ const toIssueRecord = (
   url: row.url,
   state: row.state,
   githubCreatedAt: new Date(row.githubCreatedAt),
+  issueAuthor: row.issueAuthor,
   parentPosition: row.parentPosition,
   hasChildren: row.hasChildren,
   parent:
@@ -503,8 +505,8 @@ export const DbServiceLive = Layer.effect(
           `INSERT INTO repository (
                id, github_owner, github_repo, local_path, is_bare, paused,
                default_model, default_variant, review_model, review_variant,
-               auto_merge, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
+               auto_merge, include_all_issue_authors, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
           [
             id,
@@ -513,6 +515,7 @@ export const DbServiceLive = Layer.effect(
             localPath,
             input.isBare,
             true,
+            false,
             false,
             now,
             now,
@@ -569,6 +572,7 @@ export const DbServiceLive = Layer.effect(
                  review_model = ?,
                  review_variant = ?,
                  auto_merge = ?,
+                 include_all_issue_authors = ?,
                  updated_at = ?
              WHERE id = ?
              RETURNING ${repositorySelectColumns}`,
@@ -579,6 +583,7 @@ export const DbServiceLive = Layer.effect(
             reviewModel,
             reviewVariant,
             input.autoMerge,
+            input.includeAllIssueAuthors,
             now,
             input.repositoryId,
           ],
@@ -852,20 +857,26 @@ export const DbServiceLive = Layer.effect(
       return yield* sql
         .withTransaction(
           Effect.gen(function* () {
+            const issueAuthor =
+              input.issueAuthor === null
+                ? null
+                : input.issueAuthor.trim() || null
+
             const result = yield* sql
               .unsafe(
                 `INSERT INTO issue (
                id, repository_id, github_issue_number, title, body, url, state,
-                github_created_at, parent_github_issue_number,
+                github_created_at, issue_author, parent_github_issue_number,
                  parent_github_issue_url, parent_position, has_children,
                  created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (repository_id, github_issue_number) DO UPDATE SET
                title = excluded.title,
                body = excluded.body,
                url = excluded.url,
                 state = excluded.state,
                 github_created_at = excluded.github_created_at,
+                 issue_author = excluded.issue_author,
                  parent_github_issue_number = excluded.parent_github_issue_number,
                  parent_github_issue_url = excluded.parent_github_issue_url,
                  parent_position = excluded.parent_position,
@@ -881,6 +892,7 @@ export const DbServiceLive = Layer.effect(
                   input.url,
                   input.state,
                   input.githubCreatedAt.getTime(),
+                  issueAuthor,
                   input.parent?.githubIssueNumber ?? null,
                   input.parent?.githubIssueUrl ?? null,
                   input.parentPosition,

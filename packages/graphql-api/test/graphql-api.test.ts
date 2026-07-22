@@ -54,6 +54,7 @@ const issue = {
   url: "https://github.com/acme/widgets/issues/42",
   state: "OPEN" as const,
   githubCreatedAt: new Date("2026-07-12T10:30:00.000Z"),
+  issueAuthor: "octocat",
   parent: null,
   parentPosition: null,
   hasChildren: false,
@@ -146,6 +147,7 @@ const makeRuntime = (
         reviewModel: input.reviewModel,
         reviewVariant: input.reviewVariant,
         autoMerge: input.autoMerge,
+        includeAllIssueAuthors: input.includeAllIssueAuthors,
       }),
     listRepositories: Effect.succeed([repository]),
     ...dbOverrides,
@@ -523,6 +525,7 @@ describe("GraphQL API", () => {
             defaultModel
             defaultVariant
             autoMerge
+            includeAllIssueAuthors
             issuesReconciledAt
           }
         }`,
@@ -543,6 +546,7 @@ describe("GraphQL API", () => {
             defaultModel: null,
             defaultVariant: null,
             autoMerge: false,
+            includeAllIssueAuthors: false,
             issuesReconciledAt: null,
           },
         ],
@@ -895,6 +899,7 @@ describe("GraphQL API", () => {
             reviewModel
             reviewVariant
             autoMerge
+            includeAllIssueAuthors
           }
         }`,
         variables: {
@@ -906,6 +911,7 @@ describe("GraphQL API", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             autoMerge: true,
+            includeAllIssueAuthors: true,
           },
         },
       }),
@@ -920,6 +926,7 @@ describe("GraphQL API", () => {
           reviewModel: "anthropic/claude-opus-4-6",
           reviewVariant: "max",
           autoMerge: true,
+          includeAllIssueAuthors: true,
         },
       },
     })
@@ -1067,6 +1074,7 @@ describe("GraphQL API", () => {
         query: `query ListIssues($repositoryId: ID!) {
           issues(repositoryId: $repositoryId) {
             id repositoryId githubIssueNumber title body url state githubCreatedAt
+            issueAuthor
             parent { githubIssueNumber githubIssueUrl }
             hasChildren
             blockedBy { githubIssueNumber githubIssueUrl }
@@ -1089,6 +1097,7 @@ describe("GraphQL API", () => {
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.githubCreatedAt.toISOString(),
+            issueAuthor: issue.issueAuthor,
             parent: issue.parent,
             hasChildren: issue.hasChildren,
             blockedBy: issue.blockedBy,
