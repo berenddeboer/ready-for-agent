@@ -1,20 +1,14 @@
 #!/usr/bin/env bun
-import {
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  writeFileSync,
-} from "node:fs"
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { writeReadyForAgentVersionFiles } from "./write-ready-for-agent-version.ts"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
 const clientRoot = resolve(workspaceRoot, "apps/harness/dist/client")
 const outDir = join(appRoot, "src/generated")
 const assetsOut = join(outDir, "client-assets.ts")
-const versionOut = join(outDir, "version.ts")
 
 const walkFiles = (root: string): string[] => {
   const results: string[] = []
@@ -86,21 +80,8 @@ export const embeddedShellHtmlPath: string = ${shellImport} as unknown as string
 
 writeFileSync(assetsOut, assetsContent)
 
-const packageJson = JSON.parse(
-  readFileSync(join(appRoot, "package.json"), "utf8"),
-) as { version?: string }
-const version =
-  typeof packageJson.version === "string" && packageJson.version.trim() !== ""
-    ? packageJson.version.trim()
-    : "0.0.0"
-
-writeFileSync(
-  versionOut,
-  `/** Injected at compile/embed time from apps/ready-for-agent/package.json. */
-export const READY_FOR_AGENT_VERSION = ${JSON.stringify(version)}
-`,
-)
+const { version } = writeReadyForAgentVersionFiles()
 
 console.log(
-  `Wrote ${assetsOut} (${files.length} assets) and ${versionOut} (v${version})`,
+  `Wrote ${assetsOut} (${files.length} assets) and version modules (v${version})`,
 )

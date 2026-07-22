@@ -163,6 +163,23 @@ describe("production lifecycle process behavior", () => {
     expect(disposed).toEqual(["server", "application"])
   })
 
+  test("readiness log includes non-placeholder version and listening URL", async () => {
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      version: "1.2.3",
+    })
+
+    const readiness = logs.find((line) => line.includes("listening on"))
+    expect(readiness).toBeDefined()
+    expect(readiness).toContain("v1.2.3")
+    expect(readiness).toContain("http://127.0.0.1:4242")
+    expect(readiness).toBe(
+      "Ready for Agent v1.2.3 listening on http://127.0.0.1:4242",
+    )
+
+    await handle.dispose()
+  })
+
   test("respects --no-open and NO_BROWSER", async () => {
     const noOpen = await startProductionLifecycle({
       ...baseOptions(),

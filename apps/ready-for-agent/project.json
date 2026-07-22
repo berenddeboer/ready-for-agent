@@ -19,6 +19,22 @@
         "command": "bun --conditions @ready-for-agent/source src/main.ts"
       }
     },
+    "generate-version": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions @ready-for-agent/source scripts/write-ready-for-agent-version.ts"
+      },
+      "inputs": [
+        "{projectRoot}/package.json",
+        "{projectRoot}/scripts/write-ready-for-agent-version.ts"
+      ],
+      "outputs": [
+        "{projectRoot}/src/generated/version.ts",
+        "{workspaceRoot}/apps/harness/src/generated/version.ts"
+      ],
+      "cache": true
+    },
     "generate-embed": {
       "executor": "nx:run-commands",
       "dependsOn": [
@@ -29,7 +45,8 @@
         {
           "projects": ["db", "graphql-schema"],
           "target": "generate"
-        }
+        },
+        "generate-version"
       ],
       "options": {
         "cwd": "{projectRoot}",
@@ -41,9 +58,13 @@
           "transitive": false
         },
         "{projectRoot}/package.json",
-        "{projectRoot}/scripts/generate-standalone-embed.ts"
+        "{projectRoot}/scripts/generate-standalone-embed.ts",
+        "{projectRoot}/scripts/write-ready-for-agent-version.ts"
       ],
-      "outputs": ["{projectRoot}/src/generated"],
+      "outputs": [
+        "{projectRoot}/src/generated",
+        "{workspaceRoot}/apps/harness/src/generated/version.ts"
+      ],
       "cache": true
     },
     "typecheck": {

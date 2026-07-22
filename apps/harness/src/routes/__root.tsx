@@ -21,6 +21,7 @@ import {
   useState,
 } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import appCss from "../styles.css?url"
 
 export interface RouterContext {
@@ -134,7 +135,7 @@ function RootDocument({ children }: { children: ReactNode }) {
 function RootComponent() {
   return (
     <div className="mx-auto min-h-screen max-w-7xl p-4 sm:p-6">
-      <nav className="mb-6 flex items-center gap-4 border-b border-slate-200 pb-4">
+      <nav className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 pb-4">
         <Link
           to="/"
           className="font-medium text-slate-700 hover:underline"
@@ -143,6 +144,12 @@ function RootComponent() {
         >
           Home
         </Link>
+        <span
+          className="text-sm tabular-nums text-slate-500"
+          title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}
+        >
+          {READY_FOR_AGENT_VERSION_LABEL}
+        </span>
         <SettingsButton />
       </nav>
       <Outlet />

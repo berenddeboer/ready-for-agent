@@ -177,7 +177,12 @@ describe("compiled host binary ambient-auth smoke", () => {
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
       })
+      let stdout = ""
       let stderr = ""
+      child.stdout?.setEncoding("utf8")
+      child.stdout?.on("data", (chunk: string) => {
+        stdout += chunk
+      })
       child.stderr?.setEncoding("utf8")
       child.stderr?.on("data", (chunk: string) => {
         stderr += chunk
@@ -203,6 +208,23 @@ describe("compiled host binary ambient-auth smoke", () => {
         const assetBody = await asset.arrayBuffer()
         expect(assetBody.byteLength).toBeGreaterThan(100)
 
+        const jsAssetPaths = [
+          ...html.matchAll(/\/assets\/[A-Za-z0-9._-]+\.js/g),
+        ].map((match) => match[0])
+        expect(jsAssetPaths.length).toBeGreaterThan(0)
+        const versionLabel = `v${packageVersion}`
+        let uiVersionFound = false
+        for (const jsPath of jsAssetPaths) {
+          const jsResponse = await fetch(`${base}${jsPath}`)
+          expect(jsResponse.status).toBe(200)
+          const jsText = await jsResponse.text()
+          if (jsText.includes(versionLabel)) {
+            uiVersionFound = true
+            break
+          }
+        }
+        expect(uiVersionFound).toBe(true)
+
         const graphql = await fetch(`${base}/graphql`, {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -214,6 +236,9 @@ describe("compiled host binary ambient-auth smoke", () => {
         }
         expect(payload.data?.health).toBe(true)
 
+        const combinedOutput = `${stdout}\n${stderr}`
+        expect(combinedOutput).toContain(`v${packageVersion}`)
+        expect(combinedOutput).toContain(`listening on ${base}`)
         expect(stderr).not.toContain("monorepo root")
         expect(stderr).not.toContain("Could not find the ready-for-agent")
       } finally {
