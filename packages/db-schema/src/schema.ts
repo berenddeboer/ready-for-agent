@@ -24,6 +24,9 @@ export const repository = snakeCase.table(
     reviewModel: text(),
     reviewVariant: text(),
     autoMerge: integer({ mode: "boolean" }).notNull().default(false),
+    includeAllIssueAuthors: integer({ mode: "boolean" })
+      .notNull()
+      .default(false),
     issuesReconciledAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
@@ -73,6 +76,7 @@ export const issue = snakeCase.table(
     url: text().notNull(),
     state: text({ enum: ["OPEN", "CLOSED"] }).notNull(),
     githubCreatedAt: integer({ mode: "number" }).notNull(),
+    issueAuthor: text(),
     parentGithubIssueNumber: integer(),
     parentGithubIssueUrl: text(),
     parentPosition: integer(),

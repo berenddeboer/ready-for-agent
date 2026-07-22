@@ -35,6 +35,7 @@ describe("DbService", () => {
     body: "Issue body",
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
+    issueAuthor: null,
     parent: null,
     parentPosition: null,
     hasChildren: false,
@@ -184,6 +185,7 @@ describe("DbService", () => {
           expect(repo.reviewModel).toBeNull()
           expect(repo.reviewVariant).toBeNull()
           expect(repo.autoMerge).toBe(false)
+          expect(repo.includeAllIssueAuthors).toBe(false)
           expect(repo.issuesReconciledAt).toBeNull()
         }),
       ))
@@ -281,7 +283,7 @@ describe("DbService", () => {
   })
 
   describe("updateRepositorySettings", () => {
-    it("updates pause, model override, and auto-merge", () =>
+    it("updates pause, model override, auto-merge, and include-all issue authors", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
@@ -295,6 +297,7 @@ describe("DbService", () => {
             reviewModel: "  anthropic/claude-opus-4-6  ",
             reviewVariant: "  max  ",
             autoMerge: true,
+            includeAllIssueAuthors: true,
           })
 
           expect(updated).toEqual({
@@ -305,6 +308,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             autoMerge: true,
+            includeAllIssueAuthors: true,
           })
           expect(yield* db.listRepositories).toEqual([updated])
         }),
@@ -323,6 +327,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             autoMerge: false,
+            includeAllIssueAuthors: false,
           })
 
           const cleared = yield* db.updateRepositorySettings({
@@ -333,6 +338,7 @@ describe("DbService", () => {
             reviewModel: " ",
             reviewVariant: null,
             autoMerge: false,
+            includeAllIssueAuthors: false,
           })
 
           expect(cleared.defaultModel).toBeNull()
@@ -355,6 +361,7 @@ describe("DbService", () => {
               reviewModel: null,
               reviewVariant: null,
               autoMerge: false,
+              includeAllIssueAuthors: false,
             }),
           )
           expect(error).toBeInstanceOf(RepositoryNotFoundError)
@@ -376,6 +383,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             autoMerge: true,
+            includeAllIssueAuthors: false,
           })
 
           const unpaused = yield* db.unpauseRepository(repo.id)
@@ -388,6 +396,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             autoMerge: true,
+            includeAllIssueAuthors: false,
           })
           expect(yield* db.listRepositories).toEqual([unpaused])
         }),
@@ -406,6 +415,7 @@ describe("DbService", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "max",
             autoMerge: true,
+            includeAllIssueAuthors: false,
           })
 
           const paused = yield* db.pauseRepository(repo.id)
@@ -519,6 +529,7 @@ describe("DbService", () => {
             title: "Remove with repository",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            issueAuthor: null,
             blockedBy: [
               {
                 githubIssueNumber: 7,
@@ -659,7 +670,37 @@ describe("DbService", () => {
           expect(issue.url).toBe("https://github.com/acme/widgets/issues/42")
           expect(issue.state).toBe("OPEN")
           expect(issue.githubCreatedAt).toEqual(githubCreatedAt)
+          expect(issue.issueAuthor).toBeNull()
           expect(issue.parent).toBeNull()
+        }),
+      ))
+
+    it("persists and lists Issue Author including null", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* addTestRepository(db)
+          const withAuthor = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Authored issue",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            issueAuthor: "  OctoCat  ",
+          })
+          expect(withAuthor.issueAuthor).toBe("OctoCat")
+          expect(yield* db.listIssues(repository.id)).toEqual([withAuthor])
+
+          const cleared = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            title: "Authored issue",
+            ...sampleIssueFields,
+            githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            issueAuthor: null,
+          })
+          expect(cleared.issueAuthor).toBeNull()
+          expect(yield* db.listIssues(repository.id)).toEqual([cleared])
         }),
       ))
 
@@ -674,6 +715,7 @@ describe("DbService", () => {
             title: "Original title",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            issueAuthor: null,
           })
           const updated = yield* db.storeIssue({
             repositoryId: repository.id,
@@ -683,6 +725,7 @@ describe("DbService", () => {
             body: "Updated body",
             state: "CLOSED",
             githubCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
+            issueAuthor: null,
           })
 
           expect(updated.id).toBe(first.id)
@@ -827,6 +870,7 @@ describe("DbService", () => {
             title: "Original title",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            issueAuthor: null,
             blockedBy: [
               {
                 githubIssueNumber: 3,
@@ -848,6 +892,7 @@ describe("DbService", () => {
               title: "Updated title",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
+              issueAuthor: null,
               blockedBy: [
                 {
                   githubIssueNumber: 5,
@@ -915,6 +960,7 @@ describe("DbService", () => {
               title: "Valid title",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+              issueAuthor: null,
             }),
           )
 
@@ -937,6 +983,7 @@ describe("DbService", () => {
               title: "   ",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+              issueAuthor: null,
             }),
           )
           const dateError = yield* Effect.flip(
@@ -946,6 +993,7 @@ describe("DbService", () => {
               title: "Valid title",
               ...sampleIssueFields,
               githubCreatedAt: new Date("invalid"),
+              issueAuthor: null,
             }),
           )
 
@@ -965,6 +1013,7 @@ describe("DbService", () => {
               title: "Unknown repository",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+              issueAuthor: null,
             }),
           )
           const listError = yield* Effect.flip(db.listIssues("repo-unknown"))
@@ -986,6 +1035,7 @@ describe("DbService", () => {
             title: "Delete me",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
+            issueAuthor: null,
           })
 
           yield* db.deleteIssue(repository.id, 42)

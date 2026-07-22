@@ -203,6 +203,7 @@ export const IssueReconcilerLive = Layer.effect(
             url: issue.url,
             state: issue.state,
             githubCreatedAt: issue.createdAt,
+            issueAuthor: null,
             parentPosition: issue.parentPosition,
             hasChildren: issue.hasChildren,
             parent:

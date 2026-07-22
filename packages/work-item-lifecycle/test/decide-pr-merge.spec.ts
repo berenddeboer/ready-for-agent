@@ -19,6 +19,7 @@ import { describe, expect, it } from "bun:test"
 const repository = makeRepositoryRecord({
   localPath: "/repos/widgets",
   autoMerge: true,
+  includeAllIssueAuthors: false,
 })
 
 const context: LifecycleStepContext = {

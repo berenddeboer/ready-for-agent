@@ -142,6 +142,7 @@ describe("WorkItemLifecycle", () => {
     url: "https://github.com/acme/widgets/issues/42",
     state: "OPEN" as const,
     githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+    issueAuthor: null,
     parent: null,
     parentPosition: null,
     hasChildren: false,
@@ -280,6 +281,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: null,
             reviewVariant: null,
             autoMerge: repository.autoMerge,
+            includeAllIssueAuthors: repository.includeAllIssueAuthors,
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -345,6 +347,7 @@ describe("WorkItemLifecycle", () => {
             reviewModel: "anthropic/claude-opus-4-6",
             reviewVariant: "high",
             autoMerge: repository.autoMerge,
+            includeAllIssueAuthors: repository.includeAllIssueAuthors,
           })
 
           const workItem = yield* lifecycle.implementNow(

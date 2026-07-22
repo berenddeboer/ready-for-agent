@@ -40,6 +40,7 @@ export const RepositoryRecord = Schema.Struct({
   reviewModel: Schema.NullOr(Schema.String),
   reviewVariant: Schema.NullOr(Schema.String),
   autoMerge: Schema.Boolean,
+  includeAllIssueAuthors: Schema.Boolean,
   issuesReconciledAt: Schema.NullOr(Schema.Date),
 })
 export type RepositoryRecord = typeof RepositoryRecord.Type
@@ -52,6 +53,7 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   reviewModel: Schema.NullOr(Schema.String),
   reviewVariant: Schema.NullOr(Schema.String),
   autoMerge: Schema.Boolean,
+  includeAllIssueAuthors: Schema.Boolean,
 })
 export type UpdateRepositorySettingsInput =
   typeof UpdateRepositorySettingsInput.Type
@@ -88,6 +90,7 @@ export const StoreIssueInput = Schema.Struct({
   url: Schema.String,
   state: IssueState,
   githubCreatedAt: Schema.Date,
+  issueAuthor: Schema.NullOr(Schema.String),
   parent: Schema.NullOr(IssueReference),
   parentPosition: Schema.NullOr(Schema.Finite),
   hasChildren: Schema.Boolean,
@@ -104,6 +107,7 @@ export const IssueRecord = Schema.Struct({
   url: Schema.String,
   state: IssueState,
   githubCreatedAt: Schema.Date,
+  issueAuthor: Schema.NullOr(Schema.String),
   parent: Schema.NullOr(IssueReference),
   parentPosition: Schema.NullOr(
     Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -134,6 +138,7 @@ export const RepositorySqlRow = Schema.Struct({
   reviewModel: Schema.NullOr(Schema.String),
   reviewVariant: Schema.NullOr(Schema.String),
   autoMerge: SqlBoolean,
+  includeAllIssueAuthors: SqlBoolean,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
 }).pipe(
   Schema.encodeKeys({
@@ -146,6 +151,7 @@ export const RepositorySqlRow = Schema.Struct({
     reviewModel: "review_model",
     reviewVariant: "review_variant",
     autoMerge: "auto_merge",
+    includeAllIssueAuthors: "include_all_issue_authors",
     issuesReconciledAt: "issues_reconciled_at",
   }),
 )
@@ -179,6 +185,7 @@ export const IssueSqlRow = Schema.Struct({
   url: Schema.String,
   state: IssueState,
   githubCreatedAt: Schema.Finite,
+  issueAuthor: Schema.NullOr(Schema.String),
   parentGithubIssueNumber: Schema.NullOr(Schema.Int),
   parentGithubIssueUrl: Schema.NullOr(Schema.String),
   parentPosition: Schema.NullOr(Schema.Int),
@@ -188,6 +195,7 @@ export const IssueSqlRow = Schema.Struct({
     repositoryId: "repository_id",
     githubIssueNumber: "github_issue_number",
     githubCreatedAt: "github_created_at",
+    issueAuthor: "issue_author",
     parentGithubIssueNumber: "parent_github_issue_number",
     parentGithubIssueUrl: "parent_github_issue_url",
     parentPosition: "parent_position",

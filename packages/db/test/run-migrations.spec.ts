@@ -86,6 +86,7 @@ describe("runMigrations", () => {
           { name: "20260718061640_right_black_bird" },
           { name: "20260720081709_cold_gladiator" },
           { name: "20260720220839_simple_rick_jones" },
+          { name: "20260722034639_condemned_wildside" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

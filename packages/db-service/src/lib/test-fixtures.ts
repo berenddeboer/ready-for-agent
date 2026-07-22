@@ -23,6 +23,7 @@ export const makeRepositoryRecord = (
   reviewModel: null,
   reviewVariant: null,
   autoMerge: false,
+  includeAllIssueAuthors: false,
   issuesReconciledAt: null,
   ...overrides,
 })
