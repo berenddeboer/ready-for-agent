@@ -44,11 +44,11 @@ export class ReviewResultError extends Schema.TaggedErrorClass<ReviewResultError
 ) {}
 
 /**
- * Reviewing reported findings; apply-findings is not implemented yet (#391).
- * Parse succeeded — this is the intentional stop-short hook, not a parse failure.
+ * Apply pass reported FIXED; Pre-Commit + re-review loop is not implemented yet (#392).
+ * Parse succeeded — intentional stop-short hook, not a parse failure or clean advance.
  */
-export class ReviewHasFindingsPendingError extends Schema.TaggedErrorClass<ReviewHasFindingsPendingError>()(
-  "ReviewHasFindingsPendingError",
+export class ReviewFixedPendingError extends Schema.TaggedErrorClass<ReviewFixedPendingError>()(
+  "ReviewFixedPendingError",
   {
     workItemId: Schema.String,
     message: Schema.String,
@@ -61,4 +61,4 @@ export type ReviewError =
   | ReviewSessionContextMissingError
   | ReviewOpenCodeError
   | ReviewResultError
-  | ReviewHasFindingsPendingError
+  | ReviewFixedPendingError

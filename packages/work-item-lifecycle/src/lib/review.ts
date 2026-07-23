@@ -13,13 +13,27 @@ import {
 } from "./review-errors.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
+  REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
 } from "./types.js"
 
+/** Final Review step outcome after reviewing (and optional apply) completes. */
 export type ReviewResult =
   | { readonly _tag: "clean" }
+  | { readonly _tag: "deferred"; readonly reason: string }
+  | { readonly _tag: "fixed" }
+
+/** Machine-readable outcome of the reviewing (/review) pass only. */
+export type ReviewingPassResult =
+  | { readonly _tag: "clean" }
   | { readonly _tag: "has_findings" }
+
+/** Machine-readable outcome of the apply-findings pass. */
+export type ApplyReviewResult =
+  | { readonly _tag: "clean" }
+  | { readonly _tag: "deferred"; readonly reason: string }
+  | { readonly _tag: "fixed" }
 
 const buildReviewingPrompt = () =>
   [
@@ -31,11 +45,22 @@ const buildReviewingPrompt = () =>
     "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
   ].join("\n")
 
-/**
- * Parse the unique final READY_FOR_AGENT_RESULT line from a reviewing pass.
- * Returns null for missing, duplicate, non-final, or unrecognized markers.
- */
-export const parseReviewResult = (output: string): ReviewResult | null => {
+const buildApplyFindingsPrompt = () =>
+  [
+    "The previous reviewing pass reported Review Findings (REVIEW_HAS_FINDINGS).",
+    "Interpret those findings. Fix only what should be fixed now; you may defer stylistic or disputed notes.",
+    "Do not commit, push, open pull requests, or start unrelated rework.",
+    "End your final response with exactly one machine-readable result line:",
+    "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+    "when you changed the worktree to address findings,",
+    "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <short reason>",
+    "when findings remain but should not block Commit,",
+    "or",
+    "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+    "when on re-read there is nothing that needs fixing or deferring.",
+  ].join("\n")
+
+const uniqueFinalResultLine = (output: string): string | null => {
   const lines = output.split("\n").map((line) => line.trim())
   const nonEmptyLines = lines.filter((line) => line !== "")
   const resultLines = lines.filter((line) =>
@@ -50,6 +75,20 @@ export const parseReviewResult = (output: string): ReviewResult | null => {
   ) {
     return null
   }
+  return finalLine
+}
+
+/**
+ * Parse the unique final READY_FOR_AGENT_RESULT line from a reviewing pass.
+ * Returns null for missing, duplicate, non-final, or unrecognized markers.
+ */
+export const parseReviewResult = (
+  output: string,
+): ReviewingPassResult | null => {
+  const finalLine = uniqueFinalResultLine(output)
+  if (finalLine === null) {
+    return null
+  }
 
   if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEAN$/i.test(finalLine)) {
     return { _tag: "clean" }
@@ -57,6 +96,39 @@ export const parseReviewResult = (output: string): ReviewResult | null => {
 
   if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_HAS_FINDINGS$/i.test(finalLine)) {
     return { _tag: "has_findings" }
+  }
+
+  return null
+}
+
+/**
+ * Parse the unique final READY_FOR_AGENT_RESULT line from an apply-findings pass.
+ * Returns null for missing, duplicate, non-final, or unrecognized markers.
+ */
+export const parseApplyReviewResult = (
+  output: string,
+): ApplyReviewResult | null => {
+  const finalLine = uniqueFinalResultLine(output)
+  if (finalLine === null) {
+    return null
+  }
+
+  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEAN$/i.test(finalLine)) {
+    return { _tag: "clean" }
+  }
+
+  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED$/i.test(finalLine)) {
+    return { _tag: "fixed" }
+  }
+
+  const deferred = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_DEFERRED\s*:\s*(.+)$/i,
+  )
+  if (deferred?.[1] !== undefined && deferred[1].trim() !== "") {
+    return {
+      _tag: "deferred",
+      reason: deferred[1].trim().slice(0, 500),
+    }
   }
 
   return null
@@ -108,60 +180,74 @@ const resolveSessionId = (context: LifecycleStepContext) => {
   return Effect.succeed(sessionId)
 }
 
-const markReviewingPhase = Effect.gen(function* () {
-  const current = yield* CurrentStepRun
-  if (current === null) {
-    return
-  }
-  const sql = yield* SqlClient.SqlClient
-  const db = yield* DbService
-  const now = Date.now()
-  yield* sql.unsafe(
-    `UPDATE step_run
+const markReviewPhase = (
+  reasonCode: string,
+  reasonMessage: string,
+  logLabel: string,
+) =>
+  Effect.gen(function* () {
+    const current = yield* CurrentStepRun
+    if (current === null) {
+      return
+    }
+    const sql = yield* SqlClient.SqlClient
+    const db = yield* DbService
+    const now = Date.now()
+    yield* sql.unsafe(
+      `UPDATE step_run
      SET reason_code = ?,
          reason_message = ?,
          updated_at = ?
      WHERE id = ?
        AND status = 'running'`,
-    [
-      STEP_RUN_REASON.reviewReviewing,
-      REVIEW_REVIEWING_MESSAGE,
-      now,
-      current.stepRunId,
-    ],
+      [reasonCode, reasonMessage, now, current.stepRunId],
+    )
+    yield* db.notifyWorkItemsChanged(current.repositoryId)
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning(`Failed to mark Review Step Run as ${logLabel}`, {
+        error,
+      }),
+    ),
+    Effect.asVoid,
   )
-  yield* db.notifyWorkItemsChanged(current.repositoryId)
-}).pipe(
-  Effect.catch((error) =>
-    Effect.logWarning("Failed to mark Review Step Run as reviewing", {
-      error,
-    }),
-  ),
-  Effect.asVoid,
+
+const markReviewingPhase = markReviewPhase(
+  STEP_RUN_REASON.reviewReviewing,
+  REVIEW_REVIEWING_MESSAGE,
+  "reviewing",
+)
+
+const markApplyingFindingsPhase = markReviewPhase(
+  STEP_RUN_REASON.reviewApplyingFindings,
+  REVIEW_APPLYING_FINDINGS_MESSAGE,
+  "applying findings",
 )
 
 /**
- * Production Review Lifecycle Step — reviewing pass.
- * Continues the Implement OpenCode Session with `/review` plus a harness
- * READY_FOR_AGENT_RESULT contract, using the Work Item review model/variant.
- * Returns a structured reviewing outcome; does not apply findings.
+ * Production Review Lifecycle Step — reviewing pass, then apply-findings when needed.
+ * Continues the Implement OpenCode Session. Reviewing uses the review model/variant;
+ * applying findings uses the build model/variant. Does not yet re-run Pre-Commit or
+ * re-review after FIXED (see #392).
  */
 export const review = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const sessionId = yield* resolveSessionId(context)
+    const timeout =
+      context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.review
+    const opencode = yield* Opencode
 
     yield* markReviewingPhase
 
-    const opencode = yield* Opencode
-    const result = yield* opencode
+    const reviewing = yield* opencode
       .continue({
         sessionId,
         prompt: buildReviewingPrompt(),
         cwd: worktreePath,
         model: context.reviewModel,
         variant: context.reviewVariant,
-        timeout: context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.review,
+        timeout,
       })
       .pipe(
         Effect.mapError(
@@ -175,13 +261,50 @@ export const review = (context: LifecycleStepContext) =>
         ),
       )
 
-    const parsed = parseReviewResult(result.assistantText)
-    if (parsed === null) {
+    const reviewingParsed = parseReviewResult(reviewing.assistantText)
+    if (reviewingParsed === null) {
       return yield* new ReviewResultError({
         workItemId: context.workItemId,
         message:
           "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS",
       })
     }
-    return parsed
+
+    if (reviewingParsed._tag === "clean") {
+      return { _tag: "clean" as const }
+    }
+
+    yield* markApplyingFindingsPhase
+
+    const applying = yield* opencode
+      .continue({
+        sessionId,
+        prompt: buildApplyFindingsPrompt(),
+        cwd: worktreePath,
+        model: context.model,
+        variant: context.variant,
+        timeout,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new ReviewOpenCodeError({
+              message: "OpenCode failed while applying Review Findings",
+              worktreePath,
+              sessionId,
+              cause,
+            }),
+        ),
+      )
+
+    const applyParsed = parseApplyReviewResult(applying.assistantText)
+    if (applyParsed === null) {
+      return yield* new ReviewResultError({
+        workItemId: context.workItemId,
+        message:
+          "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_DEFERRED: <reason>, or REVIEW_CLEAN",
+      })
+    }
+
+    return applyParsed
   })

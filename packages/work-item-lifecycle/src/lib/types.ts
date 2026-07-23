@@ -125,6 +125,9 @@ export const WAITING_FOR_OPENCODE_SESSION_MESSAGE =
 /** Operator-visible Review phase while the reviewing OpenCode pass runs. */
 export const REVIEW_REVIEWING_MESSAGE = "reviewing"
 
+/** Operator-visible Review phase while apply-findings OpenCode pass runs. */
+export const REVIEW_APPLYING_FINDINGS_MESSAGE = "applying findings"
+
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
 export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
@@ -254,6 +257,10 @@ export const STEP_RUN_REASON = {
   waitingForOpencodeSession: "waiting_for_opencode_session",
   /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
   reviewReviewing: "review_reviewing",
+  /** Mid-run: Review is applying findings with the build model. */
+  reviewApplyingFindings: "review_applying_findings",
+  /** Successful Review that deferred findings and advanced to Commit. */
+  reviewDeferred: "review_deferred",
   /** Successful Merge PR run that returned to Watch for fresh validation. */
   mergeRevalidation: "merge_revalidation",
 } as const
