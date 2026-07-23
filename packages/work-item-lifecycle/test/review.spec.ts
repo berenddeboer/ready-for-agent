@@ -526,7 +526,7 @@ describe("review", () => {
       expect(turn).toBeGreaterThanOrEqual(3)
     }))
 
-  it("returns Needs Human after three FIXED rounds without clean or deferred", () =>
+  it("returns Needs Human after MAX_REVIEW_FIX_ROUNDS FIXED rounds without clean or deferred", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "still broken\n")
@@ -551,15 +551,20 @@ describe("review", () => {
         }),
       )
 
-      // 4 reviewing passes + 3 apply passes (no 4th apply)
-      expect(turn).toBe(MAX_REVIEW_FIX_ROUNDS * 2 + 1)
+      // 6 reviewing passes + 5 apply passes (no 6th apply)
+      expect(MAX_REVIEW_FIX_ROUNDS).toBe(5)
+      expect(turn).toBe(11)
       expect(result).toEqual({
         _tag: "needs_human",
-        reason: REVIEW_FIX_LIMIT_REASON,
+        reason:
+          "Review fix limit reached (5); inspect the worktree or address remaining findings, then Retry.",
       })
+      expect(REVIEW_FIX_LIMIT_REASON).toBe(
+        "Review fix limit reached (5); inspect the worktree or address remaining findings, then Retry.",
+      )
     }))
 
-  it("succeeds with clean after fewer than three FIXED rounds", () =>
+  it("succeeds with clean after fewer than MAX_REVIEW_FIX_ROUNDS FIXED rounds", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
@@ -592,7 +597,7 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
     }))
 
-  it("succeeds with clean on the reviewing pass after exactly three FIXED rounds", () =>
+  it("succeeds with clean on the reviewing pass after exactly MAX_REVIEW_FIX_ROUNDS FIXED rounds", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
@@ -622,12 +627,13 @@ describe("review", () => {
         }),
       )
 
-      expect(applyPasses).toBe(MAX_REVIEW_FIX_ROUNDS)
-      expect(reviewingPasses).toBe(MAX_REVIEW_FIX_ROUNDS + 1)
+      expect(MAX_REVIEW_FIX_ROUNDS).toBe(5)
+      expect(applyPasses).toBe(5)
+      expect(reviewingPasses).toBe(6)
       expect(result).toEqual({ _tag: "clean" })
     }))
 
-  it("succeeds with deferred after fewer than three FIXED rounds", () =>
+  it("succeeds with deferred after fewer than MAX_REVIEW_FIX_ROUNDS FIXED rounds", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
