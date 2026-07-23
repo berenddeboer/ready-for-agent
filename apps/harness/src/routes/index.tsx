@@ -35,6 +35,10 @@ import { streamRepositoryChanges } from "../repository-live.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
+import {
+  lifecycleStepChipClassName,
+  statusBadgeClassNameForStatus,
+} from "../work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
@@ -1740,7 +1744,7 @@ function RepositoryIssues({
                     </span>
                   )}
                 </span>
-                <span className="flex shrink-0 items-center gap-1.5 text-[0.65rem] font-bold tracking-wide text-slate-500 uppercase">
+                <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold tracking-wide text-slate-500 uppercase">
                   {closedChildren}/{children.length} closed
                   <svg
                     aria-hidden="true"
@@ -1879,12 +1883,12 @@ function RepositoryIssueRow({
         </span>
         <span className="flex shrink-0 items-center gap-1">
           {issue.state === "CLOSED" && (
-            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-500 uppercase">
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs font-bold tracking-wide text-slate-500 uppercase">
               Closed
             </span>
           )}
           {issue.blockedBy.length > 0 && (
-            <span className="rounded-full bg-amber-200/70 px-1.5 py-0.5 text-[0.6rem] font-bold tracking-wide text-amber-900 uppercase">
+            <span className="rounded-full bg-amber-200/70 px-1.5 py-0.5 text-xs font-bold tracking-wide text-amber-900 uppercase">
               Blocked
             </span>
           )}
@@ -2715,19 +2719,7 @@ function WorkItemLifecycleStatus({
   })
   const actionsPending = retry.isPending || reset.isPending
   const prNumber = workItem.githubPullRequestNumber
-  const statusBadgeClassName = `rounded-full px-2 py-0.5 text-xs font-bold tracking-wide uppercase ${
-    status === "FAILED" || status === "INTERRUPTED"
-      ? "bg-red-100 text-red-700"
-      : status === "COMPLETE" || status === "SUCCEEDED"
-        ? "bg-green-100 text-green-700"
-        : status === "ABANDONED" || status === "CANCELLED"
-          ? "bg-slate-200 text-slate-600"
-          : status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"
-            ? "bg-amber-100 text-amber-800"
-            : status === "WAITING_FOR_WORKER_SLOT"
-              ? "bg-violet-100 text-violet-800"
-              : "bg-blue-100 text-blue-700"
-  }`
+  const statusBadgeClassName = statusBadgeClassNameForStatus(status)
   const openPullRequestLabel =
     prNumber === null ? null : `Open pull request #${prNumber}`
   const isNoChangeComplete =
@@ -2776,8 +2768,7 @@ function WorkItemLifecycleStatus({
               openPullRequestLabel !== null &&
               lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
               lifecycleLabel.status === "NEEDS_HUMAN"
-            const chipClassName =
-              "rounded bg-white px-1.5 py-1 text-xs text-slate-600 ring-1 ring-slate-200"
+            const chipClassName = lifecycleStepChipClassName
             const duration = displayDurationMs !== null && (
               <span className="ml-1 text-slate-400">
                 {formatDuration(displayDurationMs)}

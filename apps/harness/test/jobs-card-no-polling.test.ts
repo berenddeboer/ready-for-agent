@@ -117,11 +117,16 @@ describe("JobsCard live updates", () => {
 
   test("styles paused Needs human review like amber human handoff, not green Succeeded", () => {
     const { source } = jobsCardSource()
-    expect(source).toContain('"NEEDS_HUMAN_REVIEW"')
-    expect(source).toContain(
+    const chrome = readFileSync(
+      join(import.meta.dir, "../src/work-item-progress-chrome.ts"),
+      "utf8",
+    )
+    expect(source).toContain("statusBadgeClassNameForStatus")
+    expect(chrome).toContain('"NEEDS_HUMAN_REVIEW"')
+    expect(chrome).toContain(
       'status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"',
     )
-    expect(source).toContain("bg-amber-100 text-amber-800")
+    expect(chrome).toContain("bg-amber-100 text-amber-800")
   })
 
   test("shows copyable session id and worktree path without Session prefix", () => {
