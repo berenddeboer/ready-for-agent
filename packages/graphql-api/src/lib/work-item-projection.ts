@@ -1,6 +1,7 @@
 import type { IssueRecord } from "@ready-for-agent/db-service"
 import {
   type OperationalLifecycleStep,
+  REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
   type StepRunRecord,
@@ -136,12 +137,15 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
       phase === finalPhase ? "needs_human" : stepRunDisplayStatus(stepRun)
     const reviewRunningPhase =
       phase === "review" && status === "running"
-        ? stepRun.reasonCode === STEP_RUN_REASON.reviewReviewing ||
-          stepRun.reasonMessage == null ||
-          stepRun.reasonMessage === "" ||
-          stepRun.reasonMessage === REVIEW_REVIEWING_MESSAGE
-          ? REVIEW_REVIEWING_MESSAGE
-          : stepRun.reasonMessage
+        ? stepRun.reasonCode === STEP_RUN_REASON.reviewApplyingFindings ||
+          stepRun.reasonMessage === REVIEW_APPLYING_FINDINGS_MESSAGE
+          ? REVIEW_APPLYING_FINDINGS_MESSAGE
+          : stepRun.reasonCode === STEP_RUN_REASON.reviewReviewing ||
+              stepRun.reasonMessage == null ||
+              stepRun.reasonMessage === "" ||
+              stepRun.reasonMessage === REVIEW_REVIEWING_MESSAGE
+            ? REVIEW_REVIEWING_MESSAGE
+            : stepRun.reasonMessage
         : null
     const outcome =
       reviewRunningPhase !== null

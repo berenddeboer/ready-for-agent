@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
+import { SqlClient } from "effect/unstable/sql"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbServiceLive } from "@ready-for-agent/db-service"
 import {
@@ -13,12 +14,16 @@ import {
 } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
+  CurrentStepRun,
+  REVIEW_APPLYING_FINDINGS_MESSAGE,
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
   ReviewResultError,
   ReviewSessionContextMissingError,
   ReviewWorktreeContextMissingError,
+  STEP_RUN_REASON,
   makeWorkItemId,
+  parseApplyReviewResult,
   parseReviewResult,
   review,
 } from "../src/index.js"
@@ -140,6 +145,47 @@ describe("parseReviewResult", () => {
   })
 })
 
+describe("parseApplyReviewResult", () => {
+  it("parses fixed, deferred, and apply-clean lines", () => {
+    expect(
+      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED"),
+    ).toEqual({ _tag: "fixed" })
+    expect(
+      parseApplyReviewResult(
+        "Left style notes.\nREADY_FOR_AGENT_RESULT: REVIEW_DEFERRED: stylistic only",
+      ),
+    ).toEqual({ _tag: "deferred", reason: "stylistic only" })
+    expect(
+      parseApplyReviewResult(
+        "Nothing actionable.\nREADY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+      ),
+    ).toEqual({ _tag: "clean" })
+  })
+
+  it("rejects missing, duplicate, blank deferred, or reviewing-only markers", () => {
+    expect(parseApplyReviewResult("no result line")).toBeNull()
+    expect(
+      parseApplyReviewResult(
+        [
+          "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+          "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+        ].join("\n"),
+      ),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED\ntrailing prose",
+      ),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED:"),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"),
+    ).toBeNull()
+  })
+})
+
 describe("review", () => {
   it("rejects missing worktree context", async () => {
     const error = await run(review(baseContext(null)).pipe(Effect.flip))
@@ -241,23 +287,209 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
     }))
 
-  it("returns has_findings for a unique final REVIEW_HAS_FINDINGS marker", () =>
+  it("applies findings with build model when reviewing reports HAS_FINDINGS", () =>
     withTemp(async (root) => {
+      const continues: Array<{
+        model: string
+        variant: string
+        prompt: string
+      }> = []
+
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            variant: "high",
+            reviewModel: "opencode/review-model",
+            reviewVariant: "max",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              model: input.model,
+              variant: input.variant,
+              prompt: input.prompt,
+            })
+            if (continues.length === 1) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "Deferred style notes.\nREADY_FOR_AGENT_RESULT: REVIEW_DEFERRED: naming nit only",
+            })
+          },
+        }),
+      )
+
+      expect(continues).toHaveLength(2)
+      expect(continues[0]!.model).toBe("opencode/review-model")
+      expect(continues[0]!.variant).toBe("max")
+      expect(continues[0]!.prompt).toContain("/review")
+      expect(continues[1]!.model).toBe("opencode/build-model")
+      expect(continues[1]!.variant).toBe("high")
+      expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
+      expect(continues[1]!.prompt).toContain("REVIEW_DEFERRED:")
+      expect(result).toEqual({
+        _tag: "deferred",
+        reason: "naming nit only",
+      })
+    }))
+
+  it("returns deferred from the apply path", () =>
+    withTemp(async (root) => {
+      let turn = 0
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () =>
-            Effect.succeed({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
-                "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
-            }),
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: out of scope",
+            })
+          },
         }),
       )
-      expect(result).toEqual({ _tag: "has_findings" })
+      expect(result).toEqual({ _tag: "deferred", reason: "out of scope" })
     }))
 
-  it("fails when READY_FOR_AGENT_RESULT is missing", () =>
+  it("returns apply-clean from the apply path", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+            })
+          },
+        }),
+      )
+      expect(result).toEqual({ _tag: "clean" })
+    }))
+
+  it("returns fixed from the apply path without treating it as clean", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                  : "Fixed the bug.\nREADY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+      expect(result).toEqual({ _tag: "fixed" })
+      expect(result).not.toEqual({ _tag: "clean" })
+    }))
+
+  it("marks Step Run phase as applying findings during the apply turn", () =>
+    withTemp(async (root) => {
+      const stepRunId = "srun-01JREVIEWAPPLY000000000001"
+      const workItemId = "wi-01JREVIEWAPPLY0000000000001"
+      const repositoryId = "repo-review-apply-phase"
+      let phaseDuringApply: {
+        reason_code: string | null
+        reason_message: string | null
+      } | null = null
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO repository (
+               id, github_owner, github_repo, local_path, is_bare, paused,
+               issues_reconciled_at, created_at, updated_at
+             ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+            [repositoryId, `/tmp/${repositoryId}`, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, model, variant,
+               review_model, review_variant, state, state_ready_at, worktree_path,
+               session_id, failure_code, failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'review', ?,
+               ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
+            [workItemId, repositoryId, now, root, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO step_run (
+               id, work_item_id, step, status, queue_job_id, queued_at,
+               started_at, finished_at, reason_code, reason_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 'review', 'running', NULL, ?, ?, NULL, NULL, NULL, ?, ?)`,
+            [stepRunId, workItemId, now, now, now, now],
+          )
+
+          let turn = 0
+          yield* review(baseContext(root, { repositoryId })).pipe(
+            Effect.provideService(CurrentStepRun, {
+              stepRunId,
+              repositoryId,
+            }),
+            Effect.provide(
+              stubOpencode({
+                continue: () =>
+                  Effect.gen(function* () {
+                    turn += 1
+                    if (turn === 2) {
+                      const rows = (yield* sql.unsafe(
+                        `SELECT reason_code, reason_message FROM step_run WHERE id = ?`,
+                        [stepRunId],
+                      )) as readonly {
+                        readonly reason_code: string | null
+                        readonly reason_message: string | null
+                      }[]
+                      phaseDuringApply = rows[0] ?? null
+                    }
+                    return {
+                      sessionId: "ses_implement_session",
+                      assistantText:
+                        turn === 1
+                          ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                          : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: later",
+                    }
+                  }),
+              }),
+            ),
+          )
+        }).pipe(
+          Effect.provide(DbServiceLive),
+          Effect.provide(DatabaseTest),
+          Effect.provide(PlatformLayer),
+        ),
+      )
+
+      expect(phaseDuringApply).toEqual({
+        reason_code: STEP_RUN_REASON.reviewApplyingFindings,
+        reason_message: REVIEW_APPLYING_FINDINGS_MESSAGE,
+      })
+    }))
+
+  it("fails when READY_FOR_AGENT_RESULT is missing on the reviewing pass", () =>
     withTemp(async (root) => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
@@ -270,6 +502,28 @@ describe("review", () => {
         }),
       )
       expect(error).toBeInstanceOf(ReviewResultError)
+    }))
+
+  it("fails when apply-path READY_FOR_AGENT_RESULT is missing or ambiguous", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                  : "I fixed things but forgot the marker",
+            })
+          },
+        }),
+      )
+      expect(error).toBeInstanceOf(ReviewResultError)
+      expect((error as ReviewResultError).message).toContain("REVIEW_FIXED")
     }))
 
   it("fails when READY_FOR_AGENT_RESULT lines are duplicated", () =>

@@ -61,7 +61,7 @@ import {
   PreCommitHookFailedError,
   PreCommitStageError,
 } from "./pre-commit-errors.js"
-import { ReviewHasFindingsPendingError } from "./review-errors.js"
+import { ReviewFixedPendingError } from "./review-errors.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
@@ -1242,12 +1242,18 @@ export const makeWorkItemLifecycleLive = (
                 if (result._tag === "clean") {
                   return Effect.succeed({})
                 }
-                // Hook for #391 apply-findings; do not treat as clean or advance.
+                if (result._tag === "deferred") {
+                  return Effect.succeed({
+                    stepRunReasonCode: STEP_RUN_REASON.reviewDeferred,
+                    stepRunNote: result.reason,
+                  })
+                }
+                // Hook for #392 fix round; do not treat FIXED as success-without-loop.
                 return Effect.fail(
-                  new ReviewHasFindingsPendingError({
+                  new ReviewFixedPendingError({
                     workItemId: context.workItemId,
                     message:
-                      "Review reported findings; apply-findings path is not implemented yet",
+                      "Review applied fixes; pre-commit re-review loop is not implemented yet",
                   }),
                 )
               }),

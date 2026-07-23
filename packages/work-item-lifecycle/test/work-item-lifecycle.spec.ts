@@ -2971,14 +2971,51 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("does not advance to Commit when Review reports has_findings", () => {
-      const stepsHasFindings: LifecycleStepsShape = {
+    it("advances to Commit when Review reports deferred findings", () => {
+      const stepsDeferredReview: LifecycleStepsShape = {
         ...successfulSteps,
-        review: () => Effect.succeed({ _tag: "has_findings" as const }),
+        review: () =>
+          Effect.succeed({
+            _tag: "deferred" as const,
+            reason: "style nits only",
+          }),
       }
 
       return runWithSteps(
-        stepsHasFindings,
+        stepsDeferredReview,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("commit")
+            const reviewRun = afterReview.workItem.stepRuns.find(
+              (run) => run.step === "review",
+            )
+            expect(reviewRun?.status).toBe("succeeded")
+            expect(reviewRun?.reasonCode).toBe(STEP_RUN_REASON.reviewDeferred)
+            expect(reviewRun?.reasonMessage).toBe("style nits only")
+          }
+        }),
+      )
+    })
+
+    it("does not advance to Commit when Review reports fixed", () => {
+      const stepsFixedReview: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () => Effect.succeed({ _tag: "fixed" as const }),
+      }
+
+      return runWithSteps(
+        stepsFixedReview,
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
@@ -2998,7 +3035,7 @@ describe("WorkItemLifecycle", () => {
             )
             expect(reviewRun?.status).toBe("failed")
             expect(reviewRun?.reasonMessage).toContain(
-              "apply-findings path is not implemented yet",
+              "pre-commit re-review loop is not implemented yet",
             )
           }
         }),
