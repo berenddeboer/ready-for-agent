@@ -188,15 +188,35 @@ The Lifecycle Step that runs the repository's git pre-commit hook on staged Work
 _Avoid_: Pre-push, CI gate, local lint only
 
 **Review**:
-The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes with the review model, then may apply accepted Review Findings with the build model in bounded Review Fix Rounds before Commit. Operator-visible phases stay under this one step: reviewing, applying findings, and pre-commit inside the loop. It is not a separate Commit or Implement step.
+The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes with the review model, then may apply accepted Review Findings with the build model in bounded Review Fix Rounds before Commit. Operator-visible phases stay under this one step: reviewing, applying findings, pre-commit, and assessing rerun inside the loop.
 _Avoid_: Code review PR check, Mark PR Ready for Review, advisory-only review
 
 **Review Finding**:
-A standards or specification issue reported by Review against the Work Item's changes. A build-model Agent Turn interprets each finding and may fix it, defer it, or treat the review as clean; deferred findings do not block Commit.
+A standards or specification issue reported by Review against the Work Item's changes. A build-model Agent Turn may fix or clear low- or medium-severity findings and may defer them; a high-severity finding must be fixed and re-reviewed or handed to a human.
 _Avoid_: Lint error, CI failure, comment thread
 
+**Review Severity**:
+The highest impact assigned to any Review Finding in one reviewing pass: low has no plausible runtime or contract impact, medium has bounded behavior or correctness impact, and high has security, data-loss, major-contract, or broad/systemic impact. A clean reviewing pass has no Review Severity; medium and high require another reviewing pass after fixes, while low is eligible for a Review Rerun Assessment.
+_Avoid_: Finding list, risk score, priority
+
+**Unresolved Review Severity**:
+The highest Review Severity still unresolved after a build-model pass interprets the findings. A deferred result records this aggregate as low or medium; an unresolved high-severity finding requires human attention.
+_Avoid_: Original severity, finding count, per-finding status
+
+**Review Rerun Assessment**:
+A narrow build-model Agent Turn after applied low-severity Review Findings and nested Pre-Commit that uses the shared Session's account of those changes to decide, with a short rationale, whether they require another reviewing pass. It may skip only direct, localized, semantics-preserving remediation; expanded scope, higher-risk change categories, or uncertainty require a rerun.
+_Avoid_: Re-review, self-review, diff check
+
+**Accepted Review Outcome**:
+A successful Review outcome in which a Review Rerun Assessment determines, with a recorded rationale, that applied findings do not require another reviewing pass. It advances to Commit without claiming that the changed remediation was reviewed clean and preserves any lower-severity findings deferred during the same remediation.
+_Avoid_: Clean review, skipped review, deferred finding
+
+**Cleared Review Outcome**:
+A successful Review outcome in which the build model rejects all low- or medium-severity Review Findings as invalid without changing the worktree. It advances to Commit with a recorded rationale; high-severity findings cannot be cleared this way.
+_Avoid_: Clean review, deferred finding, fixed finding
+
 **Review Fix Round**:
-One build-model pass that interprets Review Findings and may change the worktree, followed by Pre-Commit and another reviewing pass. A Review Step Run allows at most five rounds; exhausting the limit without a clean or deferred outcome is Needs Human.
+One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. A Review Step Run allows at most five rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human.
 _Avoid_: Implement redo, unbounded fix loop
 
 **Commit**:
