@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0033
+---
+
 # Session usage via live OpenCode SQLite
 
 The Jobs Completed dialog needs OpenCode session model, token totals (input, output, reasoning, cache read/write), cost, and timestamps. We expose that with a root GraphQL `session(id: String!)` query that live-reads OpenCode’s SQLite (`opencode db path` / XDG data dir), not a harness-side snapshot and not `opencode export`.
