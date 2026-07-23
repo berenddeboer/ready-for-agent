@@ -140,7 +140,7 @@ A standards or specification issue reported by Review against the Work Item's ch
 _Avoid_: Lint error, CI failure, comment thread
 
 **Review Fix Round**:
-One build-model pass that interprets Review Findings and may change the worktree, followed by Pre-Commit and another reviewing pass. A Review Step Run allows at most three rounds; exhausting the limit without a clean or deferred outcome is Needs Human.
+One build-model pass that interprets Review Findings and may change the worktree, followed by Pre-Commit and another reviewing pass. A Review Step Run allows at most five rounds; exhausting the limit without a clean or deferred outcome is Needs Human.
 _Avoid_: Implement redo, unbounded fix loop
 
 **Commit**:

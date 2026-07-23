@@ -42,6 +42,7 @@ import {
   ParentIssueError,
   PrStatusChecksUnresolvedError,
   PreCommitHookFailedError,
+  REVIEW_FIX_LIMIT_REASON,
   ResetCleanupError,
   RetryNotEligibleError,
   STEP_RUN_REASON,
@@ -3009,8 +3010,7 @@ describe("WorkItemLifecycle", () => {
     })
 
     it("enters Needs Human when Review exhausts fix rounds and releases the Worker Slot", () => {
-      const reason =
-        "Review fix limit reached (3); inspect the worktree or address remaining findings, then Retry."
+      const reason = REVIEW_FIX_LIMIT_REASON
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         review: () =>
@@ -3069,8 +3069,7 @@ describe("WorkItemLifecycle", () => {
     })
 
     it("retries Review fix-limit Needs Human at a fresh reviewing pass", () => {
-      const reason =
-        "Review fix limit reached (3); inspect the worktree or address remaining findings, then Retry."
+      const reason = REVIEW_FIX_LIMIT_REASON
       let reviewCalls = 0
       const steps: LifecycleStepsShape = {
         ...successfulSteps,

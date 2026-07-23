@@ -21,7 +21,7 @@ import {
 } from "./types.js"
 
 /** Max build-model apply rounds per Review Step Run before Needs Human. */
-export const MAX_REVIEW_FIX_ROUNDS = 3
+export const MAX_REVIEW_FIX_ROUNDS = 5
 
 /** Operator-visible reason when Review Fix Rounds are exhausted. */
 export const REVIEW_FIX_LIMIT_REASON = `Review fix limit reached (${MAX_REVIEW_FIX_ROUNDS}); inspect the worktree or address remaining findings, then Retry.`
