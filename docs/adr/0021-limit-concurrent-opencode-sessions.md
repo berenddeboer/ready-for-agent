@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0031
+---
+
 # Limit concurrent OpenCode sessions
 
 The harness Config setting `maxConcurrentOpencodeSessions` (default 2) caps how many concurrent OpenCode CLI processes lifecycle work may spawn. Enforcement is a shared Effect semaphore around lifecycle `Opencode.start` / `Opencode.continue` (not `listModels` or Issue Polling). Config is re-read on each acquire; lowering the limit does not interrupt in-flight processes.

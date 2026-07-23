@@ -17,11 +17,11 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional build model and variant (null falls back to harness defaults; if those are also unset the empty option is labeled as harness default not configured), optional review model and variant (null falls back to harness review settings, then the resolved build model/variant), Auto-merge, and Include all Issue Authors. Changing settings does not rewrite existing Work Items; build and review model/variant are captured when a Work Item is created. A repository build override alone is enough to create Work Items even when harness defaults are still unset.
+Per-Repository operator preferences: Paused, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, and Include all Issue Authors. An absent build model inherits the whole Harness build selection; an absent review model inherits the Harness review selection and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. Changing settings does not rewrite existing Work Items; resolved build and review selections are captured when a Work Item is created, while changing Agent Backend clears every Repository's model selections.
 _Avoid_: Project config, repo config file
 
 **Harness Config**:
-Harness-wide operator preferences stored as a single config row: optional default build model and build thinking level (variant), optional review model and review thinking level (null means same as build), and concurrency limits (default two OpenCode sessions and five concurrent Work Items). On a fresh empty database the build model and variant start null (unconfigured); there is no product-seeded free model. First-run UI opens Settings and shows a banner until a build model and thinking level are saved. Creating a Work Item fails with a structured error when neither a repository override nor harness defaults resolve a build model and variant.
+Harness-wide operator preferences stored as a single config row: the Agent Backend selected for the next Harness startup (OpenCode by default), optional default build Agent Model and Thinking Level, optional review Agent Model and Thinking Level (no review model means the build selection), and concurrency limits (default two concurrent Agent Turns and five concurrent Work Items). An Agent Backend change takes effect after restart, is rejected while any Work Item is unfinished, and clears every Harness and Repository Agent Model selection because model identities are backend-local. On a fresh empty database the build model starts null (unconfigured); there is no product-seeded free model. First-run UI opens Settings and shows a banner until a build model is saved. Creating a Work Item fails with a structured error when neither a Repository override nor Harness Config resolves a build Agent Model.
 _Avoid_: Default model seed, product default model
 
 **Auto-merge**:
@@ -68,12 +68,68 @@ The backend boundary for vault operations. It can determine whether a named secr
 _Avoid_: Secret store, credential cache
 
 **Keymaxxer Sidecar**:
-The long-lived loopback companion process that owns one Keymaxxer stdio keyholder and exposes the Keymaxxer MCP tools over Streamable HTTP so Harness and every OpenCode process share one vault session and Allow-session set without ambient secret values.
+The long-lived loopback companion process that owns one Keymaxxer stdio keyholder and exposes the Keymaxxer MCP tools over Streamable HTTP so the Harness and Keymaxxer-capable Agent Backends can share one vault session and Allow-session set without ambient secret values.
 _Avoid_: Credential daemon, token cache, development-only sidecar
 
+**Agent Backend**:
+A supported headless coding-agent CLI integration shipped with Ready for Agent that can execute Agent Turns for the Harness. Repositories and Work Items do not select an Agent Backend; arbitrary external backend plugins are not part of this boundary.
+_Avoid_: Agent (ambiguous), model, provider
+
+**Active Agent Backend**:
+The one Agent Backend loaded by a running Harness to execute Agent Turns. Each Work Item captures it as provenance, and Harness Config cannot select a different backend while any Work Item is unfinished.
+_Avoid_: Repository backend, Work Item backend selection
+
+**Grok Build**:
+The supported xAI coding Agent Backend selected in Harness Config with the stable ID `grok`. Distinct from a Grok Agent Model.
+_Avoid_: Grok (when referring to the backend), grok-build (as the config ID)
+
+**Agent Backend Unavailable**:
+A degraded Harness state established only by failed startup inspection or Recheck Agent Backend when the Active Agent Backend cannot execute Agent Turns or report its Agent Models. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available, but new Agent Turns and Work Item creation are blocked until a Recheck succeeds; runtime Agent Turn failures instead fail only their Step Run, and the Harness never silently falls back to another backend.
+_Avoid_: Startup failure, automatic fallback, Paused Repository
+
+**Agent Backend Restart Required**:
+A degraded Harness state after Harness Config selects an Agent Backend different from the Active Agent Backend. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available, but new Agent Turns and Work Item creation are blocked until restart activates the selection.
+_Avoid_: Hot backend switch, Agent Backend Unavailable
+
+**Recheck Agent Backend**:
+An explicit operator request that revalidates the Active Agent Backend and refreshes its Agent Model catalog. Success clears Agent Backend Unavailable and permits Agent Turns to resume; failure leaves the Harness degraded with an actionable reason.
+_Avoid_: Automatic health poll, model-cache refresh only, Harness restart
+
+**Agent Model**:
+A model in the Active Agent Backend's instance-wide catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific; every Work Item captures explicit build and review Agent Models.
+_Avoid_: Provider, Agent Backend, model profile
+
+**Thinking Level**:
+An optional, backend-defined effort setting for an Agent Model. An Agent Model may offer no Thinking Levels; `variant` is OpenCode's representation rather than the Harness term.
+_Avoid_: Variant, required reasoning effort
+
 **Session**:
-An opencode conversation identified by opencode’s session id, scoped to a working directory, and continued across one or more prompt runs.
+An Agent Backend-owned conversation identified to the Harness by its backend provenance and an opaque backend-local Session ID, scoped to a working directory, and continued across one or more Agent Turns and Harness restarts. Its identity is made durable while the first turn is still running; the Harness does not persist or reconstruct conversation history, and each turn may select a different Agent Model and Thinking Level without starting a new Session.
 _Avoid_: chat, thread, conversation (in formal docs)
+
+**Session Telemetry**:
+Optional Agent Backend-provided details about a Session, such as models, token totals, cost, and timestamps. An Agent Backend may support Agent Turns without exposing Session Telemetry; unsupported telemetry is distinct from a missing Session.
+_Avoid_: Agent Turn Result, required backend capability
+
+**Agent Turn**:
+One fully unattended headless Agent Backend CLI invocation within a Session using an explicit Agent Model and optional Thinking Level. An Agent Backend must support both the first turn and later turns that continue the same Session; file, shell, and tool permissions cannot wait for operator approval during the turn.
+_Avoid_: Agent run, prompt run, OpenCode process
+
+**Agent Turn Result**:
+The normalized successful output of an Agent Turn: its Session ID and ordered final assistant text, recovered from the Agent Backend's machine-readable output. Backend-specific events and terminal presentation are not part of the result.
+_Avoid_: CLI stdout, transcript, tool-event stream
+
+**Agent-free Lifecycle Step**:
+A Lifecycle Step guaranteed not to invoke an Agent Turn. A step that may need an Agent Turn conditionally is not Agent-free and does not start while the Agent Backend is Unavailable or an Agent Backend Restart is Required.
+_Avoid_: Step that usually avoids the agent, non-OpenCode step
+
+**Agent Command**:
+A slash command invoked verbatim by a Lifecycle Step and expected to have common semantics across Agent Backends. `/review` is the only required Agent Command; its availability is not checked by Recheck Agent Backend, so a missing command fails the Review Step Run when invoked.
+_Avoid_: Backend-specific prompt template, readiness capability
+
+**Agent GitHub Access**:
+Authentication available to GitHub commands invoked during Agent Turns. A backend may integrate the Keymaxxer named-secret tools, but need not; otherwise it uses authenticated ambient `gh` access, and the Harness never copies raw GitHub tokens into the Agent Turn environment.
+_Avoid_: Required Keymaxxer support, injected GitHub token
 
 **Ready-labeled Issue**:
 An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, GitHub state, and Issue Author (login when GitHub provides one) so consumers can decide whether it is actionable.
@@ -112,11 +168,11 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for Implement, Review Fix Rounds, Commit, and related steps; the review model is used only for reviewing passes inside Review (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the active Agent Backend as provenance and the resolved build and review Agent Model selections at creation. The build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement**:
-The Lifecycle Step that asks OpenCode to complete the Issue's objective. Completion may change repository files, produce findings, create or update GitHub artifacts, or perform other work required by the Issue; repository changes are not required.
+The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective. Completion may change repository files, produce findings, create or update GitHub artifacts, or perform other work required by the Issue; repository changes are not required.
 _Avoid_: Edit code, generate code
 
 **No-Change Outcome**:
@@ -124,11 +180,11 @@ A successful Work Item outcome that leaves no repository changes to commit becau
 _Avoid_: No-code outcome, empty change, no-op
 
 **Assess Changes**:
-The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run. Observable repository changes advance directly to Pre-Commit without consulting OpenCode. When the worktree appears unchanged, Assess Changes asks the Work Item's Implement Session to confirm that the absence of changes is intentional and provide a concise completion summary. A confirmed No-Change Outcome skips Pre-Commit and Review and follows the lifecycle's no-change branch. Assess Changes does not review the work.
+The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run. Observable repository changes advance directly to Pre-Commit without an Agent Turn. When the worktree appears unchanged, Assess Changes asks the Work Item's Session to confirm that the absence of changes is intentional and provide a concise completion summary. A confirmed No-Change Outcome skips Pre-Commit and Review and follows the lifecycle's no-change branch. Assess Changes does not review the work.
 _Avoid_: Review changes, empty-commit check
 
 **Pre-Commit**:
-The Lifecycle Step that runs the repository's git pre-commit hook on staged Work Item changes before Review, with an OpenCode fix loop on hook failure. It may also run again inside Review after a Review Fix Round changes the worktree.
+The Lifecycle Step that runs the repository's git pre-commit hook on staged Work Item changes before Review, with an Agent Turn fix loop on hook failure. It may also run again inside Review after a Review Fix Round changes the worktree.
 _Avoid_: Pre-push, CI gate, local lint only
 
 **Review**:
@@ -136,7 +192,7 @@ The Lifecycle Step after Pre-Commit that critiques the Work Item's repository ch
 _Avoid_: Code review PR check, Mark PR Ready for Review, advisory-only review
 
 **Review Finding**:
-A standards or specification issue reported by Review against the Work Item's changes. OpenCode interprets each finding and may fix it, defer it, or treat the review as clean; deferred findings do not block Commit.
+A standards or specification issue reported by Review against the Work Item's changes. A build-model Agent Turn interprets each finding and may fix it, defer it, or treat the review as clean; deferred findings do not block Commit.
 _Avoid_: Lint error, CI failure, comment thread
 
 **Review Fix Round**:
@@ -152,7 +208,7 @@ The Lifecycle Step that publishes the No-Change Outcome's completion summary on 
 _Avoid_: Complete Work Item, local cleanup
 
 **Worker Slot**:
-One unit of harness capacity reserved by an Admitted Work Item. Only Admitted Work Items occupy a Worker Slot; Work Items waiting for a Worker Slot do not. The number of occupied Worker Slots is bounded by a harness-wide maximum concurrent Work Items Config setting (default five, positive integer), re-read on each admission decision. Raising the bound admits waiters immediately up to the new limit; lowering it does not demote already-Admitted Work Items, but blocks new admissions until occupancy is at or below the new bound. Distinct from the OpenCode session limit and from job-worker fiber budget.
+One unit of harness capacity reserved by an Admitted Work Item. Only Admitted Work Items occupy a Worker Slot; Work Items waiting for a Worker Slot do not. The number of occupied Worker Slots is bounded by a harness-wide maximum concurrent Work Items Config setting (default five, positive integer), re-read on each admission decision. Raising the bound admits waiters immediately up to the new limit; lowering it does not demote already-Admitted Work Items, but blocks new admissions until occupancy is at or below the new bound. Distinct from the concurrent Agent Turn limit and from job-worker fiber budget.
 _Avoid_: OpenCode session limit, fiber budget, queue concurrency, concurrent Step Runs
 
 **Admitted Work Item**:
@@ -164,7 +220,7 @@ The state of an unfinished, non-paused Work Item that has not yet been Admitted 
 _Avoid_: Queued Step Run, paused, Not Implemented
 
 **Implement Now**:
-An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked when no build model and variant can be resolved from repository override or harness defaults (`Select a default build model first`).
+An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Agent Backend is Unavailable, an Agent Backend Restart is Required, or no build Agent Model can be resolved from Repository settings or Harness Config (`Select a default build model first`).
 _Avoid_: Auto-implement, enqueue Issue
 
 **Implement Locally**:
