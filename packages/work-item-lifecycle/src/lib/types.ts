@@ -128,6 +128,9 @@ export const REVIEW_REVIEWING_MESSAGE = "reviewing"
 /** Operator-visible Review phase while apply-findings OpenCode pass runs. */
 export const REVIEW_APPLYING_FINDINGS_MESSAGE = "applying findings"
 
+/** Operator-visible Review phase while nested Pre-Commit runs after FIXED. */
+export const REVIEW_PRE_COMMIT_MESSAGE = "pre-commit"
+
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
 export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
@@ -259,6 +262,8 @@ export const STEP_RUN_REASON = {
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */
   reviewApplyingFindings: "review_applying_findings",
+  /** Mid-run: Review is re-running Pre-Commit after FIXED before re-review. */
+  reviewPreCommit: "review_pre_commit",
   /** Successful Review that deferred findings and advanced to Commit. */
   reviewDeferred: "review_deferred",
   /** Successful Merge PR run that returned to Watch for fresh validation. */

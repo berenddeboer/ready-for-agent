@@ -3008,40 +3008,6 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("does not advance to Commit when Review reports fixed", () => {
-      const stepsFixedReview: LifecycleStepsShape = {
-        ...successfulSteps,
-        review: () => Effect.succeed({ _tag: "fixed" as const }),
-      }
-
-      return runWithSteps(
-        stepsFixedReview,
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          yield* claimAndRunPending
-          const afterReview = yield* claimAndRunPending
-
-          expect(afterReview._tag).toBe("processed")
-          if (afterReview._tag === "processed") {
-            expect(afterReview.workItem.state).toBe("review")
-            const reviewRun = afterReview.workItem.stepRuns.find(
-              (run) => run.step === "review",
-            )
-            expect(reviewRun?.status).toBe("failed")
-            expect(reviewRun?.reasonMessage).toContain(
-              "pre-commit re-review loop is not implemented yet",
-            )
-          }
-        }),
-      )
-    })
-
     it("persists complete pre-commit hook output on failure", () => {
       const output = `format failed: ${"x".repeat(9_000)}`
       const steps: LifecycleStepsShape = {
