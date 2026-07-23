@@ -4342,6 +4342,7 @@ describe("WorkItemLifecycle", () => {
         review: () =>
           Effect.succeed({
             _tag: "deferred" as const,
+            severity: "low" as const,
             reason: "style nits only",
           }),
       }
@@ -4367,8 +4368,89 @@ describe("WorkItemLifecycle", () => {
             )
             expect(reviewRun?.status).toBe("succeeded")
             expect(reviewRun?.reasonCode).toBe(STEP_RUN_REASON.reviewDeferred)
-            expect(reviewRun?.reasonMessage).toBe("style nits only")
+            expect(reviewRun?.reasonMessage).toBe("low: style nits only")
           }
+        }),
+      )
+    })
+
+    it("advances to Commit when Review reports cleared findings", () => {
+      const stepsClearedReview: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () =>
+          Effect.succeed({
+            _tag: "cleared" as const,
+            reason: "false positive on import order",
+          }),
+      }
+
+      return runWithSteps(
+        stepsClearedReview,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("commit")
+            const reviewRun = afterReview.workItem.stepRuns.find(
+              (run) => run.step === "review",
+            )
+            expect(reviewRun?.status).toBe("succeeded")
+            expect(reviewRun?.reasonCode).toBe(STEP_RUN_REASON.reviewCleared)
+            expect(reviewRun?.reasonMessage).toBe(
+              "false positive on import order",
+            )
+          }
+        }),
+      )
+    })
+
+    it("enters Needs Human when Review reports unresolved high and releases the Worker Slot", () => {
+      const reason = "auth bypass remains open"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () =>
+          Effect.succeed({
+            _tag: "needs_human" as const,
+            reason,
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("needs_human")
+            expect(afterReview.workItem.failureCode).toBe("needs_human")
+            expect(afterReview.workItem.failureMessage).toBe(reason)
+            expect(afterReview.workItem.holdsWorkerSlot).toBe(false)
+          }
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          expect(final.holdsWorkerSlot).toBe(false)
         }),
       )
     })

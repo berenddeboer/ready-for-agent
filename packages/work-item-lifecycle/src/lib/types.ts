@@ -272,6 +272,8 @@ export const STEP_RUN_REASON = {
   reviewPreCommit: "review_pre_commit",
   /** Successful Review that deferred findings and advanced to Commit. */
   reviewDeferred: "review_deferred",
+  /** Successful Review that cleared low/medium findings without changes. */
+  reviewCleared: "review_cleared",
   /** Successful Merge PR run that returned to Watch for fresh validation. */
   mergeRevalidation: "merge_revalidation",
 } as const
