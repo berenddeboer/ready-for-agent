@@ -3,7 +3,7 @@ import { WorkItemOutcomePresentation } from "../src/work-item-outcome-presentati
 import { describe, expect, test } from "bun:test"
 
 const statusBadgeClassName =
-  "rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase bg-green-100 text-green-700"
+  "rounded-full px-2 py-0.5 text-xs font-bold tracking-wide uppercase bg-green-100 text-green-700"
 
 describe("WorkItemOutcomePresentation", () => {
   test("renders no-change completion message, Issue link, and summary", () => {
