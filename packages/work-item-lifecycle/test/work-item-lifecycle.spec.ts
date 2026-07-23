@@ -216,6 +216,18 @@ describe("WorkItemLifecycle", () => {
     return { repository, issue }
   })
 
+  /** Drop Create PR draft provenance so already-ready stubs use Last PR Change. */
+  const forgetCreatePrDraftProvenance = (workItemId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(
+        `UPDATE work_item
+         SET check_start_last_observed_is_draft = NULL
+         WHERE id = ?`,
+        [workItemId],
+      )
+    })
+
   describe("implementNow", () => {
     it("creates a Work Item at Create Worktree for an actionable Issue on a paused Repository", () =>
       runTest(
@@ -808,7 +820,11 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 13; i++) {
+          for (let i = 0; i < 8; i++) {
+            yield* claimAndRun
+          }
+          yield* forgetCreatePrDraftProvenance(complete.id)
+          for (let i = 0; i < 4; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -869,7 +885,20 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 13; i++) {
+          for (let i = 0; i < 8; i++) {
+            const sql = yield* SqlClient.SqlClient
+            yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+            const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+            expect(Option.isSome(job)).toBe(true)
+            if (Option.isNone(job)) {
+              return yield* Effect.die("expected job")
+            }
+            yield* lifecycle.runStep(
+              (job.value.payload as { stepRunId: string }).stepRunId,
+            )
+          }
+          yield* forgetCreatePrDraftProvenance(first.id)
+          for (let i = 0; i < 4; i++) {
             const sql = yield* SqlClient.SqlClient
             yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -1106,6 +1135,16 @@ describe("WorkItemLifecycle", () => {
       yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
     })
 
+    /** Run steps through Create PR, then clear draft provenance for already-ready snapshots. */
+    const driveThroughCreatePrAlreadyReady = (workItemId: string) =>
+      Effect.gen(function* () {
+        for (let index = 0; index < 8; index += 1) {
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+        }
+        yield* forgetCreatePrDraftProvenance(workItemId)
+      })
+
     it("drives the complete happy path to Complete with typed outputs", () =>
       runTest(
         Effect.gen(function* () {
@@ -1208,17 +1247,13 @@ describe("WorkItemLifecycle", () => {
               },
             ])
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
 
+          // Already-ready settled PR past its Check-Start Deadline advances to Decide.
           const afterChecks = yield* claimAndRunPending
           expect(afterChecks._tag).toBe("processed")
           if (afterChecks._tag === "processed") {
-            expect(afterChecks.workItem.state).toBe("mark_pr_ready_for_review")
-          }
-
-          const afterReady = yield* claimAndRunPending
-          expect(afterReady._tag).toBe("processed")
-          if (afterReady._tag === "processed") {
-            expect(afterReady.workItem.state).toBe("decide_pr_merge")
+            expect(afterChecks.workItem.state).toBe("decide_pr_merge")
           }
 
           const afterDecide = yield* claimAndRunPending
@@ -1261,7 +1296,6 @@ describe("WorkItemLifecycle", () => {
               ["commit", "succeeded"],
               ["create_pr", "succeeded"],
               ["watch_pr_status_checks", "succeeded"],
-              ["mark_pr_ready_for_review", "succeeded"],
               ["decide_pr_merge", "succeeded"],
               ["merge_pr", "succeeded"],
               ["local_cleanup", "succeeded"],
@@ -1274,7 +1308,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(13)
+          expect(final.stepRuns).toHaveLength(12)
         }),
       ))
 
@@ -1340,7 +1374,9 @@ describe("WorkItemLifecycle", () => {
             ],
           )
 
-          for (let index = 0; index < 11; index += 1) {
+          // create…create_pr (8) + watch→decide + decide→merge = 10 runs to merge_pr.
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 2; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1412,7 +1448,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 3; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1451,7 +1488,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 3; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1498,7 +1536,8 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          for (let index = 0; index < 12; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 3; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1565,6 +1604,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               // First Watch poll lands at 1_008_000 after eight 1s steps + 1s.
               yield* TestClock.setTime(anchorInstant)
@@ -1615,15 +1655,13 @@ describe("WorkItemLifecycle", () => {
                 finalDelay[0]!.available_at - finalDelay[0]!.created_at,
               ).toBe(1)
 
-              // At exactly 90_000 ms after the anchor, no_checks may advance.
+              // At exactly 90_000 ms after the anchor, settled ready may Decide.
               yield* TestClock.setTime(anchorInstant + CHECK_START_DEADLINE_MS)
               yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
               const afterDeadline = yield* claimAndRunPending
               expect(afterDeadline._tag).toBe("processed")
               if (afterDeadline._tag === "processed") {
-                expect(afterDeadline.workItem.state).toBe(
-                  "mark_pr_ready_for_review",
-                )
+                expect(afterDeadline.workItem.state).toBe("decide_pr_merge")
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -1665,6 +1703,7 @@ describe("WorkItemLifecycle", () => {
                   yield* TestClock.adjust(1_000)
                   yield* claimAndRunPending
                 }
+                yield* forgetCreatePrDraftProvenance(created.id)
 
                 yield* TestClock.adjust(1_000)
                 const first = yield* claimAndRunPending
@@ -1761,9 +1800,7 @@ describe("WorkItemLifecycle", () => {
                 )
                 expect(advanced._tag).toBe("processed")
                 if (advanced._tag === "processed") {
-                  expect(advanced.workItem.state).toBe(
-                    "mark_pr_ready_for_review",
-                  )
+                  expect(advanced.workItem.state).toBe("decide_pr_merge")
                 }
               }),
               makeRestartTestLayer(steps, dbPath),
@@ -1806,6 +1843,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               // Simulate migration backfill: unfinished Work Item already has a
               // conservative anchor with no bound head SHA.
@@ -1859,7 +1897,7 @@ describe("WorkItemLifecycle", () => {
               const advanced = yield* claimAndRunPending
               expect(advanced._tag).toBe("processed")
               if (advanced._tag === "processed") {
-                expect(advanced.workItem.state).toBe("mark_pr_ready_for_review")
+                expect(advanced.workItem.state).toBe("decide_pr_merge")
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -1898,6 +1936,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               yield* TestClock.adjust(1_000)
               const early = yield* claimAndRunPending
@@ -1927,7 +1966,7 @@ describe("WorkItemLifecycle", () => {
               const ready = yield* claimAndRunPending
               expect(ready._tag).toBe("processed")
               if (ready._tag === "processed") {
-                expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+                expect(ready.workItem.state).toBe("decide_pr_merge")
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -1968,6 +2007,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               yield* TestClock.setTime(harnessNow + 8_000)
               yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
@@ -1999,7 +2039,7 @@ describe("WorkItemLifecycle", () => {
               const ready = yield* claimAndRunPending
               expect(ready._tag).toBe("processed")
               if (ready._tag === "processed") {
-                expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+                expect(ready.workItem.state).toBe("decide_pr_merge")
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -2049,6 +2089,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               yield* TestClock.adjust(1_000)
               const first = yield* claimAndRunPending
@@ -2171,6 +2212,51 @@ describe("WorkItemLifecycle", () => {
               yield* TestClock.setTime(1_000_000)
               const lifecycle = yield* WorkItemLifecycle
               const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* forgetCreatePrDraftProvenance(created.id)
+
+              yield* TestClock.adjust(1_000)
+              const afterDeadline = yield* claimAndRunPending
+              expect(afterDeadline._tag).toBe("processed")
+              if (afterDeadline._tag === "processed") {
+                expect(afterDeadline.workItem.state).toBe("decide_pr_merge")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("advances a settled draft to Mark PR Ready without waiting for the Check-Start Deadline", () => {
+      const anchorInstant = 1_008_000
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(anchorInstant),
+            headSha: "draft-head",
+            headPushedAt: new Date(anchorInstant),
+            isDraft: true,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
               yield* lifecycle.implementNow(
                 repository.id,
                 issue.githubIssueNumber,
@@ -2181,13 +2267,651 @@ describe("WorkItemLifecycle", () => {
                 yield* claimAndRunPending
               }
 
+              // Still well before the 90s deadline for this head.
+              yield* TestClock.setTime(anchorInstant + 1_000)
+              const afterWatch = yield* claimAndRunPending
+              expect(afterWatch._tag).toBe("processed")
+              if (afterWatch._tag === "processed") {
+                expect(afterWatch.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("returns Mark PR Ready to Watch with a fresh ready-phase anchor and only then Decides after 90s", () => {
+      let prIsDraft = true
+      let markReadyCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(0),
+            headSha: "ready-phase-head",
+            headPushedAt: new Date(0),
+            isDraft: prIsDraft,
+          }),
+        markPrReadyForReview: () => {
+          markReadyCalls += 1
+          prIsDraft = false
+          return Effect.void
+        },
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
               yield* TestClock.adjust(1_000)
+              const afterDraftWatch = yield* claimAndRunPending
+              expect(afterDraftWatch._tag).toBe("processed")
+              if (afterDraftWatch._tag === "processed") {
+                expect(afterDraftWatch.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+
+              const markReadyAt = 2_000_000
+              yield* TestClock.setTime(markReadyAt)
+              const afterMarkReady = yield* claimAndRunPending
+              expect(afterMarkReady._tag).toBe("processed")
+              if (afterMarkReady._tag === "processed") {
+                expect(afterMarkReady.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+              expect(markReadyCalls).toBe(1)
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_last_observed_is_draft
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_last_observed_is_draft: number | null
+              }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(markReadyAt)
+              expect(anchors[0]?.check_start_last_observed_is_draft).toBe(0)
+
+              // Ready phase cannot Decide before the fresh 90s window.
+              yield* TestClock.setTime(markReadyAt + 89_999)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const stillWatching = yield* claimAndRunPending
+              expect(stillWatching._tag).toBe("processed")
+              if (stillWatching._tag === "processed") {
+                expect(stillWatching.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              yield* TestClock.setTime(markReadyAt + CHECK_START_DEADLINE_MS)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const afterReadyWindow = yield* claimAndRunPending
+              expect(afterReadyWindow._tag).toBe("processed")
+              if (afterReadyWindow._tag === "processed") {
+                expect(afterReadyWindow.workItem.state).toBe("decide_pr_merge")
+              }
+              expect(markReadyCalls).toBe(1)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("creates a durable ready-phase anchor on first external draft-to-ready observation", async () => {
+      const root = await mkdtemp(join(tmpdir(), "rfa-draft-ready-restart-"))
+      const dbPath = join(root, "restart.db")
+      try {
+        const established = await Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const sql = yield* SqlClient.SqlClient
+                const { repository, issue } = yield* seedActionableIssue
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.githubIssueNumber,
+                )
+
+                for (let index = 0; index < 8; index += 1) {
+                  yield* TestClock.adjust(1_000)
+                  yield* claimAndRunPending
+                }
+
+                // Pending draft records draft observation without Mark Ready.
+                yield* TestClock.setTime(1_008_000)
+                const draftPoll = yield* claimAndRunPending
+                expect(draftPoll._tag).toBe("processed")
+                if (draftPoll._tag === "processed") {
+                  expect(draftPoll.workItem.state).toBe(
+                    "watch_pr_status_checks",
+                  )
+                }
+
+                const persisted = (yield* sql.unsafe(
+                  `SELECT check_start_last_observed_is_draft
+                   FROM work_item WHERE id = ?`,
+                  [created.id],
+                )) as readonly {
+                  readonly check_start_last_observed_is_draft: number | null
+                }[]
+                expect(persisted[0]?.check_start_last_observed_is_draft).toBe(1)
+                return { workItemId: created.id }
+              }),
+              makeRestartTestLayer(
+                {
+                  ...successfulSteps,
+                  watchPrStatusChecks: () =>
+                    Effect.succeed({
+                      _tag: "pending" as const,
+                      createdAt: new Date(1_000_000),
+                      headSha: "external-ready-head",
+                      headPushedAt: new Date(1_000_000),
+                      isDraft: true,
+                    }),
+                },
+                dbPath,
+              ),
+            ),
+          ),
+        )
+
+        const readyObservedAt = 1_050_000
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const sql = yield* SqlClient.SqlClient
+                const queue = yield* QueueService
+
+                const before = (yield* sql.unsafe(
+                  `SELECT check_start_last_observed_is_draft
+                   FROM work_item WHERE id = ?`,
+                  [established.workItemId],
+                )) as readonly {
+                  readonly check_start_last_observed_is_draft: number | null
+                }[]
+                expect(before[0]?.check_start_last_observed_is_draft).toBe(1)
+
+                yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+                const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+                expect(Option.isSome(claimed)).toBe(true)
+                if (Option.isNone(claimed)) {
+                  return yield* Effect.die("expected queued watch")
+                }
+                yield* TestClock.setTime(readyObservedAt)
+                const afterReady = yield* lifecycle.runStep(
+                  (claimed.value.payload as { stepRunId: string }).stepRunId,
+                )
+                expect(afterReady._tag).toBe("processed")
+                if (afterReady._tag === "processed") {
+                  expect(afterReady.workItem.state).toBe(
+                    "watch_pr_status_checks",
+                  )
+                }
+
+                const after = (yield* sql.unsafe(
+                  `SELECT check_start_last_observed_is_draft, check_start_anchor_at
+                   FROM work_item WHERE id = ?`,
+                  [established.workItemId],
+                )) as readonly {
+                  readonly check_start_last_observed_is_draft: number | null
+                  readonly check_start_anchor_at: number | null
+                }[]
+                expect(after[0]?.check_start_last_observed_is_draft).toBe(0)
+                expect(after[0]?.check_start_anchor_at).toBe(readyObservedAt)
+
+                yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+                const claimed2 = yield* queue.rawClaim(
+                  WORK_ITEM_LIFECYCLE_QUEUE,
+                )
+                expect(Option.isSome(claimed2)).toBe(true)
+                if (Option.isNone(claimed2)) {
+                  return yield* Effect.die("expected queued watch")
+                }
+                yield* TestClock.setTime(
+                  readyObservedAt + CHECK_START_DEADLINE_MS - 1,
+                )
+                const stillWaiting = yield* lifecycle.runStep(
+                  (claimed2.value.payload as { stepRunId: string }).stepRunId,
+                )
+                expect(stillWaiting._tag).toBe("processed")
+                if (stillWaiting._tag === "processed") {
+                  expect(stillWaiting.workItem.state).toBe(
+                    "watch_pr_status_checks",
+                  )
+                }
+
+                yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+                const claimed3 = yield* queue.rawClaim(
+                  WORK_ITEM_LIFECYCLE_QUEUE,
+                )
+                expect(Option.isSome(claimed3)).toBe(true)
+                if (Option.isNone(claimed3)) {
+                  return yield* Effect.die("expected queued watch")
+                }
+                yield* TestClock.setTime(
+                  readyObservedAt + CHECK_START_DEADLINE_MS,
+                )
+                const decided = yield* lifecycle.runStep(
+                  (claimed3.value.payload as { stepRunId: string }).stepRunId,
+                )
+                expect(decided._tag).toBe("processed")
+                if (decided._tag === "processed") {
+                  expect(decided.workItem.state).toBe("decide_pr_merge")
+                }
+              }),
+              makeRestartTestLayer(
+                {
+                  ...successfulSteps,
+                  watchPrStatusChecks: () =>
+                    Effect.succeed({
+                      _tag: "succeeded" as const,
+                      createdAt: new Date(1_000_000),
+                      headSha: "external-ready-head",
+                      headPushedAt: new Date(1_000_000),
+                      isDraft: false,
+                    }),
+                  markPrReadyForReview: () =>
+                    Effect.die("Mark PR Ready must not run for external ready"),
+                },
+                dbPath,
+              ),
+            ),
+          ),
+        )
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+
+    it("keeps draft pending, conflict, and handoff priority ahead of Mark PR Ready", () => {
+      const runDraftPriority = (
+        status: {
+          readonly _tag: "pending" | "conflict" | "handoff_needed"
+          readonly retiredCheckIds?: readonly string[]
+          readonly createdAt: Date
+          readonly headSha: string
+          readonly headPushedAt: Date
+          readonly isDraft: true
+        },
+        expectedNext:
+          | "watch_pr_status_checks"
+          | "resolve_pr_merge_conflict"
+          | "investigate_pr_status_checks",
+      ) => {
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          watchPrStatusChecks: () =>
+            Effect.succeed(
+              status._tag === "conflict"
+                ? {
+                    _tag: "conflict" as const,
+                    retiredCheckIds: status.retiredCheckIds ?? [],
+                    createdAt: status.createdAt,
+                    headSha: status.headSha,
+                    headPushedAt: status.headPushedAt,
+                    isDraft: true,
+                  }
+                : status,
+            ),
+        }
+        return Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(1_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.githubIssueNumber,
+                )
+
+                for (let index = 0; index < 8; index += 1) {
+                  yield* TestClock.adjust(1_000)
+                  yield* claimAndRunPending
+                }
+
+                yield* TestClock.adjust(1_000)
+                const afterWatch = yield* claimAndRunPending
+                expect(afterWatch._tag).toBe("processed")
+                if (afterWatch._tag === "processed") {
+                  expect(afterWatch.workItem.state).toBe(expectedNext)
+                }
+              }),
+              makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+            ),
+          ),
+        )
+      }
+
+      return runDraftPriority(
+        {
+          _tag: "pending",
+          createdAt: new Date(0),
+          headSha: "draft-pending",
+          headPushedAt: new Date(0),
+          isDraft: true,
+        },
+        "watch_pr_status_checks",
+      )
+        .then(() =>
+          runDraftPriority(
+            {
+              _tag: "conflict",
+              retiredCheckIds: [],
+              createdAt: new Date(0),
+              headSha: "draft-conflict",
+              headPushedAt: new Date(0),
+              isDraft: true,
+            },
+            "resolve_pr_merge_conflict",
+          ),
+        )
+        .then(() =>
+          runDraftPriority(
+            {
+              _tag: "handoff_needed",
+              createdAt: new Date(0),
+              headSha: "draft-handoff",
+              headPushedAt: new Date(0),
+              isDraft: true,
+            },
+            "investigate_pr_status_checks",
+          ),
+        )
+    })
+
+    it("advances a draft failed aggregate with no unhandled terminals to Mark PR Ready", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "failed" as const,
+            createdAt: new Date(1_008_000),
+            headSha: "draft-failed-head",
+            headPushedAt: new Date(1_008_000),
+            isDraft: true,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.setTime(1_009_000)
+              const afterWatch = yield* claimAndRunPending
+              expect(afterWatch._tag).toBe("processed")
+              if (afterWatch._tag === "processed") {
+                expect(afterWatch.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("anchors first Watch of an externally-ready PR after Create PR draft provenance", () => {
+      const readyObservedAt = 1_050_000
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            // Old Last PR Change would already be past the deadline.
+            createdAt: new Date(0),
+            headSha: "external-before-watch",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        markPrReadyForReview: () =>
+          Effect.die("Mark PR Ready must not run when already ready"),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              const afterCreatePr = (yield* sql.unsafe(
+                `SELECT check_start_last_observed_is_draft
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_last_observed_is_draft: number | null
+              }[]
+              expect(afterCreatePr[0]?.check_start_last_observed_is_draft).toBe(
+                1,
+              )
+
+              yield* TestClock.setTime(readyObservedAt)
+              const firstWatch = yield* claimAndRunPending
+              expect(firstWatch._tag).toBe("processed")
+              if (firstWatch._tag === "processed") {
+                // Fresh ready-phase anchor blocks Decide despite old Last PR Change.
+                expect(firstWatch.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_last_observed_is_draft
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_last_observed_is_draft: number | null
+              }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(readyObservedAt)
+              expect(anchors[0]?.check_start_last_observed_is_draft).toBe(0)
+
+              yield* TestClock.setTime(
+                readyObservedAt + CHECK_START_DEADLINE_MS,
+              )
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
               const afterDeadline = yield* claimAndRunPending
               expect(afterDeadline._tag).toBe("processed")
               if (afterDeadline._tag === "processed") {
-                expect(afterDeadline.workItem.state).toBe(
+                expect(afterDeadline.workItem.state).toBe("decide_pr_merge")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("keeps a ready-phase anchor when Mark PR Ready is already-ready idempotent", () => {
+      let markReadyCalls = 0
+      let prIsDraft: boolean | null = true
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(0),
+            headSha: "already-ready-head",
+            headPushedAt: new Date(0),
+            isDraft: prIsDraft,
+          }),
+        // GitHub no-op path: step succeeds; subsequent snapshots report ready.
+        markPrReadyForReview: () => {
+          markReadyCalls += 1
+          prIsDraft = false
+          return Effect.void
+        },
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* TestClock.adjust(1_000)
+              const afterDraftWatch = yield* claimAndRunPending
+              expect(afterDraftWatch._tag).toBe("processed")
+              if (afterDraftWatch._tag === "processed") {
+                expect(afterDraftWatch.workItem.state).toBe(
                   "mark_pr_ready_for_review",
                 )
+              }
+
+              const markReadyAt = 2_500_000
+              yield* TestClock.setTime(markReadyAt)
+              const afterMark = yield* claimAndRunPending
+              expect(afterMark._tag).toBe("processed")
+              if (afterMark._tag === "processed") {
+                expect(afterMark.workItem.state).toBe("watch_pr_status_checks")
+              }
+              expect(markReadyCalls).toBe(1)
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_anchor_head_sha,
+                        check_start_last_observed_is_draft
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_anchor_head_sha: string | null
+                readonly check_start_last_observed_is_draft: number | null
+              }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(markReadyAt)
+              expect(anchors[0]?.check_start_anchor_head_sha).toBeNull()
+              expect(anchors[0]?.check_start_last_observed_is_draft).toBe(0)
+
+              // Next ready snapshot must not re-enter Mark or rewind the anchor.
+              yield* TestClock.setTime(markReadyAt + 1_000)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const afterReadyWatch = yield* claimAndRunPending
+              expect(afterReadyWatch._tag).toBe("processed")
+              if (afterReadyWatch._tag === "processed") {
+                expect(afterReadyWatch.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+              expect(markReadyCalls).toBe(1)
+
+              const afterReadyAnchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly { readonly check_start_anchor_at: number | null }[]
+              expect(afterReadyAnchors[0]?.check_start_anchor_at).toBe(
+                markReadyAt,
+              )
+
+              yield* TestClock.setTime(markReadyAt + CHECK_START_DEADLINE_MS)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const afterDeadline = yield* claimAndRunPending
+              expect(afterDeadline._tag).toBe("processed")
+              if (afterDeadline._tag === "processed") {
+                expect(afterDeadline.workItem.state).toBe("decide_pr_merge")
+              }
+              expect(markReadyCalls).toBe(1)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("keeps polling when draft status is unknown rather than Decide or Mark Ready", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(0),
+            headSha: "unknown-draft-head",
+            headPushedAt: new Date(0),
+            isDraft: null,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* forgetCreatePrDraftProvenance(created.id)
+
+              yield* TestClock.adjust(1_000)
+              const afterWatch = yield* claimAndRunPending
+              expect(afterWatch._tag).toBe("processed")
+              if (afterWatch._tag === "processed") {
+                expect(afterWatch.workItem.state).toBe("watch_pr_status_checks")
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -2230,6 +2954,8 @@ describe("WorkItemLifecycle", () => {
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
+
           const pending = yield* claimAndRunPending
           expect(pending._tag).toBe("processed")
           if (pending._tag === "processed") {
@@ -2389,6 +3115,8 @@ describe("WorkItemLifecycle", () => {
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
+
           const watched = yield* claimAndRunPending
           expect(watched._tag).toBe("processed")
           if (watched._tag === "processed") {
@@ -2454,6 +3182,8 @@ describe("WorkItemLifecycle", () => {
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
+
           const watched = yield* claimAndRunPending
           expect(watched._tag).toBe("processed")
           if (watched._tag === "processed") {
@@ -2540,6 +3270,8 @@ describe("WorkItemLifecycle", () => {
               for (let index = 0; index < 8; index += 1) {
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
+
               const watched = yield* claimAndRunPending
               expect(watched._tag).toBe("processed")
               if (watched._tag === "processed") {
@@ -2629,6 +3361,8 @@ describe("WorkItemLifecycle", () => {
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
+
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO pr_status_check (
@@ -2801,11 +3535,15 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const sql = yield* SqlClient.SqlClient
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
 
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
 
           const firstHandoff = yield* claimAndRunPending
           expect(firstHandoff._tag).toBe("processed")
@@ -2853,7 +3591,7 @@ describe("WorkItemLifecycle", () => {
           const ready = yield* claimAndRunPending
           expect(ready._tag).toBe("processed")
           if (ready._tag === "processed") {
-            expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+            expect(ready.workItem.state).toBe("decide_pr_merge")
           }
         }),
       )
@@ -2887,6 +3625,7 @@ describe("WorkItemLifecycle", () => {
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
           }
+          yield* forgetCreatePrDraftProvenance(created.id)
 
           const now = Date.now()
           yield* sql.unsafe(
@@ -2978,6 +3717,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.adjust(1_000)
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               // First failed poll establishes the anchor and requeues until deadline.
               yield* TestClock.setTime(anchorInstant)
@@ -3033,7 +3773,7 @@ describe("WorkItemLifecycle", () => {
               const ready = yield* claimAndRunPending
               expect(ready._tag).toBe("processed")
               if (ready._tag === "processed") {
-                expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+                expect(ready.workItem.state).toBe("decide_pr_merge")
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -3076,6 +3816,7 @@ describe("WorkItemLifecycle", () => {
               for (let index = 0; index < 8; index += 1) {
                 yield* claimAndRunPending
               }
+              yield* forgetCreatePrDraftProvenance(created.id)
 
               const handoff = yield* claimAndRunPending
               expect(handoff._tag).toBe("processed")
@@ -3257,12 +3998,19 @@ describe("WorkItemLifecycle", () => {
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 13; index += 1) {
+          const wi = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const workItemId = wi[0]!.id
+          yield* driveThroughCreatePrAlreadyReady(workItemId)
+          for (let index = 0; index < 4; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
-          expect(seen).toHaveLength(13)
+          // Mark Ready is skipped when the PR snapshot is already ready.
+          expect(seen).toHaveLength(12)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -3306,8 +4054,6 @@ describe("WorkItemLifecycle", () => {
           expect(seen[10]!.sessionId).toBe("ses_recorded")
           expect(seen[11]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[11]!.sessionId).toBe("ses_recorded")
-          expect(seen[12]!.worktreePath).toBe("/tmp/worktrees/recorded")
-          expect(seen[12]!.sessionId).toBe("ses_recorded")
         }),
       )
     })
@@ -3332,7 +4078,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 2; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -3366,7 +4113,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 2; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -3428,7 +4176,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 2; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -3468,7 +4217,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 2; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -3503,7 +4253,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 11; index += 1) {
+          for (let index = 0; index < 10; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -3540,7 +4290,8 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 11; index += 1) {
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          for (let index = 0; index < 2; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }

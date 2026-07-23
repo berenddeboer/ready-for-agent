@@ -295,6 +295,12 @@ export const workItem = snakeCase.table(
      * First-observation instant (ms) for checkStartObservedHeadSha.
      */
     checkStartObservedHeadAt: integer({ mode: "number" }),
+    /**
+     * Last observed Work Item PR draft flag from Watch (1/0). Null until the
+     * first boolean draft observation. Used to detect an external draft-to-ready
+     * transition that must create a ready-phase Check-Start Anchor.
+     */
+    checkStartLastObservedIsDraft: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
