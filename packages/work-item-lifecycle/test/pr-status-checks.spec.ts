@@ -34,6 +34,8 @@ const mergeable = {
   baseRefName: "main",
   headPushedAt: null,
   headSha: null,
+  createdAt: null,
+  isDraft: null,
 } as const
 
 const context: LifecycleStepContext = {
@@ -154,7 +156,7 @@ describe("PR status check steps", () => {
       }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
     )
 
-    expect(status).toBe("pending")
+    expect(status._tag).toBe("pending")
     expect(requestedBranch).toBe(`rfa/acme-widgets/42/${context.workItemId}`)
   })
 
@@ -182,6 +184,9 @@ describe("PR status check steps", () => {
     expect(status).toEqual({
       _tag: "no_checks",
       headPushedAt,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
   })
 
@@ -207,7 +212,7 @@ describe("PR status check steps", () => {
       ),
     )
 
-    expect(status).toBe("handoff_needed")
+    expect(status._tag).toBe("handoff_needed")
   })
 
   it("prioritizes a merge conflict and identifies every completed unhandled check for retirement", async () => {
@@ -231,6 +236,8 @@ describe("PR status check steps", () => {
               baseRefName: "develop",
               headPushedAt: null,
               headSha: null,
+              createdAt: null,
+              isDraft: null,
               terminalChecks: [
                 { externalId: "checkrun:1", name: "lint", outcome: "red" },
                 { externalId: "checkrun:2", name: "review", outcome: "green" },
@@ -245,6 +252,10 @@ describe("PR status check steps", () => {
     expect(result.status).toEqual({
       _tag: "conflict",
       retiredCheckIds: result.rows.map((row) => row.id),
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
     expect(result.rows.every((row) => row.handled_at === null)).toBe(true)
   })
@@ -257,6 +268,8 @@ describe("PR status check steps", () => {
         baseRefName: "main",
         headPushedAt: null,
         headSha: null,
+        createdAt: null,
+        isDraft: null,
         terminalChecks: [
           { externalId: "checkrun:1", name: "review", outcome: "green" },
         ],
@@ -292,14 +305,17 @@ describe("PR status check steps", () => {
       }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
     )
 
-    expect(result).toEqual({ unknown: "pending", known: "handoff_needed" })
+    expect(result.unknown._tag).toBe("pending")
+    expect(result.known._tag).toBe("handoff_needed")
   })
 
   it("does not re-hand off already handled checks and reports aggregate success", async () => {
     const status = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
-        expect(yield* watchPrStatusChecks(context)).toBe("handoff_needed")
+        expect((yield* watchPrStatusChecks(context))._tag).toBe(
+          "handoff_needed",
+        )
         const sql = yield* SqlClient.SqlClient
         yield* sql.unsafe(
           `UPDATE pr_status_check SET handled_at = ? WHERE work_item_id = ?`,
@@ -323,7 +339,7 @@ describe("PR status check steps", () => {
       ),
     )
 
-    expect(status).toBe("succeeded")
+    expect(status._tag).toBe("succeeded")
   })
 
   it("hands off a new execution of the same check name", async () => {
@@ -363,7 +379,9 @@ describe("PR status check steps", () => {
     const second = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
-        expect(yield* watchPrStatusChecks(context)).toBe("handoff_needed")
+        expect((yield* watchPrStatusChecks(context))._tag).toBe(
+          "handoff_needed",
+        )
         const sql = yield* SqlClient.SqlClient
         yield* sql.unsafe(
           `UPDATE pr_status_check SET handled_at = ? WHERE work_item_id = ?`,
@@ -373,7 +391,7 @@ describe("PR status check steps", () => {
       }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
     )
 
-    expect(second).toBe("handoff_needed")
+    expect(second._tag).toBe("handoff_needed")
   })
 
   it("retires a failed execution after a manually rerun check makes the aggregate green", async () => {
@@ -413,7 +431,9 @@ describe("PR status check steps", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
-        expect(yield* watchPrStatusChecks(context)).toBe("handoff_needed")
+        expect((yield* watchPrStatusChecks(context))._tag).toBe(
+          "handoff_needed",
+        )
         const status = yield* watchPrStatusChecks(context)
         const sql = yield* SqlClient.SqlClient
         const rows = (yield* sql.unsafe(
@@ -430,7 +450,7 @@ describe("PR status check steps", () => {
       }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
     )
 
-    expect(result.status).toBe("handoff_needed")
+    expect(result.status._tag).toBe("handoff_needed")
     expect(result.rows).toEqual([
       { external_id: "checkrun:1", handled_at: expect.any(Number) },
       { external_id: "checkrun:2", handled_at: null },

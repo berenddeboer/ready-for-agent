@@ -277,6 +277,24 @@ export const workItem = snakeCase.table(
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),
+    /**
+     * Latest Check-Start Anchor instant (ms since epoch). Null until first
+     * Watch observation establishes Last PR Change or a conservative fallback.
+     */
+    checkStartAnchorAt: integer({ mode: "number" }),
+    /**
+     * Head SHA the Check-Start Anchor is scoped to. A replacement head must not
+     * inherit a prior head's anchor or observation fallback.
+     */
+    checkStartAnchorHeadSha: text(),
+    /**
+     * Current head SHA first observed when GitHub omitted a valid push time.
+     */
+    checkStartObservedHeadSha: text(),
+    /**
+     * First-observation instant (ms) for checkStartObservedHeadSha.
+     */
+    checkStartObservedHeadAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),

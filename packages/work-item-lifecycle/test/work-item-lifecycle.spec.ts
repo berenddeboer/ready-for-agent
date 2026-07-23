@@ -1,6 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   Cause,
-  Clock,
   Deferred,
   Duration,
   Effect,
@@ -12,7 +14,7 @@ import {
 } from "effect"
 import { TestClock } from "effect/testing"
 import { SqlClient } from "effect/unstable/sql"
-import { DatabaseTest } from "@ready-for-agent/db/test"
+import { DatabaseTest, makeFileDatabaseTest } from "@ready-for-agent/db/test"
 import {
   DbService,
   DbServiceLive,
@@ -28,6 +30,7 @@ import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   ActiveStepRunExistsError,
   BuildModelNotConfiguredError,
+  CHECK_START_DEADLINE_MS,
   CloseIssueEligibilityError,
   CommitOpenCodeError,
   CreatePrOpenCodeError,
@@ -59,6 +62,30 @@ import {
 import { describe, expect, it } from "bun:test"
 
 describe("WorkItemLifecycle", () => {
+  const settledTiming = {
+    createdAt: new Date(0),
+    headSha: "settled-head",
+    headPushedAt: new Date(0),
+    isDraft: false,
+  } as const
+
+  const watchResult = <
+    T extends
+      | "succeeded"
+      | "pending"
+      | "expected"
+      | "no_checks"
+      | "failed"
+      | "closed"
+      | "handoff_needed",
+  >(
+    tag: T,
+  ) =>
+    ({
+      _tag: tag,
+      ...settledTiming,
+    }) as const
+
   const successfulSteps: LifecycleStepsShape = {
     createWorktree: () =>
       Effect.succeed({
@@ -72,7 +99,7 @@ describe("WorkItemLifecycle", () => {
     review: () => Effect.succeed({ _tag: "clean" as const }),
     commit: () => Effect.void,
     createPr: () => Effect.succeed(101),
-    watchPrStatusChecks: () => Effect.succeed("succeeded"),
+    watchPrStatusChecks: () => Effect.succeed(watchResult("succeeded")),
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
@@ -110,6 +137,17 @@ describe("WorkItemLifecycle", () => {
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
       Layer.provideMerge(DatabaseTest),
+    )
+
+  const makeRestartTestLayer = (steps: LifecycleStepsShape, filename: string) =>
+    WorkItemLifecycleLive.pipe(
+      Layer.provideMerge(
+        Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+      ),
+      Layer.provideMerge(DbServiceLive),
+      Layer.provideMerge(SqliteQueueServiceLive),
+      Layer.provideMerge(makeFileDatabaseTest(filename)),
+      Layer.provideMerge(TestClock.layer()),
     )
 
   const runWithSteps = <A, E>(
@@ -769,7 +807,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 14; i++) {
+          for (let i = 0; i < 13; i++) {
             yield* claimAndRun
           }
           expect((yield* lifecycle.getWorkItem(complete.id)).state).toBe(
@@ -830,7 +868,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let i = 0; i < 14; i++) {
+          for (let i = 0; i < 13; i++) {
             const sql = yield* SqlClient.SqlClient
             yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
             const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -1062,18 +1100,6 @@ describe("WorkItemLifecycle", () => {
       return result
     })
 
-    const allowPrChecksToAppear = (workItemId: string) =>
-      Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient
-        yield* sql.unsafe(
-          `UPDATE work_item
-           SET state_ready_at = state_ready_at - 60000
-           WHERE id = ? AND state = 'watch_pr_status_checks'`,
-          [workItemId],
-        )
-        yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-      })
-
     const makeQueuedJobsAvailable = Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
@@ -1182,13 +1208,6 @@ describe("WorkItemLifecycle", () => {
             ])
           }
 
-          const firstGreen = yield* claimAndRunPending
-          expect(firstGreen._tag).toBe("processed")
-          if (firstGreen._tag === "processed") {
-            expect(firstGreen.workItem.state).toBe("watch_pr_status_checks")
-          }
-
-          yield* makeQueuedJobsAvailable
           const afterChecks = yield* claimAndRunPending
           expect(afterChecks._tag).toBe("processed")
           if (afterChecks._tag === "processed") {
@@ -1241,7 +1260,6 @@ describe("WorkItemLifecycle", () => {
               ["commit", "succeeded"],
               ["create_pr", "succeeded"],
               ["watch_pr_status_checks", "succeeded"],
-              ["watch_pr_status_checks", "succeeded"],
               ["mark_pr_ready_for_review", "succeeded"],
               ["decide_pr_merge", "succeeded"],
               ["merge_pr", "succeeded"],
@@ -1255,7 +1273,7 @@ describe("WorkItemLifecycle", () => {
 
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("complete")
-          expect(final.stepRuns).toHaveLength(14)
+          expect(final.stepRuns).toHaveLength(13)
         }),
       ))
 
@@ -1272,9 +1290,10 @@ describe("WorkItemLifecycle", () => {
             return Effect.succeed({
               _tag: "conflict",
               retiredCheckIds: [],
+              ...settledTiming,
             })
           }
-          return Effect.succeed("succeeded")
+          return Effect.succeed(watchResult("succeeded"))
         },
         resolvePrMergeConflict: () => {
           resolveCalls += 1
@@ -1320,7 +1339,7 @@ describe("WorkItemLifecycle", () => {
             ],
           )
 
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1392,7 +1411,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 13; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1431,7 +1450,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 13; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1478,7 +1497,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          for (let index = 0; index < 13; index += 1) {
+          for (let index = 0; index < 12; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -1514,140 +1533,17 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("keeps no_checks pending for 60 seconds before treating as green", () => {
+    it("keeps no_checks pending until the 90s Check-Start Deadline and caps the final poll delay", () => {
+      const anchorInstant = 1_008_000
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.succeed({ _tag: "no_checks", headPushedAt: null }),
-      }
-
-      return runWithSteps(
-        steps,
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const sql = yield* SqlClient.SqlClient
-          const { repository, issue } = yield* seedActionableIssue
-          const created = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          for (let index = 0; index < 8; index += 1) {
-            yield* claimAndRunPending
-          }
-
-          const earlyEmpty = yield* claimAndRunPending
-          expect(earlyEmpty._tag).toBe("processed")
-          if (earlyEmpty._tag === "processed") {
-            expect(earlyEmpty.workItem.state).toBe("watch_pr_status_checks")
-            expect(earlyEmpty.workItem.stepRuns.at(-2)?.status).toBe(
-              "succeeded",
-            )
-            expect(earlyEmpty.workItem.stepRuns.at(-1)?.status).toBe("queued")
-          }
-
-          const delayed = (yield* sql.unsafe(
-            `SELECT available_at, created_at FROM job_queue`,
-          )) as readonly {
-            readonly available_at: number
-            readonly created_at: number
-          }[]
-          expect(delayed).toHaveLength(1)
-          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
-
-          const readyAt = (yield* sql.unsafe(
-            `SELECT state_ready_at FROM work_item WHERE id = ?`,
-            [created.id],
-          )) as readonly { readonly state_ready_at: number }[]
-          const watchStartedAt = readyAt[0]!.state_ready_at
-
-          yield* allowPrChecksToAppear(created.id)
-          const firstGreenAfterGrace = yield* claimAndRunPending
-          expect(firstGreenAfterGrace._tag).toBe("processed")
-          if (firstGreenAfterGrace._tag === "processed") {
-            expect(firstGreenAfterGrace.workItem.state).toBe(
-              "watch_pr_status_checks",
-            )
-          }
-
-          yield* sql.unsafe(
-            `UPDATE step_run
-             SET finished_at = ?
-             WHERE work_item_id = ?
-               AND step = 'watch_pr_status_checks'
-               AND status = 'succeeded'`,
-            [watchStartedAt, created.id],
-          )
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const afterGrace = yield* claimAndRunPending
-          expect(afterGrace._tag).toBe("processed")
-          if (afterGrace._tag === "processed") {
-            expect(afterGrace.workItem.state).toBe("mark_pr_ready_for_review")
-            expect(afterGrace.workItem.stateReadyAt.getTime()).toBeGreaterThan(
-              watchStartedAt,
-            )
-          }
-        }),
-      )
-    })
-
-    it("advances stale no_checks immediately without grace or confirmation", () => {
-      const steps: LifecycleStepsShape = {
-        ...successfulSteps,
-        watchPrStatusChecks: () =>
-          Effect.gen(function* () {
-            const now = yield* Clock.currentTimeMillis
-            return {
-              _tag: "no_checks" as const,
-              headPushedAt: new Date(now - 120_000),
-              headSha: null,
-            }
-          }),
-      }
-
-      return Effect.runPromise(
-        Effect.scoped(
-          Effect.provide(
-            Effect.gen(function* () {
-              yield* TestClock.setTime(1_000_000)
-              const lifecycle = yield* WorkItemLifecycle
-              const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
-
-              for (let index = 0; index < 8; index += 1) {
-                yield* TestClock.adjust(1_000)
-                yield* claimAndRunPending
-              }
-
-              yield* TestClock.adjust(1_000)
-              const afterWatch = yield* claimAndRunPending
-              expect(afterWatch._tag).toBe("processed")
-              if (afterWatch._tag === "processed") {
-                expect(afterWatch.workItem.state).toBe(
-                  "mark_pr_ready_for_review",
-                )
-              }
-            }),
-            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
-          ),
-        ),
-      )
-    })
-
-    it("keeps the conservative no_checks path when the head is younger than two minutes", () => {
-      const steps: LifecycleStepsShape = {
-        ...successfulSteps,
-        watchPrStatusChecks: () =>
-          Effect.gen(function* () {
-            const now = yield* Clock.currentTimeMillis
-            return {
-              _tag: "no_checks" as const,
-              headPushedAt: new Date(now - 119_999),
-              headSha: null,
-            }
+          Effect.succeed({
+            _tag: "no_checks" as const,
+            createdAt: new Date(anchorInstant),
+            headSha: "fresh-head",
+            headPushedAt: new Date(anchorInstant),
+            isDraft: false,
           }),
       }
 
@@ -1669,6 +1565,339 @@ describe("WorkItemLifecycle", () => {
                 yield* claimAndRunPending
               }
 
+              // First Watch poll lands at 1_008_000 after eight 1s steps + 1s.
+              yield* TestClock.setTime(anchorInstant)
+              const earlyEmpty = yield* claimAndRunPending
+              expect(earlyEmpty._tag).toBe("processed")
+              if (earlyEmpty._tag === "processed") {
+                expect(earlyEmpty.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const firstDelay = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly {
+                readonly available_at: number
+                readonly created_at: number
+              }[]
+              expect(firstDelay).toHaveLength(1)
+              expect(
+                firstDelay[0]!.available_at - firstDelay[0]!.created_at,
+              ).toBe(30_000)
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_anchor_head_sha
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_anchor_head_sha: string | null
+              }[]
+              expect(anchors[0]?.check_start_anchor_head_sha).toBe("fresh-head")
+              expect(anchors[0]?.check_start_anchor_at).toBe(anchorInstant)
+
+              // Advance to 89_999 ms after the anchor — still before the deadline.
+              yield* TestClock.setTime(anchorInstant + 89_999)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const atBoundary = yield* claimAndRunPending
+              expect(atBoundary._tag).toBe("processed")
+              if (atBoundary._tag === "processed") {
+                expect(atBoundary.workItem.state).toBe("watch_pr_status_checks")
+              }
+              const finalDelay = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly {
+                readonly available_at: number
+                readonly created_at: number
+              }[]
+              expect(finalDelay).toHaveLength(1)
+              expect(
+                finalDelay[0]!.available_at - finalDelay[0]!.created_at,
+              ).toBe(1)
+
+              // At exactly 90_000 ms after the anchor, no_checks may advance.
+              yield* TestClock.setTime(anchorInstant + CHECK_START_DEADLINE_MS)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const afterDeadline = yield* claimAndRunPending
+              expect(afterDeadline._tag).toBe("processed")
+              if (afterDeadline._tag === "processed") {
+                expect(afterDeadline.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("uses first observation of an undated head as the durable Check-Start Anchor fallback", async () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "no_checks" as const,
+            createdAt: new Date(0),
+            headSha: "undated-head",
+            headPushedAt: null,
+            isDraft: false,
+          }),
+      }
+
+      const root = await mkdtemp(join(tmpdir(), "rfa-check-start-restart-"))
+      const dbPath = join(root, "restart.db")
+      try {
+        const established = await Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                yield* TestClock.setTime(2_000_000)
+                const lifecycle = yield* WorkItemLifecycle
+                const sql = yield* SqlClient.SqlClient
+                const { repository, issue } = yield* seedActionableIssue
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.githubIssueNumber,
+                )
+
+                for (let index = 0; index < 8; index += 1) {
+                  yield* TestClock.adjust(1_000)
+                  yield* claimAndRunPending
+                }
+
+                yield* TestClock.adjust(1_000)
+                const first = yield* claimAndRunPending
+                expect(first._tag).toBe("processed")
+                if (first._tag === "processed") {
+                  expect(first.workItem.state).toBe("watch_pr_status_checks")
+                }
+
+                const persisted = (yield* sql.unsafe(
+                  `SELECT check_start_anchor_at, check_start_observed_head_sha,
+                          check_start_observed_head_at
+                   FROM work_item WHERE id = ?`,
+                  [created.id],
+                )) as readonly {
+                  readonly check_start_anchor_at: number | null
+                  readonly check_start_observed_head_sha: string | null
+                  readonly check_start_observed_head_at: number | null
+                }[]
+                expect(persisted[0]?.check_start_observed_head_sha).toBe(
+                  "undated-head",
+                )
+                // Last PR Change is later of creation (epoch) and first observation.
+                expect(persisted[0]?.check_start_anchor_at).toBe(
+                  persisted[0]?.check_start_observed_head_at,
+                )
+                return {
+                  workItemId: created.id,
+                  anchorAt: persisted[0]!.check_start_anchor_at!,
+                }
+              }),
+              makeRestartTestLayer(steps, dbPath),
+            ),
+          ),
+        )
+
+        // Fresh services against the same file DB — no in-memory timing retained.
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const queue = yield* QueueService
+                const sql = yield* SqlClient.SqlClient
+
+                const persisted = (yield* sql.unsafe(
+                  `SELECT check_start_anchor_at, check_start_observed_head_sha,
+                          check_start_observed_head_at
+                   FROM work_item WHERE id = ?`,
+                  [established.workItemId],
+                )) as readonly {
+                  readonly check_start_anchor_at: number | null
+                  readonly check_start_observed_head_sha: string | null
+                  readonly check_start_observed_head_at: number | null
+                }[]
+                expect(persisted[0]?.check_start_anchor_at).toBe(
+                  established.anchorAt,
+                )
+                expect(persisted[0]?.check_start_observed_head_sha).toBe(
+                  "undated-head",
+                )
+
+                yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+                const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+                expect(Option.isSome(claimed)).toBe(true)
+                if (Option.isNone(claimed)) {
+                  return yield* Effect.die("expected queued watch")
+                }
+                yield* TestClock.setTime(
+                  established.anchorAt + CHECK_START_DEADLINE_MS - 1,
+                )
+                const stillWaiting = yield* lifecycle.runStep(
+                  (claimed.value.payload as { stepRunId: string }).stepRunId,
+                )
+                expect(stillWaiting._tag).toBe("processed")
+                if (stillWaiting._tag === "processed") {
+                  expect(stillWaiting.workItem.state).toBe(
+                    "watch_pr_status_checks",
+                  )
+                }
+
+                yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+                const claimed2 = yield* queue.rawClaim(
+                  WORK_ITEM_LIFECYCLE_QUEUE,
+                )
+                expect(Option.isSome(claimed2)).toBe(true)
+                if (Option.isNone(claimed2)) {
+                  return yield* Effect.die("expected queued watch")
+                }
+                yield* TestClock.setTime(
+                  established.anchorAt + CHECK_START_DEADLINE_MS,
+                )
+                const advanced = yield* lifecycle.runStep(
+                  (claimed2.value.payload as { stepRunId: string }).stepRunId,
+                )
+                expect(advanced._tag).toBe("processed")
+                if (advanced._tag === "processed") {
+                  expect(advanced.workItem.state).toBe(
+                    "mark_pr_ready_for_review",
+                  )
+                }
+              }),
+              makeRestartTestLayer(steps, dbPath),
+            ),
+          ),
+        )
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    })
+
+    it("preserves a conservative persisted anchor when Last PR Change is older", () => {
+      const conservativeAnchor = 5_000_000
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "no_checks" as const,
+            createdAt: new Date(1_000_000),
+            headSha: "old-head",
+            headPushedAt: new Date(1_000_000),
+            isDraft: false,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(conservativeAnchor)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              // Simulate migration backfill: unfinished Work Item already has a
+              // conservative anchor with no bound head SHA.
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET check_start_anchor_at = ?,
+                     check_start_anchor_head_sha = NULL,
+                     check_start_observed_head_sha = NULL,
+                     check_start_observed_head_at = NULL
+                 WHERE id = ?`,
+                [conservativeAnchor, created.id],
+              )
+
+              yield* TestClock.setTime(conservativeAnchor + 1_000)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const first = yield* claimAndRunPending
+              expect(first._tag).toBe("processed")
+              if (first._tag === "processed") {
+                expect(first.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const persisted = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_anchor_head_sha
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_anchor_head_sha: string | null
+              }[]
+              expect(persisted[0]?.check_start_anchor_at).toBe(
+                conservativeAnchor,
+              )
+              expect(persisted[0]?.check_start_anchor_head_sha).toBe("old-head")
+
+              yield* TestClock.setTime(
+                conservativeAnchor + CHECK_START_DEADLINE_MS - 1,
+              )
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const stillWaiting = yield* claimAndRunPending
+              expect(stillWaiting._tag).toBe("processed")
+              if (stillWaiting._tag === "processed") {
+                expect(stillWaiting.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              yield* TestClock.setTime(
+                conservativeAnchor + CHECK_START_DEADLINE_MS,
+              )
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const advanced = yield* claimAndRunPending
+              expect(advanced._tag).toBe("processed")
+              if (advanced._tag === "processed") {
+                expect(advanced.workItem.state).toBe("mark_pr_ready_for_review")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("takes the later of PR creation and current-head push as Last PR Change", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(1_000_000),
+            headSha: "head-a",
+            headPushedAt: new Date(1_050_000),
+            isDraft: false,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_050_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
               yield* TestClock.adjust(1_000)
               const early = yield* claimAndRunPending
               expect(early._tag).toBe("processed")
@@ -1676,27 +1905,24 @@ describe("WorkItemLifecycle", () => {
                 expect(early.workItem.state).toBe("watch_pr_status_checks")
               }
 
-              const delayed = (yield* sql.unsafe(
-                `SELECT available_at, created_at FROM job_queue`,
-              )) as readonly {
-                readonly available_at: number
-                readonly created_at: number
-              }[]
-              expect(delayed).toHaveLength(1)
-              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
-                30_000,
-              )
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly { readonly check_start_anchor_at: number | null }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(1_050_000)
 
-              yield* allowPrChecksToAppear(created.id)
-              yield* TestClock.adjust(1_000)
-              const confirming = yield* claimAndRunPending
-              expect(confirming._tag).toBe("processed")
-              if (confirming._tag === "processed") {
-                expect(confirming.workItem.state).toBe("watch_pr_status_checks")
+              yield* TestClock.setTime(1_050_000 + 89_999)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const stillWaiting = yield* claimAndRunPending
+              expect(stillWaiting._tag).toBe("processed")
+              if (stillWaiting._tag === "processed") {
+                expect(stillWaiting.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
               }
 
+              yield* TestClock.setTime(1_050_000 + CHECK_START_DEADLINE_MS)
               yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-              yield* TestClock.adjust(1_000)
               const ready = yield* claimAndRunPending
               expect(ready._tag).toBe("processed")
               if (ready._tag === "processed") {
@@ -1709,17 +1935,231 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("does not use a future headPushedAt for the stale no_checks shortcut", () => {
+    it("honors a GitHub push time slightly ahead of the harness clock", () => {
+      const harnessNow = 1_000_000
+      const githubPushAt = harnessNow + 5_000
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.gen(function* () {
-            const now = yield* Clock.currentTimeMillis
-            return {
-              _tag: "no_checks" as const,
-              headPushedAt: new Date(now + 1),
-              headSha: null,
-            }
+          Effect.succeed({
+            _tag: "no_checks" as const,
+            createdAt: new Date(harnessNow - 60_000),
+            headSha: "skew-head",
+            headPushedAt: new Date(githubPushAt),
+            isDraft: false,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(harnessNow)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.setTime(harnessNow + 8_000)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const first = yield* claimAndRunPending
+              expect(first._tag).toBe("processed")
+              if (first._tag === "processed") {
+                expect(first.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly { readonly check_start_anchor_at: number | null }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(githubPushAt)
+
+              // Still before githubPushAt + 90s even though harness has advanced past push.
+              yield* TestClock.setTime(githubPushAt + 89_999)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const stillWaiting = yield* claimAndRunPending
+              expect(stillWaiting._tag).toBe("processed")
+              if (stillWaiting._tag === "processed") {
+                expect(stillWaiting.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              yield* TestClock.setTime(githubPushAt + CHECK_START_DEADLINE_MS)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const ready = yield* claimAndRunPending
+              expect(ready._tag).toBe("processed")
+              if (ready._tag === "processed") {
+                expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("does not restart the deadline when a pushed head later omits push time", () => {
+      const snapshots = [
+        {
+          _tag: "no_checks" as const,
+          createdAt: new Date(1_000_000),
+          headSha: "head-a",
+          headPushedAt: new Date(1_050_000),
+          isDraft: false,
+        },
+        {
+          _tag: "no_checks" as const,
+          createdAt: new Date(1_000_000),
+          headSha: "head-a",
+          headPushedAt: null,
+          isDraft: false,
+        },
+      ]
+      let index = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed(snapshots[Math.min(index++, snapshots.length - 1)]!),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_050_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.adjust(1_000)
+              const first = yield* claimAndRunPending
+              expect(first._tag).toBe("processed")
+              if (first._tag === "processed") {
+                expect(first.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const afterPush = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_observed_head_at
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_observed_head_at: number | null
+              }[]
+              expect(afterPush[0]?.check_start_anchor_at).toBe(1_050_000)
+              expect(afterPush[0]?.check_start_observed_head_at).toBeNull()
+
+              // Later observation still has the same head but no push time.
+              yield* TestClock.setTime(1_080_000)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const second = yield* claimAndRunPending
+              expect(second._tag).toBe("processed")
+              if (second._tag === "processed") {
+                expect(second.workItem.state).toBe("watch_pr_status_checks")
+              }
+
+              const afterOmit = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_observed_head_at
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_observed_head_at: number | null
+              }[]
+              expect(afterOmit[0]?.check_start_anchor_at).toBe(1_050_000)
+              // No new observation fallback is recorded for an already-pushed head.
+              expect(afterOmit[0]?.check_start_observed_head_at).toBeNull()
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("keeps actual pending checks polling after the Check-Start Deadline", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "pending" as const,
+            createdAt: new Date(0),
+            headSha: "pending-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              yield* TestClock.adjust(1_000)
+              const afterDeadline = yield* claimAndRunPending
+              expect(afterDeadline._tag).toBe("processed")
+              if (afterDeadline._tag === "processed") {
+                expect(afterDeadline.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+              const delayed = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly {
+                readonly available_at: number
+                readonly created_at: number
+              }[]
+              expect(delayed).toHaveLength(1)
+              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
+                30_000,
+              )
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("stops blocking on Expected checks at the Check-Start Deadline", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "expected" as const,
+            createdAt: new Date(0),
+            headSha: "expected-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
           }),
       }
 
@@ -1741,10 +2181,12 @@ describe("WorkItemLifecycle", () => {
               }
 
               yield* TestClock.adjust(1_000)
-              const early = yield* claimAndRunPending
-              expect(early._tag).toBe("processed")
-              if (early._tag === "processed") {
-                expect(early.workItem.state).toBe("watch_pr_status_checks")
+              const afterDeadline = yield* claimAndRunPending
+              expect(afterDeadline._tag).toBe("processed")
+              if (afterDeadline._tag === "processed") {
+                expect(afterDeadline.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
               }
             }),
             makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
@@ -1754,12 +2196,17 @@ describe("WorkItemLifecycle", () => {
     })
 
     it("rechecks pending PR checks after 30 seconds and hands failed checks to a human when requested", () => {
-      const statuses = ["pending", "handoff_needed"] as const
+      const statuses = [
+        watchResult("pending"),
+        watchResult("handoff_needed"),
+      ] as const
       let statusIndex = 0
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.succeed(statuses[statusIndex++] ?? "handoff_needed"),
+          Effect.succeed(
+            statuses[statusIndex++] ?? watchResult("handoff_needed"),
+          ),
         investigatePrStatusChecks: () =>
           Effect.succeed({
             _tag: "needs_human",
@@ -1917,7 +2364,8 @@ describe("WorkItemLifecycle", () => {
         "Automated review rerun limit reached (3) for Claude Code Review; inspect or run the review manually, then Retry checks."
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.succeed({
             _tag: "needs_human",
@@ -1981,7 +2429,8 @@ describe("WorkItemLifecycle", () => {
       const checkId = "psc-active-review"
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.succeed({
             _tag: "waiting",
@@ -2052,7 +2501,11 @@ describe("WorkItemLifecycle", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.succeed({ _tag: "conflict", retiredCheckIds: [checkId] }),
+          Effect.succeed({
+            _tag: "conflict",
+            retiredCheckIds: [checkId],
+            ...settledTiming,
+          }),
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
       }
 
@@ -2111,7 +2564,11 @@ describe("WorkItemLifecycle", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.succeed({ _tag: "conflict", retiredCheckIds: [] }),
+          Effect.succeed({
+            _tag: "conflict",
+            retiredCheckIds: [],
+            ...settledTiming,
+          }),
         resolvePrMergeConflict: () =>
           Effect.succeed({
             _tag: "needs_human",
@@ -2144,7 +2601,8 @@ describe("WorkItemLifecycle", () => {
       const checkId = "psc-transition-rollback"
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.succeed({
             _tag: "needs_human",
@@ -2208,18 +2666,19 @@ describe("WorkItemLifecycle", () => {
 
     it("batches unhandled green results while aggregate is pending and waits for handoff before Mark PR Ready", () => {
       const watchStatuses = [
-        "handoff_needed",
-        "pending",
-        "handoff_needed",
-        "succeeded",
-        "succeeded",
+        watchResult("handoff_needed"),
+        watchResult("pending"),
+        watchResult("handoff_needed"),
+        watchResult("succeeded"),
       ] as const
       let watchIndex = 0
       let investigations = 0
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
-          Effect.succeed(watchStatuses[watchIndex++] ?? "succeeded"),
+          Effect.succeed(
+            watchStatuses[watchIndex++] ?? watchResult("succeeded"),
+          ),
         investigatePrStatusChecks: () => {
           investigations += 1
           return Effect.succeed({
@@ -2284,13 +2743,6 @@ describe("WorkItemLifecycle", () => {
           expect(investigations).toBe(2)
 
           yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const firstGreen = yield* claimAndRunPending
-          expect(firstGreen._tag).toBe("processed")
-          if (firstGreen._tag === "processed") {
-            expect(firstGreen.workItem.state).toBe("watch_pr_status_checks")
-          }
-
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
           const ready = yield* claimAndRunPending
           expect(ready._tag).toBe("processed")
           if (ready._tag === "processed") {
@@ -2306,7 +2758,8 @@ describe("WorkItemLifecycle", () => {
         "Manual fixing may be required. ActionLint failed twice on GitHub 503; restart did not help. Please fix or rerun the checks on GitHub, then click Retry checks."
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.fail(
             new PrStatusChecksUnresolvedError({ message: failureMessage }),
@@ -2380,112 +2833,113 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("requires consecutive aggregate-failed polls before stopping retryably", () => {
-      const statuses = [
-        "failed",
-        "pending",
-        "failed",
-        "failed",
-        "succeeded",
-        "succeeded",
-      ] as const
+    it("fails retryably at the Check-Start Deadline when aggregate stays failed with no unhandled execution", () => {
+      const anchorInstant = 1_008_000
+      const tags = ["failed", "failed", "succeeded"] as const
       let statusIndex = 0
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () =>
-          Effect.succeed(statuses[statusIndex++] ?? "failed"),
+        watchPrStatusChecks: () => {
+          const tag = tags[statusIndex++] ?? "failed"
+          if (tag === "succeeded") {
+            return Effect.succeed(watchResult("succeeded"))
+          }
+          return Effect.succeed({
+            _tag: tag,
+            createdAt: new Date(anchorInstant),
+            headSha: "failed-head",
+            headPushedAt: new Date(anchorInstant),
+            isDraft: false,
+          })
+        },
       }
 
-      return runWithSteps(
-        steps,
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const lifecycle = yield* WorkItemLifecycle
-          const { repository, issue } = yield* seedActionableIssue
-          const created = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const sql = yield* SqlClient.SqlClient
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
 
-          for (let index = 0; index < 8; index += 1) {
-            yield* claimAndRunPending
-          }
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
 
-          const confirming = yield* claimAndRunPending
-          expect(confirming._tag).toBe("processed")
-          if (confirming._tag === "processed") {
-            expect(confirming.workItem.state).toBe("watch_pr_status_checks")
-          }
+              // First failed poll establishes the anchor and requeues until deadline.
+              yield* TestClock.setTime(anchorInstant)
+              const beforeDeadline = yield* claimAndRunPending
+              expect(beforeDeadline._tag).toBe("processed")
+              if (beforeDeadline._tag === "processed") {
+                expect(beforeDeadline.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
 
-          const delayed = (yield* sql.unsafe(
-            `SELECT available_at, created_at FROM job_queue`,
-          )) as readonly {
-            readonly available_at: number
-            readonly created_at: number
-          }[]
-          expect(delayed).toHaveLength(1)
-          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+              const delayed = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly {
+                readonly available_at: number
+                readonly created_at: number
+              }[]
+              expect(delayed).toHaveLength(1)
+              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
+                30_000,
+              )
 
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const pending = yield* claimAndRunPending
-          expect(pending._tag).toBe("processed")
-          if (pending._tag === "processed") {
-            expect(pending.workItem.state).toBe("watch_pr_status_checks")
-          }
+              yield* TestClock.setTime(anchorInstant + CHECK_START_DEADLINE_MS)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const stopped = yield* claimAndRunPending
+              expect(stopped._tag).toBe("processed")
+              if (stopped._tag === "processed") {
+                expect(stopped.workItem.state).toBe("watch_pr_status_checks")
+                expect(stopped.workItem.failureCode).toBeNull()
+                expect(stopped.workItem.failureMessage).toBeNull()
+                expect(stopped.workItem.holdsWorkerSlot).toBe(false)
+                expect(stopped.workItem.stepRuns.at(-1)?.status).toBe("failed")
+                expect(stopped.workItem.stepRuns.at(-1)?.reasonCode).toBe(
+                  STEP_RUN_REASON.prStatusChecksUnresolved,
+                )
+                expect(
+                  stopped.workItem.stepRuns.at(-1)?.reasonMessage,
+                ).toContain(
+                  "fix or rerun the checks on GitHub, then click Retry checks",
+                )
+              }
 
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const reconfirming = yield* claimAndRunPending
-          expect(reconfirming._tag).toBe("processed")
-          if (reconfirming._tag === "processed") {
-            expect(reconfirming.workItem.state).toBe("watch_pr_status_checks")
-          }
+              const jobs = (yield* sql.unsafe(
+                `SELECT id FROM job_queue WHERE job_attempts < job_retry_limit`,
+              )) as readonly { readonly id: string }[]
+              expect(jobs).toHaveLength(0)
 
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const stopped = yield* claimAndRunPending
-          expect(stopped._tag).toBe("processed")
-          if (stopped._tag === "processed") {
-            expect(stopped.workItem.state).toBe("watch_pr_status_checks")
-            expect(stopped.workItem.failureCode).toBeNull()
-            expect(stopped.workItem.failureMessage).toBeNull()
-            expect(stopped.workItem.holdsWorkerSlot).toBe(false)
-            expect(stopped.workItem.stepRuns.at(-1)?.status).toBe("failed")
-            expect(stopped.workItem.stepRuns.at(-1)?.reasonCode).toBe(
-              STEP_RUN_REASON.prStatusChecksUnresolved,
-            )
-            expect(stopped.workItem.stepRuns.at(-1)?.reasonMessage).toContain(
-              "fix or rerun the checks on GitHub, then click Retry checks",
-            )
-          }
+              const retried = yield* lifecycle.retry(created.id)
+              expect(retried.state).toBe("watch_pr_status_checks")
+              expect(retried.stepRuns.at(-1)?.status).toBe("queued")
 
-          const jobs = (yield* sql.unsafe(
-            `SELECT id FROM job_queue WHERE job_attempts < job_retry_limit`,
-          )) as readonly { readonly id: string }[]
-          expect(jobs).toHaveLength(0)
-
-          const retried = yield* lifecycle.retry(created.id)
-          expect(retried.state).toBe("watch_pr_status_checks")
-          expect(retried.stepRuns.at(-1)?.status).toBe("queued")
-
-          const firstGreen = yield* claimAndRunPending
-          expect(firstGreen._tag).toBe("processed")
-          if (firstGreen._tag === "processed") {
-            expect(firstGreen.workItem.state).toBe("watch_pr_status_checks")
-          }
-
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const ready = yield* claimAndRunPending
-          expect(ready._tag).toBe("processed")
-          if (ready._tag === "processed") {
-            expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
-          }
-        }),
+              yield* TestClock.adjust(1_000)
+              const ready = yield* claimAndRunPending
+              expect(ready._tag).toBe("processed")
+              if (ready._tag === "processed") {
+                expect(ready.workItem.state).toBe("mark_pr_ready_for_review")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
       )
     })
 
     it("returns to delayed Watch after PROCESSED investigation when OpenCode took action", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("handoff_needed"),
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.succeed({
             _tag: "processed" as const,
@@ -2534,7 +2988,7 @@ describe("WorkItemLifecycle", () => {
     it("stops polling when the PR is closed without merging", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
-        watchPrStatusChecks: () => Effect.succeed("closed"),
+        watchPrStatusChecks: () => Effect.succeed(watchResult("closed")),
       }
 
       return runWithSteps(
@@ -2599,7 +3053,7 @@ describe("WorkItemLifecycle", () => {
         },
         watchPrStatusChecks: (context) => {
           seen.push(context)
-          return Effect.succeed("succeeded")
+          return Effect.succeed(watchResult("succeeded"))
         },
         resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
         investigatePrStatusChecks: () =>
@@ -2641,12 +3095,12 @@ describe("WorkItemLifecycle", () => {
           })
 
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 14; index += 1) {
+          for (let index = 0; index < 13; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
-          expect(seen).toHaveLength(14)
+          expect(seen).toHaveLength(13)
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
@@ -2692,8 +3146,6 @@ describe("WorkItemLifecycle", () => {
           expect(seen[11]!.sessionId).toBe("ses_recorded")
           expect(seen[12]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[12]!.sessionId).toBe("ses_recorded")
-          expect(seen[13]!.worktreePath).toBe("/tmp/worktrees/recorded")
-          expect(seen[13]!.sessionId).toBe("ses_recorded")
         }),
       )
     })
@@ -2718,7 +3170,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2752,7 +3204,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2814,7 +3266,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2854,7 +3306,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2889,7 +3341,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
           yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
@@ -2926,7 +3378,7 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             issue.githubIssueNumber,
           )
-          for (let index = 0; index < 12; index += 1) {
+          for (let index = 0; index < 11; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }

@@ -88,6 +88,7 @@ describe("runMigrations", () => {
           { name: "20260720220839_simple_rick_jones" },
           { name: "20260722034639_condemned_wildside" },
           { name: "20260722230410_goofy_gertrude_yorkes" },
+          { name: "20260723051726_clever_hex" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -229,6 +230,129 @@ describe("runMigrations", () => {
         expect(rows).toEqual([
           { id: "new-attempt", state: "abandoned" },
           { id: "old-handoff", state: "local_cleanup" },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds Check-Start Anchor columns while preserving Work Items and PR Status Checks", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260723051726_clever_hex/migration.sql",
+      ),
+      "utf8",
+    )
+    const beforeMs = Date.now()
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE work_item (
+             id text PRIMARY KEY,
+             repository_id text NOT NULL,
+             github_issue_number integer NOT NULL,
+             state text NOT NULL,
+             failure_code text
+           )`,
+        )
+        yield* sql.unsafe(
+          `CREATE TABLE pr_status_check (
+             id text PRIMARY KEY,
+             work_item_id text NOT NULL,
+             external_id text NOT NULL,
+             name text NOT NULL,
+             outcome text NOT NULL
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO work_item VALUES
+             ('wi-existing', 'repo-1', 42, 'watch_pr_status_checks', NULL),
+             ('wi-retryable-failed', 'repo-1', 43, 'failed', 'pr_status_checks_unresolved'),
+             ('wi-other-failed', 'repo-1', 44, 'failed', 'issue_not_found'),
+             ('wi-complete', 'repo-1', 45, 'complete', NULL)`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO pr_status_check VALUES
+             ('psc-existing', 'wi-existing', 'checkrun:1', 'lint', 'green')`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const afterMs = Date.now()
+        const workItems = (yield* sql.unsafe(
+          `SELECT id, state,
+                  check_start_anchor_at,
+                  check_start_anchor_head_sha,
+                  check_start_observed_head_sha,
+                  check_start_observed_head_at
+           FROM work_item
+           ORDER BY id`,
+        )) as readonly {
+          readonly id: string
+          readonly state: string
+          readonly check_start_anchor_at: number | null
+          readonly check_start_anchor_head_sha: string | null
+          readonly check_start_observed_head_sha: string | null
+          readonly check_start_observed_head_at: number | null
+        }[]
+
+        expect(workItems).toHaveLength(4)
+        const unfinished = workItems.find((row) => row.id === "wi-existing")
+        const retryableFailed = workItems.find(
+          (row) => row.id === "wi-retryable-failed",
+        )
+        const otherFailed = workItems.find(
+          (row) => row.id === "wi-other-failed",
+        )
+        const complete = workItems.find((row) => row.id === "wi-complete")
+        expect(unfinished).toMatchObject({
+          state: "watch_pr_status_checks",
+          check_start_anchor_head_sha: null,
+          check_start_observed_head_sha: null,
+          check_start_observed_head_at: null,
+        })
+        expect(unfinished?.check_start_anchor_at).not.toBeNull()
+        expect(unfinished!.check_start_anchor_at!).toBeGreaterThanOrEqual(
+          beforeMs,
+        )
+        expect(unfinished!.check_start_anchor_at!).toBeLessThanOrEqual(afterMs)
+        expect(retryableFailed?.check_start_anchor_at).not.toBeNull()
+        expect(retryableFailed!.check_start_anchor_at!).toBeGreaterThanOrEqual(
+          beforeMs,
+        )
+        expect(retryableFailed!.check_start_anchor_at!).toBeLessThanOrEqual(
+          afterMs,
+        )
+        expect(otherFailed).toEqual({
+          id: "wi-other-failed",
+          state: "failed",
+          check_start_anchor_at: null,
+          check_start_anchor_head_sha: null,
+          check_start_observed_head_sha: null,
+          check_start_observed_head_at: null,
+        })
+        expect(complete).toEqual({
+          id: "wi-complete",
+          state: "complete",
+          check_start_anchor_at: null,
+          check_start_anchor_head_sha: null,
+          check_start_observed_head_sha: null,
+          check_start_observed_head_at: null,
+        })
+
+        const checks = yield* sql.unsafe(
+          `SELECT id, external_id FROM pr_status_check`,
+        )
+        expect(checks).toEqual([
+          { id: "psc-existing", external_id: "checkrun:1" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

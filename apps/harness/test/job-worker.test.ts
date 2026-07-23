@@ -140,6 +140,8 @@ const defaultGithubLayer = Layer.succeed(GitHubService, {
       baseRefName: "main",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     }),
   getPrStatusCheckDiagnostics: () => Effect.succeed([]),
   getPullRequestLifecycleStatus: () =>
@@ -395,6 +397,8 @@ describe("Job worker", () => {
           baseRefName: "main",
           headPushedAt: null,
           headSha: null,
+          createdAt: null,
+          isDraft: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>

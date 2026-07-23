@@ -247,6 +247,10 @@ type WorkItemRow = {
   readonly session_id: string | null
   readonly failure_code: string | null
   readonly failure_message: string | null
+  readonly check_start_anchor_at: number | null
+  readonly check_start_anchor_head_sha: string | null
+  readonly check_start_observed_head_sha: string | null
+  readonly check_start_observed_head_at: number | null
   readonly created_at: number
   readonly updated_at: number
 }
@@ -334,35 +338,57 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_
                    review_variant, state, state_ready_at, paused, waiting_since, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
-                   failure_message, created_at, updated_at`
+                   failure_message, check_start_anchor_at, check_start_anchor_head_sha,
+                   check_start_observed_head_sha, check_start_observed_head_at,
+                   created_at, updated_at`
 
 const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
-const PR_STATUS_CHECKS_MIN_GREEN_WAIT = Duration.seconds(60)
-/**
- * When a resumed Work Item sees `no_checks` for a PR head that has been
- * unchanged at least this long, skip the normal grace and confirmation polls.
- * Intentionally longer than the normal 60s + 30s sequence.
- */
-const PR_STATUS_CHECKS_STALE_HEAD_NO_CHECK_WAIT = Duration.minutes(2)
-/** Stored on a green watch Step Run that requeues for one confirmation poll. */
-const PR_STATUS_CHECKS_GREEN_CONFIRMING = "pr_checks_green_confirming"
-/** Stored when handled red checks leave the aggregate failed for confirmation. */
-const PR_STATUS_CHECKS_FAILED_CONFIRMING = "pr_checks_failed_confirming"
+/** Catch-up window after the latest Check-Start Anchor before startup is complete. */
+export const CHECK_START_DEADLINE_MS = 90_000
 
-const isStaleNoChecksHead = (
-  headPushedAt: Date | null,
+/** Accept finite GitHub instants, including slight clock-skew futures. */
+const validInstantMs = (value: Date | null): number | null => {
+  if (value === null) {
+    return null
+  }
+  const ms = value.getTime()
+  if (!Number.isFinite(ms)) {
+    return null
+  }
+  return ms
+}
+
+const lastPrChangeMs = (input: {
+  readonly createdAt: Date | null
+  readonly headPushedAt: Date | null
+  readonly observedHeadAt: number | null
+  readonly nowMs: number
+}): number => {
+  const createdMs = validInstantMs(input.createdAt)
+  const pushedMs = validInstantMs(input.headPushedAt)
+  const pushOrObserved = pushedMs ?? input.observedHeadAt
+  if (createdMs !== null && pushOrObserved !== null) {
+    return Math.max(createdMs, pushOrObserved)
+  }
+  if (pushOrObserved !== null) {
+    return pushOrObserved
+  }
+  if (createdMs !== null) {
+    return createdMs
+  }
+  return input.nowMs
+}
+
+const pollDelayUntilDeadline = (
   nowMs: number,
-): boolean => {
-  if (headPushedAt === null) {
-    return false
+  deadlineMs: number,
+): Duration.Duration => {
+  const remaining = deadlineMs - nowMs
+  if (remaining <= 0) {
+    return PR_STATUS_CHECKS_POLL_DELAY
   }
-  const pushedMs = headPushedAt.getTime()
-  if (!Number.isFinite(pushedMs) || pushedMs > nowMs) {
-    return false
-  }
-  return (
-    nowMs - pushedMs >=
-    Duration.toMillis(PR_STATUS_CHECKS_STALE_HEAD_NO_CHECK_WAIT)
+  return Duration.millis(
+    Math.min(Duration.toMillis(PR_STATUS_CHECKS_POLL_DELAY), remaining),
   )
 }
 
@@ -1137,26 +1163,6 @@ export const makeWorkItemLifecycleLive = (
           return { ok: true as const }
         })
 
-      const previousWatchPollNote = (
-        workItemId: string,
-      ): Effect.Effect<string | null, WorkItemLifecycleDatabaseError> =>
-        Effect.gen(function* () {
-          const rows = (yield* sql
-            .unsafe(
-              `SELECT reason_message FROM step_run
-             WHERE work_item_id = ?
-               AND step = 'watch_pr_status_checks'
-               AND status = 'succeeded'
-             ORDER BY finished_at DESC, rowid DESC
-             LIMIT 1`,
-              [workItemId],
-            )
-            .pipe(Effect.mapError(toDatabaseError))) as readonly {
-            readonly reason_message: string | null
-          }[]
-          return rows[0]?.reason_message ?? null
-        })
-
       const mergeRevalidationCount = (
         workItemId: string,
       ): Effect.Effect<number, WorkItemLifecycleDatabaseError> =>
@@ -1267,10 +1273,100 @@ export const makeWorkItemLifecycleLive = (
             return steps.watchPrStatusChecks(context).pipe(
               Effect.flatMap((status) =>
                 Effect.gen(function* () {
-                  if (
-                    typeof status === "object" &&
-                    status._tag === "conflict"
+                  const now = yield* Clock.currentTimeMillis
+                  const rawHeadSha =
+                    "headSha" in status ? (status.headSha ?? null) : null
+                  const headSha =
+                    typeof rawHeadSha === "string" && rawHeadSha.trim() !== ""
+                      ? rawHeadSha
+                      : null
+                  const createdAt =
+                    "createdAt" in status ? (status.createdAt ?? null) : null
+                  const headPushedAt =
+                    "headPushedAt" in status
+                      ? (status.headPushedAt ?? null)
+                      : null
+                  let observedHeadSha = workItem.check_start_observed_head_sha
+                  let observedHeadAt = workItem.check_start_observed_head_at
+                  const pushedMs = validInstantMs(headPushedAt)
+                  if (headSha !== null) {
+                    if (observedHeadSha !== headSha) {
+                      observedHeadSha = headSha
+                      // First-observation fallback only when GitHub omits a
+                      // valid push time for this head.
+                      observedHeadAt = pushedMs === null ? now : null
+                    } else if (pushedMs !== null) {
+                      // Authoritative push evidence supersedes any earlier
+                      // observation fallback for the same head.
+                      observedHeadAt = null
+                    }
+                  } else if (
+                    observedHeadSha !== null &&
+                    workItem.check_start_anchor_head_sha !== null &&
+                    observedHeadSha !== workItem.check_start_anchor_head_sha
                   ) {
+                    observedHeadSha = null
+                    observedHeadAt = null
+                  }
+
+                  const lastChange = lastPrChangeMs({
+                    createdAt,
+                    headPushedAt,
+                    observedHeadAt: pushedMs === null ? observedHeadAt : null,
+                    nowMs: now,
+                  })
+
+                  let anchorAt = workItem.check_start_anchor_at
+                  let anchorHeadSha = workItem.check_start_anchor_head_sha
+                  const headChanged =
+                    headSha !== null &&
+                    anchorHeadSha !== null &&
+                    headSha !== anchorHeadSha
+                  if (headChanged) {
+                    // Replacement head must not inherit the prior head's anchor.
+                    anchorAt = lastChange
+                    anchorHeadSha = headSha
+                  } else if (anchorAt === null) {
+                    anchorAt = lastChange
+                    if (headSha !== null) {
+                      anchorHeadSha = headSha
+                    }
+                  } else {
+                    // Keep a conservative persisted anchor (e.g. migration
+                    // backfill); only move it forward for newer Last PR Change.
+                    if (lastChange > anchorAt) {
+                      anchorAt = lastChange
+                    }
+                    if (headSha !== null && anchorHeadSha === null) {
+                      anchorHeadSha = headSha
+                    }
+                  }
+
+                  yield* sql
+                    .unsafe(
+                      `UPDATE work_item
+                       SET check_start_anchor_at = ?,
+                           check_start_anchor_head_sha = ?,
+                           check_start_observed_head_sha = ?,
+                           check_start_observed_head_at = ?,
+                           updated_at = ?
+                       WHERE id = ?`,
+                      [
+                        anchorAt,
+                        anchorHeadSha,
+                        observedHeadSha,
+                        observedHeadAt,
+                        now,
+                        workItem.id,
+                      ],
+                    )
+                    .pipe(Effect.mapError(toDatabaseError))
+
+                  const deadlineMs = (anchorAt ?? now) + CHECK_START_DEADLINE_MS
+                  const pastDeadline = now >= deadlineMs
+                  const requeueDelay = pollDelayUntilDeadline(now, deadlineMs)
+
+                  if (status._tag === "conflict") {
                     return {
                       handledCheckIds: status.retiredCheckIds,
                       transition: {
@@ -1278,14 +1374,14 @@ export const makeWorkItemLifecycleLive = (
                       },
                     }
                   }
-                  if (status === "handoff_needed") {
+                  if (status._tag === "handoff_needed") {
                     return {
                       transition: {
                         nextState: "investigate_pr_status_checks" as const,
                       },
                     }
                   }
-                  if (status === "closed") {
+                  if (status._tag === "closed") {
                     return {
                       transition: {
                         nextState: "needs_human" as const,
@@ -1294,22 +1390,23 @@ export const makeWorkItemLifecycleLive = (
                       },
                     }
                   }
-                  if (status === "pending") {
+                  // Actual pending executions and unknown mergeability keep polling.
+                  if (status._tag === "pending") {
                     return {
                       transition: {
                         nextState: "watch_pr_status_checks" as const,
-                        delay: PR_STATUS_CHECKS_POLL_DELAY,
+                        delay: pastDeadline
+                          ? PR_STATUS_CHECKS_POLL_DELAY
+                          : requeueDelay,
                       },
                     }
                   }
-                  if (status === "failed") {
-                    const priorNote = yield* previousWatchPollNote(workItem.id)
-                    if (priorNote !== PR_STATUS_CHECKS_FAILED_CONFIRMING) {
+                  if (status._tag === "failed") {
+                    if (!pastDeadline) {
                       return {
-                        stepRunNote: PR_STATUS_CHECKS_FAILED_CONFIRMING,
                         transition: {
                           nextState: "watch_pr_status_checks" as const,
-                          delay: PR_STATUS_CHECKS_POLL_DELAY,
+                          delay: requeueDelay,
                         },
                       }
                     }
@@ -1318,46 +1415,24 @@ export const makeWorkItemLifecycleLive = (
                         "Manual fixing may be required. GitHub status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on GitHub, then click Retry checks.",
                     })
                   }
-                  const isNoChecks =
-                    typeof status === "object" && status._tag === "no_checks"
-                  // no_checks: wait the grace before treating absence as green,
-                  // unless the PR head was already pushed long enough ago that a
-                  // harness restart should not re-run the full confirmation sequence.
-                  if (isNoChecks) {
-                    const now = yield* Clock.currentTimeMillis
-                    if (isStaleNoChecksHead(status.headPushedAt, now)) {
-                      return {
-                        transition: {
-                          nextState: "mark_pr_ready_for_review" as const,
-                        },
-                      }
-                    }
-                    const watchedMs = Math.max(0, now - workItem.state_ready_at)
-                    if (
-                      watchedMs <
-                      Duration.toMillis(PR_STATUS_CHECKS_MIN_GREEN_WAIT)
-                    ) {
+                  // no_checks, expected, and all-terminal success wait for the deadline.
+                  if (
+                    status._tag === "no_checks" ||
+                    status._tag === "expected" ||
+                    status._tag === "succeeded"
+                  ) {
+                    if (!pastDeadline) {
                       return {
                         transition: {
                           nextState: "watch_pr_status_checks" as const,
-                          delay: PR_STATUS_CHECKS_POLL_DELAY,
+                          delay: requeueDelay,
                         },
                       }
                     }
-                  }
-                  // succeeded (and no_checks after grace): require two consecutive
-                  // green polls so a brief SUCCESS cannot race into merge while a
-                  // second check is still starting.
-                  if (status === "succeeded" || isNoChecks) {
-                    const priorNote = yield* previousWatchPollNote(workItem.id)
-                    if (priorNote !== PR_STATUS_CHECKS_GREEN_CONFIRMING) {
-                      return {
-                        stepRunNote: PR_STATUS_CHECKS_GREEN_CONFIRMING,
-                        transition: {
-                          nextState: "watch_pr_status_checks" as const,
-                          delay: PR_STATUS_CHECKS_POLL_DELAY,
-                        },
-                      }
+                    return {
+                      transition: {
+                        nextState: "mark_pr_ready_for_review" as const,
+                      },
                     }
                   }
                   return {
@@ -3377,15 +3452,28 @@ export const makeWorkItemLifecycleLive = (
           .withTransaction(
             Effect.gen(function* () {
               if (recoverableStatusCheckFailure || retryableNeedsHumanHandoff) {
+                // Retryable unresolved-check failures may predate Check-Start
+                // Anchor columns; give them a conservative anchor before Watch.
                 yield* sql.unsafe(
                   `UPDATE work_item
                    SET state = ?,
                        state_ready_at = ?,
                        failure_code = NULL,
                        failure_message = NULL,
+                       check_start_anchor_at = CASE
+                         WHEN ? = 1 AND check_start_anchor_at IS NULL THEN ?
+                         ELSE check_start_anchor_at
+                       END,
                        updated_at = ?
                    WHERE id = ?`,
-                  [pendingStep, now, now, workItemId],
+                  [
+                    pendingStep,
+                    now,
+                    recoverableStatusCheckFailure ? 1 : 0,
+                    now,
+                    now,
+                    workItemId,
+                  ],
                 )
               }
 

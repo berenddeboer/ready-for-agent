@@ -141,7 +141,7 @@ describe("GitHubService live implementation", () => {
 
   for (const [state, expected] of [
     ["PENDING", "pending"],
-    ["EXPECTED", "pending"],
+    ["EXPECTED", "expected"],
     ["SUCCESS", "succeeded"],
     ["FAILURE", "failed"],
     ["ERROR", "failed"],
@@ -181,6 +181,8 @@ describe("GitHubService live implementation", () => {
         baseRefName: "main",
         headPushedAt: null,
         headSha: "abc123",
+        createdAt: null,
+        isDraft: null,
       })
     })
   }
@@ -219,6 +221,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: null,
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
     expect(
       await Effect.runPromise(
@@ -230,10 +234,12 @@ describe("GitHubService live implementation", () => {
       baseRefName: "develop",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
   })
 
-  it("reads the current head commit pushedDate as headPushedAt", async () => {
+  it("reads PR creation, draft state, and current head commit pushedDate", async () => {
     let request: unknown
     const service = makeGitHubService({
       query: (input) => {
@@ -245,6 +251,8 @@ describe("GitHubService live implementation", () => {
                 {
                   state: "OPEN",
                   merged: false,
+                  isDraft: true,
+                  createdAt: "2026-07-17T11:00:00.000Z",
                   headRefOid: "abc123",
                   baseRefName: "main",
                   mergeable: "MERGEABLE",
@@ -277,11 +285,15 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: new Date("2026-07-17T12:00:00.000Z"),
       headSha: "abc123",
+      createdAt: new Date("2026-07-17T11:00:00.000Z"),
+      isDraft: true,
     })
     expect(request).toMatchObject({
       repository: {
         pullRequests: {
           nodes: {
+            isDraft: true,
+            createdAt: true,
             commits: {
               __args: { last: 1 },
               nodes: {
@@ -365,6 +377,8 @@ describe("GitHubService live implementation", () => {
         baseRefName: "main",
         headPushedAt: null,
         headSha: "abc123",
+        createdAt: null,
+        isDraft: null,
       })
     }
   })
@@ -471,6 +485,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
     expect(
       await Effect.runPromise(
@@ -483,6 +499,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
   })
 
@@ -529,6 +547,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: "sha-head",
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
         { externalId: "actions-job:101", name: "lint", outcome: "red" },
@@ -578,6 +598,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: "sha-head",
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         { externalId: "actions-job:100", name: "unit", outcome: "green" },
       ],
@@ -621,6 +643,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: "sha-head",
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         { externalId: "actions-job:100", name: "lint", outcome: "red" },
         { externalId: "actions-job:101", name: "lint", outcome: "green" },
@@ -705,6 +729,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: "sha-head",
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         { externalId: "actions-job:200", name: "CI/lint", outcome: "red" },
       ],
@@ -806,6 +832,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: "sha-head",
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         {
           externalId: "actions-job:1001",
@@ -1020,6 +1048,8 @@ describe("GitHubService live implementation", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
     expect(attempts).toBe(3)
   })

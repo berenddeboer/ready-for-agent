@@ -106,10 +106,16 @@ const SerializedPullRequestCheckStatusFields = {
   baseRefName: Schema.NullOr(Schema.String),
   headPushedAt: Schema.NullOr(Schema.String),
   headSha: Schema.NullOr(Schema.String),
+  createdAt: Schema.NullOr(Schema.String),
+  isDraft: Schema.NullOr(Schema.Boolean),
 } as const
 
 const SerializedPullRequestCheckStatus = Schema.Union([
   Schema.TaggedStruct("pending", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+  Schema.TaggedStruct("expected", {
     terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
     ...SerializedPullRequestCheckStatusFields,
   }),
@@ -129,7 +135,7 @@ const SerializedPullRequestCheckStatus = Schema.Union([
   }),
 ])
 
-const decodeHeadPushedAt = (value: string | null): Date | null => {
+const decodeOptionalInstant = (value: string | null): Date | null => {
   if (value === null) {
     return null
   }
@@ -350,7 +356,8 @@ export const keymaxxerGitHubLayer = (options: {
             )(result.stdout).pipe(
               Effect.map((status) => ({
                 ...status,
-                headPushedAt: decodeHeadPushedAt(status.headPushedAt),
+                headPushedAt: decodeOptionalInstant(status.headPushedAt),
+                createdAt: decodeOptionalInstant(status.createdAt),
               })),
               Effect.mapError(() =>
                 requestError(

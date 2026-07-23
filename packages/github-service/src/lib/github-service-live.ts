@@ -122,6 +122,8 @@ interface GitHubApiPullRequestCommit {
 interface GitHubApiPullRequest {
   readonly state: unknown
   readonly merged: unknown
+  readonly isDraft?: unknown
+  readonly createdAt?: unknown
   readonly headRefOid?: unknown
   readonly baseRefName: unknown
   readonly mergeable: unknown
@@ -330,7 +332,7 @@ const uniqueTerminalChecks = (
 
 /**
  * Read the current PR head commit's push time. Invalid or mismatched API data
- * yields null so callers keep the conservative no-check path.
+ * yields null so callers keep the conservative observation fallback.
  */
 const parseHeadPushedAt = (pullRequest: GitHubApiPullRequest): Date | null => {
   const headRefOid = pullRequest.headRefOid
@@ -363,6 +365,28 @@ const parseHeadPushedAt = (pullRequest: GitHubApiPullRequest): Date | null => {
   return parsed
 }
 
+const parsePrCreatedAt = (pullRequest: GitHubApiPullRequest): Date | null => {
+  const createdAt = pullRequest.createdAt
+  if (typeof createdAt !== "string" || createdAt.trim() === "") {
+    return null
+  }
+  const parsed = new Date(createdAt)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed
+}
+
+const parseIsDraft = (pullRequest: GitHubApiPullRequest): boolean | null => {
+  if (pullRequest.isDraft === true) {
+    return true
+  }
+  if (pullRequest.isDraft === false) {
+    return false
+  }
+  return null
+}
+
 const headShaFromPullRequest = (
   pullRequest: GitHubApiPullRequest | null | undefined,
 ): string | null => {
@@ -375,6 +399,15 @@ const headShaFromPullRequest = (
     : null
 }
 
+const emptyCheckSnapshotFields = {
+  mergeability: "unknown" as const,
+  baseRefName: null,
+  headPushedAt: null,
+  headSha: null,
+  createdAt: null,
+  isDraft: null,
+}
+
 const toPullRequestCheckStatus = (
   pullRequest: GitHubApiPullRequest | null | undefined,
   terminalChecks: readonly TerminalPrStatusCheck[] = emptyTerminalChecks,
@@ -383,10 +416,7 @@ const toPullRequestCheckStatus = (
     return {
       _tag: "pending",
       terminalChecks: emptyTerminalChecks,
-      mergeability: "unknown",
-      baseRefName: null,
-      headPushedAt: null,
-      headSha: null,
+      ...emptyCheckSnapshotFields,
     }
   }
   const decoded = decodeSync(GitHubPullRequestCheckFieldsSchema, pullRequest)
@@ -401,6 +431,8 @@ const toPullRequestCheckStatus = (
     baseRefName: decoded.baseRefName,
     headPushedAt: parseHeadPushedAt(pullRequest),
     headSha: headShaFromPullRequest(pullRequest),
+    createdAt: parsePrCreatedAt(pullRequest),
+    isDraft: parseIsDraft(pullRequest),
   } as const
   if (decoded.merged) {
     return { _tag: "succeeded", terminalChecks, ...snapshot }
@@ -417,6 +449,9 @@ const toPullRequestCheckStatus = (
   }
   if (state === "FAILURE" || state === "ERROR") {
     return { _tag: "failed", terminalChecks, ...snapshot }
+  }
+  if (state === "EXPECTED") {
+    return { _tag: "expected", terminalChecks, ...snapshot }
   }
   return { _tag: "pending", terminalChecks, ...snapshot }
 }
@@ -823,6 +858,8 @@ export const makeGitHubService = (
                 nodes: {
                   state: true,
                   merged: true,
+                  isDraft: true,
+                  createdAt: true,
                   headRefOid: true,
                   baseRefName: true,
                   mergeable: true,
@@ -854,10 +891,7 @@ export const makeGitHubService = (
       return {
         _tag: "pending",
         terminalChecks: emptyTerminalChecks,
-        mergeability: "unknown",
-        baseRefName: null,
-        headPushedAt: null,
-        headSha: null,
+        ...emptyCheckSnapshotFields,
       }
     }
 

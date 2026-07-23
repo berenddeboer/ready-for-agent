@@ -111,6 +111,7 @@ type PullRequest {
   state: PullRequestState!
   merged: Boolean!
   isDraft: Boolean!
+  createdAt: DateTime!
   headRefOid: String!
   baseRefName: String!
   mergeable: MergeableState!
