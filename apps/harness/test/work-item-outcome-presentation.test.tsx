@@ -1,9 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server"
 import { WorkItemOutcomePresentation } from "../src/work-item-outcome-presentation.js"
+import {
+  prBadgeClassName,
+  statusBadgeClassNameForStatus,
+} from "../src/work-item-progress-chrome.js"
 import { describe, expect, test } from "bun:test"
 
-const statusBadgeClassName =
-  "rounded-full px-2 py-0.5 text-xs font-bold tracking-wide uppercase bg-green-100 text-green-700"
+const statusBadgeClassName = statusBadgeClassNameForStatus("COMPLETE")
 
 describe("WorkItemOutcomePresentation", () => {
   test("renders no-change completion message, Issue link, and summary", () => {
@@ -49,6 +52,10 @@ describe("WorkItemOutcomePresentation", () => {
     expect(html).toContain('href="https://github.com/acme/widgets/pull/17"')
     expect(html).toContain("Open pull request #17")
     expect(html).toContain("Complete")
+    expect(html).toContain(prBadgeClassName)
+    expect(html).toContain("text-xs")
+    expect(html).not.toContain("0.65rem")
+    expect(html).not.toContain("0.6rem")
     expect(html).not.toContain("Issue closed without repository changes")
     expect(html).not.toContain('aria-label="Completion summary"')
   })
@@ -58,7 +65,7 @@ describe("WorkItemOutcomePresentation", () => {
       <WorkItemOutcomePresentation
         state="IMPLEMENT"
         statusLabel="Running"
-        statusBadgeClassName="bg-blue-100 text-blue-700"
+        statusBadgeClassName={statusBadgeClassNameForStatus("IMPLEMENT")}
         githubPullRequestNumber={null}
         pullRequestUrl={null}
         completionSummary={null}

@@ -1,3 +1,5 @@
+import { prBadgeClassName } from "./work-item-progress-chrome.js"
+
 /**
  * Presentational outcome chrome for a Work Item: PR links for changed work, or
  * the distinct No-Change Outcome message, Issue link, and completion summary.
@@ -36,7 +38,7 @@ export function WorkItemOutcomePresentation({
           pullRequestUrl !== null &&
           prNumber !== null && (
             <a
-              className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold tracking-wide text-slate-700 uppercase hover:bg-slate-300 hover:underline"
+              className={prBadgeClassName}
               href={pullRequestUrl}
               target="_blank"
               rel="noopener noreferrer"
