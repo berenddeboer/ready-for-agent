@@ -61,7 +61,10 @@ import {
   PreCommitHookFailedError,
   PreCommitStageError,
 } from "./pre-commit-errors.js"
-import { formatDeferredReviewSummary } from "./review.js"
+import {
+  formatAcceptedReviewSummary,
+  formatDeferredReviewSummary,
+} from "./review.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
@@ -1286,6 +1289,15 @@ export const makeWorkItemLifecycleLive = (
                   return {
                     stepRunReasonCode: STEP_RUN_REASON.reviewCleared,
                     stepRunNote: result.reason,
+                  }
+                }
+                if (result._tag === "accepted") {
+                  return {
+                    stepRunReasonCode: STEP_RUN_REASON.reviewAccepted,
+                    stepRunNote: formatAcceptedReviewSummary(
+                      result.reason,
+                      result.deferred,
+                    ),
                   }
                 }
                 if (result._tag === "needs_human") {

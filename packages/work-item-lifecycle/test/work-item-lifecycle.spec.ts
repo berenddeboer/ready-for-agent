@@ -4413,6 +4413,49 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("advances to Commit when Review reports accepted low-severity remediation", () => {
+      const stepsAcceptedReview: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () =>
+          Effect.succeed({
+            _tag: "accepted" as const,
+            reason: "direct localized rename",
+            deferred: {
+              severity: "low" as const,
+              reason: "style nits remain",
+            },
+          }),
+      }
+
+      return runWithSteps(
+        stepsAcceptedReview,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("commit")
+            const reviewRun = afterReview.workItem.stepRuns.find(
+              (run) => run.step === "review",
+            )
+            expect(reviewRun?.status).toBe("succeeded")
+            expect(reviewRun?.reasonCode).toBe(STEP_RUN_REASON.reviewAccepted)
+            expect(reviewRun?.reasonMessage).toBe(
+              "direct localized rename (deferred low: style nits remain)",
+            )
+          }
+        }),
+      )
+    })
+
     it("enters Needs Human when Review reports unresolved high and releases the Worker Slot", () => {
       const reason = "auth bypass remains open"
       const steps: LifecycleStepsShape = {

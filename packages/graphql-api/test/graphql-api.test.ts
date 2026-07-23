@@ -1910,6 +1910,67 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects running Review Step Run as Review: assessing rerun", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const assessing = {
+      ...workItem,
+      state: "review",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "review",
+          status: "running",
+          reasonCode: STEP_RUN_REASON.reviewAssessingRerun,
+          reasonMessage: "assessing rerun",
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([assessing]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            stateLabel status statusLabel statusMessage
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            stateLabel: "Review",
+            status: "RUNNING",
+            statusLabel: "Running",
+            statusMessage: null,
+            lifecycleLabels: [
+              {
+                phase: "REVIEW",
+                label: "Review: assessing rerun",
+                status: "RUNNING",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
   test("keeps non-echo Review statusMessage while Review phase reasonCode is set", async () => {
     const baseRun = workItem.stepRuns[0]!
     const operational = {

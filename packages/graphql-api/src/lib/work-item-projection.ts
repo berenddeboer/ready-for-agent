@@ -2,6 +2,7 @@ import type { IssueRecord } from "@ready-for-agent/db-service"
 import {
   type OperationalLifecycleStep,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_ASSESSING_RERUN_MESSAGE,
   REVIEW_PRE_COMMIT_MESSAGE,
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
@@ -127,6 +128,7 @@ const REVIEW_IN_PROGRESS_CHIP_MESSAGES = new Set<string>([
   REVIEW_REVIEWING_MESSAGE,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_PRE_COMMIT_MESSAGE,
+  REVIEW_ASSESSING_RERUN_MESSAGE,
 ])
 
 const isRedundantReviewInProgressMessage = (stepRun: StepRunRecord): boolean =>
@@ -176,12 +178,15 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
           : stepRun.reasonCode === STEP_RUN_REASON.reviewPreCommit ||
               stepRun.reasonMessage === REVIEW_PRE_COMMIT_MESSAGE
             ? REVIEW_PRE_COMMIT_MESSAGE
-            : stepRun.reasonCode === STEP_RUN_REASON.reviewReviewing ||
-                stepRun.reasonMessage == null ||
-                stepRun.reasonMessage === "" ||
-                stepRun.reasonMessage === REVIEW_REVIEWING_MESSAGE
-              ? REVIEW_REVIEWING_MESSAGE
-              : stepRun.reasonMessage
+            : stepRun.reasonCode === STEP_RUN_REASON.reviewAssessingRerun ||
+                stepRun.reasonMessage === REVIEW_ASSESSING_RERUN_MESSAGE
+              ? REVIEW_ASSESSING_RERUN_MESSAGE
+              : stepRun.reasonCode === STEP_RUN_REASON.reviewReviewing ||
+                  stepRun.reasonMessage == null ||
+                  stepRun.reasonMessage === "" ||
+                  stepRun.reasonMessage === REVIEW_REVIEWING_MESSAGE
+                ? REVIEW_REVIEWING_MESSAGE
+                : stepRun.reasonMessage
         : null
     const outcome =
       reviewRunningPhase !== null
