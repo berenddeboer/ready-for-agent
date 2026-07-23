@@ -1,6 +1,7 @@
 import type { IssueRecord } from "@ready-for-agent/db-service"
 import {
   type OperationalLifecycleStep,
+  REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
   type StepRunRecord,
   type WorkItemRecord,
@@ -133,16 +134,27 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
   return [...latestRuns].map(([phase, stepRun]) => {
     const status: WorkItemStatus =
       phase === finalPhase ? "needs_human" : stepRunDisplayStatus(stepRun)
+    const reviewRunningPhase =
+      phase === "review" && status === "running"
+        ? stepRun.reasonCode === STEP_RUN_REASON.reviewReviewing ||
+          stepRun.reasonMessage == null ||
+          stepRun.reasonMessage === "" ||
+          stepRun.reasonMessage === REVIEW_REVIEWING_MESSAGE
+          ? REVIEW_REVIEWING_MESSAGE
+          : stepRun.reasonMessage
+        : null
     const outcome =
-      phase === "decide_pr_merge" && status === "needs_human"
-        ? "Human review before merge"
-        : phase === "decide_pr_merge" && status === "succeeded"
-          ? "Clanker may merge"
-          : phase === "merge_pr" &&
-              status === "succeeded" &&
-              stepRun.reasonCode !== STEP_RUN_REASON.mergeRevalidation
-            ? "Merged"
-            : statusLabel(status)
+      reviewRunningPhase !== null
+        ? reviewRunningPhase
+        : phase === "decide_pr_merge" && status === "needs_human"
+          ? "Human review before merge"
+          : phase === "decide_pr_merge" && status === "succeeded"
+            ? "Clanker may merge"
+            : phase === "merge_pr" &&
+                status === "succeeded" &&
+                stepRun.reasonCode !== STEP_RUN_REASON.mergeRevalidation
+              ? "Merged"
+              : statusLabel(status)
     return {
       phase: phase.toUpperCase(),
       label: `${lifecyclePhaseLabel(phase)}: ${outcome}`,

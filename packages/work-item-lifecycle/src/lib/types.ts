@@ -122,6 +122,9 @@ export const WAITING_FOR_WORKER_SLOT_MESSAGE =
 export const WAITING_FOR_OPENCODE_SESSION_MESSAGE =
   "Waiting for an OpenCode session slot"
 
+/** Operator-visible Review phase while the reviewing OpenCode pass runs. */
+export const REVIEW_REVIEWING_MESSAGE = "reviewing"
+
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
 export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
@@ -249,6 +252,8 @@ export const STEP_RUN_REASON = {
   paused: "paused",
   /** Mid-run: Step Run is Running but blocked on maxConcurrentOpencodeSessions. */
   waitingForOpencodeSession: "waiting_for_opencode_session",
+  /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
+  reviewReviewing: "review_reviewing",
   /** Successful Merge PR run that returned to Watch for fresh validation. */
   mergeRevalidation: "merge_revalidation",
 } as const

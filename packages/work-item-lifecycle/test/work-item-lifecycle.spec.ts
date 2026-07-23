@@ -69,7 +69,7 @@ describe("WorkItemLifecycle", () => {
     implement: () => Effect.succeed("ses_test_implement_session"),
     assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
-    review: () => Effect.void,
+    review: () => Effect.succeed({ _tag: "clean" as const }),
     commit: () => Effect.void,
     createPr: () => Effect.succeed(101),
     watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -2587,7 +2587,7 @@ describe("WorkItemLifecycle", () => {
         },
         review: (context) => {
           seen.push(context)
-          return Effect.void
+          return Effect.succeed({ _tag: "clean" as const })
         },
         commit: (context) => {
           seen.push(context)
@@ -2939,19 +2939,18 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("completes Review on command success without interpreting findings", () => {
+    it("advances to Commit when Review reports clean", () => {
       let reviewCalls = 0
-      const stepsWithFindings: LifecycleStepsShape = {
+      const stepsCleanReview: LifecycleStepsShape = {
         ...successfulSteps,
         review: () => {
           reviewCalls += 1
-          // Handler success alone advances; findings are not a lifecycle gate.
-          return Effect.void
+          return Effect.succeed({ _tag: "clean" as const })
         },
       }
 
       return runWithSteps(
-        stepsWithFindings,
+        stepsCleanReview,
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
@@ -2967,6 +2966,40 @@ describe("WorkItemLifecycle", () => {
           expect(afterReview._tag).toBe("processed")
           if (afterReview._tag === "processed") {
             expect(afterReview.workItem.state).toBe("commit")
+          }
+        }),
+      )
+    })
+
+    it("does not advance to Commit when Review reports has_findings", () => {
+      const stepsHasFindings: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () => Effect.succeed({ _tag: "has_findings" as const }),
+      }
+
+      return runWithSteps(
+        stepsHasFindings,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("review")
+            const reviewRun = afterReview.workItem.stepRuns.find(
+              (run) => run.step === "review",
+            )
+            expect(reviewRun?.status).toBe("failed")
+            expect(reviewRun?.reasonMessage).toContain(
+              "apply-findings path is not implemented yet",
+            )
           }
         }),
       )

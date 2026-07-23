@@ -3,6 +3,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
+import { DatabaseTest } from "@ready-for-agent/db/test"
+import { DbServiceLive } from "@ready-for-agent/db-service"
 import {
   Opencode,
   OpencodeExitError,
@@ -13,9 +15,11 @@ import type { LifecycleStepContext } from "../src/index.js"
 import {
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
+  ReviewResultError,
   ReviewSessionContextMissingError,
   ReviewWorktreeContextMissingError,
   makeWorkItemId,
+  parseReviewResult,
   review,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -47,7 +51,7 @@ const stubOpencode = (impl: {
     readonly model: string
     readonly variant: string
     readonly timeout?: Duration.Input
-  }) => Effect.Effect<{ sessionId: string }, never>
+  }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
   readonly continue?: (input: {
     readonly sessionId: string
     readonly prompt: string
@@ -55,7 +59,7 @@ const stubOpencode = (impl: {
     readonly model: string
     readonly variant: string
     readonly timeout?: Duration.Input
-  }) => Effect.Effect<{ sessionId: string }, never>
+  }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
     Opencode,
@@ -68,17 +72,32 @@ const stubOpencode = (impl: {
         }),
       continue: (input) =>
         impl.continue?.(input) ??
-        Effect.succeed({ sessionId: "ses_review_default", assistantText: "" }),
+        Effect.succeed({
+          sessionId: "ses_review_default",
+          assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+        }),
       listModels: () => Effect.succeed([]),
     }),
   )
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Opencode>,
+  effect: Effect.Effect<
+    A,
+    E,
+    | Opencode
+    | Layer.Layer.Success<typeof PlatformLayer>
+    | Layer.Layer.Success<typeof DbServiceLive>
+    | Layer.Layer.Success<typeof DatabaseTest>
+  >,
   opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(opencodeLayer), Effect.provide(PlatformLayer)),
+    effect.pipe(
+      Effect.provide(opencodeLayer),
+      Effect.provide(DbServiceLive),
+      Effect.provide(DatabaseTest),
+      Effect.provide(PlatformLayer),
+    ),
   )
 
 const withTemp = async (assert: (root: string) => Promise<void>) => {
@@ -89,6 +108,37 @@ const withTemp = async (assert: (root: string) => Promise<void>) => {
     await rm(root, { recursive: true, force: true })
   }
 }
+
+describe("parseReviewResult", () => {
+  it("parses clean and has-findings lines", () => {
+    expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_CLEAN")).toEqual({
+      _tag: "clean",
+    })
+    expect(
+      parseReviewResult(
+        "Looks good overall.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+      ),
+    ).toEqual({ _tag: "has_findings" })
+  })
+
+  it("rejects missing, duplicate, non-final, or unknown markers", () => {
+    expect(parseReviewResult("no result line")).toBeNull()
+    expect(
+      parseReviewResult(
+        [
+          "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+          "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+        ].join("\n"),
+      ),
+    ).toBeNull()
+    expect(
+      parseReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_CLEAN\nAdditional output",
+      ),
+    ).toBeNull()
+    expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED")).toBeNull()
+  })
+})
 
 describe("review", () => {
   it("rejects missing worktree context", async () => {
@@ -113,14 +163,12 @@ describe("review", () => {
   it("rejects blank Session context", () =>
     withTemp(async (root) => {
       const error = await run(
-        review(baseContext(root, { sessionId: "   ", assistantText: "" })).pipe(
-          Effect.flip,
-        ),
+        review(baseContext(root, { sessionId: "   " })).pipe(Effect.flip),
       )
       expect(error).toBeInstanceOf(ReviewSessionContextMissingError)
     }))
 
-  it("continues the Implement Session with /review and review model", () =>
+  it("continues the Implement Session with /review contract and review model", () =>
     withTemp(async (root) => {
       let continued: {
         sessionId: string
@@ -132,7 +180,7 @@ describe("review", () => {
       } | null = null
       let started = false
 
-      await run(
+      const result = await run(
         review(
           baseContext(root, {
             sessionId: "ses_from_implement",
@@ -152,13 +200,14 @@ describe("review", () => {
             continued = input
             return Effect.succeed({
               sessionId: "ses_from_implement",
-              assistantText: "",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
             })
           },
         }),
       )
 
       expect(started).toBe(false)
+      expect(result).toEqual({ _tag: "clean" })
       expect(continued).not.toBeNull()
       expect(continued!.sessionId).toBe("ses_from_implement")
       expect(continued!.cwd).toBe(root)
@@ -167,22 +216,94 @@ describe("review", () => {
       expect(Duration.toMillis(continued!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(45)),
       )
-      expect(continued!.prompt).toBe("/review")
+      expect(continued!.prompt).toContain("/review")
+      expect(continued!.prompt).toContain(
+        "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+      )
+      expect(continued!.prompt).toContain(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+      )
     }))
 
-  it("succeeds without interpreting review findings", () =>
+  it("returns clean for a unique final REVIEW_CLEAN marker", () =>
     withTemp(async (root) => {
-      await run(
+      const result = await run(
         review(baseContext(root)),
         stubOpencode({
           continue: () =>
-            // OpenCode exit success alone is enough; findings are not a gate.
             Effect.succeed({
               sessionId: "ses_implement_session",
-              assistantText: "",
+              assistantText:
+                "No issues found.\nREADY_FOR_AGENT_RESULT: REVIEW_CLEAN",
             }),
         }),
       )
+      expect(result).toEqual({ _tag: "clean" })
+    }))
+
+  it("returns has_findings for a unique final REVIEW_HAS_FINDINGS marker", () =>
+    withTemp(async (root) => {
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+            }),
+        }),
+      )
+      expect(result).toEqual({ _tag: "has_findings" })
+    }))
+
+  it("fails when READY_FOR_AGENT_RESULT is missing", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continue: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "Review complete with no machine line",
+            }),
+        }),
+      )
+      expect(error).toBeInstanceOf(ReviewResultError)
+    }))
+
+  it("fails when READY_FOR_AGENT_RESULT lines are duplicated", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continue: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: [
+                "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+              ].join("\n"),
+            }),
+        }),
+      )
+      expect(error).toBeInstanceOf(ReviewResultError)
+    }))
+
+  it("fails when READY_FOR_AGENT_RESULT is not the final line", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continue: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_CLEAN\ntrailing prose",
+            }),
+        }),
+      )
+      expect(error).toBeInstanceOf(ReviewResultError)
     }))
 
   it("maps OpenCode exit failure", () =>
