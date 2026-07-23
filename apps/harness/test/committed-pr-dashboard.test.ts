@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { localCommittedPullRequestDayBounds } from "../src/local-day-bounds.ts"
+import {
+  localCommittedPullRequestDayBounds,
+  msUntilNextLocalMidnight,
+} from "../src/local-day-bounds.ts"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
@@ -147,6 +150,16 @@ describe("localCommittedPullRequestDayBounds", () => {
     )
   })
 
+  test("msUntilNextLocalMidnight is positive and lands on local midnight", () => {
+    const now = new Date(2026, 6, 22, 15, 30, 0, 0)
+    const ms = msUntilNextLocalMidnight(now)
+    expect(ms).toBeGreaterThan(0)
+    const rolled = new Date(now.getTime() + ms)
+    expect(rolled.getHours()).toBe(0)
+    expect(rolled.getMinutes()).toBe(0)
+    expect(rolled.getDate()).toBe(23)
+  })
+
   test("handles fall-back daylight-saving local midnight", () => {
     // US Pacific 2026: clocks fall back 2026-11-01 02:00 → 01:00
     // 2026-11-02 is a Monday
@@ -190,7 +203,10 @@ describe("Committed pull requests dashboard UI", () => {
     const source = homeSource()
     expect(source).toContain("committedPullRequestsCount")
     expect(source).toContain("localCommittedPullRequestDayBounds")
-    expect(source).toContain('queryKey: ["committed-pull-requests-count"')
+    expect(source).toContain("committedPullRequestsCountQueryKeyPrefix")
+    expect(source).toContain(
+      "queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to]",
+    )
     const dashboard = source.slice(
       source.indexOf("function CommittedPullRequestsDashboard()"),
       source.indexOf("function RepositoryCards()"),
@@ -201,6 +217,36 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("bounds.lastWeekTo")
     expect(dashboard).not.toContain("workItems")
     expect(dashboard).not.toContain("JOBS_COMPLETED_LIMIT")
+  })
+
+  test("stays live via work-items subscription without polling", () => {
+    const source = homeSource()
+    expect(source).toContain("followRepositoryWorkItemsLive")
+    expect(source).toContain("committedPullRequestsCountQueryKeyPrefix")
+    const dashboard = source.slice(
+      source.indexOf("function CommittedPullRequestsDashboard()"),
+      source.indexOf("function RepositoryCards()"),
+    )
+    expect(dashboard).not.toContain("refetchInterval")
+    const refreshSource = readFileSync(
+      join(import.meta.dir, "../src/refresh-work-items-live.ts"),
+      "utf8",
+    )
+    expect(refreshSource).toContain("refreshCommittedPullRequestsCounts")
+    expect(refreshSource).toContain("committedPullRequestsCountQueryKeyPrefix")
+    expect(refreshSource).toContain('"committed-pull-requests-count"')
+  })
+
+  test("rolls day bounds at local midnight and on tab visibility", () => {
+    const source = homeSource()
+    const dashboard = source.slice(
+      source.indexOf("function CommittedPullRequestsDashboard()"),
+      source.indexOf("function RepositoryCards()"),
+    )
+    expect(dashboard).toContain("msUntilNextLocalMidnight")
+    expect(dashboard).toContain("scheduleMidnightRollover")
+    expect(dashboard).toContain("visibilitychange")
+    expect(dashboard).toContain("setBounds")
   })
 
   test("shows loading and error states without blocking Jobs", () => {

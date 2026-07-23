@@ -24,3 +24,11 @@ export const localCommittedPullRequestDayBounds = (now = new Date()) => {
     lastWeekTo: startOfThisWeek.toISOString(),
   }
 }
+
+/** Milliseconds until the next local midnight (at least 1ms). */
+export const msUntilNextLocalMidnight = (now = new Date()) => {
+  const startOfTomorrow = new Date(now)
+  startOfTomorrow.setHours(0, 0, 0, 0)
+  startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
+  return Math.max(1, startOfTomorrow.getTime() - now.getTime())
+}

@@ -22,9 +22,15 @@ import {
   liveDurationMs,
   useNowMs,
 } from "../live-duration.js"
-import { localCommittedPullRequestDayBounds } from "../local-day-bounds.js"
+import {
+  localCommittedPullRequestDayBounds,
+  msUntilNextLocalMidnight,
+} from "../local-day-bounds.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
-import { followRepositoryWorkItemsLive } from "../refresh-work-items-live.js"
+import {
+  committedPullRequestsCountQueryKeyPrefix,
+  followRepositoryWorkItemsLive,
+} from "../refresh-work-items-live.js"
 import { streamRepositoryChanges } from "../repository-live.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
@@ -401,7 +407,7 @@ const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
   })
 
 const committedPullRequestsCountQuery = (from: string, to: string) => ({
-  queryKey: ["committed-pull-requests-count", from, to] as const,
+  queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to] as const,
   queryFn: async (): Promise<number> => {
     const result = await graphql.query({
       committedPullRequestsCount: {
@@ -491,7 +497,37 @@ function HomeBody() {
 }
 
 function CommittedPullRequestsDashboard() {
-  const bounds = localCommittedPullRequestDayBounds()
+  const [bounds, setBounds] = useState(() =>
+    localCommittedPullRequestDayBounds(),
+  )
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const syncBounds = () => {
+      const next = localCommittedPullRequestDayBounds()
+      setBounds((current) =>
+        current.todayFrom === next.todayFrom && current.todayTo === next.todayTo
+          ? current
+          : next,
+      )
+    }
+    const scheduleMidnightRollover = () => {
+      timer = setTimeout(() => {
+        syncBounds()
+        scheduleMidnightRollover()
+      }, msUntilNextLocalMidnight())
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") syncBounds()
+    }
+    scheduleMidnightRollover()
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+      document.removeEventListener("visibilitychange", onVisibility)
+    }
+  }, [])
+
   const todayQuery = useQuery(
     committedPullRequestsCountQuery(bounds.todayFrom, bounds.todayTo),
   )
