@@ -32,6 +32,7 @@ export interface StartInput {
   readonly variant: string
   readonly timeout?: Duration.Input
   readonly onSessionId?: OnSessionId
+  readonly command?: string
 }
 
 export interface ContinueInput {
@@ -42,6 +43,7 @@ export interface ContinueInput {
   readonly variant: string
   readonly timeout?: Duration.Input
   readonly onSessionId?: OnSessionId
+  readonly command?: string
 }
 
 export interface OpencodeLayerOptions {

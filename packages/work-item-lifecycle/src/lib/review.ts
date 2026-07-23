@@ -43,10 +43,12 @@ export type ApplyReviewResult =
   | { readonly _tag: "deferred"; readonly reason: string }
   | { readonly _tag: "fixed" }
 
-const buildReviewingPrompt = () =>
+export const REVIEW_AGENT_COMMAND = "/review"
+
+export const buildReviewingPrompt = () =>
   [
-    "/review",
-    "After the review, do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+    "Review uncommitted worktree changes.",
+    "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
     "End your final response with exactly one machine-readable result line:",
     "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
     "or",
@@ -262,6 +264,7 @@ export const review = (context: LifecycleStepContext) =>
       const reviewing = yield* opencode
         .continue({
           sessionId,
+          command: REVIEW_AGENT_COMMAND,
           prompt: buildReviewingPrompt(),
           cwd: worktreePath,
           model: context.reviewModel,
