@@ -19,6 +19,7 @@ import {
   PreCommitOpenCodeError,
   REVIEW_AGENT_COMMAND,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_ASSESSING_RERUN_MESSAGE,
   REVIEW_FIX_LIMIT_REASON,
   REVIEW_HIGH_UNCHANGED_REASON,
   REVIEW_PRE_COMMIT_MESSAGE,
@@ -29,10 +30,13 @@ import {
   ReviewSessionContextMissingError,
   ReviewWorktreeContextMissingError,
   STEP_RUN_REASON,
+  buildRerunAssessmentPrompt,
   buildReviewingPrompt,
+  formatAcceptedReviewSummary,
   formatDeferredReviewSummary,
   makeWorkItemId,
   parseApplyReviewResult,
+  parseRerunAssessmentResult,
   parseReviewResult,
   review,
 } from "../src/index.js"
@@ -304,12 +308,88 @@ describe("formatDeferredReviewSummary", () => {
   })
 })
 
+describe("formatAcceptedReviewSummary", () => {
+  it("persists acceptance rationale and optional deferred remainder", () => {
+    expect(formatAcceptedReviewSummary("localized rename only", null)).toBe(
+      "localized rename only",
+    )
+    expect(
+      formatAcceptedReviewSummary("localized rename only", {
+        severity: "low",
+        reason: "style nits remain",
+      }),
+    ).toBe("localized rename only (deferred low: style nits remain)")
+  })
+})
+
+describe("parseRerunAssessmentResult", () => {
+  it("parses accepted-without-rerun and rerun-required lines", () => {
+    expect(
+      parseRerunAssessmentResult(
+        "Looks narrow.\nREADY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: direct rename only",
+      ),
+    ).toEqual({
+      _tag: "accepted",
+      reason: "direct rename only",
+    })
+    expect(
+      parseRerunAssessmentResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: expanded into parser behavior",
+      ),
+    ).toEqual({
+      _tag: "rerun_required",
+      reason: "expanded into parser behavior",
+    })
+  })
+
+  it("rejects missing, duplicate, blank, non-final, or foreign markers", () => {
+    expect(parseRerunAssessmentResult("no result line")).toBeNull()
+    expect(
+      parseRerunAssessmentResult(
+        [
+          "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: a",
+          "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: b",
+        ].join("\n"),
+      ),
+    ).toBeNull()
+    expect(
+      parseRerunAssessmentResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: ok\ntrailing",
+      ),
+    ).toBeNull()
+    expect(
+      parseRerunAssessmentResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED:",
+      ),
+    ).toBeNull()
+    expect(
+      parseRerunAssessmentResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED"),
+    ).toBeNull()
+    expect(
+      parseRerunAssessmentResult("READY_FOR_AGENT_RESULT: REVIEW_CLEAN"),
+    ).toBeNull()
+  })
+
+  it("bounds assessment reasons", () => {
+    const long = "x".repeat(600)
+    expect(
+      parseRerunAssessmentResult(
+        `READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: ${long}`,
+      ),
+    ).toEqual({ _tag: "rerun_required", reason: long.slice(0, 500) })
+  })
+})
+
 const isReviewingTurn = (input: {
   readonly command?: string
   readonly prompt: string
 }): boolean =>
   input.command === REVIEW_AGENT_COMMAND ||
   input.prompt === buildReviewingPrompt()
+
+const isAssessmentTurn = (input: { readonly prompt: string }): boolean =>
+  input.prompt === buildRerunAssessmentPrompt() ||
+  input.prompt.includes("REVIEW_RERUN_NOT_REQUIRED")
 
 describe("buildReviewingPrompt", () => {
   it("forbids edits, defines the severity rubric, and requires the result contract", () => {
@@ -726,7 +806,7 @@ describe("review", () => {
       })
     }))
 
-  it("runs Pre-Commit then re-reviews after FIXED and succeeds on clean", () =>
+  it("runs Pre-Commit then re-reviews after medium FIXED without assessment", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
@@ -791,9 +871,62 @@ describe("review", () => {
       expect(continues[2]!.variant).toBe("max")
       expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
       expect(continues[2]!.prompt).toBe(buildReviewingPrompt())
+      expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
     }))
 
-  it("runs Pre-Commit then re-reviews after FIXED_AND_DEFERRED", () =>
+  it("runs Pre-Commit then full reviewing after high FIXED without assessment", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const continues: Array<{
+        model: string
+        command?: string
+        prompt: string
+      }> = []
+
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            reviewModel: "opencode/review-model",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              model: input.model,
+              prompt: input.prompt,
+              command: input.command,
+            })
+            if (continues.length === 1) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high",
+              })
+            }
+            if (continues.length === 2) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(continues).toHaveLength(3)
+      expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
+      expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+    }))
+
+  it("runs Pre-Commit then re-reviews after high FIXED_AND_DEFERRED without assessment", () =>
     withTempGit(async (root) => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
@@ -846,6 +979,227 @@ describe("review", () => {
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED_AND_DEFERRED")
       expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
+    }))
+
+  it("accepts low-severity FIXED without a second review-model command", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const continues: Array<{
+        model: string
+        variant: string
+        prompt: string
+        command?: string
+      }> = []
+
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            variant: "high",
+            reviewModel: "opencode/review-model",
+            reviewVariant: "max",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              model: input.model,
+              variant: input.variant,
+              prompt: input.prompt,
+              command: input.command,
+            })
+            if (isReviewingTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
+              })
+            }
+            if (isAssessmentTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: direct localized rename",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "accepted",
+        reason: "direct localized rename",
+        deferred: null,
+      })
+      expect(continues).toHaveLength(3)
+      expect(continues[0]!.model).toBe("opencode/review-model")
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[1]!.model).toBe("opencode/build-model")
+      expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
+      expect(continues[2]!.model).toBe("opencode/build-model")
+      expect(continues[2]!.variant).toBe("high")
+      expect(continues[2]!.command).toBeUndefined()
+      expect(continues[2]!.prompt).toBe(buildRerunAssessmentPrompt())
+      expect(continues[2]!.prompt).toContain(
+        "direct, localized, and semantics-preserving",
+      )
+      expect(continues.filter((turn) => isReviewingTurn(turn))).toHaveLength(1)
+    }))
+
+  it("accepts low FIXED_AND_DEFERRED and preserves deferred severity", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            reviewModel: "opencode/review-model",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            if (isReviewingTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
+              })
+            }
+            if (isAssessmentTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: comment-only fix",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: low: leftover import order",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "accepted",
+        reason: "comment-only fix",
+        deferred: {
+          severity: "low",
+          reason: "leftover import order",
+        },
+      })
+    }))
+
+  it("re-reviews after low FIXED when assessment requires rerun", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const continues: Array<{
+        model: string
+        command?: string
+        prompt: string
+      }> = []
+
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            reviewModel: "opencode/review-model",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              model: input.model,
+              prompt: input.prompt,
+              command: input.command,
+            })
+            if (isReviewingTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  continues.filter((turn) => isReviewingTurn(turn)).length === 1
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
+                    : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+              })
+            }
+            if (isAssessmentTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: expanded scope into schema",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(continues).toHaveLength(4)
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[1]!.model).toBe("opencode/build-model")
+      expect(continues[2]!.model).toBe("opencode/build-model")
+      expect(isAssessmentTurn(continues[2]!)).toBe(true)
+      expect(continues[3]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[3]!.model).toBe("opencode/review-model")
+    }))
+
+  it("falls back to full reviewing when low assessment output is malformed", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const continues: Array<{ prompt: string; command?: string }> = []
+
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              prompt: input.prompt,
+              command: input.command,
+            })
+            if (isReviewingTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  continues.filter((turn) => isReviewingTurn(turn)).length === 1
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
+                    : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+              })
+            }
+            if (isAssessmentTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "I am unsure and forgot the marker",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(continues.filter((turn) => isAssessmentTurn(turn))).toHaveLength(1)
+      expect(continues.filter((turn) => isReviewingTurn(turn))).toHaveLength(2)
     }))
 
   it("fails the Review Step Run when nested Pre-Commit fails after FIXED", () =>
@@ -932,21 +1286,32 @@ describe("review", () => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
 
-      let turn = 0
+      let reviewingPasses = 0
+      let applyPasses = 0
+      let assessmentPasses = 0
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
           continue: (input) => {
-            turn += 1
             if (isReviewingTurn(input)) {
+              reviewingPasses += 1
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText:
-                  turn <= 3
+                  reviewingPasses <= 2
                     ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
                     : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
               })
             }
+            if (isAssessmentTurn(input)) {
+              assessmentPasses += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: still uncertain",
+              })
+            }
+            applyPasses += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
@@ -955,8 +1320,10 @@ describe("review", () => {
         }),
       )
 
-      // reviewing, apply, reviewing, apply, reviewing(clean)
-      expect(turn).toBe(5)
+      // reviewing, apply, assess, reviewing, apply, assess, reviewing(clean)
+      expect(reviewingPasses).toBe(3)
+      expect(applyPasses).toBe(2)
+      expect(assessmentPasses).toBe(2)
       expect(result).toEqual({ _tag: "clean" })
     }))
 
@@ -1001,12 +1368,11 @@ describe("review", () => {
       await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
       await writeFile(join(root, "change.txt"), "fixed\n")
 
-      let turn = 0
+      let applyPasses = 0
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
           continue: (input) => {
-            turn += 1
             if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
@@ -1014,7 +1380,15 @@ describe("review", () => {
                   "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
               })
             }
-            if (turn === 2) {
+            if (isAssessmentTurn(input)) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: needs another look",
+              })
+            }
+            applyPasses += 1
+            if (applyPasses === 1) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
@@ -1033,6 +1407,53 @@ describe("review", () => {
         _tag: "deferred",
         severity: "low",
         reason: "remaining style notes",
+      })
+    }))
+
+  it("counts only changed apply rounds toward the fix limit when assessing low severity", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "still broken\n")
+
+      let reviewingPasses = 0
+      let applyPasses = 0
+      let assessmentPasses = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            if (isReviewingTurn(input)) {
+              reviewingPasses += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
+              })
+            }
+            if (isAssessmentTurn(input)) {
+              assessmentPasses += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: still risky",
+              })
+            }
+            applyPasses += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      // 6 reviewing + 5 apply + 5 assessment; no 6th apply
+      expect(applyPasses).toBe(5)
+      expect(assessmentPasses).toBe(5)
+      expect(reviewingPasses).toBe(6)
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: REVIEW_FIX_LIMIT_REASON,
       })
     }))
 
@@ -1225,6 +1646,100 @@ describe("review", () => {
       expect(phaseDuringApply).toEqual({
         reason_code: STEP_RUN_REASON.reviewApplyingFindings,
         reason_message: REVIEW_APPLYING_FINDINGS_MESSAGE,
+      })
+    }))
+
+  it("marks Step Run phase as assessing rerun during low-severity assessment", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const stepRunId = "srun-01JREVIEWASSESS000000000001"
+      const workItemId = "wi-01JREVIEWASSESS0000000000001"
+      const repositoryId = "repo-review-assess-phase"
+      let phaseDuringAssess: {
+        reason_code: string | null
+        reason_message: string | null
+      } | null = null
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO repository (
+               id, github_owner, github_repo, local_path, is_bare, paused,
+               issues_reconciled_at, created_at, updated_at
+             ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+            [repositoryId, `/tmp/${repositoryId}`, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, model, variant,
+               review_model, review_variant, state, state_ready_at, worktree_path,
+               session_id, failure_code, failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'review', ?,
+               ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
+            [workItemId, repositoryId, now, root, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO step_run (
+               id, work_item_id, step, status, queue_job_id, queued_at,
+               started_at, finished_at, reason_code, reason_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 'review', 'running', NULL, ?, ?, NULL, NULL, NULL, ?, ?)`,
+            [stepRunId, workItemId, now, now, now, now],
+          )
+
+          yield* review(baseContext(root, { repositoryId })).pipe(
+            Effect.provideService(CurrentStepRun, {
+              stepRunId,
+              repositoryId,
+            }),
+            Effect.provide(
+              stubOpencode({
+                continue: (input) =>
+                  Effect.gen(function* () {
+                    if (isAssessmentTurn(input)) {
+                      const rows = (yield* sql.unsafe(
+                        `SELECT reason_code, reason_message FROM step_run WHERE id = ?`,
+                        [stepRunId],
+                      )) as readonly {
+                        readonly reason_code: string | null
+                        readonly reason_message: string | null
+                      }[]
+                      phaseDuringAssess = rows[0] ?? null
+                      return {
+                        sessionId: "ses_implement_session",
+                        assistantText:
+                          "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: localized only",
+                      }
+                    }
+                    if (isReviewingTurn(input)) {
+                      return {
+                        sessionId: "ses_implement_session",
+                        assistantText:
+                          "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
+                      }
+                    }
+                    return {
+                      sessionId: "ses_implement_session",
+                      assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+                    }
+                  }),
+              }),
+            ),
+          )
+        }).pipe(
+          Effect.provide(DbServiceLive),
+          Effect.provide(DatabaseTest),
+          Effect.provide(PlatformLayer),
+        ),
+      )
+
+      expect(phaseDuringAssess).toEqual({
+        reason_code: STEP_RUN_REASON.reviewAssessingRerun,
+        reason_message: REVIEW_ASSESSING_RERUN_MESSAGE,
       })
     }))
 

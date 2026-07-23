@@ -15,6 +15,7 @@ import {
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_ASSESSING_RERUN_MESSAGE,
   REVIEW_PRE_COMMIT_MESSAGE,
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
@@ -52,6 +53,14 @@ export type ReviewResult =
       readonly severity: DeferredReviewSeverity
       readonly reason: string
     }
+  | {
+      readonly _tag: "accepted"
+      readonly reason: string
+      readonly deferred: {
+        readonly severity: DeferredReviewSeverity
+        readonly reason: string
+      } | null
+    }
   | { readonly _tag: "needs_human"; readonly reason: string }
 
 /** Machine-readable outcome of the reviewing (/review) pass only. */
@@ -75,6 +84,11 @@ export type ApplyReviewResult =
   | { readonly _tag: "cleared"; readonly reason: string }
   | { readonly _tag: "unresolved_high"; readonly reason: string }
 
+/** Machine-readable outcome of a Review Rerun Assessment. */
+export type RerunAssessmentResult =
+  | { readonly _tag: "accepted"; readonly reason: string }
+  | { readonly _tag: "rerun_required"; readonly reason: string }
+
 export const REVIEW_AGENT_COMMAND = "/review"
 
 const SEVERITY_RUBRIC = [
@@ -89,6 +103,18 @@ export const formatDeferredReviewSummary = (
   severity: DeferredReviewSeverity,
   reason: string,
 ): string => `${severity}: ${reason}`
+
+/** Persist Accepted Review Outcome rationale (and any deferred remainder). */
+export const formatAcceptedReviewSummary = (
+  reason: string,
+  deferred: {
+    readonly severity: DeferredReviewSeverity
+    readonly reason: string
+  } | null,
+): string =>
+  deferred === null
+    ? reason
+    : `${reason} (deferred ${deferred.severity}: ${deferred.reason})`
 
 export const buildReviewingPrompt = () =>
   [
@@ -132,6 +158,20 @@ const buildApplyFindingsPrompt = (severity: ReviewSeverity) =>
     "or",
     "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: <short reason>",
     "when high-severity findings remain unresolved or disputed without a fix.",
+  ].join("\n")
+
+export const buildRerunAssessmentPrompt = () =>
+  [
+    "A prior build-model pass applied low-severity Review Findings, then nested Pre-Commit ran in this Session.",
+    "Using only this Session's account of those apply and Pre-Commit changes, decide whether another full reviewing pass is required.",
+    "Do not edit files, commit, push, open pull requests, re-review the whole worktree, capture repository snapshots, or compute diffs.",
+    "Accept without rerun only when remediation was direct, localized, and semantics-preserving relative to the low-severity findings.",
+    "Require a full reviewing pass when remediation changed behavior, contracts, schemas, dependencies, security posture, concurrency, broad generated files, expanded beyond the findings, or when you are uncertain.",
+    "End your final response with exactly one machine-readable result line:",
+    "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: <short reason>",
+    "when the remediation may advance without another reviewing pass, or",
+    "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: <short reason>",
+    "when a full reviewing pass is required.",
   ].join("\n")
 
 const uniqueFinalResultLine = (output: string): string | null => {
@@ -279,6 +319,41 @@ export const parseApplyReviewResult = (
   return null
 }
 
+/**
+ * Parse the unique final READY_FOR_AGENT_RESULT line from a Review Rerun Assessment.
+ * Returns null for missing, duplicate, non-final, or unrecognized markers.
+ */
+export const parseRerunAssessmentResult = (
+  output: string,
+): RerunAssessmentResult | null => {
+  const finalLine = uniqueFinalResultLine(output)
+  if (finalLine === null) {
+    return null
+  }
+
+  const notRequired = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_RERUN_NOT_REQUIRED\s*:\s*(.+)$/i,
+  )
+  if (notRequired?.[1] !== undefined && notRequired[1].trim() !== "") {
+    return {
+      _tag: "accepted",
+      reason: boundReason(notRequired[1]),
+    }
+  }
+
+  const required = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_RERUN_REQUIRED\s*:\s*(.+)$/i,
+  )
+  if (required?.[1] !== undefined && required[1].trim() !== "") {
+    return {
+      _tag: "rerun_required",
+      reason: boundReason(required[1]),
+    }
+  }
+
+  return null
+}
+
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = context.worktreePath
@@ -375,14 +450,23 @@ const markReviewPreCommitPhase = markReviewPhase(
   "pre-commit",
 )
 
+const markAssessingRerunPhase = markReviewPhase(
+  STEP_RUN_REASON.reviewAssessingRerun,
+  REVIEW_ASSESSING_RERUN_MESSAGE,
+  "assessing rerun",
+)
+
 /**
  * Production Review Lifecycle Step — reviewing pass, optional apply-findings,
- * and on changed work a nested Pre-Commit then re-review. Continues the Implement
- * OpenCode Session. Reviewing uses the review model/variant; applying findings
- * and nested Pre-Commit fix turns use the build model/variant. Nested Pre-Commit
- * failures fail the Review Step Run (retryable), same spirit as standalone
- * Pre-Commit. At most {@link MAX_REVIEW_FIX_ROUNDS} changed apply rounds; further
- * findings without clean/deferred/cleared become Needs Human (not a failed Step Run).
+ * and on changed work a nested Pre-Commit then either a Review Rerun Assessment
+ * (low severity) or a mandatory full reviewing pass (medium/high). Continues the
+ * Implement OpenCode Session. Reviewing uses the review model/variant; applying
+ * findings, nested Pre-Commit fix turns, and rerun assessments use the build
+ * model/variant. Nested Pre-Commit failures fail the Review Step Run (retryable),
+ * same spirit as standalone Pre-Commit. At most {@link MAX_REVIEW_FIX_ROUNDS}
+ * changed apply rounds; assessment and reviewing turns do not independently
+ * consume rounds. Further findings without clean/deferred/cleared/accepted
+ * become Needs Human (not a failed Step Run).
  */
 export const review = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -533,9 +617,54 @@ export const review = (context: LifecycleStepContext) =>
         }
       }
 
-      // fixed | fixed_and_deferred — changed work always re-reviews after Pre-Commit
+      // fixed | fixed_and_deferred — changed work: Pre-Commit then severity policy
       fixRoundsUsed += 1
+      const deferredFromApply =
+        applyParsed._tag === "fixed_and_deferred"
+          ? {
+              severity: applyParsed.severity,
+              reason: applyParsed.reason,
+            }
+          : null
+
       yield* markReviewPreCommitPhase
       yield* preCommit(context)
+
+      if (originalSeverity === "low") {
+        yield* markAssessingRerunPhase
+        const assessment = yield* opencode
+          .continue({
+            sessionId,
+            prompt: buildRerunAssessmentPrompt(),
+            cwd: worktreePath,
+            model: context.model,
+            variant: context.variant,
+            timeout,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ReviewOpenCodeError({
+                  message: "OpenCode failed during Review Rerun Assessment",
+                  worktreePath,
+                  sessionId,
+                  cause,
+                }),
+            ),
+          )
+
+        const assessmentParsed = parseRerunAssessmentResult(
+          assessment.assistantText,
+        )
+        // Missing/duplicate/malformed/ambiguous → conservative full reviewing pass
+        if (assessmentParsed?._tag === "accepted") {
+          return {
+            _tag: "accepted" as const,
+            reason: assessmentParsed.reason,
+            deferred: deferredFromApply,
+          }
+        }
+      }
+      // medium/high mandatory rerun, low rerun_required, or malformed assessment
     }
   })

@@ -131,6 +131,9 @@ export const REVIEW_APPLYING_FINDINGS_MESSAGE = "applying findings"
 /** Operator-visible Review phase while nested Pre-Commit runs after FIXED. */
 export const REVIEW_PRE_COMMIT_MESSAGE = "pre-commit"
 
+/** Operator-visible Review phase while Review Rerun Assessment runs. */
+export const REVIEW_ASSESSING_RERUN_MESSAGE = "assessing rerun"
+
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
 export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
@@ -270,10 +273,14 @@ export const STEP_RUN_REASON = {
   reviewApplyingFindings: "review_applying_findings",
   /** Mid-run: Review is re-running Pre-Commit after FIXED before re-review. */
   reviewPreCommit: "review_pre_commit",
+  /** Mid-run: Review is assessing whether low-severity remediation needs rerun. */
+  reviewAssessingRerun: "review_assessing_rerun",
   /** Successful Review that deferred findings and advanced to Commit. */
   reviewDeferred: "review_deferred",
   /** Successful Review that cleared low/medium findings without changes. */
   reviewCleared: "review_cleared",
+  /** Successful Review that accepted low-severity remediation without full rerun. */
+  reviewAccepted: "review_accepted",
   /** Successful Merge PR run that returned to Watch for fresh validation. */
   mergeRevalidation: "merge_revalidation",
 } as const
