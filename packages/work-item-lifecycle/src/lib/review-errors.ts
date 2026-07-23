@@ -35,8 +35,30 @@ export class ReviewOpenCodeError extends Schema.TaggedErrorClass<ReviewOpenCodeE
   },
 ) {}
 
+export class ReviewResultError extends Schema.TaggedErrorClass<ReviewResultError>()(
+  "ReviewResultError",
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
+/**
+ * Reviewing reported findings; apply-findings is not implemented yet (#391).
+ * Parse succeeded — this is the intentional stop-short hook, not a parse failure.
+ */
+export class ReviewHasFindingsPendingError extends Schema.TaggedErrorClass<ReviewHasFindingsPendingError>()(
+  "ReviewHasFindingsPendingError",
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
 export type ReviewError =
   | ReviewWorktreeContextMissingError
   | ReviewInvalidWorktreeContextError
   | ReviewSessionContextMissingError
   | ReviewOpenCodeError
+  | ReviewResultError
+  | ReviewHasFindingsPendingError

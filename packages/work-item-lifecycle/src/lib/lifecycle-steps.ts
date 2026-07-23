@@ -44,6 +44,7 @@ import type {
   ResolvePrMergeConflictOpenCodeError,
   ResolvePrMergeConflictResult,
 } from "./resolve-pr-merge-conflict.js"
+import type { ReviewResult } from "./review.js"
 import type { ReviewError } from "./review-errors.js"
 import type { WorkItemId } from "./types.js"
 
@@ -133,7 +134,7 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<void, LifecycleStepError>
   readonly review: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, LifecycleStepError>
+  ) => Effect.Effect<ReviewResult, LifecycleStepError>
   readonly commit: (
     context: LifecycleStepContext,
   ) => Effect.Effect<void, LifecycleStepError>

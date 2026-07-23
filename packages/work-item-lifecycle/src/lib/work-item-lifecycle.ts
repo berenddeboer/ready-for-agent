@@ -61,6 +61,7 @@ import {
   PreCommitHookFailedError,
   PreCommitStageError,
 } from "./pre-commit-errors.js"
+import { ReviewHasFindingsPendingError } from "./review-errors.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
@@ -1236,7 +1237,21 @@ export const makeWorkItemLifecycleLive = (
           case "pre_commit":
             return steps.preCommit(context).pipe(Effect.as({}))
           case "review":
-            return steps.review(context).pipe(Effect.as({}))
+            return steps.review(context).pipe(
+              Effect.flatMap((result) => {
+                if (result._tag === "clean") {
+                  return Effect.succeed({})
+                }
+                // Hook for #391 apply-findings; do not treat as clean or advance.
+                return Effect.fail(
+                  new ReviewHasFindingsPendingError({
+                    workItemId: context.workItemId,
+                    message:
+                      "Review reported findings; apply-findings path is not implemented yet",
+                  }),
+                )
+              }),
+            )
           case "commit":
             return steps.commit(context).pipe(Effect.as({}))
           case "create_pr":

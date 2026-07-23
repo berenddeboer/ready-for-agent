@@ -76,7 +76,7 @@ describe("Assess Changes lifecycle routes", () => {
           opencodeCalls += 1
           return Effect.void
         },
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.void,
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -213,7 +213,7 @@ describe("Assess Changes lifecycle routes", () => {
         assessChanges: (context) =>
           assessChanges(context).pipe(Effect.provide(PlatformLayer)),
         preCommit: () => Effect.void,
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.void,
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -320,7 +320,7 @@ describe("Assess Changes lifecycle routes", () => {
             completionSummary: null,
           }).pipe(Effect.provide(PlatformLayer)),
         preCommit: () => Effect.die("pre-commit must not run"),
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.void,
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -449,7 +449,7 @@ describe("Assess Changes lifecycle routes", () => {
         },
         review: () => {
           reviewCalls += 1
-          return Effect.void
+          return Effect.succeed({ _tag: "clean" as const })
         },
         commit: () => {
           commitCalls += 1
@@ -614,7 +614,7 @@ describe("Assess Changes lifecycle routes", () => {
           return Effect.succeed({ _tag: "changes" })
         },
         preCommit: () => Effect.void,
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.void,
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -724,7 +724,7 @@ describe("Assess Changes lifecycle routes", () => {
             ),
           ),
         preCommit: () => Effect.die("pre-commit must not run"),
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.void,
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -842,7 +842,7 @@ describe("Assess Changes lifecycle routes", () => {
             completionSummary: summary,
           }),
         preCommit: () => Effect.die("pre-commit must not run"),
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.die("commit must not run"),
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
@@ -983,7 +983,7 @@ describe("Assess Changes lifecycle routes", () => {
             completionSummary: summary,
           }),
         preCommit: () => Effect.void,
-        review: () => Effect.void,
+        review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.void,
         createPr: () => Effect.succeed(1),
         watchPrStatusChecks: () => Effect.succeed("succeeded"),
