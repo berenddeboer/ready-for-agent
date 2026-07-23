@@ -20,10 +20,17 @@ import {
   STEP_RUN_REASON,
 } from "./types.js"
 
+/** Max build-model apply rounds per Review Step Run before Needs Human. */
+export const MAX_REVIEW_FIX_ROUNDS = 3
+
+/** Operator-visible reason when Review Fix Rounds are exhausted. */
+export const REVIEW_FIX_LIMIT_REASON = `Review fix limit reached (${MAX_REVIEW_FIX_ROUNDS}); inspect the worktree or address remaining findings, then Retry.`
+
 /** Final Review step outcome after reviewing, optional apply, and fix rounds. */
 export type ReviewResult =
   | { readonly _tag: "clean" }
   | { readonly _tag: "deferred"; readonly reason: string }
+  | { readonly _tag: "needs_human"; readonly reason: string }
 
 /** Machine-readable outcome of the reviewing (/review) pass only. */
 export type ReviewingPassResult =
@@ -237,7 +244,8 @@ const markReviewPreCommitPhase = markReviewPhase(
  * OpenCode Session. Reviewing uses the review model/variant; applying findings
  * and nested Pre-Commit fix turns use the build model/variant. Nested Pre-Commit
  * failures fail the Review Step Run (retryable), same spirit as standalone
- * Pre-Commit.
+ * Pre-Commit. At most {@link MAX_REVIEW_FIX_ROUNDS} FIXED apply rounds; further
+ * findings without clean/deferred become Needs Human (not a failed Step Run).
  */
 export const review = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -246,6 +254,7 @@ export const review = (context: LifecycleStepContext) =>
     const timeout =
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.review
     const opencode = yield* Opencode
+    let fixRoundsUsed = 0
 
     for (;;) {
       yield* markReviewingPhase
@@ -282,6 +291,13 @@ export const review = (context: LifecycleStepContext) =>
 
       if (reviewingParsed._tag === "clean") {
         return { _tag: "clean" as const }
+      }
+
+      if (fixRoundsUsed >= MAX_REVIEW_FIX_ROUNDS) {
+        return {
+          _tag: "needs_human" as const,
+          reason: REVIEW_FIX_LIMIT_REASON,
+        }
       }
 
       yield* markApplyingFindingsPhase
@@ -324,6 +340,7 @@ export const review = (context: LifecycleStepContext) =>
         return applyParsed
       }
 
+      fixRoundsUsed += 1
       yield* markReviewPreCommitPhase
       yield* preCommit(context)
     }

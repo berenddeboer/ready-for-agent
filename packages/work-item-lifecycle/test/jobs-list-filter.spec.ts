@@ -1,10 +1,12 @@
 import {
+  type OperationalLifecycleStep,
   type StepRunStatus,
   type WorkItemState,
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
   isJobsFailedWorkItem,
   isJobsWorkingWorkItem,
+  isRetryableNeedsHumanWorkItem,
 } from "../src/lib/types.js"
 import { describe, expect, it } from "bun:test"
 
@@ -13,6 +15,7 @@ const item = (
   createdAtMs: number,
   latestStepStatus?: StepRunStatus,
   failureCode: string | null = null,
+  latestStep?: OperationalLifecycleStep,
 ) => ({
   state,
   failureCode,
@@ -20,7 +23,12 @@ const item = (
   stepRuns:
     latestStepStatus === undefined
       ? []
-      : [{ status: latestStepStatus } as const],
+      : [
+          {
+            status: latestStepStatus,
+            ...(latestStep === undefined ? {} : { step: latestStep }),
+          } as const,
+        ],
 })
 
 describe("Jobs list membership", () => {
@@ -63,6 +71,31 @@ describe("Jobs list membership", () => {
     )
     expect(isJobsFailedWorkItem(retryable)).toBe(false)
     expect(isJobsWorkingWorkItem(retryable)).toBe(true)
+  })
+
+  it("treats Investigate and Review Needs Human handoffs as retryable", () => {
+    expect(
+      isRetryableNeedsHumanWorkItem(
+        item(
+          "needs_human",
+          1,
+          "succeeded",
+          null,
+          "investigate_pr_status_checks",
+        ),
+      ),
+    ).toBe(true)
+    expect(
+      isRetryableNeedsHumanWorkItem(
+        item("needs_human", 1, "succeeded", null, "review"),
+      ),
+    ).toBe(true)
+    expect(
+      isRetryableNeedsHumanWorkItem(
+        item("needs_human", 1, "succeeded", null, "decide_pr_merge"),
+      ),
+    ).toBe(false)
+    expect(isRetryableNeedsHumanWorkItem(item("needs_human", 1))).toBe(false)
   })
 
   it("places unfinished lifecycle states on Working when not stopped on failure", () => {

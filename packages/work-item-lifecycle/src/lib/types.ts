@@ -178,10 +178,16 @@ export const isRetryableFailedWorkItem = (
 
 export const isRetryableNeedsHumanWorkItem = (
   item: Pick<WorkItemRecord, "state" | "stepRuns">,
-): boolean =>
-  item.state === "needs_human" &&
-  item.stepRuns.at(-1)?.step === "investigate_pr_status_checks" &&
-  item.stepRuns.at(-1)?.status === "succeeded"
+): boolean => {
+  if (item.state !== "needs_human") {
+    return false
+  }
+  const latest = item.stepRuns.at(-1)
+  return (
+    latest?.status === "succeeded" &&
+    (latest.step === "investigate_pr_status_checks" || latest.step === "review")
+  )
+}
 
 /** Jobs card Failed tab: non-retryable terminal failures only. */
 export const isJobsFailedWorkItem = (item: JobsListMembershipItem): boolean =>

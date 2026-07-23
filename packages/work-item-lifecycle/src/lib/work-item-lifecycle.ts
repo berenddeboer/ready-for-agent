@@ -1244,6 +1244,14 @@ export const makeWorkItemLifecycleLive = (
                     stepRunNote: result.reason,
                   }
                 }
+                if (result._tag === "needs_human") {
+                  return {
+                    transition: {
+                      nextState: "needs_human" as const,
+                      reason: result.reason,
+                    },
+                  }
+                }
                 return {}
               }),
             )
@@ -3273,10 +3281,16 @@ export const makeWorkItemLifecycleLive = (
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
         const latest = latestRows[0]
-        const retryableNeedsHumanHandoff =
+        const retryableInvestigateNeedsHuman =
           workItem.state === "needs_human" &&
           latest?.step === "investigate_pr_status_checks" &&
           latest.status === "succeeded"
+        const retryableReviewFixLimitNeedsHuman =
+          workItem.state === "needs_human" &&
+          latest?.step === "review" &&
+          latest.status === "succeeded"
+        const retryableNeedsHumanHandoff =
+          retryableInvestigateNeedsHuman || retryableReviewFixLimitNeedsHuman
 
         if (
           isTerminalWorkItemState(workItem.state) &&
@@ -3299,9 +3313,11 @@ export const makeWorkItemLifecycleLive = (
         const pendingStep: OperationalLifecycleStep =
           recoverableStatusCheckFailure
             ? "watch_pr_status_checks"
-            : retryableNeedsHumanHandoff
+            : retryableInvestigateNeedsHuman
               ? "investigate_pr_status_checks"
-              : (workItem.state as OperationalLifecycleStep)
+              : retryableReviewFixLimitNeedsHuman
+                ? "review"
+                : (workItem.state as OperationalLifecycleStep)
 
         const activeRows = (yield* sql
           .unsafe(
@@ -3374,7 +3390,7 @@ export const makeWorkItemLifecycleLive = (
               }
 
               if (
-                retryableNeedsHumanHandoff &&
+                retryableInvestigateNeedsHuman &&
                 latest !== undefined &&
                 latest.finished_at !== null
               ) {
