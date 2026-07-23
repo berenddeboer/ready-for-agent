@@ -26,58 +26,112 @@ export const MAX_REVIEW_FIX_ROUNDS = 5
 /** Operator-visible reason when Review Fix Rounds are exhausted. */
 export const REVIEW_FIX_LIMIT_REASON = `Review fix limit reached (${MAX_REVIEW_FIX_ROUNDS}); inspect the worktree or address remaining findings, then Retry.`
 
+/** Needs Human when high-severity findings remain unresolved after apply. */
+export const REVIEW_UNRESOLVED_HIGH_REASON =
+  "Unresolved high-severity Review Findings require human attention."
+
+/**
+ * Needs Human when the builder leaves an original high-severity review
+ * unchanged or disputes it without fixing.
+ */
+export const REVIEW_HIGH_UNCHANGED_REASON =
+  "High-severity Review Findings were not fixed; human attention required."
+
+/** Aggregate impact of Review Findings in one reviewing pass. */
+export type ReviewSeverity = "low" | "medium" | "high"
+
+/** Unresolved severity eligible for deferral (never high). */
+export type DeferredReviewSeverity = "low" | "medium"
+
 /** Final Review step outcome after reviewing, optional apply, and fix rounds. */
 export type ReviewResult =
   | { readonly _tag: "clean" }
-  | { readonly _tag: "deferred"; readonly reason: string }
+  | { readonly _tag: "cleared"; readonly reason: string }
+  | {
+      readonly _tag: "deferred"
+      readonly severity: DeferredReviewSeverity
+      readonly reason: string
+    }
   | { readonly _tag: "needs_human"; readonly reason: string }
 
 /** Machine-readable outcome of the reviewing (/review) pass only. */
 export type ReviewingPassResult =
   | { readonly _tag: "clean" }
-  | { readonly _tag: "has_findings" }
+  | { readonly _tag: "has_findings"; readonly severity: ReviewSeverity }
 
 /** Machine-readable outcome of the apply-findings pass. */
 export type ApplyReviewResult =
-  | { readonly _tag: "clean" }
-  | { readonly _tag: "deferred"; readonly reason: string }
   | { readonly _tag: "fixed" }
+  | {
+      readonly _tag: "fixed_and_deferred"
+      readonly severity: DeferredReviewSeverity
+      readonly reason: string
+    }
+  | {
+      readonly _tag: "deferred"
+      readonly severity: DeferredReviewSeverity
+      readonly reason: string
+    }
+  | { readonly _tag: "cleared"; readonly reason: string }
+  | { readonly _tag: "unresolved_high"; readonly reason: string }
 
 export const REVIEW_AGENT_COMMAND = "/review"
+
+const SEVERITY_RUBRIC = [
+  "Severity measures finding impact, not expected fix effort:",
+  "low = no plausible runtime or contract impact;",
+  "medium = bounded behavior or correctness impact;",
+  "high = security, data-loss, major-contract, or broad/systemic impact.",
+].join(" ")
+
+/** Persist deferred severity + rationale on the completed Review Step Run. */
+export const formatDeferredReviewSummary = (
+  severity: DeferredReviewSeverity,
+  reason: string,
+): string => `${severity}: ${reason}`
 
 export const buildReviewingPrompt = () =>
   [
     "Review uncommitted worktree changes.",
     "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+    SEVERITY_RUBRIC,
     "End your final response with exactly one machine-readable result line:",
     "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-    "or",
-    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+    "when there are no Review Findings, or",
+    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
+    "using the highest Review Severity among the findings.",
   ].join("\n")
 
 const buildReviewVerdictPrompt = () =>
   [
     "The /review command immediately above has completed.",
     "Do not review again, edit files, or add explanatory prose.",
-    "If it reported any Review Findings, respond exactly:",
-    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+    SEVERITY_RUBRIC,
+    "Classify the existing report. If it reported any Review Findings, respond exactly:",
+    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
+    "using the highest Review Severity among those findings.",
     "Otherwise respond exactly:",
     "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
   ].join("\n")
 
-const buildApplyFindingsPrompt = () =>
+const buildApplyFindingsPrompt = (severity: ReviewSeverity) =>
   [
-    "The previous reviewing pass reported Review Findings (REVIEW_HAS_FINDINGS).",
-    "Interpret those findings. Fix only what should be fixed now; you may defer stylistic or disputed notes.",
+    `The previous reviewing pass reported Review Findings at severity ${severity} (REVIEW_HAS_FINDINGS: ${severity}).`,
+    "Interpret those findings. Fix only what should be fixed now.",
+    "Low- and medium-severity findings may be deferred or cleared with a reason; high-severity findings must be fixed (with optional lower-severity deferrals) or left unresolved for a human.",
     "Do not commit, push, open pull requests, or start unrelated rework.",
     "End your final response with exactly one machine-readable result line:",
     "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
-    "when you changed the worktree to address findings,",
-    "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <short reason>",
-    "when findings remain but should not block Commit,",
+    "when you changed the worktree and no findings remain deferred,",
+    "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: <low|medium>: <short reason>",
+    "when you changed the worktree and also deferred remaining low/medium findings,",
+    "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: <low|medium>: <short reason>",
+    "when you did not change the worktree and only low/medium findings remain (defer them),",
+    "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: <short reason>",
+    "when you reject all low/medium findings as invalid without changing the worktree,",
     "or",
-    "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-    "when on re-read there is nothing that needs fixing or deferring.",
+    "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: <short reason>",
+    "when high-severity findings remain unresolved or disputed without a fix.",
   ].join("\n")
 
 const uniqueFinalResultLine = (output: string): string | null => {
@@ -103,6 +157,24 @@ const hasResultLine = (output: string): boolean =>
     .split("\n")
     .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
 
+const parseSeverity = (raw: string): ReviewSeverity | null => {
+  const value = raw.trim().toLowerCase()
+  if (value === "low" || value === "medium" || value === "high") {
+    return value
+  }
+  return null
+}
+
+const parseDeferredSeverity = (raw: string): DeferredReviewSeverity | null => {
+  const severity = parseSeverity(raw)
+  if (severity === "low" || severity === "medium") {
+    return severity
+  }
+  return null
+}
+
+const boundReason = (reason: string): string => reason.trim().slice(0, 500)
+
 /**
  * Parse the unique final READY_FOR_AGENT_RESULT line from a reviewing pass.
  * Returns null for missing, duplicate, non-final, or unrecognized markers.
@@ -119,8 +191,14 @@ export const parseReviewResult = (
     return { _tag: "clean" }
   }
 
-  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_HAS_FINDINGS$/i.test(finalLine)) {
-    return { _tag: "has_findings" }
+  const hasFindings = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_HAS_FINDINGS\s*:\s*(.+)$/i,
+  )
+  if (hasFindings?.[1] !== undefined) {
+    const severity = parseSeverity(hasFindings[1])
+    if (severity !== null) {
+      return { _tag: "has_findings", severity }
+    }
   }
 
   return null
@@ -138,21 +216,63 @@ export const parseApplyReviewResult = (
     return null
   }
 
-  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEAN$/i.test(finalLine)) {
-    return { _tag: "clean" }
-  }
-
   if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED$/i.test(finalLine)) {
     return { _tag: "fixed" }
   }
 
-  const deferred = finalLine.match(
-    /^READY_FOR_AGENT_RESULT:\s*REVIEW_DEFERRED\s*:\s*(.+)$/i,
+  const fixedAndDeferred = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED_AND_DEFERRED\s*:\s*(low|medium)\s*:\s*(.+)$/i,
   )
-  if (deferred?.[1] !== undefined && deferred[1].trim() !== "") {
+  if (
+    fixedAndDeferred?.[1] !== undefined &&
+    fixedAndDeferred[2] !== undefined &&
+    fixedAndDeferred[2].trim() !== ""
+  ) {
+    const severity = parseDeferredSeverity(fixedAndDeferred[1])
+    if (severity !== null) {
+      return {
+        _tag: "fixed_and_deferred",
+        severity,
+        reason: boundReason(fixedAndDeferred[2]),
+      }
+    }
+  }
+
+  const deferred = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_DEFERRED\s*:\s*(low|medium)\s*:\s*(.+)$/i,
+  )
+  if (
+    deferred?.[1] !== undefined &&
+    deferred[2] !== undefined &&
+    deferred[2].trim() !== ""
+  ) {
+    const severity = parseDeferredSeverity(deferred[1])
+    if (severity !== null) {
+      return {
+        _tag: "deferred",
+        severity,
+        reason: boundReason(deferred[2]),
+      }
+    }
+  }
+
+  const cleared = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEARED\s*:\s*(.+)$/i,
+  )
+  if (cleared?.[1] !== undefined && cleared[1].trim() !== "") {
     return {
-      _tag: "deferred",
-      reason: deferred[1].trim().slice(0, 500),
+      _tag: "cleared",
+      reason: boundReason(cleared[1]),
+    }
+  }
+
+  const unresolvedHigh = finalLine.match(
+    /^READY_FOR_AGENT_RESULT:\s*REVIEW_UNRESOLVED_HIGH\s*:\s*(.+)$/i,
+  )
+  if (unresolvedHigh?.[1] !== undefined && unresolvedHigh[1].trim() !== "") {
+    return {
+      _tag: "unresolved_high",
+      reason: boundReason(unresolvedHigh[1]),
     }
   }
 
@@ -257,12 +377,12 @@ const markReviewPreCommitPhase = markReviewPhase(
 
 /**
  * Production Review Lifecycle Step — reviewing pass, optional apply-findings,
- * and on FIXED a nested Pre-Commit then re-review. Continues the Implement
+ * and on changed work a nested Pre-Commit then re-review. Continues the Implement
  * OpenCode Session. Reviewing uses the review model/variant; applying findings
  * and nested Pre-Commit fix turns use the build model/variant. Nested Pre-Commit
  * failures fail the Review Step Run (retryable), same spirit as standalone
- * Pre-Commit. At most {@link MAX_REVIEW_FIX_ROUNDS} FIXED apply rounds; further
- * findings without clean/deferred become Needs Human (not a failed Step Run).
+ * Pre-Commit. At most {@link MAX_REVIEW_FIX_ROUNDS} changed apply rounds; further
+ * findings without clean/deferred/cleared become Needs Human (not a failed Step Run).
  */
 export const review = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -327,13 +447,15 @@ export const review = (context: LifecycleStepContext) =>
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
           message:
-            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS",
+            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>",
         })
       }
 
       if (reviewingParsed._tag === "clean") {
         return { _tag: "clean" as const }
       }
+
+      const originalSeverity = reviewingParsed.severity
 
       if (fixRoundsUsed >= MAX_REVIEW_FIX_ROUNDS) {
         return {
@@ -347,7 +469,7 @@ export const review = (context: LifecycleStepContext) =>
       const applying = yield* opencode
         .continue({
           sessionId,
-          prompt: buildApplyFindingsPrompt(),
+          prompt: buildApplyFindingsPrompt(originalSeverity),
           cwd: worktreePath,
           model: context.model,
           variant: context.variant,
@@ -370,18 +492,48 @@ export const review = (context: LifecycleStepContext) =>
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
           message:
-            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_DEFERRED: <reason>, or REVIEW_CLEAN",
+            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>",
         })
       }
 
-      if (applyParsed._tag === "clean") {
-        return { _tag: "clean" as const }
+      if (applyParsed._tag === "unresolved_high") {
+        return {
+          _tag: "needs_human" as const,
+          reason:
+            applyParsed.reason.trim() !== ""
+              ? applyParsed.reason
+              : REVIEW_UNRESOLVED_HIGH_REASON,
+        }
       }
 
       if (applyParsed._tag === "deferred") {
-        return applyParsed
+        if (originalSeverity === "high") {
+          return {
+            _tag: "needs_human" as const,
+            reason: REVIEW_HIGH_UNCHANGED_REASON,
+          }
+        }
+        return {
+          _tag: "deferred" as const,
+          severity: applyParsed.severity,
+          reason: applyParsed.reason,
+        }
       }
 
+      if (applyParsed._tag === "cleared") {
+        if (originalSeverity === "high") {
+          return {
+            _tag: "needs_human" as const,
+            reason: REVIEW_HIGH_UNCHANGED_REASON,
+          }
+        }
+        return {
+          _tag: "cleared" as const,
+          reason: applyParsed.reason,
+        }
+      }
+
+      // fixed | fixed_and_deferred — changed work always re-reviews after Pre-Commit
       fixRoundsUsed += 1
       yield* markReviewPreCommitPhase
       yield* preCommit(context)

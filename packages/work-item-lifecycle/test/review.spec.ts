@@ -20,7 +20,9 @@ import {
   REVIEW_AGENT_COMMAND,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_FIX_LIMIT_REASON,
+  REVIEW_HIGH_UNCHANGED_REASON,
   REVIEW_PRE_COMMIT_MESSAGE,
+  REVIEW_UNRESOLVED_HIGH_REASON,
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
   ReviewResultError,
@@ -28,6 +30,7 @@ import {
   ReviewWorktreeContextMissingError,
   STEP_RUN_REASON,
   buildReviewingPrompt,
+  formatDeferredReviewSummary,
   makeWorkItemId,
   parseApplyReviewResult,
   parseReviewResult,
@@ -158,24 +161,30 @@ const writeHook = async (root: string, body: string) => {
 }
 
 describe("parseReviewResult", () => {
-  it("parses clean and has-findings lines", () => {
+  it("parses clean and severity-tagged has-findings lines", () => {
     expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_CLEAN")).toEqual({
       _tag: "clean",
     })
     expect(
       parseReviewResult(
-        "Looks good overall.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+        "Looks good overall.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
       ),
-    ).toEqual({ _tag: "has_findings" })
+    ).toEqual({ _tag: "has_findings", severity: "low" })
+    expect(
+      parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"),
+    ).toEqual({ _tag: "has_findings", severity: "medium" })
+    expect(
+      parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"),
+    ).toEqual({ _tag: "has_findings", severity: "high" })
   })
 
-  it("rejects missing, duplicate, non-final, or unknown markers", () => {
+  it("rejects missing, duplicate, non-final, unsevered, or unknown markers", () => {
     expect(parseReviewResult("no result line")).toBeNull()
     expect(
       parseReviewResult(
         [
           "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-          "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+          "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
         ].join("\n"),
       ),
     ).toBeNull()
@@ -184,34 +193,63 @@ describe("parseReviewResult", () => {
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN\nAdditional output",
       ),
     ).toBeNull()
+    expect(
+      parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"),
+    ).toBeNull()
+    expect(
+      parseReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: critical",
+      ),
+    ).toBeNull()
     expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED")).toBeNull()
   })
 })
 
 describe("parseApplyReviewResult", () => {
-  it("parses fixed, deferred, and apply-clean lines", () => {
+  it("parses fixed, fixed-and-deferred, deferred, cleared, and unresolved-high lines", () => {
     expect(
       parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED"),
     ).toEqual({ _tag: "fixed" })
     expect(
       parseApplyReviewResult(
-        "Left style notes.\nREADY_FOR_AGENT_RESULT: REVIEW_DEFERRED: stylistic only",
+        "Fixed main bug.\nREADY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: low: style nits remain",
       ),
-    ).toEqual({ _tag: "deferred", reason: "stylistic only" })
+    ).toEqual({
+      _tag: "fixed_and_deferred",
+      severity: "low",
+      reason: "style nits remain",
+    })
     expect(
       parseApplyReviewResult(
-        "Nothing actionable.\nREADY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+        "Left style notes.\nREADY_FOR_AGENT_RESULT: REVIEW_DEFERRED: medium: naming only",
       ),
-    ).toEqual({ _tag: "clean" })
+    ).toEqual({
+      _tag: "deferred",
+      severity: "medium",
+      reason: "naming only",
+    })
+    expect(
+      parseApplyReviewResult(
+        "Nothing actionable.\nREADY_FOR_AGENT_RESULT: REVIEW_CLEARED: false positive",
+      ),
+    ).toEqual({ _tag: "cleared", reason: "false positive" })
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: auth bypass still open",
+      ),
+    ).toEqual({
+      _tag: "unresolved_high",
+      reason: "auth bypass still open",
+    })
   })
 
-  it("rejects missing, duplicate, blank deferred, or reviewing-only markers", () => {
+  it("rejects missing, duplicate, blank, high-deferred, or reviewing-only markers", () => {
     expect(parseApplyReviewResult("no result line")).toBeNull()
     expect(
       parseApplyReviewResult(
         [
           "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
-          "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+          "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: x",
         ].join("\n"),
       ),
     ).toBeNull()
@@ -224,8 +262,45 @@ describe("parseApplyReviewResult", () => {
       parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED:"),
     ).toBeNull()
     expect(
-      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"),
+      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low:"),
     ).toBeNull()
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: high: cannot defer high",
+      ),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_CLEAN"),
+    ).toBeNull()
+    expect(
+      parseApplyReviewResult(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
+      ),
+    ).toBeNull()
+  })
+
+  it("bounds deferred and cleared reasons", () => {
+    const long = "x".repeat(600)
+    expect(
+      parseApplyReviewResult(
+        `READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low: ${long}`,
+      ),
+    ).toEqual({
+      _tag: "deferred",
+      severity: "low",
+      reason: long.slice(0, 500),
+    })
+    expect(
+      parseApplyReviewResult(`READY_FOR_AGENT_RESULT: REVIEW_CLEARED: ${long}`),
+    ).toEqual({ _tag: "cleared", reason: long.slice(0, 500) })
+  })
+})
+
+describe("formatDeferredReviewSummary", () => {
+  it("joins severity and reason for Step Run persistence", () => {
+    expect(formatDeferredReviewSummary("low", "style nits")).toBe(
+      "low: style nits",
+    )
   })
 })
 
@@ -237,17 +312,20 @@ const isReviewingTurn = (input: {
   input.prompt === buildReviewingPrompt()
 
 describe("buildReviewingPrompt", () => {
-  it("forbids edits and requires the result contract without a bare leading /review line", () => {
+  it("forbids edits, defines the severity rubric, and requires the result contract", () => {
     const prompt = buildReviewingPrompt()
-    expect(prompt).toBe(
-      [
-        "Review uncommitted worktree changes.",
-        "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
-        "End your final response with exactly one machine-readable result line:",
-        "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-        "or",
-        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
-      ].join("\n"),
+    expect(prompt).toContain("Review uncommitted worktree changes.")
+    expect(prompt).toContain(
+      "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+    )
+    expect(prompt).toContain("low = no plausible runtime or contract impact")
+    expect(prompt).toContain("medium = bounded behavior or correctness impact")
+    expect(prompt).toContain(
+      "high = security, data-loss, major-contract, or broad/systemic impact",
+    )
+    expect(prompt).toContain("READY_FOR_AGENT_RESULT: REVIEW_CLEAN")
+    expect(prompt).toContain(
+      "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
     )
     expect(prompt.startsWith('"')).toBe(false)
     expect(prompt.endsWith('"')).toBe(false)
@@ -345,7 +423,10 @@ describe("review", () => {
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
       )
       expect(continued!.prompt).toContain(
-        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
+      )
+      expect(continued!.prompt).toContain(
+        "low = no plausible runtime or contract impact",
       )
     }))
 
@@ -397,8 +478,71 @@ describe("review", () => {
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
       )
       expect(continues[1]!.prompt).toContain(
-        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: <low|medium|high>",
       )
+      expect(continues[1]!.prompt).toContain(
+        "low = no plausible runtime or contract impact",
+      )
+    }))
+
+  it("classifies severity on the fallback verdict without another /review command", () =>
+    withTemp(async (root) => {
+      const continues: Array<{
+        prompt: string
+        command?: string
+        model: string
+      }> = []
+      const result = await run(
+        review(
+          baseContext(root, {
+            reviewModel: "opencode/review-model",
+            model: "opencode/build-model",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              prompt: input.prompt,
+              model: input.model,
+              ...(input.command !== undefined
+                ? { command: input.command }
+                : {}),
+            })
+            if (continues.length === 1) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "Found a bounded correctness issue in the parser.",
+              })
+            }
+            if (continues.length === 2) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: medium: follow-up ticket",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "deferred",
+        severity: "medium",
+        reason: "follow-up ticket",
+      })
+      expect(continues).toHaveLength(3)
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.model).toBe("opencode/review-model")
+      expect(continues[1]!.command).toBeUndefined()
+      expect(continues[1]!.model).toBe("opencode/review-model")
+      expect(continues[1]!.prompt).toContain("Do not review again")
+      expect(continues[2]!.model).toBe("opencode/build-model")
     }))
 
   it("applies findings with build model when reviewing reports HAS_FINDINGS", () =>
@@ -431,13 +575,13 @@ describe("review", () => {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText:
-                  "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+                  "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
               })
             }
             return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
-                "Deferred style notes.\nREADY_FOR_AGENT_RESULT: REVIEW_DEFERRED: naming nit only",
+                "Deferred style notes.\nREADY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low: naming nit only",
             })
           },
         }),
@@ -452,13 +596,15 @@ describe("review", () => {
       expect(continues[1]!.variant).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[1]!.prompt).toContain("REVIEW_DEFERRED:")
+      expect(continues[1]!.prompt).toContain("severity low")
       expect(result).toEqual({
         _tag: "deferred",
+        severity: "low",
         reason: "naming nit only",
       })
     }))
 
-  it("returns deferred from the apply path", () =>
+  it("returns deferred from the apply path with unresolved severity", () =>
     withTemp(async (root) => {
       let turn = 0
       const result = await run(
@@ -470,16 +616,20 @@ describe("review", () => {
               sessionId: "ses_implement_session",
               assistantText:
                 turn === 1
-                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
-                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: out of scope",
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: medium: out of scope",
             })
           },
         }),
       )
-      expect(result).toEqual({ _tag: "deferred", reason: "out of scope" })
+      expect(result).toEqual({
+        _tag: "deferred",
+        severity: "medium",
+        reason: "out of scope",
+      })
     }))
 
-  it("returns apply-clean from the apply path", () =>
+  it("returns cleared from the apply path for low/medium findings", () =>
     withTemp(async (root) => {
       let turn = 0
       const result = await run(
@@ -491,13 +641,89 @@ describe("review", () => {
               sessionId: "ses_implement_session",
               assistantText:
                 turn === 1
-                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
-                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: not a real issue",
             })
           },
         }),
       )
-      expect(result).toEqual({ _tag: "clean" })
+      expect(result).toEqual({
+        _tag: "cleared",
+        reason: "not a real issue",
+      })
+    }))
+
+  it("returns Needs Human when apply reports unresolved high", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_UNRESOLVED_HIGH: injection risk remains",
+            })
+          },
+        }),
+      )
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: "injection risk remains",
+      })
+      expect(REVIEW_UNRESOLVED_HIGH_REASON).toContain("high-severity")
+    }))
+
+  it("returns Needs Human when high findings are deferred without a fix", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low: only nits remain",
+            })
+          },
+        }),
+      )
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: REVIEW_HIGH_UNCHANGED_REASON,
+      })
+    }))
+
+  it("returns Needs Human when high findings are cleared without a fix", () =>
+    withTemp(async (root) => {
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                turn === 1
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high"
+                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: disagree with critic",
+            })
+          },
+        }),
+      )
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: REVIEW_HIGH_UNCHANGED_REASON,
+      })
     }))
 
   it("runs Pre-Commit then re-reviews after FIXED and succeeds on clean", () =>
@@ -533,7 +759,7 @@ describe("review", () => {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText:
-                  "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+                  "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
               })
             }
             if (continues.length === 2) {
@@ -567,6 +793,61 @@ describe("review", () => {
       expect(continues[2]!.prompt).toBe(buildReviewingPrompt())
     }))
 
+  it("runs Pre-Commit then re-reviews after FIXED_AND_DEFERRED", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const continues: Array<{
+        model: string
+        command?: string
+        prompt: string
+      }> = []
+
+      const result = await run(
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            reviewModel: "opencode/review-model",
+          }),
+        ),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              model: input.model,
+              prompt: input.prompt,
+              command: input.command,
+            })
+            if (continues.length === 1) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: high",
+              })
+            }
+            if (continues.length === 2) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_FIXED_AND_DEFERRED: low: leftover style",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(continues).toHaveLength(3)
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[1]!.model).toBe("opencode/build-model")
+      expect(continues[1]!.prompt).toContain("REVIEW_FIXED_AND_DEFERRED")
+      expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+    }))
+
   it("fails the Review Step Run when nested Pre-Commit fails after FIXED", () =>
     withTempGit(async (root) => {
       await writeHook(
@@ -592,7 +873,7 @@ describe("review", () => {
                 sessionId: "ses_implement_session",
                 assistantText:
                   turn === 1
-                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
                     : "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
               })
             }
@@ -621,7 +902,8 @@ describe("review", () => {
             if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
-                assistantText: "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
               })
             }
             return Effect.succeed({
@@ -661,7 +943,7 @@ describe("review", () => {
                 sessionId: "ses_implement_session",
                 assistantText:
                   turn <= 3
-                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
                     : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
               })
             }
@@ -695,7 +977,7 @@ describe("review", () => {
                 sessionId: "ses_implement_session",
                 assistantText:
                   reviewingPasses <= MAX_REVIEW_FIX_ROUNDS
-                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
                     : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
               })
             }
@@ -728,7 +1010,8 @@ describe("review", () => {
             if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
-                assistantText: "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+                assistantText:
+                  "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
               })
             }
             if (turn === 2) {
@@ -740,7 +1023,7 @@ describe("review", () => {
             return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
-                "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: remaining style notes",
+                "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low: remaining style notes",
             })
           },
         }),
@@ -748,6 +1031,7 @@ describe("review", () => {
 
       expect(result).toEqual({
         _tag: "deferred",
+        severity: "low",
         reason: "remaining style notes",
       })
     }))
@@ -838,7 +1122,7 @@ describe("review", () => {
                       sessionId: "ses_implement_session",
                       assistantText:
                         turn === 1
-                          ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                          ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
                           : turn === 2
                             ? "READY_FOR_AGENT_RESULT: REVIEW_FIXED"
                             : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
@@ -924,8 +1208,8 @@ describe("review", () => {
                       sessionId: "ses_implement_session",
                       assistantText:
                         turn === 1
-                          ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
-                          : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: later",
+                          ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
+                          : "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: low: later",
                     }
                   }),
               }),
@@ -971,7 +1255,7 @@ describe("review", () => {
               sessionId: "ses_implement_session",
               assistantText:
                 turn === 1
-                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low"
                   : "I fixed things but forgot the marker",
             })
           },
@@ -994,7 +1278,7 @@ describe("review", () => {
                   sessionId: "ses_implement_session",
                   assistantText: [
                     "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-                    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+                    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
                   ].join("\n"),
                 })
               : Effect.succeed({
