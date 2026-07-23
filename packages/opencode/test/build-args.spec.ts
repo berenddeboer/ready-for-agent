@@ -1,28 +1,30 @@
-import { buildRunArgs, joinOpenCodeMessageArgs } from "../src/lib/build-args.js"
+import {
+  buildRunArgs,
+  joinOpenCodeMessageArgs,
+  shouldUsePromptStdin,
+} from "../src/lib/build-args.js"
 import { describe, expect, it } from "bun:test"
 
-const messageFromArgs = (args: ReadonlyArray<string>): string => {
+const messageTokensFromArgs = (
+  args: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
   const separatorIndex = args.indexOf("--")
-  if (separatorIndex !== -1) {
-    return joinOpenCodeMessageArgs(args.slice(separatorIndex + 1))
-  }
-  const commandIndex = args.indexOf("--command")
-  if (commandIndex !== -1) {
-    return joinOpenCodeMessageArgs(args.slice(commandIndex + 2))
-  }
-  return joinOpenCodeMessageArgs(args.slice(-1))
+  return separatorIndex === -1 ? [] : args.slice(separatorIndex + 1)
 }
 
+const messageFromArgs = (args: ReadonlyArray<string>): string =>
+  joinOpenCodeMessageArgs(messageTokensFromArgs(args))
+
 describe("buildRunArgs", () => {
-  it("builds start args with auto, json, model, and a single prompt positional", () => {
-    expect(
-      buildRunArgs({
-        prompt: "fix the bug",
-        cwd: "/worktrees/repository",
-        model: "anthropic/claude-sonnet-4-5",
-        variant: "high",
-      }),
-    ).toEqual([
+  it("builds start args with auto, json, model, and tokenized prompt positionals", () => {
+    const args = buildRunArgs({
+      prompt: "fix the bug",
+      cwd: "/worktrees/repository",
+      model: "anthropic/claude-sonnet-4-5",
+      variant: "high",
+    })
+
+    expect(args).toEqual([
       "run",
       "--auto",
       "--format",
@@ -33,11 +35,19 @@ describe("buildRunArgs", () => {
       "anthropic/claude-sonnet-4-5",
       "--variant",
       "high",
-      "fix the bug",
+      "--",
+      "fix",
+      "the",
+      "bug",
     ])
+    expect(messageTokensFromArgs(args)).toEqual(["fix", "the", "bug"])
+    const persisted = messageFromArgs(args)
+    expect(persisted).toBe("fix the bug")
+    expect(persisted.startsWith('"')).toBe(false)
+    expect(persisted.endsWith('"')).toBe(false)
   })
 
-  it("preserves multi-line non-review prompts as one positional", () => {
+  it("uses stdin to preserve multi-line non-command prompts", () => {
     const prompt = [
       "Run git hook run --ignore-missing pre-commit",
       "",
@@ -46,14 +56,14 @@ describe("buildRunArgs", () => {
       "```",
     ].join("\n")
 
-    expect(
-      buildRunArgs({
-        prompt,
-        cwd: "/worktrees/repository",
-        model: "anthropic/claude-sonnet-4-5",
-        variant: "high",
-      }),
-    ).toEqual([
+    const args = buildRunArgs({
+      prompt,
+      cwd: "/worktrees/repository",
+      model: "anthropic/claude-sonnet-4-5",
+      variant: "high",
+    })
+
+    expect(args.slice(0, 10)).toEqual([
       "run",
       "--auto",
       "--format",
@@ -64,14 +74,34 @@ describe("buildRunArgs", () => {
       "anthropic/claude-sonnet-4-5",
       "--variant",
       "high",
-      prompt,
     ])
+    expect(shouldUsePromptStdin(prompt)).toBe(true)
+    expect(messageTokensFromArgs(args)).toEqual([])
+    expect(args).not.toContain(prompt)
   })
 
-  it("includes session for continue", () => {
+  it("uses stdin only for newline-bearing prompts", () => {
+    for (const [prompt, usesStdin, message] of [
+      ["first\nsecond", true, []],
+      ["first\tsecond", false, ["first", "second"]],
+    ] as const) {
+      const args = buildRunArgs({
+        prompt,
+        cwd: "/worktrees/repository",
+        model: "anthropic/claude-sonnet-4-5",
+        variant: "high",
+      })
+
+      expect(shouldUsePromptStdin(prompt)).toBe(usesStdin)
+      expect(messageTokensFromArgs(args)).toEqual(message)
+      expect(args).not.toContain(prompt)
+    }
+  })
+
+  it("includes session for continue and protects the prompt with --", () => {
     expect(
       buildRunArgs({
-        prompt: "continue",
+        prompt: "continue the work",
         cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
         variant: "max",
@@ -90,7 +120,10 @@ describe("buildRunArgs", () => {
       "max",
       "--session",
       "ses_abc",
+      "--",
       "continue",
+      "the",
+      "work",
     ])
   })
 
@@ -184,5 +217,47 @@ describe("buildRunArgs", () => {
       "--command",
       "review",
     ])
+  })
+
+  it("omits empty non-command prompt positionals", () => {
+    expect(
+      buildRunArgs({
+        prompt: "   \n\t  ",
+        cwd: "/worktrees/repository",
+        model: "anthropic/claude-sonnet-4-5",
+        variant: "high",
+      }),
+    ).toEqual([
+      "run",
+      "--auto",
+      "--format",
+      "json",
+      "--dir",
+      "/worktrees/repository",
+      "-m",
+      "anthropic/claude-sonnet-4-5",
+      "--variant",
+      "high",
+    ])
+  })
+
+  it("keeps implement-style multi-word prompts free of surrounding quotes", () => {
+    const prompt = [
+      "Implement GitHub issue berenddeboer/ready-for-agent#434.",
+      "Inspect the current GitHub Issue and this Repository's agent/project instructions.",
+      "Make the implementation in this worktree and run appropriate verification.",
+      "Do not merely propose a plan; complete the implementation work for that exact issue.",
+    ].join("\n")
+
+    const args = buildRunArgs({
+      prompt,
+      cwd: "/worktrees/issue-434",
+      model: "xai/grok-code-fast-1",
+      variant: "high",
+    })
+
+    const messageTokens = messageTokensFromArgs(args)
+    expect(shouldUsePromptStdin(prompt)).toBe(true)
+    expect(messageTokens).toEqual([])
   })
 })
