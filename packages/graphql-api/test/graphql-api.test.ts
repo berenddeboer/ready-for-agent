@@ -1735,7 +1735,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
           workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            stateLabel status statusLabel
+            stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
@@ -1753,6 +1753,7 @@ describe("GraphQL API", () => {
             stateLabel: "Review",
             status: "RUNNING",
             statusLabel: "Running",
+            statusMessage: null,
             lifecycleLabels: [
               {
                 phase: "REVIEW",
@@ -1795,7 +1796,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
           workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            stateLabel status statusLabel
+            stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
@@ -1813,6 +1814,7 @@ describe("GraphQL API", () => {
             stateLabel: "Review",
             status: "RUNNING",
             statusLabel: "Running",
+            statusMessage: null,
             lifecycleLabels: [
               {
                 phase: "REVIEW",
@@ -1855,7 +1857,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
           workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            stateLabel status statusLabel
+            stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
@@ -1873,11 +1875,130 @@ describe("GraphQL API", () => {
             stateLabel: "Review",
             status: "RUNNING",
             statusLabel: "Running",
+            statusMessage: null,
             lifecycleLabels: [
               {
                 phase: "REVIEW",
                 label: "Review: pre-commit",
                 status: "RUNNING",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  test("keeps non-echo Review statusMessage while Review phase reasonCode is set", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const operational = {
+      ...workItem,
+      state: "review",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "review",
+          status: "running",
+          reasonCode: STEP_RUN_REASON.reviewReviewing,
+          reasonMessage: "waiting on model response",
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([operational]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            status statusMessage
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            status: "RUNNING",
+            statusMessage: "waiting on model response",
+            lifecycleLabels: [
+              {
+                phase: "REVIEW",
+                label: "Review: reviewing",
+                status: "RUNNING",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  test("keeps failed Review reasonMessage as statusMessage", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const failedReview = {
+      ...workItem,
+      state: "review",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "review",
+          status: "failed",
+          reasonCode: STEP_RUN_REASON.handlerFailed,
+          reasonMessage: "OpenCode failed to review the Work Item",
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([failedReview]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            status statusMessage
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            status: "FAILED",
+            statusMessage: "OpenCode failed to review the Work Item",
+            lifecycleLabels: [
+              {
+                phase: "REVIEW",
+                label: "Review: Failed",
+                status: "FAILED",
               },
             ],
           },
