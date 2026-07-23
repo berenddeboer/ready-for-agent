@@ -61,7 +61,6 @@ import {
   PreCommitHookFailedError,
   PreCommitStageError,
 } from "./pre-commit-errors.js"
-import { ReviewFixedPendingError } from "./review-errors.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
@@ -1238,24 +1237,14 @@ export const makeWorkItemLifecycleLive = (
             return steps.preCommit(context).pipe(Effect.as({}))
           case "review":
             return steps.review(context).pipe(
-              Effect.flatMap((result) => {
-                if (result._tag === "clean") {
-                  return Effect.succeed({})
-                }
+              Effect.map((result) => {
                 if (result._tag === "deferred") {
-                  return Effect.succeed({
+                  return {
                     stepRunReasonCode: STEP_RUN_REASON.reviewDeferred,
                     stepRunNote: result.reason,
-                  })
+                  }
                 }
-                // Hook for #392 fix round; do not treat FIXED as success-without-loop.
-                return Effect.fail(
-                  new ReviewFixedPendingError({
-                    workItemId: context.workItemId,
-                    message:
-                      "Review applied fixes; pre-commit re-review loop is not implemented yet",
-                  }),
-                )
+                return {}
               }),
             )
           case "commit":

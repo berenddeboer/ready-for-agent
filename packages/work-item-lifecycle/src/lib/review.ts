@@ -4,6 +4,7 @@ import { DbService } from "@ready-for-agent/db-service"
 import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { CurrentStepRun } from "./opencode-session-limiter.js"
+import { preCommit } from "./pre-commit.js"
 import {
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
@@ -14,15 +15,15 @@ import {
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_PRE_COMMIT_MESSAGE,
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
 } from "./types.js"
 
-/** Final Review step outcome after reviewing (and optional apply) completes. */
+/** Final Review step outcome after reviewing, optional apply, and fix rounds. */
 export type ReviewResult =
   | { readonly _tag: "clean" }
   | { readonly _tag: "deferred"; readonly reason: string }
-  | { readonly _tag: "fixed" }
 
 /** Machine-readable outcome of the reviewing (/review) pass only. */
 export type ReviewingPassResult =
@@ -224,11 +225,19 @@ const markApplyingFindingsPhase = markReviewPhase(
   "applying findings",
 )
 
+const markReviewPreCommitPhase = markReviewPhase(
+  STEP_RUN_REASON.reviewPreCommit,
+  REVIEW_PRE_COMMIT_MESSAGE,
+  "pre-commit",
+)
+
 /**
- * Production Review Lifecycle Step — reviewing pass, then apply-findings when needed.
- * Continues the Implement OpenCode Session. Reviewing uses the review model/variant;
- * applying findings uses the build model/variant. Does not yet re-run Pre-Commit or
- * re-review after FIXED (see #392).
+ * Production Review Lifecycle Step — reviewing pass, optional apply-findings,
+ * and on FIXED a nested Pre-Commit then re-review. Continues the Implement
+ * OpenCode Session. Reviewing uses the review model/variant; applying findings
+ * and nested Pre-Commit fix turns use the build model/variant. Nested Pre-Commit
+ * failures fail the Review Step Run (retryable), same spirit as standalone
+ * Pre-Commit.
  */
 export const review = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -238,73 +247,84 @@ export const review = (context: LifecycleStepContext) =>
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.review
     const opencode = yield* Opencode
 
-    yield* markReviewingPhase
+    for (;;) {
+      yield* markReviewingPhase
 
-    const reviewing = yield* opencode
-      .continue({
-        sessionId,
-        prompt: buildReviewingPrompt(),
-        cwd: worktreePath,
-        model: context.reviewModel,
-        variant: context.reviewVariant,
-        timeout,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ReviewOpenCodeError({
-              message: "OpenCode failed to review the Work Item",
-              worktreePath,
-              sessionId,
-              cause,
-            }),
-        ),
-      )
+      const reviewing = yield* opencode
+        .continue({
+          sessionId,
+          prompt: buildReviewingPrompt(),
+          cwd: worktreePath,
+          model: context.reviewModel,
+          variant: context.reviewVariant,
+          timeout,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ReviewOpenCodeError({
+                message: "OpenCode failed to review the Work Item",
+                worktreePath,
+                sessionId,
+                cause,
+              }),
+          ),
+        )
 
-    const reviewingParsed = parseReviewResult(reviewing.assistantText)
-    if (reviewingParsed === null) {
-      return yield* new ReviewResultError({
-        workItemId: context.workItemId,
-        message:
-          "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS",
-      })
+      const reviewingParsed = parseReviewResult(reviewing.assistantText)
+      if (reviewingParsed === null) {
+        return yield* new ReviewResultError({
+          workItemId: context.workItemId,
+          message:
+            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS",
+        })
+      }
+
+      if (reviewingParsed._tag === "clean") {
+        return { _tag: "clean" as const }
+      }
+
+      yield* markApplyingFindingsPhase
+
+      const applying = yield* opencode
+        .continue({
+          sessionId,
+          prompt: buildApplyFindingsPrompt(),
+          cwd: worktreePath,
+          model: context.model,
+          variant: context.variant,
+          timeout,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ReviewOpenCodeError({
+                message: "OpenCode failed while applying Review Findings",
+                worktreePath,
+                sessionId,
+                cause,
+              }),
+          ),
+        )
+
+      const applyParsed = parseApplyReviewResult(applying.assistantText)
+      if (applyParsed === null) {
+        return yield* new ReviewResultError({
+          workItemId: context.workItemId,
+          message:
+            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_DEFERRED: <reason>, or REVIEW_CLEAN",
+        })
+      }
+
+      if (applyParsed._tag === "clean") {
+        return { _tag: "clean" as const }
+      }
+
+      if (applyParsed._tag === "deferred") {
+        return applyParsed
+      }
+
+      yield* markReviewPreCommitPhase
+      yield* preCommit(context)
     }
-
-    if (reviewingParsed._tag === "clean") {
-      return { _tag: "clean" as const }
-    }
-
-    yield* markApplyingFindingsPhase
-
-    const applying = yield* opencode
-      .continue({
-        sessionId,
-        prompt: buildApplyFindingsPrompt(),
-        cwd: worktreePath,
-        model: context.model,
-        variant: context.variant,
-        timeout,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ReviewOpenCodeError({
-              message: "OpenCode failed while applying Review Findings",
-              worktreePath,
-              sessionId,
-              cause,
-            }),
-        ),
-      )
-
-    const applyParsed = parseApplyReviewResult(applying.assistantText)
-    if (applyParsed === null) {
-      return yield* new ReviewResultError({
-        workItemId: context.workItemId,
-        message:
-          "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_DEFERRED: <reason>, or REVIEW_CLEAN",
-      })
-    }
-
-    return applyParsed
   })

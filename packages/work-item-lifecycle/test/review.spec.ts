@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -15,7 +15,9 @@ import {
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CurrentStepRun,
+  PreCommitOpenCodeError,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_PRE_COMMIT_MESSAGE,
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
   ReviewResultError,
@@ -112,6 +114,42 @@ const withTemp = async (assert: (root: string) => Promise<void>) => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+}
+
+const initGitRepo = async (root: string) => {
+  const runGit = async (...args: string[]) => {
+    const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
+      cwd: root,
+      stdout: "ignore",
+      stderr: "pipe",
+    })
+    const exitCode = await proc.exited
+    if (exitCode !== 0) {
+      const stderr = await new Response(proc.stderr).text()
+      throw new Error(`git ${args.join(" ")} failed: ${stderr}`)
+    }
+  }
+  await runGit("init")
+  await runGit("config", "user.email", "test@example.com")
+  await runGit("config", "user.name", "Test")
+  await runGit("commit", "--no-verify", "--allow-empty", "-m", "init")
+}
+
+const withTempGit = async (assert: (root: string) => Promise<void>) => {
+  const root = await mkdtemp(join(tmpdir(), "rfa-review-git-"))
+  try {
+    await initGitRepo(root)
+    await assert(root)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
+const writeHook = async (root: string, body: string) => {
+  await mkdir(join(root, ".git", "hooks"), { recursive: true })
+  await writeFile(join(root, ".git", "hooks", "pre-commit"), body, {
+    mode: 0o755,
+  })
 }
 
 describe("parseReviewResult", () => {
@@ -383,26 +421,215 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
     }))
 
-  it("returns fixed from the apply path without treating it as clean", () =>
-    withTemp(async (root) => {
-      let turn = 0
+  it("runs Pre-Commit then re-reviews after FIXED and succeeds on clean", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const continues: Array<{
+        model: string
+        variant: string
+        prompt: string
+      }> = []
+
       const result = await run(
-        review(baseContext(root)),
+        review(
+          baseContext(root, {
+            model: "opencode/build-model",
+            variant: "high",
+            reviewModel: "opencode/review-model",
+            reviewVariant: "max",
+          }),
+        ),
         stubOpencode({
-          continue: () => {
-            turn += 1
+          continue: (input) => {
+            continues.push({
+              model: input.model,
+              variant: input.variant,
+              prompt: input.prompt,
+            })
+            if (continues.length === 1) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "Found a bug.\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+              })
+            }
+            if (continues.length === 2) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  "Fixed the bug.\nREADY_FOR_AGENT_RESULT: REVIEW_FIXED",
+              })
+            }
             return Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
-                turn === 1
-                  ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
-                  : "Fixed the bug.\nREADY_FOR_AGENT_RESULT: REVIEW_FIXED",
+                "Looks good now.\nREADY_FOR_AGENT_RESULT: REVIEW_CLEAN",
             })
           },
         }),
       )
-      expect(result).toEqual({ _tag: "fixed" })
-      expect(result).not.toEqual({ _tag: "clean" })
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(continues).toHaveLength(3)
+      expect(continues[0]!.model).toBe("opencode/review-model")
+      expect(continues[0]!.variant).toBe("max")
+      expect(continues[0]!.prompt).toContain("/review")
+      expect(continues[1]!.model).toBe("opencode/build-model")
+      expect(continues[1]!.variant).toBe("high")
+      expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
+      expect(continues[2]!.model).toBe("opencode/review-model")
+      expect(continues[2]!.variant).toBe("max")
+      expect(continues[2]!.prompt).toContain("/review")
+    }))
+
+  it("fails the Review Step Run when nested Pre-Commit fails after FIXED", () =>
+    withTempGit(async (root) => {
+      await writeHook(
+        root,
+        [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          "printf '%s\\n' 'format failed permanently' >&2",
+          "exit 1",
+          "",
+        ].join("\n"),
+      )
+      await writeFile(join(root, "change.txt"), "broken\n")
+
+      let turn = 0
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        stubOpencode({
+          continue: () => {
+            turn += 1
+            if (turn <= 2) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  turn === 1
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                    : "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+              })
+            }
+            return Effect.fail(
+              new OpencodeExitError({ exitCode: 2, cwd: root }),
+            )
+          },
+        }),
+      )
+
+      expect(error).toBeInstanceOf(PreCommitOpenCodeError)
+      expect(turn).toBeGreaterThanOrEqual(3)
+    }))
+
+  it("marks Step Run phase as pre-commit during nested Pre-Commit after FIXED", () =>
+    withTempGit(async (root) => {
+      await writeHook(
+        root,
+        [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          'if [ -f ".pre-commit-fixed" ]; then',
+          "  exit 0",
+          "fi",
+          "printf '%s\\n' 'needs fix' >&2",
+          "exit 1",
+          "",
+        ].join("\n"),
+      )
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      const stepRunId = "srun-01JREVIEWPRECOM000000000001"
+      const workItemId = "wi-01JREVIEWPRECOM0000000000001"
+      const repositoryId = "repo-review-pre-commit-phase"
+      let phaseDuringPreCommit: {
+        reason_code: string | null
+        reason_message: string | null
+      } | null = null
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO repository (
+               id, github_owner, github_repo, local_path, is_bare, paused,
+               issues_reconciled_at, created_at, updated_at
+             ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+            [repositoryId, `/tmp/${repositoryId}`, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, model, variant,
+               review_model, review_variant, state, state_ready_at, worktree_path,
+               session_id, failure_code, failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'review', ?,
+               ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
+            [workItemId, repositoryId, now, root, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO step_run (
+               id, work_item_id, step, status, queue_job_id, queued_at,
+               started_at, finished_at, reason_code, reason_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 'review', 'running', NULL, ?, ?, NULL, NULL, NULL, ?, ?)`,
+            [stepRunId, workItemId, now, now, now, now],
+          )
+
+          let turn = 0
+          yield* review(baseContext(root, { repositoryId })).pipe(
+            Effect.provideService(CurrentStepRun, {
+              stepRunId,
+              repositoryId,
+            }),
+            Effect.provide(
+              stubOpencode({
+                continue: (input) =>
+                  Effect.gen(function* () {
+                    turn += 1
+                    if (input.prompt.includes("pre-commit")) {
+                      const rows = (yield* sql.unsafe(
+                        `SELECT reason_code, reason_message FROM step_run WHERE id = ?`,
+                        [stepRunId],
+                      )) as readonly {
+                        readonly reason_code: string | null
+                        readonly reason_message: string | null
+                      }[]
+                      phaseDuringPreCommit = rows[0] ?? null
+                      yield* Effect.promise(async () => {
+                        await writeFile(join(root, ".pre-commit-fixed"), "ok\n")
+                      })
+                      return {
+                        sessionId: "ses_implement_session",
+                        assistantText: "fixed hooks",
+                      }
+                    }
+                    return {
+                      sessionId: "ses_implement_session",
+                      assistantText:
+                        turn === 1
+                          ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                          : turn === 2
+                            ? "READY_FOR_AGENT_RESULT: REVIEW_FIXED"
+                            : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                    }
+                  }),
+              }),
+            ),
+          )
+        }).pipe(
+          Effect.provide(DbServiceLive),
+          Effect.provide(DatabaseTest),
+          Effect.provide(PlatformLayer),
+        ),
+      )
+
+      expect(phaseDuringPreCommit).toEqual({
+        reason_code: STEP_RUN_REASON.reviewPreCommit,
+        reason_message: REVIEW_PRE_COMMIT_MESSAGE,
+      })
     }))
 
   it("marks Step Run phase as applying findings during the apply turn", () =>

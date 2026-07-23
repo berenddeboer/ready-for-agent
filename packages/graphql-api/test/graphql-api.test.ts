@@ -1826,6 +1826,66 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects running Review Step Run as Review: pre-commit", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const preCommitPhase = {
+      ...workItem,
+      state: "review",
+      stepRuns: [
+        {
+          ...baseRun,
+          step: "review",
+          status: "running",
+          reasonCode: STEP_RUN_REASON.reviewPreCommit,
+          reasonMessage: "pre-commit",
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([preCommitPhase]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            stateLabel status statusLabel
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            stateLabel: "Review",
+            status: "RUNNING",
+            statusLabel: "Running",
+            lifecycleLabels: [
+              {
+                phase: "REVIEW",
+                label: "Review: pre-commit",
+                status: "RUNNING",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
   test("lists all Work Items for a repository", async () => {
     let receivedRepositoryId: string | undefined
     await runtime.dispose()
