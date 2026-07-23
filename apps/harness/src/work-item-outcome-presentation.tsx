@@ -36,7 +36,7 @@ export function WorkItemOutcomePresentation({
           pullRequestUrl !== null &&
           prNumber !== null && (
             <a
-              className="rounded-full bg-slate-200 px-2 py-0.5 text-[0.6rem] font-bold tracking-wide text-slate-700 uppercase hover:bg-slate-300 hover:underline"
+              className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold tracking-wide text-slate-700 uppercase hover:bg-slate-300 hover:underline"
               href={pullRequestUrl}
               target="_blank"
               rel="noopener noreferrer"

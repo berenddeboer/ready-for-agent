@@ -2451,7 +2451,7 @@ function JobsCard() {
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      <span className="text-[0.65rem] font-bold tracking-wide text-slate-600 uppercase">
+                      <span className="text-xs font-bold tracking-wide text-slate-600 uppercase">
                         {workItem.stateLabel}
                       </span>
                       <WorkItemPauseButton workItem={workItem} />
@@ -2464,7 +2464,7 @@ function JobsCard() {
                           <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                             <button
                               type="button"
-                              className="min-w-0 truncate font-mono text-[0.7rem] text-slate-500 underline-offset-2 hover:text-blue-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                              className="min-w-0 truncate font-mono text-xs text-slate-500 underline-offset-2 hover:text-blue-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
                               title={sessionId}
                               onClick={() => {
                                 setSessionDialogId(sessionId)
@@ -2482,11 +2482,11 @@ function JobsCard() {
                           <Copy
                             value={sessionId}
                             className="min-w-0 max-w-full"
-                            textClassName="font-mono text-[0.7rem] text-slate-500"
+                            textClassName="font-mono text-xs text-slate-500"
                           />
                         ))}
                       {sessionId !== null && worktreePath !== null && (
-                        <span className="shrink-0 font-mono text-[0.7rem] text-slate-500">
+                        <span className="shrink-0 font-mono text-xs text-slate-500">
                           -
                         </span>
                       )}
@@ -2494,7 +2494,7 @@ function JobsCard() {
                         <Copy
                           value={worktreePath}
                           className="min-w-0 max-w-full"
-                          textClassName="font-mono text-[0.7rem] text-slate-500"
+                          textClassName="font-mono text-xs text-slate-500"
                         />
                       )}
                     </p>
@@ -2715,7 +2715,7 @@ function WorkItemLifecycleStatus({
   })
   const actionsPending = retry.isPending || reset.isPending
   const prNumber = workItem.githubPullRequestNumber
-  const statusBadgeClassName = `rounded-full px-2 py-0.5 text-[0.6rem] font-bold tracking-wide uppercase ${
+  const statusBadgeClassName = `rounded-full px-2 py-0.5 text-xs font-bold tracking-wide uppercase ${
     status === "FAILED" || status === "INTERRUPTED"
       ? "bg-red-100 text-red-700"
       : status === "COMPLETE" || status === "SUCCEEDED"
@@ -2777,7 +2777,7 @@ function WorkItemLifecycleStatus({
               lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
               lifecycleLabel.status === "NEEDS_HUMAN"
             const chipClassName =
-              "rounded bg-white px-1.5 py-1 text-[0.65rem] text-slate-600 ring-1 ring-slate-200"
+              "rounded bg-white px-1.5 py-1 text-xs text-slate-600 ring-1 ring-slate-200"
             const duration = displayDurationMs !== null && (
               <span className="ml-1 text-slate-400">
                 {formatDuration(displayDurationMs)}
