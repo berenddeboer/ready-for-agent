@@ -1,7 +1,7 @@
 import { Context, Duration, Effect, Layer, Ref, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { buildRunArgs } from "./build-args.js"
+import { buildRunArgs, shouldUsePromptStdin } from "./build-args.js"
 import { collectChildStdout } from "./collect-child-stdout.js"
 import { makeOpencodeEnvironment } from "./environment.js"
 import {
@@ -133,12 +133,16 @@ export class Opencode extends Context.Service<
                 ? { command: input.command }
                 : {}),
             })
+            const promptOnStdin =
+              input.command === undefined && shouldUsePromptStdin(input.prompt)
 
             const command = ChildProcess.make(binary, args, {
               cwd: input.cwd,
               env: environment,
               extendEnv: false,
-              stdin: "ignore",
+              stdin: promptOnStdin
+                ? Stream.fromIterable([new TextEncoder().encode(input.prompt)])
+                : "ignore",
               stderr: "ignore",
             })
 

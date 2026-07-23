@@ -7,6 +7,9 @@ const messageTokens = (prompt: string): ReadonlyArray<string> =>
     .split(/\s+/)
     .filter((token) => token.length > 0)
 
+export const shouldUsePromptStdin = (prompt: string): boolean =>
+  /\r|\n/.test(prompt)
+
 export const buildRunArgs = (input: {
   readonly prompt: string
   readonly cwd: string
@@ -41,7 +44,12 @@ export const buildRunArgs = (input: {
     return args
   }
 
-  args.push(input.prompt)
+  if (!shouldUsePromptStdin(input.prompt)) {
+    const tokens = messageTokens(input.prompt)
+    if (tokens.length > 0) {
+      args.push("--", ...tokens)
+    }
+  }
   return args
 }
 

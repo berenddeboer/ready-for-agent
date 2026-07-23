@@ -28,12 +28,17 @@ const withExecutable = async <A>(
   }
 }
 
-const start = (binary: string, timeout: string, onSessionId?: OnSessionId) =>
+const start = (
+  binary: string,
+  timeout: string,
+  onSessionId?: OnSessionId,
+  prompt = "test",
+) =>
   Effect.gen(function* () {
     const opencode = yield* Opencode
     return yield* opencode.start({
       cwd: process.cwd(),
-      prompt: "test",
+      prompt,
       model: "test/model",
       variant: "test",
       timeout,
@@ -62,6 +67,26 @@ describe("Opencode Effect service", () => {
         ).resolves.toEqual({
           sessionId: "ses_test",
           assistantText: "first\nsecond",
+        })
+      },
+    )
+  })
+
+  it("sends multi-line prompts through stdin without changing their structure", async () => {
+    const prompt = "first\nsecond"
+    await withExecutable(
+      [
+        "input=$(cat)",
+        "expected=$(printf 'first\\nsecond')",
+        '[ "$input" = "$expected" ] || exit 9',
+        `printf '%s\n' '{"type":"step_start","sessionID":"ses_stdin"}'`,
+      ].join("\n"),
+      async (binary) => {
+        await expect(
+          Effect.runPromise(start(binary, "2 seconds", undefined, prompt)),
+        ).resolves.toEqual({
+          sessionId: "ses_stdin",
+          assistantText: "",
         })
       },
     )
