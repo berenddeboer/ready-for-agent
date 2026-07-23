@@ -17,6 +17,7 @@ import {
   CurrentStepRun,
   MAX_REVIEW_FIX_ROUNDS,
   PreCommitOpenCodeError,
+  REVIEW_AGENT_COMMAND,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_FIX_LIMIT_REASON,
   REVIEW_PRE_COMMIT_MESSAGE,
@@ -26,6 +27,7 @@ import {
   ReviewSessionContextMissingError,
   ReviewWorktreeContextMissingError,
   STEP_RUN_REASON,
+  buildReviewingPrompt,
   makeWorkItemId,
   parseApplyReviewResult,
   parseReviewResult,
@@ -68,6 +70,7 @@ const stubOpencode = (impl: {
     readonly model: string
     readonly variant: string
     readonly timeout?: Duration.Input
+    readonly command?: string
   }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
@@ -226,6 +229,33 @@ describe("parseApplyReviewResult", () => {
   })
 })
 
+const isReviewingTurn = (input: {
+  readonly command?: string
+  readonly prompt: string
+}): boolean =>
+  input.command === REVIEW_AGENT_COMMAND ||
+  input.prompt === buildReviewingPrompt()
+
+describe("buildReviewingPrompt", () => {
+  it("forbids edits and requires the result contract without a bare leading /review line", () => {
+    const prompt = buildReviewingPrompt()
+    expect(prompt).toBe(
+      [
+        "Review uncommitted worktree changes.",
+        "Do not edit files, commit, push, open pull requests, or apply findings in this turn.",
+        "End your final response with exactly one machine-readable result line:",
+        "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+        "or",
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+      ].join("\n"),
+    )
+    expect(prompt.startsWith('"')).toBe(false)
+    expect(prompt.endsWith('"')).toBe(false)
+    expect(prompt.startsWith("/review")).toBe(false)
+    expect(REVIEW_AGENT_COMMAND).toBe("/review")
+  })
+})
+
 describe("review", () => {
   it("rejects missing worktree context", async () => {
     const error = await run(review(baseContext(null)).pipe(Effect.flip))
@@ -263,6 +293,7 @@ describe("review", () => {
         model: string
         variant: string
         timeout?: Duration.Input
+        command?: string
       } | null = null
       let started = false
 
@@ -302,7 +333,14 @@ describe("review", () => {
       expect(Duration.toMillis(continued!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(45)),
       )
-      expect(continued!.prompt).toContain("/review")
+      expect(continued!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continued!.prompt).toBe(buildReviewingPrompt())
+      expect(continued!.prompt.startsWith('"')).toBe(false)
+      expect(continued!.prompt.endsWith('"')).toBe(false)
+      expect(continued!.prompt.startsWith("/review")).toBe(false)
+      expect(continued!.prompt).toContain(
+        "Do not edit files, commit, push, open pull requests, or apply findings",
+      )
       expect(continued!.prompt).toContain(
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
       )
@@ -333,6 +371,7 @@ describe("review", () => {
         model: string
         variant: string
         prompt: string
+        command?: string
       }> = []
 
       const result = await run(
@@ -350,6 +389,7 @@ describe("review", () => {
               model: input.model,
               variant: input.variant,
               prompt: input.prompt,
+              command: input.command,
             })
             if (continues.length === 1) {
               return Effect.succeed({
@@ -370,7 +410,8 @@ describe("review", () => {
       expect(continues).toHaveLength(2)
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[0]!.variant).toBe("max")
-      expect(continues[0]!.prompt).toContain("/review")
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.variant).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
@@ -432,6 +473,7 @@ describe("review", () => {
         model: string
         variant: string
         prompt: string
+        command?: string
       }> = []
 
       const result = await run(
@@ -449,6 +491,7 @@ describe("review", () => {
               model: input.model,
               variant: input.variant,
               prompt: input.prompt,
+              command: input.command,
             })
             if (continues.length === 1) {
               return Effect.succeed({
@@ -477,13 +520,15 @@ describe("review", () => {
       expect(continues).toHaveLength(3)
       expect(continues[0]!.model).toBe("opencode/review-model")
       expect(continues[0]!.variant).toBe("max")
-      expect(continues[0]!.prompt).toContain("/review")
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.variant).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[2]!.model).toBe("opencode/review-model")
       expect(continues[2]!.variant).toBe("max")
-      expect(continues[2]!.prompt).toContain("/review")
+      expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[2]!.prompt).toBe(buildReviewingPrompt())
     }))
 
   it("fails the Review Step Run when nested Pre-Commit fails after FIXED", () =>
@@ -537,7 +582,7 @@ describe("review", () => {
         stubOpencode({
           continue: (input) => {
             turn += 1
-            if (input.prompt.includes("/review")) {
+            if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText: "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
@@ -575,7 +620,7 @@ describe("review", () => {
         stubOpencode({
           continue: (input) => {
             turn += 1
-            if (input.prompt.includes("/review")) {
+            if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText:
@@ -608,7 +653,7 @@ describe("review", () => {
         review(baseContext(root)),
         stubOpencode({
           continue: (input) => {
-            if (input.prompt.includes("/review")) {
+            if (isReviewingTurn(input)) {
               reviewingPasses += 1
               return Effect.succeed({
                 sessionId: "ses_implement_session",
@@ -644,7 +689,7 @@ describe("review", () => {
         stubOpencode({
           continue: (input) => {
             turn += 1
-            if (input.prompt.includes("/review")) {
+            if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
                 assistantText: "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",

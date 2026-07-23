@@ -112,6 +112,7 @@ export class Opencode extends Context.Service<
           readonly model: string
           readonly variant: string
           readonly sessionId?: string
+          readonly command?: string
           readonly timeout?: Duration.Input
           readonly onSessionId?: StartInput["onSessionId"]
         }): Effect.Effect<OpencodeRunResult, OpencodeError> =>
@@ -128,6 +129,9 @@ export class Opencode extends Context.Service<
               model: input.model,
               variant: input.variant,
               sessionId: input.sessionId,
+              ...(input.command !== undefined
+                ? { command: input.command }
+                : {}),
             })
 
             const command = ChildProcess.make(binary, args, {
