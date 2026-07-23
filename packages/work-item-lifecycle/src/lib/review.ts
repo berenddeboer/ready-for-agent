@@ -55,6 +55,16 @@ export const buildReviewingPrompt = () =>
     "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
   ].join("\n")
 
+const buildReviewVerdictPrompt = () =>
+  [
+    "The /review command immediately above has completed.",
+    "Do not review again, edit files, or add explanatory prose.",
+    "If it reported any Review Findings, respond exactly:",
+    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+    "Otherwise respond exactly:",
+    "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+  ].join("\n")
+
 const buildApplyFindingsPrompt = () =>
   [
     "The previous reviewing pass reported Review Findings (REVIEW_HAS_FINDINGS).",
@@ -87,6 +97,11 @@ const uniqueFinalResultLine = (output: string): string | null => {
   }
   return finalLine
 }
+
+const hasResultLine = (output: string): boolean =>
+  output
+    .split("\n")
+    .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
 
 /**
  * Parse the unique final READY_FOR_AGENT_RESULT line from a reviewing pass.
@@ -283,7 +298,31 @@ export const review = (context: LifecycleStepContext) =>
           ),
         )
 
-      const reviewingParsed = parseReviewResult(reviewing.assistantText)
+      let reviewingParsed = parseReviewResult(reviewing.assistantText)
+      if (reviewingParsed === null && !hasResultLine(reviewing.assistantText)) {
+        const verdict = yield* opencode
+          .continue({
+            sessionId,
+            prompt: buildReviewVerdictPrompt(),
+            cwd: worktreePath,
+            model: context.reviewModel,
+            variant: context.reviewVariant,
+            timeout,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ReviewOpenCodeError({
+                  message: "OpenCode failed to report the Review verdict",
+                  worktreePath,
+                  sessionId,
+                  cause,
+                }),
+            ),
+          )
+        reviewingParsed = parseReviewResult(verdict.assistantText)
+      }
+
       if (reviewingParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,

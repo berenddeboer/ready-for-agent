@@ -365,6 +365,42 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
     }))
 
+  it("requests a verdict when /review summarizes a nested clean result without its marker", () =>
+    withTemp(async (root) => {
+      const continues: Array<{ prompt: string; command?: string }> = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              prompt: input.prompt,
+              ...(input.command !== undefined
+                ? { command: input.command }
+                : {}),
+            })
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                continues.length === 1
+                  ? "Review clean: no findings."
+                  : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({ _tag: "clean" })
+      expect(continues).toHaveLength(2)
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[1]!.command).toBeUndefined()
+      expect(continues[1]!.prompt).toContain(
+        "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+      )
+      expect(continues[1]!.prompt).toContain(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+      )
+    }))
+
   it("applies findings with build model when reviewing reports HAS_FINDINGS", () =>
     withTemp(async (root) => {
       const continues: Array<{
@@ -947,20 +983,29 @@ describe("review", () => {
 
   it("fails when READY_FOR_AGENT_RESULT lines are duplicated", () =>
     withTemp(async (root) => {
+      let continues = 0
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () =>
-            Effect.succeed({
-              sessionId: "ses_implement_session",
-              assistantText: [
-                "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
-                "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
-              ].join("\n"),
-            }),
+          continue: () => {
+            continues += 1
+            return continues === 1
+              ? Effect.succeed({
+                  sessionId: "ses_implement_session",
+                  assistantText: [
+                    "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                    "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+                  ].join("\n"),
+                })
+              : Effect.succeed({
+                  sessionId: "ses_implement_session",
+                  assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                })
+          },
         }),
       )
       expect(error).toBeInstanceOf(ReviewResultError)
+      expect(continues).toBe(1)
     }))
 
   it("fails when READY_FOR_AGENT_RESULT is not the final line", () =>
