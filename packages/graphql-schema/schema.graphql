@@ -39,6 +39,49 @@ type Query {
   Counts across all repositories; not limited by Jobs card filters or limits.
   """
   committedPullRequestsCount(from: String!, to: String!): Int!
+  """
+  OpenCode Session usage for a Session id owned by a Work Item.
+  Returns null when no Work Item has that sessionId (unrelated local chats
+  are not exposed). When owned, availability is AVAILABLE, MISSING, or
+  UNAVAILABLE; metric fields are null unless AVAILABLE.
+  """
+  session(id: String!): Session
+}
+
+"""
+Whether OpenCode's local SQLite still has this Session's usage row.
+"""
+enum SessionAvailability {
+  AVAILABLE
+  MISSING
+  UNAVAILABLE
+}
+
+type SessionModel {
+  providerId: String!
+  id: String!
+  variant: String
+}
+
+type SessionTokens {
+  input: Int!
+  output: Int!
+  reasoning: Int!
+  cacheRead: Int!
+  cacheWrite: Int!
+}
+
+"""
+OpenCode Session usage totals (live-read from OpenCode SQLite).
+"""
+type Session {
+  id: String!
+  availability: SessionAvailability!
+  model: SessionModel
+  tokens: SessionTokens
+  cost: Float
+  createdAt: String
+  updatedAt: String
 }
 
 """

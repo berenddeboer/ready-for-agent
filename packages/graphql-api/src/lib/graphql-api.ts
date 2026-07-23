@@ -11,7 +11,13 @@ import { createSchema, createYoga } from "graphql-yoga"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode, type OpencodeModel } from "@ready-for-agent/opencode"
+import {
+  Opencode,
+  type OpencodeModel,
+  type OpencodeSession,
+  OpencodeSessionStore,
+  type SessionAvailability,
+} from "@ready-for-agent/opencode"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
@@ -109,6 +115,28 @@ type CommittedPullRequestsCountArgs = {
   to: string
 }
 
+type SessionArgs = {
+  id: string
+}
+
+const toGraphqlSessionAvailability = (
+  availability: SessionAvailability,
+): "AVAILABLE" | "MISSING" | "UNAVAILABLE" => {
+  if (availability === "available") return "AVAILABLE"
+  if (availability === "missing") return "MISSING"
+  return "UNAVAILABLE"
+}
+
+const toGraphqlSession = (session: OpencodeSession) => ({
+  id: session.id,
+  availability: toGraphqlSessionAvailability(session.availability),
+  model: session.model,
+  tokens: session.tokens,
+  cost: session.cost,
+  createdAt: session.createdAt,
+  updatedAt: session.updatedAt,
+})
+
 const parseIsoInstantMs = (value: string, field: string): number => {
   const ms = Date.parse(value)
   if (Number.isNaN(ms)) {
@@ -142,6 +170,7 @@ export type GraphqlServices =
   | DbService
   | KeymaxxerService
   | Opencode
+  | OpencodeSessionStore
   | QueueService
   | WorkItemLifecycle
 
@@ -321,6 +350,19 @@ export const createGraphqlApi = (
               ),
             )
           },
+          session: async (_parent: unknown, args: SessionArgs) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const owned = yield* lifecycle.ownsSessionId(args.id)
+                if (!owned) {
+                  return null
+                }
+                const store = yield* OpencodeSessionStore
+                const session = yield* store.getSession(args.id)
+                return toGraphqlSession(session)
+              }).pipe(Effect.withSpan("graphql-api.session")),
+            ),
         },
         Issue: {
           githubCreatedAt: (issue: { githubCreatedAt: Date }) =>

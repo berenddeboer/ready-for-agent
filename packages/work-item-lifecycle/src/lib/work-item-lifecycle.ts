@@ -571,6 +571,13 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
   /**
+   * True when any Work Item (any state) has this OpenCode Session id.
+   * Used to gate GraphQL session usage reads to harness-owned Sessions.
+   */
+  readonly ownsSessionId: (
+    sessionId: string,
+  ) => Effect.Effect<boolean, ListWorkItemsError>
+  /**
    * Count unique Work Items with a non-null GitHub PR number and a successful
    * commit Step Run whose finished_at is in the half-open range [fromMs, toMs).
    */
@@ -805,6 +812,23 @@ export const makeWorkItemLifecycleLive = (
           toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
         )
       })
+
+      const ownsSessionId = Effect.fn("WorkItemLifecycle.ownsSessionId")(
+        function* (sessionId: string) {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT 1 AS owned
+               FROM work_item
+               WHERE session_id = ?
+               LIMIT 1`,
+              [sessionId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly owned: number
+          }[]
+          return rows.length > 0
+        },
+      )
 
       const countCommittedPullRequests = Effect.fn(
         "WorkItemLifecycle.countCommittedPullRequests",
@@ -3771,6 +3795,7 @@ export const makeWorkItemLifecycleLive = (
         getWorkItem,
         listWorkItemsForIssue,
         listWorkItemsForRepository,
+        ownsSessionId,
         countCommittedPullRequests,
         continueAfterHumanPrOutcome,
         admitWaitingWorkItems,
