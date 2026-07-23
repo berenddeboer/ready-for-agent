@@ -291,7 +291,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   assess_changes: Duration.hours(1),
   pre_commit: Duration.hours(2),
   review: Duration.hours(1),
-  commit: Duration.minutes(30),
+  commit: Duration.minutes(5),
   create_pr: Duration.minutes(10),
   watch_pr_status_checks: Duration.minutes(5),
   resolve_pr_merge_conflict: Duration.hours(2),
