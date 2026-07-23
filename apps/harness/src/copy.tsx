@@ -4,10 +4,13 @@ export function Copy({
   value,
   className,
   textClassName,
+  showValue = true,
 }: {
   value: string
   className?: string
   textClassName?: string
+  /** When false, only the copy control is shown (value still copied). */
+  showValue?: boolean
 }) {
   const [copied, setCopied] = useState(false)
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -40,9 +43,14 @@ export function Copy({
     <span
       className={`inline-flex min-w-0 max-w-full items-center gap-1 ${className ?? ""}`}
     >
-      <span className={`min-w-0 truncate ${textClassName ?? ""}`} title={value}>
-        {value}
-      </span>
+      {showValue ? (
+        <span
+          className={`min-w-0 truncate ${textClassName ?? ""}`}
+          title={value}
+        >
+          {value}
+        </span>
+      ) : null}
       <button
         type="button"
         className="inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"

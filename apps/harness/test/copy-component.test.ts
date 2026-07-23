@@ -9,6 +9,7 @@ describe("Copy component", () => {
       "utf8",
     )
     expect(source).toContain("export function Copy")
+    expect(source).toContain("showValue = true")
     expect(source).toContain("navigator.clipboard.writeText(value)")
     expect(source).toContain("title={value}")
     expect(source).toContain("truncate")

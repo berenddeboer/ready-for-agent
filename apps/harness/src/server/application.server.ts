@@ -12,7 +12,7 @@ import {
   disabledKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
+import { Opencode, OpencodeSessionStoreLive } from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleStepsLive,
@@ -70,6 +70,7 @@ export const createApplication = async (
   const opencodeLayer = Opencode.layer({
     ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
   }).pipe(Layer.provide(opencodePlatformLayer))
+  const opencodeSessionStoreLayer = OpencodeSessionStoreLive()
   const lifecycleLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),
@@ -93,6 +94,7 @@ export const createApplication = async (
           queueLayer,
           keymaxxerLayer,
           opencodeLayer,
+          opencodeSessionStoreLayer,
           lifecycleLayer,
           loggingLayer,
         )
@@ -102,6 +104,7 @@ export const createApplication = async (
           queueLayer,
           keymaxxerLayer,
           opencodeLayer,
+          opencodeSessionStoreLayer,
           lifecycleLayer,
           loggingLayer,
         )

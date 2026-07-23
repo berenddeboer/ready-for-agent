@@ -33,7 +33,7 @@ import {
   KeymaxxerError,
   KeymaxxerService,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
+import { Opencode, OpencodeSessionStore } from "@ready-for-agent/opencode"
 import {
   ClaimError,
   QueueService,
@@ -236,6 +236,7 @@ const queueLayer = (
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -588,6 +589,18 @@ describe("Job worker", () => {
       continue: () => Effect.die("not used"),
       listModels: () => Effect.die("not used"),
     })
+    const sessionStore = Layer.succeed(OpencodeSessionStore, {
+      getSession: (id) =>
+        Effect.succeed({
+          id,
+          availability: "missing" as const,
+          model: null,
+          tokens: null,
+          cost: null,
+          createdAt: null,
+          updatedAt: null,
+        }),
+    })
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
         database,
@@ -595,6 +608,7 @@ describe("Job worker", () => {
         reconciler,
         keymaxxerLayer(),
         opencode,
+        sessionStore,
         defaultGithubLayer,
       ),
     )
@@ -1423,6 +1437,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -1526,6 +1541,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -1593,6 +1609,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -1725,6 +1742,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -1913,6 +1931,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
@@ -2023,6 +2042,7 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),

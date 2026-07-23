@@ -8,7 +8,12 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
+import {
+  Opencode,
+  type OpencodeSession,
+  OpencodeSessionStore,
+  type OpencodeSessionStoreShape,
+} from "@ready-for-agent/opencode"
 import {
   EnqueueError,
   QueueService,
@@ -117,6 +122,7 @@ const makeRuntime = (
       never
     >
   } = {},
+  sessionStoreOverrides: Partial<OpencodeSessionStoreShape> = {},
 ) => {
   const opencode = {
     start: () => Effect.die("not used"),
@@ -133,6 +139,19 @@ const makeRuntime = (
         },
       ]),
     ...opencodeOverrides,
+  }
+  const sessionStore: OpencodeSessionStoreShape = {
+    getSession: (id) =>
+      Effect.succeed({
+        id,
+        availability: "missing",
+        model: null,
+        tokens: null,
+        cost: null,
+        createdAt: null,
+        updatedAt: null,
+      } satisfies OpencodeSession),
+    ...sessionStoreOverrides,
   }
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -198,6 +217,7 @@ const makeRuntime = (
     getWorkItem: unused,
     listWorkItemsForIssue: unused,
     listWorkItemsForRepository: unused,
+    ownsSessionId: () => Effect.succeed(false),
     countCommittedPullRequests: unused,
     continueAfterHumanPrOutcome: unused,
     admitWaitingWorkItems: Effect.succeed(0),
@@ -208,6 +228,7 @@ const makeRuntime = (
       Layer.succeed(DbService, db),
       Layer.succeed(KeymaxxerService, keymaxxer),
       Layer.succeed(Opencode, opencode),
+      Layer.succeed(OpencodeSessionStore, sessionStore),
       Layer.succeed(QueueService, queue),
       Layer.succeed(WorkItemLifecycle, lifecycle),
     ),
@@ -3100,5 +3121,210 @@ describe("GraphQL API", () => {
       errors?: ReadonlyArray<{ message: string }>
     }
     expect(body.errors?.[0]?.message).toContain("Invalid ISO instant for from")
+  })
+
+  test("session returns null for non-owned Session id", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      { ownsSessionId: () => Effect.succeed(false) },
+      {},
+      {
+        getSession: () => Effect.die("session store must not run"),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($id: String!) {
+          session(id: $id) { id availability }
+        }`,
+        variables: { id: "ses_unowned" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: { session: null },
+    })
+  })
+
+  test("session returns AVAILABLE usage for owned fixture Session", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      { ownsSessionId: (id) => Effect.succeed(id === "ses_owned") },
+      {},
+      {
+        getSession: (id) =>
+          Effect.succeed({
+            id,
+            availability: "available",
+            model: {
+              providerId: "openai",
+              id: "gpt-5.5",
+              variant: "xhigh",
+            },
+            tokens: {
+              input: 100,
+              output: 20,
+              reasoning: 5,
+              cacheRead: 50,
+              cacheWrite: 10,
+            },
+            cost: 1.25,
+            createdAt: "2026-07-14T08:00:00.000Z",
+            updatedAt: "2026-07-14T09:00:00.000Z",
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($id: String!) {
+          session(id: $id) {
+            id
+            availability
+            model { providerId id variant }
+            tokens { input output reasoning cacheRead cacheWrite }
+            cost
+            createdAt
+            updatedAt
+          }
+        }`,
+        variables: { id: "ses_owned" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        session: {
+          id: "ses_owned",
+          availability: "AVAILABLE",
+          model: {
+            providerId: "openai",
+            id: "gpt-5.5",
+            variant: "xhigh",
+          },
+          tokens: {
+            input: 100,
+            output: 20,
+            reasoning: 5,
+            cacheRead: 50,
+            cacheWrite: 10,
+          },
+          cost: 1.25,
+          createdAt: "2026-07-14T08:00:00.000Z",
+          updatedAt: "2026-07-14T09:00:00.000Z",
+        },
+      },
+    })
+  })
+
+  test("session returns MISSING with null metrics when OpenCode row is gone", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      { ownsSessionId: () => Effect.succeed(true) },
+      {},
+      {
+        getSession: (id) =>
+          Effect.succeed({
+            id,
+            availability: "missing",
+            model: null,
+            tokens: null,
+            cost: null,
+            createdAt: null,
+            updatedAt: null,
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($id: String!) {
+          session(id: $id) {
+            id
+            availability
+            model { id }
+            tokens { input }
+            cost
+            createdAt
+            updatedAt
+          }
+        }`,
+        variables: { id: "ses_missing" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        session: {
+          id: "ses_missing",
+          availability: "MISSING",
+          model: null,
+          tokens: null,
+          cost: null,
+          createdAt: null,
+          updatedAt: null,
+        },
+      },
+    })
+  })
+
+  test("session returns UNAVAILABLE with null metrics on lock/read failure", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      { ownsSessionId: () => Effect.succeed(true) },
+      {},
+      {
+        getSession: (id) =>
+          Effect.succeed({
+            id,
+            availability: "unavailable",
+            model: null,
+            tokens: null,
+            cost: null,
+            createdAt: null,
+            updatedAt: null,
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($id: String!) {
+          session(id: $id) {
+            id
+            availability
+            model { id }
+            tokens { input }
+            cost
+          }
+        }`,
+        variables: { id: "ses_locked" },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        session: {
+          id: "ses_locked",
+          availability: "UNAVAILABLE",
+          model: null,
+          tokens: null,
+          cost: null,
+        },
+      },
+    })
   })
 })

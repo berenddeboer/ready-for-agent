@@ -65,6 +65,60 @@ const modelsQuery = {
   },
 }
 
+const sessionQuery = (sessionId: string) => ({
+  queryKey: ["session", sessionId] as const,
+  queryFn: async () => {
+    const result = await graphql.query({
+      session: {
+        __args: { id: sessionId },
+        id: true,
+        availability: true,
+        model: {
+          providerId: true,
+          id: true,
+          variant: true,
+        },
+        tokens: {
+          input: true,
+          output: true,
+          reasoning: true,
+          cacheRead: true,
+          cacheWrite: true,
+        },
+        cost: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    })
+    return result.session
+  },
+})
+
+const formatSessionCost = (cost: number): string =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(cost)
+
+const formatSessionInstant = (value: string | null | undefined): string => {
+  if (value === null || value === undefined || value === "") {
+    return "—"
+  }
+  const ms = Date.parse(value)
+  if (Number.isNaN(ms)) {
+    return value
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(ms)
+}
+
+const formatTokenCount = (value: number): string =>
+  new Intl.NumberFormat(undefined).format(value)
+
 const variantsForModel = (
   models: readonly OpencodeModelOption[] | undefined,
   modelId: string,
@@ -1922,8 +1976,236 @@ const jobsTabListAriaLabel = (tab: JobsTab): string => {
   return "Completed jobs"
 }
 
+function SessionUsageDialog({
+  sessionId,
+  open,
+  onClose,
+}: {
+  sessionId: string | null
+  open: boolean
+  onClose: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const enabled = open && sessionId !== null
+  const session = useQuery({
+    ...sessionQuery(sessionId ?? ""),
+    enabled,
+  })
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (dialog === null) return
+    if (open) {
+      if (!dialog.open) dialog.showModal()
+    } else if (dialog.open) {
+      dialog.close()
+    }
+  }, [open])
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="m-auto w-[min(92vw,28rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
+      aria-labelledby="session-usage-title"
+      onClose={onClose}
+    >
+      <div className="border-b border-slate-200 px-5 py-4">
+        <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
+          Session usage
+        </p>
+        <h2 id="session-usage-title" className="mt-1 text-lg font-bold">
+          OpenCode Session
+        </h2>
+        {sessionId !== null && (
+          <p
+            className="mt-1 truncate font-mono text-xs text-slate-500"
+            title={sessionId}
+          >
+            {sessionId}
+          </p>
+        )}
+      </div>
+      <div className="px-5 py-4">
+        {!enabled ? null : session.isPending ? (
+          <p className="m-0 text-sm text-slate-500">Loading usage…</p>
+        ) : session.isError ? (
+          <p
+            className="m-0 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+            role="alert"
+          >
+            Could not load Session usage. Close and try again.
+          </p>
+        ) : session.data === null || session.data === undefined ? (
+          <p
+            className="m-0 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"
+            role="status"
+          >
+            This Session is not owned by a Work Item.
+          </p>
+        ) : session.data.availability === "MISSING" ? (
+          <p
+            className="m-0 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"
+            role="status"
+          >
+            OpenCode no longer has this Session locally. Usage cannot be loaded.
+          </p>
+        ) : session.data.availability === "UNAVAILABLE" ? (
+          <div className="grid gap-3">
+            <p
+              className="m-0 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"
+              role="status"
+            >
+              OpenCode’s database is temporarily unavailable (for example
+              locked). Retry in a moment.
+            </p>
+            <button
+              type="button"
+              className="justify-self-start rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              onClick={() => {
+                void session.refetch()
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left text-sm">
+            <tbody>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Model
+                </th>
+                <td className="py-1.5 font-mono text-slate-800">
+                  {session.data.model === null ||
+                  session.data.model === undefined
+                    ? "—"
+                    : [
+                        session.data.model.providerId,
+                        session.data.model.id,
+                        session.data.model.variant,
+                      ]
+                        .filter(
+                          (part) =>
+                            part !== null && part !== undefined && part !== "",
+                        )
+                        .join(" / ")}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Input tokens
+                </th>
+                <td className="py-1.5 tabular-nums text-slate-800">
+                  {formatTokenCount(session.data.tokens?.input ?? 0)}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Output tokens
+                </th>
+                <td className="py-1.5 tabular-nums text-slate-800">
+                  {formatTokenCount(session.data.tokens?.output ?? 0)}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Reasoning tokens
+                </th>
+                <td className="py-1.5 tabular-nums text-slate-800">
+                  {formatTokenCount(session.data.tokens?.reasoning ?? 0)}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Cache read
+                </th>
+                <td className="py-1.5 tabular-nums text-slate-800">
+                  {formatTokenCount(session.data.tokens?.cacheRead ?? 0)}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Cache write
+                </th>
+                <td className="py-1.5 tabular-nums text-slate-800">
+                  {formatTokenCount(session.data.tokens?.cacheWrite ?? 0)}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Cost
+                </th>
+                <td className="py-1.5 tabular-nums text-slate-800">
+                  {session.data.cost === null || session.data.cost === undefined
+                    ? "—"
+                    : formatSessionCost(session.data.cost)}
+                </td>
+              </tr>
+              <tr className="border-b border-slate-100">
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Created
+                </th>
+                <td className="py-1.5 text-slate-800">
+                  {formatSessionInstant(session.data.createdAt)}
+                </td>
+              </tr>
+              <tr>
+                <th
+                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  scope="row"
+                >
+                  Updated
+                </th>
+                <td className="py-1.5 text-slate-800">
+                  {formatSessionInstant(session.data.updatedAt)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </div>
+      <div className="flex justify-end border-t border-slate-200 px-5 py-3">
+        <button
+          type="button"
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          onClick={() => {
+            dialogRef.current?.close()
+          }}
+        >
+          Close
+        </button>
+      </div>
+    </dialog>
+  )
+}
+
 function JobsCard() {
   const [selectedTab, setSelectedTab] = useState<JobsTab>("working")
+  const [sessionDialogId, setSessionDialogId] = useState<string | null>(null)
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const workingQueries = useQueries({
     queries: repositories.map((repository) =>
@@ -2141,13 +2423,32 @@ function JobsCard() {
                   </div>
                   {(sessionId !== null || worktreePath !== null) && (
                     <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
-                      {sessionId !== null && (
-                        <Copy
-                          value={sessionId}
-                          className="min-w-0 max-w-full"
-                          textClassName="font-mono text-[0.7rem] text-slate-500"
-                        />
-                      )}
+                      {sessionId !== null &&
+                        (selectedTab === "completed" ? (
+                          <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                            <button
+                              type="button"
+                              className="min-w-0 truncate font-mono text-[0.7rem] text-slate-500 underline-offset-2 hover:text-blue-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                              title={sessionId}
+                              onClick={() => {
+                                setSessionDialogId(sessionId)
+                              }}
+                            >
+                              {sessionId}
+                            </button>
+                            <Copy
+                              value={sessionId}
+                              className="shrink-0"
+                              showValue={false}
+                            />
+                          </span>
+                        ) : (
+                          <Copy
+                            value={sessionId}
+                            className="min-w-0 max-w-full"
+                            textClassName="font-mono text-[0.7rem] text-slate-500"
+                          />
+                        ))}
                       {sessionId !== null && worktreePath !== null && (
                         <span className="shrink-0 font-mono text-[0.7rem] text-slate-500">
                           -
@@ -2182,6 +2483,13 @@ function JobsCard() {
           </ul>
         )}
       </div>
+      <SessionUsageDialog
+        sessionId={sessionDialogId}
+        open={sessionDialogId !== null}
+        onClose={() => {
+          setSessionDialogId(null)
+        }}
+      />
     </article>
   )
 }
