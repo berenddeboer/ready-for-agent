@@ -1,6 +1,7 @@
 ---
 status: accepted
 supersedes: 0016-handoff-individual-pr-status-checks
+amended-by: 0028
 ---
 
 # Bound Automated Review Reruns and Reject Non-Review Evidence

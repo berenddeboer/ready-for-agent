@@ -1,3 +1,8 @@
+---
+status: superseded
+superseded-by: 0028
+---
+
 # Watch PR Status Checks
 
 After Create PR succeeds, the Work Item enters Watch PR Status Checks instead of completing immediately. The step queries GitHub for the open pull request on the Work Item's deterministic branch. A missing status-check rollup (`no_checks`) is not treated as green: it requeues with a 30-second delay until the Work Item has resided in this step for at least 60 seconds (two poll intervals), after which absence of checks may be accepted. Pending rollup states keep polling. A SUCCESS rollup (or `no_checks` after the grace) does not advance immediately: it requeues once more after 30 seconds and only advances to Mark PR Ready for Review after a second consecutive green poll, so a brief SUCCESS cannot race into merge while another check is still starting. Failed checks advance to Investigate PR Status Checks when an unhandled execution is available. When every observed execution is already handled and the aggregate remains failed for two consecutive Watch runs, the second run stops as a retryable failed Step Run instead of polling forever.
