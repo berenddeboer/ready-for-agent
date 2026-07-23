@@ -14,7 +14,6 @@ import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { Opencode, type OpencodeModel } from "@ready-for-agent/opencode"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
-  WAITING_FOR_WORKER_SLOT_MESSAGE,
   WorkItemLifecycle,
   type WorkItemRecord,
   type WorkItemsListKind,
@@ -47,6 +46,7 @@ import {
   workIssueProjection,
   workItemStateLabel,
   workItemStatus,
+  workItemStatusMessage,
 } from "./work-item-projection.js"
 
 type AddRepositoryArgs = {
@@ -340,10 +340,7 @@ export const createGraphqlApi = (
           statusLabel: (workItem: WorkItemRecord) =>
             statusLabel(workItemStatus(workItem)),
           statusMessage: (workItem: WorkItemRecord) =>
-            workItem.waitingSince != null
-              ? WAITING_FOR_WORKER_SLOT_MESSAGE
-              : (workItem.failureMessage ??
-                latestStepRun(workItem)?.reasonMessage),
+            workItemStatusMessage(workItem),
           paused: (workItem: WorkItemRecord) => workItem.paused,
           canRetry: (workItem: WorkItemRecord) => {
             const latestStatus = latestStepRun(workItem)?.status

@@ -6,6 +6,7 @@ import {
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
   type StepRunRecord,
+  WAITING_FOR_WORKER_SLOT_MESSAGE,
   type WorkItemRecord,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
@@ -120,6 +121,37 @@ export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   const latest = latestStepRun(workItem)
   if (latest === undefined) return "queued"
   return stepRunDisplayStatus(latest)
+}
+
+const REVIEW_IN_PROGRESS_CHIP_MESSAGES = new Set<string>([
+  REVIEW_REVIEWING_MESSAGE,
+  REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_PRE_COMMIT_MESSAGE,
+])
+
+const isRedundantReviewInProgressMessage = (stepRun: StepRunRecord): boolean =>
+  stepRun.status === "running" &&
+  stepRun.step === "review" &&
+  stepRun.reasonMessage != null &&
+  REVIEW_IN_PROGRESS_CHIP_MESSAGES.has(stepRun.reasonMessage)
+
+export const workItemStatusMessage = (
+  workItem: WorkItemRecord,
+): string | null => {
+  if (workItem.waitingSince != null) {
+    return WAITING_FOR_WORKER_SLOT_MESSAGE
+  }
+  if (workItem.failureMessage != null) {
+    return workItem.failureMessage
+  }
+  const latest = latestStepRun(workItem)
+  if (latest === undefined || latest.reasonMessage == null) {
+    return null
+  }
+  if (isRedundantReviewInProgressMessage(latest)) {
+    return null
+  }
+  return latest.reasonMessage
 }
 
 export const lifecycleLabels = (workItem: WorkItemRecord) => {
