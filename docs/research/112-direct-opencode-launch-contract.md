@@ -50,7 +50,7 @@ opencode run --auto --format json --dir <cwd> -m <model> --variant <variant> [--
 | Step | Session policy |
 | --- | --- |
 | Install fallback | `start`; session id discarded |
-| Implement | Always `start` (fresh session; ignore any prior) |
+| Implement | `continue` when Work Item `sessionId` is set (Retry after interrupt/fail); otherwise `start` |
 | Review, Commit, Create PR, Investigate PR checks, Decide PR merge | `continue` with Work Item `sessionId` |
 
 - stdin: ignore  

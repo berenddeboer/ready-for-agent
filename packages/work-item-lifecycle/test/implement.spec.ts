@@ -175,7 +175,7 @@ describe("implement", () => {
       expect(error).toBeInstanceOf(ImplementIssueContextMissingError)
     }))
 
-  it("starts OpenCode with exact issue identity, worktree, model, and variant", () =>
+  it("starts OpenCode with exact issue identity, worktree, model, and variant when no prior session", () =>
     withTemp(async (root) => {
       let started: {
         prompt: string
@@ -197,7 +197,7 @@ describe("implement", () => {
               variant: "max",
               reviewModel: "opencode/implement-model",
               reviewVariant: "max",
-              sessionId: "ses_install_fallback_must_ignore",
+              sessionId: null,
               maxDuration: Duration.minutes(90),
             }),
           )
@@ -232,76 +232,138 @@ describe("implement", () => {
       expect(continued).toBe(false)
     }))
 
-  it("always starts a fresh Session despite an earlier installation Session", () =>
+  it("starts a fresh Session when session_id is blank", () =>
+    withTemp(async (root) => {
+      let started = false
+      let continued = false
+
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              sessionId: "   ",
+            }),
+          )
+        }),
+        stubOpencode({
+          start: () => {
+            started = true
+            return Effect.succeed({
+              sessionId: "ses_blank_prior_start",
+              assistantText: "",
+            })
+          },
+          continue: () => {
+            continued = true
+            return Effect.succeed({
+              sessionId: "ses_should_not",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(sessionId).toBe("ses_blank_prior_start")
+      expect(started).toBe(true)
+      expect(continued).toBe(false)
+    }))
+
+  it("continues the prior OpenCode Session when session_id is set (retry after interrupt)", () =>
+    withTemp(async (root) => {
+      let continued: {
+        sessionId: string
+        prompt: string
+        cwd: string
+        model: string
+        variant: string
+        timeout?: Duration.Input
+      } | null = null
+      let started = false
+
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root)
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              githubIssueNumber: 80,
+              model: "opencode/implement-model",
+              variant: "max",
+              sessionId: "ses_interrupted_build",
+              maxDuration: Duration.minutes(90),
+            }),
+          )
+        }),
+        stubOpencode({
+          start: () => {
+            started = true
+            return Effect.succeed({
+              sessionId: "ses_should_not_start",
+              assistantText: "",
+            })
+          },
+          continue: (input) => {
+            continued = input
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(sessionId).toBe("ses_interrupted_build")
+      expect(started).toBe(false)
+      expect(continued).not.toBeNull()
+      expect(continued!.sessionId).toBe("ses_interrupted_build")
+      expect(continued!.cwd).toBe(root)
+      expect(continued!.model).toBe("opencode/implement-model")
+      expect(continued!.variant).toBe("max")
+      expect(Duration.toMillis(continued!.timeout!)).toBe(
+        Duration.toMillis(Duration.minutes(90)),
+      )
+      expect(continued!.prompt).toContain("Continue implementing")
+      expect(continued!.prompt).toContain("acme/widgets#80")
+      expect(continued!.prompt).toContain("interrupted or failed")
+      expect(continued!.prompt).toContain("partial work")
+    }))
+
+  it("continues after a failed Build when session_id exists", () =>
     withTemp(async (root) => {
       const calls: string[] = []
-      let continueCalls = 0
 
-      const first = await run(
+      const sessionId = await run(
         Effect.gen(function* () {
           const repository = yield* seedRepository(root)
           return yield* implement(
             baseContext(root, {
               repositoryId: repository.id,
-              sessionId: "ses_from_install_fallback",
+              sessionId: "ses_after_failed_build",
             }),
           )
         }),
         stubOpencode({
           start: () => {
-            calls.push("start-1")
+            calls.push("start")
             return Effect.succeed({
-              sessionId: "ses_first_implement",
+              sessionId: "ses_wrong",
               assistantText: "",
             })
           },
-          continue: () => {
-            continueCalls += 1
+          continue: (input) => {
+            calls.push(`continue:${input.sessionId}`)
             return Effect.succeed({
-              sessionId: "ses_should_not",
+              sessionId: input.sessionId,
               assistantText: "",
             })
           },
         }),
       )
 
-      expect(first).toBe("ses_first_implement")
-      expect(calls).toEqual(["start-1"])
-      expect(continueCalls).toBe(0)
-
-      // Retry is re-entrant: another Implement run starts a new Session even
-      // when context still carries the previous Session id.
-      const second = await run(
-        Effect.gen(function* () {
-          const repository = yield* seedRepository(root)
-          return yield* implement(
-            baseContext(root, {
-              repositoryId: repository.id,
-              sessionId: first,
-            }),
-          )
-        }),
-        stubOpencode({
-          start: () => {
-            calls.push("start-2")
-            return Effect.succeed({
-              sessionId: "ses_retry_implement",
-              assistantText: "",
-            })
-          },
-          continue: () => {
-            continueCalls += 1
-            return Effect.succeed({
-              sessionId: "ses_should_not",
-              assistantText: "",
-            })
-          },
-        }),
-      )
-
-      expect(second).toBe("ses_retry_implement")
-      expect(calls).toEqual(["start-1", "start-2"])
-      expect(continueCalls).toBe(0)
+      expect(sessionId).toBe("ses_after_failed_build")
+      expect(calls).toEqual(["continue:ses_after_failed_build"])
     }))
 
   it("maps OpenCode exit failure", () =>

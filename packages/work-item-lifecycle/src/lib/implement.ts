@@ -120,10 +120,32 @@ const buildImplementPrompt = (
     "Do not merely propose a plan; complete the implementation work for that exact issue.",
   ].join("\n")
 
+const buildContinueImplementPrompt = (
+  githubOwner: string,
+  githubRepo: string,
+  githubIssueNumber: number,
+) =>
+  [
+    `Continue implementing GitHub issue ${githubOwner}/${githubRepo}#${githubIssueNumber}.`,
+    "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
+    "Inspect the current GitHub Issue, this Repository's agent/project instructions, and any partial work already present.",
+    "Finish the implementation in this worktree and run appropriate verification.",
+    "Do not merely propose a plan; complete the implementation work for that exact issue.",
+  ].join("\n")
+
+const priorSessionId = (context: LifecycleStepContext): string | null => {
+  const sessionId = context.sessionId
+  if (sessionId === null || sessionId.trim() === "") {
+    return null
+  }
+  return sessionId
+}
+
 /**
  * Production Implement Lifecycle Step.
- * Starts a fresh OpenCode Session in the Work Item worktree and asks it to
- * implement the referenced GitHub Issue. Always uses start — never continue.
+ * Starts a fresh OpenCode Session in the Work Item worktree when none exists,
+ * or continues the prior Session when `session_id` is already set (Retry after
+ * interrupt or failed Build). Fresh start after delete/reset has no session id.
  */
 export const implement = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -131,45 +153,65 @@ export const implement = (context: LifecycleStepContext) =>
     const repository = yield* resolveRepository(context)
     const githubIssueNumber = yield* resolveIssueNumber(context)
 
-    const prompt = buildImplementPrompt(
-      repository.githubOwner,
-      repository.githubRepo,
-      githubIssueNumber,
-    )
+    const existingSessionId = priorSessionId(context)
+    const prompt =
+      existingSessionId === null
+        ? buildImplementPrompt(
+            repository.githubOwner,
+            repository.githubRepo,
+            githubIssueNumber,
+          )
+        : buildContinueImplementPrompt(
+            repository.githubOwner,
+            repository.githubRepo,
+            githubIssueNumber,
+          )
 
     const opencode = yield* Opencode
     const sql = yield* SqlClient.SqlClient
     const db = yield* DbService
-    // Always start a fresh Session. Ignore any prior context.sessionId from
-    // setup, dependency installation, or a previous failed Step Run.
-    const result = yield* opencode
-      .start({
-        prompt,
-        cwd: worktreePath,
-        model: context.model,
-        variant: context.variant,
-        timeout:
-          context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
-        onSessionId: (sessionId) =>
-          persistSessionIdMidRun(
-            context.workItemId,
-            sessionId,
-            context.repositoryId,
-          ).pipe(
-            Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.provideService(DbService, db),
-          ),
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ImplementOpenCodeError({
-              message: "OpenCode failed to implement the Work Item issue",
-              worktreePath,
-              cause,
-            }),
-        ),
+    const onSessionId = (sessionId: string) =>
+      persistSessionIdMidRun(
+        context.workItemId,
+        sessionId,
+        context.repositoryId,
+      ).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.provideService(DbService, db),
       )
+
+    const run =
+      existingSessionId === null
+        ? opencode.start({
+            prompt,
+            cwd: worktreePath,
+            model: context.model,
+            variant: context.variant,
+            timeout:
+              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
+            onSessionId,
+          })
+        : opencode.continue({
+            sessionId: existingSessionId,
+            prompt,
+            cwd: worktreePath,
+            model: context.model,
+            variant: context.variant,
+            timeout:
+              context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
+            onSessionId,
+          })
+
+    const result = yield* run.pipe(
+      Effect.mapError(
+        (cause) =>
+          new ImplementOpenCodeError({
+            message: "OpenCode failed to implement the Work Item issue",
+            worktreePath,
+            cause,
+          }),
+      ),
+    )
 
     if (result.sessionId.trim() === "") {
       return yield* new ImplementOpenCodeError({
