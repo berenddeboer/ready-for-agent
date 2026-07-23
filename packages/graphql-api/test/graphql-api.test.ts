@@ -1996,6 +1996,18 @@ describe("GraphQL API", () => {
         },
       ],
     }
+    const retryableReviewNeedsHuman = {
+      ...needsHuman,
+      id: makeWorkItemId(),
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          step: "review" as const,
+          status: "succeeded" as const,
+          finishedAt: new Date("2026-07-14T08:00:03.000Z"),
+        },
+      ],
+    }
     const complete = {
       ...workItem,
       id: makeWorkItemId(),
@@ -2045,6 +2057,7 @@ describe("GraphQL API", () => {
           Effect.succeed([
             needsHuman,
             retryableNeedsHuman,
+            retryableReviewNeedsHuman,
             complete,
             implementing,
             retriableFailed,
@@ -2076,6 +2089,12 @@ describe("GraphQL API", () => {
           },
           {
             id: retryableNeedsHuman.id,
+            state: "NEEDS_HUMAN",
+            canRetry: true,
+            isTerminal: true,
+          },
+          {
+            id: retryableReviewNeedsHuman.id,
             state: "NEEDS_HUMAN",
             canRetry: true,
             isTerminal: true,

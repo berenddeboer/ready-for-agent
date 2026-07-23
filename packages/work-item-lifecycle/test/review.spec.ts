@@ -15,8 +15,10 @@ import {
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CurrentStepRun,
+  MAX_REVIEW_FIX_ROUNDS,
   PreCommitOpenCodeError,
   REVIEW_APPLYING_FINDINGS_MESSAGE,
+  REVIEW_FIX_LIMIT_REASON,
   REVIEW_PRE_COMMIT_MESSAGE,
   ReviewInvalidWorktreeContextError,
   ReviewOpenCodeError,
@@ -522,6 +524,145 @@ describe("review", () => {
 
       expect(error).toBeInstanceOf(PreCommitOpenCodeError)
       expect(turn).toBeGreaterThanOrEqual(3)
+    }))
+
+  it("returns Needs Human after three FIXED rounds without clean or deferred", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "still broken\n")
+
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            turn += 1
+            if (input.prompt.includes("/review")) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      // 4 reviewing passes + 3 apply passes (no 4th apply)
+      expect(turn).toBe(MAX_REVIEW_FIX_ROUNDS * 2 + 1)
+      expect(result).toEqual({
+        _tag: "needs_human",
+        reason: REVIEW_FIX_LIMIT_REASON,
+      })
+    }))
+
+  it("succeeds with clean after fewer than three FIXED rounds", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            turn += 1
+            if (input.prompt.includes("/review")) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  turn <= 3
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                    : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      // reviewing, apply, reviewing, apply, reviewing(clean)
+      expect(turn).toBe(5)
+      expect(result).toEqual({ _tag: "clean" })
+    }))
+
+  it("succeeds with clean on the reviewing pass after exactly three FIXED rounds", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      let reviewingPasses = 0
+      let applyPasses = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            if (input.prompt.includes("/review")) {
+              reviewingPasses += 1
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText:
+                  reviewingPasses <= MAX_REVIEW_FIX_ROUNDS
+                    ? "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"
+                    : "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+              })
+            }
+            applyPasses += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+            })
+          },
+        }),
+      )
+
+      expect(applyPasses).toBe(MAX_REVIEW_FIX_ROUNDS)
+      expect(reviewingPasses).toBe(MAX_REVIEW_FIX_ROUNDS + 1)
+      expect(result).toEqual({ _tag: "clean" })
+    }))
+
+  it("succeeds with deferred after fewer than three FIXED rounds", () =>
+    withTempGit(async (root) => {
+      await writeHook(root, "#!/usr/bin/env bash\nexit 0\n")
+      await writeFile(join(root, "change.txt"), "fixed\n")
+
+      let turn = 0
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            turn += 1
+            if (input.prompt.includes("/review")) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS",
+              })
+            }
+            if (turn === 2) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: remaining style notes",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "deferred",
+        reason: "remaining style notes",
+      })
     }))
 
   it("marks Step Run phase as pre-commit during nested Pre-Commit after FIXED", () =>

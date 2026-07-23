@@ -3008,6 +3008,128 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("enters Needs Human when Review exhausts fix rounds and releases the Worker Slot", () => {
+      const reason =
+        "Review fix limit reached (3); inspect the worktree or address remaining findings, then Retry."
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () =>
+          Effect.succeed({
+            _tag: "needs_human" as const,
+            reason,
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("needs_human")
+            expect(afterReview.workItem.failureCode).toBe("needs_human")
+            expect(afterReview.workItem.failureMessage).toBe(reason)
+            expect(afterReview.workItem.holdsWorkerSlot).toBe(false)
+            expect(afterReview.workItem.sessionId).toBe(
+              "ses_test_implement_session",
+            )
+            const reviewRun = afterReview.workItem.stepRuns.at(-1)
+            expect(reviewRun?.step).toBe("review")
+            expect(reviewRun?.status).toBe("succeeded")
+          }
+
+          const queued = (yield* sql.unsafe(
+            `SELECT COUNT(*) AS count FROM job_queue`,
+          )) as readonly { count: number }[]
+          expect(Number(queued[0]?.count)).toBe(0)
+
+          const blocked = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+          )
+          expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.state).toBe("needs_human")
+          expect(final.holdsWorkerSlot).toBe(false)
+        }),
+      )
+    })
+
+    it("retries Review fix-limit Needs Human at a fresh reviewing pass", () => {
+      const reason =
+        "Review fix limit reached (3); inspect the worktree or address remaining findings, then Retry."
+      let reviewCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        review: () => {
+          reviewCalls += 1
+          if (reviewCalls === 1) {
+            return Effect.succeed({
+              _tag: "needs_human" as const,
+              reason,
+            })
+          }
+          return Effect.succeed({ _tag: "clean" as const })
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          yield* claimAndRunPending
+          const afterReview = yield* claimAndRunPending
+          expect(afterReview._tag).toBe("processed")
+          if (afterReview._tag === "processed") {
+            expect(afterReview.workItem.state).toBe("needs_human")
+            expect(afterReview.workItem.holdsWorkerSlot).toBe(false)
+          }
+
+          const retried = yield* lifecycle.retry(created.id)
+          expect(retried.state).toBe("review")
+          expect(retried.failureCode).toBeNull()
+          expect(retried.failureMessage).toBeNull()
+          expect(retried.holdsWorkerSlot).toBe(true)
+          expect(retried.sessionId).toBe("ses_test_implement_session")
+          expect(retried.stepRuns.at(-1)).toMatchObject({
+            step: "review",
+            status: "queued",
+          })
+
+          const secondReview = yield* claimAndRunPending
+          expect(reviewCalls).toBe(2)
+          expect(secondReview._tag).toBe("processed")
+          if (secondReview._tag === "processed") {
+            expect(secondReview.workItem.state).toBe("commit")
+            expect(secondReview.workItem.failureCode).toBeNull()
+            expect(secondReview.workItem.failureMessage).toBeNull()
+          }
+        }),
+      )
+    })
+
     it("persists complete pre-commit hook output on failure", () => {
       const output = `format failed: ${"x".repeat(9_000)}`
       const steps: LifecycleStepsShape = {
