@@ -1,0 +1,1 @@
+ALTER TABLE `work_item` ADD `check_start_last_observed_is_draft` integer;

@@ -251,6 +251,7 @@ type WorkItemRow = {
   readonly check_start_anchor_head_sha: string | null
   readonly check_start_observed_head_sha: string | null
   readonly check_start_observed_head_at: number | null
+  readonly check_start_last_observed_is_draft: number | null
   readonly created_at: number
   readonly updated_at: number
 }
@@ -338,9 +339,10 @@ const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_
                    review_variant, state, state_ready_at, paused, waiting_since, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
-                   failure_message, check_start_anchor_at, check_start_anchor_head_sha,
-                   check_start_observed_head_sha, check_start_observed_head_at,
-                   created_at, updated_at`
+                    failure_message, check_start_anchor_at, check_start_anchor_head_sha,
+                    check_start_observed_head_sha, check_start_observed_head_at,
+                    check_start_last_observed_is_draft,
+                    created_at, updated_at`
 
 const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
 /** Catch-up window after the latest Check-Start Anchor before startup is complete. */
@@ -419,7 +421,7 @@ const nextOperationalStep = (
     case "investigate_pr_status_checks":
       return "watch_pr_status_checks"
     case "mark_pr_ready_for_review":
-      return "decide_pr_merge"
+      return "watch_pr_status_checks"
     case "decide_pr_merge":
       return "merge_pr"
     case "merge_pr":
@@ -1220,6 +1222,7 @@ export const makeWorkItemLifecycleLive = (
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
           readonly refreshCheckStartAnchor?: boolean
+          readonly checkStartLastObservedIsDraft?: number | null
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
           readonly transition?: {
@@ -1292,6 +1295,9 @@ export const makeWorkItemLifecycleLive = (
             return steps.createPr(context).pipe(
               Effect.map((githubPullRequestNumber) => ({
                 githubPullRequestNumber,
+                // Create PR opens a draft; persist so an external ready before
+                // the first Watch poll still gets a ready-phase anchor.
+                checkStartLastObservedIsDraft: 1,
               })),
             )
           case "watch_pr_status_checks":
@@ -1311,6 +1317,12 @@ export const makeWorkItemLifecycleLive = (
                     "headPushedAt" in status
                       ? (status.headPushedAt ?? null)
                       : null
+                  const observedIsDraft =
+                    "isDraft" in status ? (status.isDraft ?? null) : null
+                  // Unknown draft status is neither draft nor ready; do not
+                  // Mark Ready or Decide until GitHub reports a boolean.
+                  const isDraft = observedIsDraft === true
+                  const isReady = observedIsDraft === false
                   let observedHeadSha = workItem.check_start_observed_head_sha
                   let observedHeadAt = workItem.check_start_observed_head_at
                   const pushedMs = validInstantMs(headPushedAt)
@@ -1367,6 +1379,26 @@ export const makeWorkItemLifecycleLive = (
                     }
                   }
 
+                  // External draft→ready is a Check-Start Anchor (ready-phase window).
+                  const previouslyDraft =
+                    workItem.check_start_last_observed_is_draft === 1
+                  if (
+                    previouslyDraft &&
+                    !isDraft &&
+                    observedIsDraft === false
+                  ) {
+                    if (anchorAt === null || now > anchorAt) {
+                      anchorAt = now
+                    }
+                  }
+
+                  const lastObservedIsDraft =
+                    observedIsDraft === null
+                      ? workItem.check_start_last_observed_is_draft
+                      : observedIsDraft
+                        ? 1
+                        : 0
+
                   yield* sql
                     .unsafe(
                       `UPDATE work_item
@@ -1374,6 +1406,7 @@ export const makeWorkItemLifecycleLive = (
                            check_start_anchor_head_sha = ?,
                            check_start_observed_head_sha = ?,
                            check_start_observed_head_at = ?,
+                           check_start_last_observed_is_draft = ?,
                            updated_at = ?
                        WHERE id = ?`,
                       [
@@ -1381,6 +1414,7 @@ export const makeWorkItemLifecycleLive = (
                         anchorHeadSha,
                         observedHeadSha,
                         observedHeadAt,
+                        lastObservedIsDraft,
                         now,
                         workItem.id,
                       ],
@@ -1427,11 +1461,23 @@ export const makeWorkItemLifecycleLive = (
                     }
                   }
                   if (status._tag === "failed") {
-                    if (!pastDeadline) {
+                    // Draft with no unhandled terminals and known mergeability
+                    // still advances to Mark Ready; the ready-phase window can
+                    // restart checks. Ready PRs fail retryably at the deadline.
+                    if (isDraft) {
+                      return {
+                        transition: {
+                          nextState: "mark_pr_ready_for_review" as const,
+                        },
+                      }
+                    }
+                    if (!isReady || !pastDeadline) {
                       return {
                         transition: {
                           nextState: "watch_pr_status_checks" as const,
-                          delay: requeueDelay,
+                          delay: pastDeadline
+                            ? PR_STATUS_CHECKS_POLL_DELAY
+                            : requeueDelay,
                         },
                       }
                     }
@@ -1440,12 +1486,32 @@ export const makeWorkItemLifecycleLive = (
                         "Manual fixing may be required. GitHub status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on GitHub, then click Retry checks.",
                     })
                   }
-                  // no_checks, expected, and all-terminal success wait for the deadline.
+                  // Settled: no_checks, expected, and all-terminal success.
                   if (
                     status._tag === "no_checks" ||
                     status._tag === "expected" ||
                     status._tag === "succeeded"
                   ) {
+                    // Draft skips the catch-up window and advances to Mark Ready.
+                    if (isDraft) {
+                      return {
+                        transition: {
+                          nextState: "mark_pr_ready_for_review" as const,
+                        },
+                      }
+                    }
+                    // Unknown draft status: keep polling until GitHub reports it.
+                    if (!isReady) {
+                      return {
+                        transition: {
+                          nextState: "watch_pr_status_checks" as const,
+                          delay: pastDeadline
+                            ? PR_STATUS_CHECKS_POLL_DELAY
+                            : requeueDelay,
+                        },
+                      }
+                    }
+                    // Ready phase waits for the Check-Start Deadline, then Decide.
                     if (!pastDeadline) {
                       return {
                         transition: {
@@ -1456,13 +1522,17 @@ export const makeWorkItemLifecycleLive = (
                     }
                     return {
                       transition: {
-                        nextState: "mark_pr_ready_for_review" as const,
+                        nextState: "decide_pr_merge" as const,
                       },
                     }
                   }
                   return {
                     transition: {
-                      nextState: "mark_pr_ready_for_review" as const,
+                      nextState: isDraft
+                        ? ("mark_pr_ready_for_review" as const)
+                        : isReady
+                          ? ("decide_pr_merge" as const)
+                          : ("watch_pr_status_checks" as const),
                     },
                   }
                 }),
@@ -1516,7 +1586,17 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
           case "mark_pr_ready_for_review":
-            return steps.markPrReadyForReview(context).pipe(Effect.as({}))
+            return steps.markPrReadyForReview(context).pipe(
+              Effect.as({
+                // Fresh ready-phase Check-Start Anchor; return to Watch so
+                // ready_for_review workflows get the full catch-up window.
+                refreshCheckStartAnchor: true,
+                checkStartLastObservedIsDraft: 0,
+                transition: {
+                  nextState: "watch_pr_status_checks" as const,
+                },
+              }),
+            )
           case "decide_pr_merge":
             return steps.decidePrMerge(context).pipe(
               Effect.map((result) =>
@@ -1624,6 +1704,7 @@ export const makeWorkItemLifecycleLive = (
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
           readonly refreshCheckStartAnchor?: boolean
+          readonly checkStartLastObservedIsDraft?: number | null
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
           readonly transition?: {
@@ -1695,13 +1776,40 @@ export const makeWorkItemLifecycleLive = (
                   )
                 }
 
-                if (output.refreshCheckStartAnchor === true) {
+                if (
+                  output.refreshCheckStartAnchor === true ||
+                  output.checkStartLastObservedIsDraft !== undefined
+                ) {
+                  // Clearing the head binding with a fresh anchor prevents a
+                  // later head change from replacing the ready-phase instant
+                  // with an older Last PR Change timestamp.
                   yield* sql.unsafe(
                     `UPDATE work_item
-                     SET check_start_anchor_at = ?,
+                     SET check_start_anchor_at = CASE
+                           WHEN ? = 1 THEN ?
+                           ELSE check_start_anchor_at
+                         END,
+                         check_start_anchor_head_sha = CASE
+                           WHEN ? = 1 THEN NULL
+                           ELSE check_start_anchor_head_sha
+                         END,
+                         check_start_last_observed_is_draft = CASE
+                           WHEN ? = 1 THEN ?
+                           ELSE check_start_last_observed_is_draft
+                         END,
                          updated_at = ?
                      WHERE id = ?`,
-                    [now, now, workItem.id],
+                    [
+                      output.refreshCheckStartAnchor === true ? 1 : 0,
+                      now,
+                      output.refreshCheckStartAnchor === true ? 1 : 0,
+                      output.checkStartLastObservedIsDraft !== undefined
+                        ? 1
+                        : 0,
+                      output.checkStartLastObservedIsDraft ?? null,
+                      now,
+                      workItem.id,
+                    ],
                   )
                 }
 

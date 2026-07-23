@@ -39,7 +39,8 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         createdAt: new Date(0),
         headSha: "settled-head",
         headPushedAt: new Date(0),
-        isDraft: true,
+        // Already-ready snapshot: Watch advances past deadline to Decide.
+        isDraft: false,
       }),
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
@@ -142,7 +143,16 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       blockedBy: [],
     })
     const created = yield* lifecycle.implementNow(repository.id, 42)
-    for (let index = 0; index < 11; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
+      yield* makeQueuedJobsAvailable
+      yield* claimAndRunPending
+    }
+    const sql = yield* SqlClient.SqlClient
+    yield* sql.unsafe(
+      `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
+      [created.id],
+    )
+    for (let index = 0; index < 2; index += 1) {
       yield* makeQueuedJobsAvailable
       yield* claimAndRunPending
     }
@@ -183,7 +193,16 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       blockedBy: [],
     })
     const created = yield* lifecycle.implementNow(repository.id, 42)
-    for (let index = 0; index < 12; index += 1) {
+    for (let index = 0; index < 8; index += 1) {
+      yield* makeQueuedJobsAvailable
+      yield* claimAndRunPending
+    }
+    const sql = yield* SqlClient.SqlClient
+    yield* sql.unsafe(
+      `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
+      [created.id],
+    )
+    for (let index = 0; index < 3; index += 1) {
       yield* makeQueuedJobsAvailable
       yield* claimAndRunPending
     }

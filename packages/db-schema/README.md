@@ -77,7 +77,10 @@ type work item = repository, github issue number, issue title,
                  review model, review variant, state, state ready at,
                  paused, waiting since, holds worker slot, pause before step,
                  worktree path, starting commit oid, completion summary,
-                 session id, failure code, failure message.
+                 session id, failure code, failure message,
+                 check start anchor at, check start anchor head sha,
+                 check start observed head sha, check start observed head at,
+                 check start last observed is draft.
 
 type step run = work item, step, status, queue job id,
                 queued at, started at, finished at, reason code, reason message.
