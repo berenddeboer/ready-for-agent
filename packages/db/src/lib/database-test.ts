@@ -36,3 +36,24 @@ const MigrationLayer = Layer.effectDiscard(
  * Default consumer path for tests; production uses {@link DatabaseLive}.
  */
 export const DatabaseTest = MigrationLayer.pipe(Layer.provideMerge(SqliteTest))
+
+/**
+ * File-backed SQLite + migrations for tests that must reopen the same DB after
+ * disposing services (restart / durability acceptance).
+ */
+export const makeFileDatabaseTest = (filename: string) => {
+  const sqlite = Layer.provideMerge(
+    Layer.effectDiscard(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`PRAGMA foreign_keys = ON`
+      }),
+    ),
+    SqliteClient.layer({
+      filename,
+      create: true,
+      readwrite: true,
+    }),
+  )
+  return MigrationLayer.pipe(Layer.provideMerge(sqlite))
+}

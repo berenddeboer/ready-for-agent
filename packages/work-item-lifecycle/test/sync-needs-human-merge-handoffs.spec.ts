@@ -33,7 +33,14 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     review: () => Effect.succeed({ _tag: "clean" as const }),
     commit: () => Effect.void,
     createPr: () => Effect.succeed(101),
-    watchPrStatusChecks: () => Effect.succeed("succeeded"),
+    watchPrStatusChecks: () =>
+      Effect.succeed({
+        _tag: "succeeded" as const,
+        createdAt: new Date(0),
+        headSha: "settled-head",
+        headPushedAt: new Date(0),
+        isDraft: true,
+      }),
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
       Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
@@ -61,6 +68,8 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           baseRefName: "main",
           headPushedAt: null,
           headSha: null,
+          createdAt: null,
+          isDraft: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () => Effect.succeed(status),
@@ -133,7 +142,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       blockedBy: [],
     })
     const created = yield* lifecycle.implementNow(repository.id, 42)
-    for (let index = 0; index < 12; index += 1) {
+    for (let index = 0; index < 11; index += 1) {
       yield* makeQueuedJobsAvailable
       yield* claimAndRunPending
     }
@@ -174,7 +183,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       blockedBy: [],
     })
     const created = yield* lifecycle.implementNow(repository.id, 42)
-    for (let index = 0; index < 13; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       yield* makeQueuedJobsAvailable
       yield* claimAndRunPending
     }

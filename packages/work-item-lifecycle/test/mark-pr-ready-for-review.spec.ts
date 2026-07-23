@@ -49,6 +49,8 @@ describe("markPrReadyForReview", () => {
           baseRefName: "main",
           headPushedAt: null,
           headSha: null,
+          createdAt: null,
+          isDraft: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
@@ -84,6 +86,8 @@ describe("markPrReadyForReview", () => {
           baseRefName: "main",
           headPushedAt: null,
           headSha: null,
+          createdAt: null,
+          isDraft: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>

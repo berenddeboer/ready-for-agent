@@ -24,7 +24,14 @@ const successfulSteps: LifecycleStepsShape = {
   review: () => Effect.succeed({ _tag: "clean" as const }),
   commit: () => Effect.void,
   createPr: () => Effect.succeed(101),
-  watchPrStatusChecks: () => Effect.succeed("succeeded"),
+  watchPrStatusChecks: () =>
+    Effect.succeed({
+      _tag: "succeeded" as const,
+      createdAt: new Date(0),
+      headSha: "settled-head",
+      headPushedAt: new Date(0),
+      isDraft: true,
+    }),
   resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
   investigatePrStatusChecks: () =>
     Effect.succeed({ _tag: "processed", handledCheckIds: [] }),

@@ -35,20 +35,40 @@ export class PrStatusChecksUnresolvedError extends Schema.TaggedErrorClass<PrSta
   },
 ) {}
 
+/** Timing evidence from the GitHub PR check snapshot for Check-Start Anchors. */
+export type PrStatusCheckTimingEvidence = {
+  readonly createdAt: Date | null
+  readonly headSha: string | null
+  readonly headPushedAt: Date | null
+  readonly isDraft: boolean | null
+}
+
 export type PrStatusCheckResult =
-  | "pending"
-  | {
+  | ({
+      readonly _tag: "pending"
+    } & PrStatusCheckTimingEvidence)
+  | ({
+      readonly _tag: "expected"
+    } & PrStatusCheckTimingEvidence)
+  | ({
       readonly _tag: "no_checks"
-      readonly headPushedAt: Date | null
-    }
-  | "succeeded"
-  | "failed"
-  | "closed"
-  | "handoff_needed"
-  | {
+    } & PrStatusCheckTimingEvidence)
+  | ({
+      readonly _tag: "succeeded"
+    } & PrStatusCheckTimingEvidence)
+  | ({
+      readonly _tag: "failed"
+    } & PrStatusCheckTimingEvidence)
+  | ({
+      readonly _tag: "closed"
+    } & PrStatusCheckTimingEvidence)
+  | ({
+      readonly _tag: "handoff_needed"
+    } & PrStatusCheckTimingEvidence)
+  | ({
       readonly _tag: "conflict"
       readonly retiredCheckIds: readonly string[]
-    }
+    } & PrStatusCheckTimingEvidence)
 
 export type PrStatusCheckInvestigationResult =
   | { readonly _tag: "processed"; readonly handledCheckIds: readonly string[] }
@@ -176,6 +196,18 @@ const retireUnhandledRedChecks = (workItemId: string) =>
     )
   })
 
+const timingEvidence = (status: {
+  readonly createdAt: Date | null
+  readonly headSha: string | null
+  readonly headPushedAt: Date | null
+  readonly isDraft: boolean | null
+}): PrStatusCheckTimingEvidence => ({
+  createdAt: status.createdAt,
+  headSha: status.headSha,
+  headPushedAt: status.headPushedAt,
+  isDraft: status.isDraft,
+})
+
 export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
@@ -184,8 +216,10 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
       { owner: repository.githubOwner, name: repository.githubRepo },
       branch,
     )
+    const evidence = timingEvidence(status)
     const terminalChecks =
       status._tag === "pending" ||
+      status._tag === "expected" ||
       status._tag === "succeeded" ||
       status._tag === "failed"
         ? status.terminalChecks
@@ -198,27 +232,58 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
     }
     const unhandled = yield* listUnhandledChecks(context.workItemId)
     if (status._tag === "closed") {
-      return "closed" satisfies PrStatusCheckResult
+      return {
+        _tag: "closed",
+        ...evidence,
+      } satisfies PrStatusCheckResult
     }
     if (status.mergeability === "conflicting") {
       return {
         _tag: "conflict",
         retiredCheckIds: unhandled.map((check) => check.id),
+        ...evidence,
       } satisfies PrStatusCheckResult
     }
     if (status.mergeability === "unknown") {
-      return "pending" satisfies PrStatusCheckResult
+      return {
+        _tag: "pending",
+        ...evidence,
+      } satisfies PrStatusCheckResult
     }
     if (unhandled.length > 0) {
-      return "handoff_needed" satisfies PrStatusCheckResult
+      return {
+        _tag: "handoff_needed",
+        ...evidence,
+      } satisfies PrStatusCheckResult
     }
     if (status._tag === "no_checks") {
       return {
         _tag: "no_checks",
-        headPushedAt: status.headPushedAt,
+        ...evidence,
       } satisfies PrStatusCheckResult
     }
-    return status._tag satisfies PrStatusCheckResult
+    if (status._tag === "expected") {
+      return {
+        _tag: "expected",
+        ...evidence,
+      } satisfies PrStatusCheckResult
+    }
+    if (status._tag === "pending") {
+      return {
+        _tag: "pending",
+        ...evidence,
+      } satisfies PrStatusCheckResult
+    }
+    if (status._tag === "failed") {
+      return {
+        _tag: "failed",
+        ...evidence,
+      } satisfies PrStatusCheckResult
+    }
+    return {
+      _tag: "succeeded",
+      ...evidence,
+    } satisfies PrStatusCheckResult
   })
 
 type ParsedInvestigationResult =

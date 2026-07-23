@@ -175,6 +175,8 @@ const makeGitHubLayer = (
         baseRefName: "main",
         headPushedAt: null,
         headSha: null,
+        createdAt: null,
+        isDraft: null,
       }),
     getPrStatusCheckDiagnostics: () => Effect.succeed([]),
     getPullRequestLifecycleStatus: () =>

@@ -62,7 +62,16 @@ export type PullRequestMergeability = "mergeable" | "conflicting" | "unknown"
 
 export type PullRequestCheckStatus = (
   | {
+      /** An execution has started and has not finished. */
       readonly _tag: "pending"
+      readonly terminalChecks: readonly TerminalPrStatusCheck[]
+    }
+  | {
+      /**
+       * A required status context has not reported an execution (GitHub
+       * EXPECTED). Distinct from a started Pending execution.
+       */
+      readonly _tag: "expected"
       readonly terminalChecks: readonly TerminalPrStatusCheck[]
     }
   | { readonly _tag: "no_checks" }
@@ -80,14 +89,23 @@ export type PullRequestCheckStatus = (
   readonly baseRefName: string | null
   /**
    * When the current PR head commit was pushed, or null when GitHub omitted a
-   * valid head-commit push time. Used only as a restart freshness signal.
+   * valid head-commit push time matching the current head.
    */
   readonly headPushedAt: Date | null
   /**
    * Current PR head commit OID, or null when GitHub omitted a valid head SHA.
-   * Used to scope automated-review rerun budgets.
+   * Used to scope automated-review rerun budgets and Check-Start timing.
    */
   readonly headSha: string | null
+  /**
+   * When the pull request was created, or null when GitHub omitted a valid
+   * creation time.
+   */
+  readonly createdAt: Date | null
+  /**
+   * Whether the pull request is a draft, or null when GitHub omitted the field.
+   */
+  readonly isDraft: boolean | null
 }
 
 export type GitHubIssueState = "OPEN" | "CLOSED"

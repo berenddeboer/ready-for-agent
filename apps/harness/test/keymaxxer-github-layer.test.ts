@@ -197,6 +197,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
             baseRefName: "develop",
             headPushedAt: null,
             headSha: null,
+            createdAt: null,
+            isDraft: null,
             terminalChecks: [
               {
                 externalId: "checkrun:1",
@@ -229,6 +231,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
       baseRefName: "develop",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         {
           externalId: "checkrun:1",
@@ -282,6 +286,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
         baseRefName: "main",
         headPushedAt: null,
         headSha: null,
+        createdAt: null,
+        isDraft: null,
       }),
       JSON.stringify({
         _tag: "pending",
@@ -289,6 +295,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
         baseRefName: "main",
         headPushedAt: null,
         headSha: null,
+        createdAt: null,
+        isDraft: null,
         terminalChecks: [
           {
             externalId: "status:SC_ci",
@@ -330,6 +338,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
     })
 
     const pending = await Effect.runPromise(
@@ -347,6 +357,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
       baseRefName: "main",
       headPushedAt: null,
       headSha: null,
+      createdAt: null,
+      isDraft: null,
       terminalChecks: [
         {
           externalId: "status:SC_ci",
