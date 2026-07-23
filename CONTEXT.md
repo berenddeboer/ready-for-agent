@@ -112,7 +112,7 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for Implement and related steps; the review model is used only for the Review step (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, using the OpenCode build model/variant and review model/variant captured at creation. The build model is used for Implement, Review Fix Rounds, Commit, and related steps; the review model is used only for reviewing passes inside Review (and falls back to the build model when unset). It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement**:
@@ -126,6 +126,26 @@ _Avoid_: No-code outcome, empty change, no-op
 **Assess Changes**:
 The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run. Observable repository changes advance directly to Pre-Commit without consulting OpenCode. When the worktree appears unchanged, Assess Changes asks the Work Item's Implement Session to confirm that the absence of changes is intentional and provide a concise completion summary. A confirmed No-Change Outcome skips Pre-Commit and Review and follows the lifecycle's no-change branch. Assess Changes does not review the work.
 _Avoid_: Review changes, empty-commit check
+
+**Pre-Commit**:
+The Lifecycle Step that runs the repository's git pre-commit hook on staged Work Item changes before Review, with an OpenCode fix loop on hook failure. It may also run again inside Review after a Review Fix Round changes the worktree.
+_Avoid_: Pre-push, CI gate, local lint only
+
+**Review**:
+The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes with the review model, then may apply accepted Review Findings with the build model in bounded Review Fix Rounds before Commit. Operator-visible phases stay under this one step: reviewing, applying findings, and pre-commit inside the loop. It is not a separate Commit or Implement step.
+_Avoid_: Code review PR check, Mark PR Ready for Review, advisory-only review
+
+**Review Finding**:
+A standards or specification issue reported by Review against the Work Item's changes. OpenCode interprets each finding and may fix it, defer it, or treat the review as clean; deferred findings do not block Commit.
+_Avoid_: Lint error, CI failure, comment thread
+
+**Review Fix Round**:
+One build-model pass that interprets Review Findings and may change the worktree, followed by Pre-Commit and another reviewing pass. A Review Step Run allows at most three rounds; exhausting the limit without a clean or deferred outcome is Needs Human.
+_Avoid_: Implement redo, unbounded fix loop
+
+**Commit**:
+The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. It stages and commits only; it does not implement Review Findings or other rework.
+_Avoid_: Create PR, git commit hook, Pre-Commit
 
 **Close Issue**:
 The Lifecycle Step that publishes the No-Change Outcome's completion summary on the Work Item's GitHub Issue and closes that Issue after Assess Changes. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried.
@@ -208,7 +228,7 @@ A durable record of one scheduled execution attempt for a Work Item's Lifecycle 
 _Avoid_: Step duration, job attempt
 
 **Retry**:
-An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is not allowed while a Work Item is paused; the operator must Start first.
+An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is not allowed while a Work Item is paused; the operator must Start first.
 _Avoid_: Queue redelivery, resume
 
 **Pause Work Item**:
