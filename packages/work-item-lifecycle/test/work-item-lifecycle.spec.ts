@@ -2426,16 +2426,17 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("returns a waiting automated review to delayed Watch without handling its checks", () => {
-      const checkId = "psc-active-review"
+    it("returns PROCESSED investigation to Watch immediately without resetting the Check-Start Anchor", () => {
+      const checkId = "psc-processed-noop"
+      const priorAnchorAt = 1_000
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
           Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.succeed({
-            _tag: "waiting",
-            handledCheckIds: [],
+            _tag: "processed",
+            handledCheckIds: [checkId],
           }),
       }
 
@@ -2461,10 +2462,16 @@ describe("WorkItemLifecycle", () => {
 
           const now = Date.now()
           yield* sql.unsafe(
+            `UPDATE work_item
+             SET check_start_anchor_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [priorAnchorAt, now, created.id],
+          )
+          yield* sql.unsafe(
             `INSERT INTO pr_status_check (
                id, work_item_id, external_id, name, outcome,
                handled_at, observed_at, created_at, updated_at
-             ) VALUES (?, ?, 'checkrun:active-review', 'review', 'green', NULL, ?, ?, ?)`,
+             ) VALUES (?, ?, 'checkrun:processed-noop', 'lint', 'green', NULL, ?, ?, ?)`,
             [checkId, created.id, now, now, now],
           )
 
@@ -2484,16 +2491,115 @@ describe("WorkItemLifecycle", () => {
             readonly handled_at: number | null
             readonly handled_by_step_run_id: string | null
           }[]
-          expect(checks).toEqual([
-            { handled_at: null, handled_by_step_run_id: null },
-          ])
+          expect(checks[0]?.handled_at).not.toBeNull()
 
           const delayed = (yield* sql.unsafe(
             `SELECT available_at, created_at FROM job_queue`,
           )) as readonly { available_at: number; created_at: number }[]
           expect(delayed).toHaveLength(1)
-          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
+          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(0)
+
+          const anchors = (yield* sql.unsafe(
+            `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+            [created.id],
+          )) as readonly { readonly check_start_anchor_at: number | null }[]
+          expect(anchors[0]?.check_start_anchor_at).toBe(priorAnchorAt)
         }),
+      )
+    })
+
+    it("records a fresh Check-Start Anchor and delayed Watch after CHECKS_TRIGGERED", () => {
+      const checkId = "psc-checks-triggered"
+      const priorAnchorAt = 1_000
+      const investigateAt = 50_000
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "checks_triggered",
+            handledCheckIds: [checkId],
+            checkStartAnchorRecorded: false,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(0)
+              const lifecycle = yield* WorkItemLifecycle
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* claimAndRunPending
+              }
+              const watched = yield* claimAndRunPending
+              expect(watched._tag).toBe("processed")
+              if (watched._tag === "processed") {
+                expect(watched.workItem.state).toBe(
+                  "investigate_pr_status_checks",
+                )
+              }
+
+              yield* TestClock.setTime(investigateAt)
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET check_start_anchor_at = ?, updated_at = ?
+                 WHERE id = ?`,
+                [priorAnchorAt, investigateAt, created.id],
+              )
+              yield* sql.unsafe(
+                `INSERT INTO pr_status_check (
+                   id, work_item_id, external_id, name, outcome,
+                   handled_at, observed_at, created_at, updated_at
+                 ) VALUES (?, ?, 'checkrun:triggered', 'lint', 'red', NULL, ?, ?, ?)`,
+                [
+                  checkId,
+                  created.id,
+                  investigateAt,
+                  investigateAt,
+                  investigateAt,
+                ],
+              )
+
+              const investigated = yield* claimAndRunPending
+              expect(investigated._tag).toBe("processed")
+              if (investigated._tag === "processed") {
+                expect(investigated.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              const checks = (yield* sql.unsafe(
+                `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+                [checkId],
+              )) as readonly { readonly handled_at: number | null }[]
+              expect(checks[0]?.handled_at).not.toBeNull()
+
+              const delayed = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly { available_at: number; created_at: number }[]
+              expect(delayed).toHaveLength(1)
+              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
+                30_000,
+              )
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly { readonly check_start_anchor_at: number | null }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(investigateAt)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
       )
     })
 
@@ -2936,53 +3042,108 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("returns to delayed Watch after PROCESSED investigation when OpenCode took action", () => {
+    it("keeps a pre-recorded Check-Start Anchor after CHECKS_TRIGGERED with checkStartAnchorRecorded", () => {
+      const checkId = "psc-authorized-rerun"
+      const priorAnchorAt = 2_000
+      const triggerAt = 70_000
+      const investigateAt = 80_000
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
           Effect.succeed(watchResult("handoff_needed")),
         investigatePrStatusChecks: () =>
           Effect.succeed({
-            _tag: "processed" as const,
-            handledCheckIds: [],
+            _tag: "checks_triggered" as const,
+            handledCheckIds: [checkId],
+            // Simulates authorized review rerun that already wrote the anchor.
+            checkStartAnchorRecorded: true,
           }),
       }
 
-      return runWithSteps(
-        steps,
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const lifecycle = yield* WorkItemLifecycle
-          const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(0)
+              const sql = yield* SqlClient.SqlClient
+              const lifecycle = yield* WorkItemLifecycle
+              const { repository, issue } = yield* seedActionableIssue
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
 
-          for (let index = 0; index < 8; index += 1) {
-            yield* claimAndRunPending
-          }
+              for (let index = 0; index < 8; index += 1) {
+                yield* claimAndRunPending
+              }
 
-          const handoff = yield* claimAndRunPending
-          expect(handoff._tag).toBe("processed")
-          if (handoff._tag === "processed") {
-            expect(handoff.workItem.state).toBe("investigate_pr_status_checks")
-          }
+              const handoff = yield* claimAndRunPending
+              expect(handoff._tag).toBe("processed")
+              if (handoff._tag === "processed") {
+                expect(handoff.workItem.state).toBe(
+                  "investigate_pr_status_checks",
+                )
+              }
 
-          const afterInvestigate = yield* claimAndRunPending
-          expect(afterInvestigate._tag).toBe("processed")
-          if (afterInvestigate._tag === "processed") {
-            expect(afterInvestigate.workItem.state).toBe(
-              "watch_pr_status_checks",
-            )
-          }
+              yield* TestClock.setTime(investigateAt)
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET check_start_anchor_at = ?,
+                     check_start_anchor_head_sha = 'rerun-head',
+                     updated_at = ?
+                 WHERE id = ?`,
+                [triggerAt, investigateAt, created.id],
+              )
+              yield* sql.unsafe(
+                `INSERT INTO pr_status_check (
+                   id, work_item_id, external_id, name, outcome,
+                   handled_at, observed_at, created_at, updated_at
+                 ) VALUES (?, ?, 'actions-job:review-rerun', 'review', 'green', NULL, ?, ?, ?)`,
+                [
+                  checkId,
+                  created.id,
+                  investigateAt,
+                  investigateAt,
+                  investigateAt,
+                ],
+              )
 
-          const delayed = (yield* sql.unsafe(
-            `SELECT available_at, created_at FROM job_queue`,
-          )) as readonly {
-            readonly available_at: number
-            readonly created_at: number
-          }[]
-          expect(delayed).toHaveLength(1)
-          expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(30_000)
-        }),
+              const afterInvestigate = yield* claimAndRunPending
+              expect(afterInvestigate._tag).toBe("processed")
+              if (afterInvestigate._tag === "processed") {
+                expect(afterInvestigate.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              const delayed = (yield* sql.unsafe(
+                `SELECT available_at, created_at FROM job_queue`,
+              )) as readonly {
+                readonly available_at: number
+                readonly created_at: number
+              }[]
+              expect(delayed).toHaveLength(1)
+              expect(delayed[0]!.available_at - delayed[0]!.created_at).toBe(
+                30_000,
+              )
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_anchor_head_sha
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_anchor_head_sha: string | null
+              }[]
+              // Must retain the trigger-time anchor, not step-completion time.
+              expect(anchors[0]?.check_start_anchor_at).toBe(triggerAt)
+              expect(anchors[0]?.check_start_anchor_head_sha).toBe("rerun-head")
+              expect(anchors[0]?.check_start_anchor_at).not.toBe(investigateAt)
+              expect(anchors[0]?.check_start_anchor_at).not.toBe(priorAnchorAt)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
       )
     })
 

@@ -72,7 +72,16 @@ export type PrStatusCheckResult =
 
 export type PrStatusCheckInvestigationResult =
   | { readonly _tag: "processed"; readonly handledCheckIds: readonly string[] }
-  | { readonly _tag: "waiting"; readonly handledCheckIds: readonly string[] }
+  | {
+      readonly _tag: "checks_triggered"
+      readonly handledCheckIds: readonly string[]
+      /**
+       * True when investigate already persisted the Check-Start Anchor at the
+       * trigger event (for example a successful authorized review rerun). False
+       * when lifecycle must record the anchor at step completion.
+       */
+      readonly checkStartAnchorRecorded: boolean
+    }
   | {
       readonly _tag: "needs_human"
       readonly reason: string
@@ -288,7 +297,7 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
 
 type ParsedInvestigationResult =
   | "processed"
-  | "waiting"
+  | "checks_triggered"
   | { readonly _tag: "needs_human"; readonly reason: string }
   | { readonly _tag: "failed"; readonly reason: string }
   | {
@@ -316,8 +325,8 @@ export const parseInvestigationResult = (
   if (/^READY_FOR_AGENT_RESULT:\s*PROCESSED$/i.test(finalLine)) {
     return "processed"
   }
-  if (/^READY_FOR_AGENT_RESULT:\s*WAITING$/i.test(finalLine)) {
-    return "waiting"
+  if (/^READY_FOR_AGENT_RESULT:\s*CHECKS_TRIGGERED$/i.test(finalLine)) {
+    return "checks_triggered"
   }
   const rerunReview = finalLine.match(
     /^READY_FOR_AGENT_RESULT:\s*RERUN_REVIEW\s*:\s*(\d+)(?:\s+(.+))?$/i,
@@ -402,15 +411,34 @@ const reserveAutomatedReviewRerun = (
     return { _tag: "reserved" as const, id }
   })
 
-const completeAutomatedReviewRerun = (id: string) =>
+/** Mark the permit complete and record the Check-Start Anchor together. */
+const completeAuthorizedReviewRerun = (
+  permitId: string,
+  workItemId: string,
+  headSha: string,
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const now = yield* Clock.currentTimeMillis
-    yield* sql.unsafe(
-      `UPDATE automated_review_rerun
-       SET status = 'completed', updated_at = ?
-       WHERE id = ?`,
-      [now, id],
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* sql.unsafe(
+          `UPDATE automated_review_rerun
+           SET status = 'completed', updated_at = ?
+           WHERE id = ?`,
+          [now, permitId],
+        )
+        // Anchor must be durable as soon as the GitHub rerun succeeds so a
+        // crash before step completion cannot drop the catch-up window.
+        yield* sql.unsafe(
+          `UPDATE work_item
+           SET check_start_anchor_at = ?,
+               check_start_anchor_head_sha = ?,
+               updated_at = ?
+           WHERE id = ?`,
+          [now, headSha, now, workItemId],
+        )
+      }),
     )
   })
 
@@ -488,12 +516,12 @@ const buildInvestigationWorkPrompt = (
       'Do not assume an automated review exists merely because CI is present. Workflow or job names alone (including names containing "review" or "PR Review") are not positive review evidence. Positive evidence requires an executed reviewer job or step, or a comment from a recognized automated reviewer; ordinary CI, repository configuration, and generic bot activity are not review evidence.',
       "A skipped workflow or job with no executed reviewer steps and no recognized automated-review comment is not an incomplete review and is not review evidence. Treat it as not applicable: there is no review output to process.",
       "If no relevant automated-review run or comment exists, that is a normal no-op and does not require proof that review automation is unconfigured. Do not request a review workflow rerun solely because a skipped reviewer produced no comment.",
-      "Use provider-specific progress artifacts as evidence of incompleteness. Strong evidence can include a finished banner combined with unchecked substantive review tasks, a remaining working spinner, and no final findings or synthesis. Do not treat arbitrary Markdown checkboxes in unrelated pull-request comments as an automated-review progress list.",
+      "Once an automated-review check is terminal, its Automated Review Output is final: do not wait for later comments. A successful terminal review with no relevant comment means no feedback and must not be rerun.",
+      "Use provider-specific progress artifacts as evidence of incompleteness only when a positively identified review comment is present but visibly incomplete. Strong evidence can include a finished banner combined with unchecked substantive review tasks, a remaining working spinner, and no final findings or synthesis. Do not treat arbitrary Markdown checkboxes in unrelated pull-request comments as an automated-review progress list.",
       "Correlate the latest relevant comment with the latest relevant run attempt. Do not rerun because of a stale incomplete comment when a newer attempt completed its review successfully.",
-      "If the latest review attempt is still active, leave it alone and do not start a duplicate. Unless this handoff produced another replacement execution or left red checks unresolved, report WAITING in the verdict turn so the review can be polled again.",
-      "A terminal review attempt is incomplete only when positive review evidence shows it produced no relevant review comment or its latest relevant comment remains visibly partial. When that is true, request a whole-review workflow rerun in the verdict turn (even when the run concluded success). Do not call GitHub workflow rerun APIs yourself; the harness authorizes and executes reruns. Do not use a failed-jobs-only rerun for a technically successful run.",
+      "Present, positively identified, visibly incomplete Automated Review Output requires a whole-review workflow rerun in the verdict turn (even when the run concluded success). Do not call GitHub workflow rerun APIs yourself; the harness authorizes and executes reruns. Do not use a failed-jobs-only rerun for a technically successful run.",
       "Requesting a terminal incomplete review rerun is required recovery, not optional feedback handling. Report FAILED for a technical inability to inspect the relevant review state. Report NEEDS_HUMAN only when evidence shows that an operator must perform or decide the required action.",
-      "For a genuinely completed latest review, address worthwhile feedback. A completed review with no worthwhile feedback still needs no changes or rerun.",
+      "For a genuinely completed latest review, address worthwhile feedback. A completed review with no worthwhile feedback, or a successful terminal review with no relevant comment, still needs no changes or rerun.",
       "If review feedback requires changes, verify them, commit them, and push the commit to the existing PR branch.",
     )
   }
@@ -511,15 +539,15 @@ const buildInvestigationVerdictPrompt = (): string =>
     "Based only on the PR status-check work you just did in this session, report the outcome.",
     "Do not make further code changes unless required to answer accurately.",
     "Reply with exactly one machine-readable result line (and optional brief prose before it):",
+    "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+    "Use CHECKS_TRIGGERED when you completed an action expected to create replacement check executions (for example a commit and push, or successfully restarting failed checks).",
     "READY_FOR_AGENT_RESULT: PROCESSED",
-    "Use PROCESSED only when you took an action expected to produce new check executions or a replacement execution (for example a commit and push, or restarting failed checks), or when the handoff was green-only and either no relevant automated-review run or comment existed (including a skipped reviewer with no review output) or a genuinely completed review had nothing to address.",
-    "Do not report PROCESSED for a terminal incomplete review that still needs a whole-workflow rerun. Request the rerun instead. A replacement-producing action takes precedence over WAITING in a mixed handoff.",
-    "When positive review evidence shows a terminal incomplete automated review that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
+    "Use PROCESSED when the handoff is handled and no replacement execution is expected: for example a green-only handoff with no relevant automated-review run or comment (including a skipped reviewer with no review output), a successful terminal review with no relevant comment (no feedback), or a genuinely completed review that had nothing to address.",
+    "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun. Request the rerun instead.",
+    "When positive review evidence shows present, positively identified, visibly incomplete Automated Review Output that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
     "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
     "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id> <workflow_name>",
-    "If positive review evidence exists, the latest review attempt is still active, you took no replacement-producing action, and no red checks remain unresolved, report:",
-    "READY_FOR_AGENT_RESULT: WAITING",
-    "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED. Report:",
+    "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED or CHECKS_TRIGGERED. Report:",
     "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
     "Also use FAILED when a technical or observability failure prevented you from determining the relevant review state.",
     "Use NEEDS_HUMAN only when evidence shows that an operator must perform or decide a required action:",
@@ -642,7 +670,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
               ? Effect.fail(
                   new PrStatusChecksOpenCodeError({
                     message:
-                      "OpenCode did not report PROCESSED, WAITING, RERUN_REVIEW, FAILED, or NEEDS_HUMAN",
+                      "OpenCode did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN",
                   }),
                 )
               : Effect.succeed(result)
@@ -682,10 +710,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         handledCheckIds,
       } satisfies PrStatusCheckInvestigationResult
     }
-    if (investigation === "waiting") {
+    if (investigation === "checks_triggered") {
       return {
-        _tag: "waiting",
-        handledCheckIds: [],
+        _tag: "checks_triggered",
+        handledCheckIds,
+        checkStartAnchorRecorded: false,
       } satisfies PrStatusCheckInvestigationResult
     }
     if (
@@ -754,10 +783,15 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           message: `Manual fixing may be required. ${detail}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
         })
       }
-      yield* completeAutomatedReviewRerun(permit.id)
+      yield* completeAuthorizedReviewRerun(
+        permit.id,
+        context.workItemId,
+        headSha,
+      )
       return {
-        _tag: "processed",
+        _tag: "checks_triggered",
         handledCheckIds,
+        checkStartAnchorRecorded: true,
       } satisfies PrStatusCheckInvestigationResult
     }
     if (

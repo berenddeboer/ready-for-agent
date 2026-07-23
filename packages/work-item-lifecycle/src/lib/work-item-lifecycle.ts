@@ -1219,6 +1219,7 @@ export const makeWorkItemLifecycleLive = (
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
+          readonly refreshCheckStartAnchor?: boolean
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
           readonly transition?: {
@@ -1484,19 +1485,35 @@ export const makeWorkItemLifecycleLive = (
             )
           case "investigate_pr_status_checks":
             return steps.investigatePrStatusChecks(context).pipe(
-              Effect.map((result) => ({
-                handledCheckIds: result.handledCheckIds,
-                transition:
-                  result._tag === "processed" || result._tag === "waiting"
-                    ? {
-                        nextState: "watch_pr_status_checks" as const,
-                        delay: PR_STATUS_CHECKS_POLL_DELAY,
-                      }
-                    : {
-                        nextState: "needs_human" as const,
-                        reason: result.reason,
-                      },
-              })),
+              Effect.map((result) => {
+                if (result._tag === "checks_triggered") {
+                  return {
+                    handledCheckIds: result.handledCheckIds,
+                    // Do not overwrite an anchor already recorded at the
+                    // trigger event (authorized review rerun API success).
+                    refreshCheckStartAnchor: !result.checkStartAnchorRecorded,
+                    transition: {
+                      nextState: "watch_pr_status_checks" as const,
+                      delay: PR_STATUS_CHECKS_POLL_DELAY,
+                    },
+                  }
+                }
+                if (result._tag === "processed") {
+                  return {
+                    handledCheckIds: result.handledCheckIds,
+                    transition: {
+                      nextState: "watch_pr_status_checks" as const,
+                    },
+                  }
+                }
+                return {
+                  handledCheckIds: result.handledCheckIds,
+                  transition: {
+                    nextState: "needs_human" as const,
+                    reason: result.reason,
+                  },
+                }
+              }),
             )
           case "mark_pr_ready_for_review":
             return steps.markPrReadyForReview(context).pipe(Effect.as({}))
@@ -1606,6 +1623,7 @@ export const makeWorkItemLifecycleLive = (
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
+          readonly refreshCheckStartAnchor?: boolean
           readonly stepRunReasonCode?: StepRunReasonCode
           readonly stepRunNote?: string
           readonly transition?: {
@@ -1674,6 +1692,16 @@ export const makeWorkItemLifecycleLive = (
                        SET handled_at = ?, handled_by_step_run_id = ?, updated_at = ?
                        WHERE id = ? AND work_item_id = ? AND handled_at IS NULL`,
                     [now, stepRun.id, now, checkId, workItem.id],
+                  )
+                }
+
+                if (output.refreshCheckStartAnchor === true) {
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                     SET check_start_anchor_at = ?,
+                         updated_at = ?
+                     WHERE id = ?`,
+                    [now, now, workItem.id],
                   )
                 }
 

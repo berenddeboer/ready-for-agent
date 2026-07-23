@@ -523,7 +523,7 @@ describe("PR status check steps", () => {
             ),
             keymaxxer,
             opencodeWith(
-              ["fixed and pushed", "READY_FOR_AGENT_RESULT: PROCESSED"],
+              ["fixed and pushed", "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
               (prompt, sessionId) => {
                 expect(sessionId).toBe("ses_implement")
                 prompts.push(prompt)
@@ -535,7 +535,10 @@ describe("PR status check steps", () => {
       ),
     )
 
-    expect(result.investigation._tag).toBe("processed")
+    expect(result.investigation._tag).toBe("checks_triggered")
+    if (result.investigation._tag === "checks_triggered") {
+      expect(result.investigation.checkStartAnchorRecorded).toBe(false)
+    }
     expect(result.investigation.handledCheckIds).toHaveLength(2)
     expect(result.rows.every((row) => row.handled_at === null)).toBe(true)
     expect(prompts).toHaveLength(2)
@@ -560,12 +563,13 @@ describe("PR status check steps", () => {
     )
     expect(prompts[0]).not.toContain("automated reviews may have completed")
     expect(prompts[0]).toContain("restart the failed checks when appropriate")
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
     expect(prompts[1]).toContain(
       "If this handoff contained red checks and you made no commit, push, check restart",
     )
-    expect(prompts[1]).toContain("replacement execution")
+    expect(prompts[1]).toContain("replacement check executions")
   })
 
   it("makes a focused recovery attempt after FAILED and accepts recovered progress", async () => {
@@ -592,7 +596,7 @@ describe("PR status check steps", () => {
                 "No code changes, commit, push, or PR comment were made.",
                 "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
                 "Reran the failed workflow; a replacement execution is queued.",
-                "READY_FOR_AGENT_RESULT: PROCESSED",
+                "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
               ],
               (prompt) => prompts.push(prompt),
             ),
@@ -603,8 +607,9 @@ describe("PR status check steps", () => {
     )
 
     expect(result).toEqual({
-      _tag: "processed",
+      _tag: "checks_triggered",
       handledCheckIds: [expect.any(String)],
+      checkStartAnchorRecorded: false,
     })
     expect(prompts).toHaveLength(4)
     expect(prompts[2]).toContain("focused recovery attempt")
@@ -777,15 +782,14 @@ describe("PR status check steps", () => {
       "stale incomplete comment when a newer attempt completed its review successfully",
     )
     expect(prompts[0]).toContain(
-      "latest review attempt is still active, leave it alone and do not start a duplicate",
-    )
-    expect(prompts[0]).toContain("or left red checks unresolved")
-    expect(prompts[0]).toContain("report WAITING in the verdict turn")
-    expect(prompts[0]).toContain(
-      "terminal review attempt is incomplete only when positive review evidence shows it produced no relevant review comment or its latest relevant comment remains visibly partial",
+      "Once an automated-review check is terminal, its Automated Review Output is final",
     )
     expect(prompts[0]).toContain(
-      "request a whole-review workflow rerun in the verdict turn",
+      "successful terminal review with no relevant comment means no feedback and must not be rerun",
+    )
+    expect(prompts[0]).not.toContain("WAITING")
+    expect(prompts[0]).toContain(
+      "Present, positively identified, visibly incomplete Automated Review Output requires a whole-review workflow rerun",
     )
     expect(prompts[0]).toContain(
       "Do not call GitHub workflow rerun APIs yourself",
@@ -798,7 +802,7 @@ describe("PR status check steps", () => {
       "Report NEEDS_HUMAN only when evidence shows that an operator must perform or decide",
     )
     expect(prompts[0]).toContain(
-      "completed review with no worthwhile feedback still needs no changes or rerun",
+      "successful terminal review with no relevant comment, still needs no changes or rerun",
     )
     expect(prompts[0]).toContain(
       "If review feedback requires changes, verify them, commit them, and push the commit",
@@ -850,26 +854,28 @@ describe("PR status check steps", () => {
       _tag: "processed",
       handledCheckIds: [expect.any(String)],
     })
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: RERUN_REVIEW:")
     expect(prompts[1]).toContain(
-      "Do not report PROCESSED for a terminal incomplete review that still needs a whole-workflow rerun",
+      "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun",
     )
     expect(prompts[1]).toContain(
       "including a skipped reviewer with no review output",
     )
     expect(prompts[1]).toContain(
-      "genuinely completed review had nothing to address",
+      "genuinely completed review that had nothing to address",
     )
+    expect(prompts[1]).toContain("no relevant automated-review run or comment")
     expect(prompts[1]).toContain(
-      "no relevant automated-review run or comment existed",
+      "successful terminal review with no relevant comment (no feedback)",
     )
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: WAITING")
+    expect(prompts[1]).not.toContain("READY_FOR_AGENT_RESULT: WAITING")
     expect(prompts[1]).toContain(
       "technical or observability failure prevented you from determining the relevant review state",
     )
   })
 
-  it("leaves a green handoff unhandled while its automated review is active", async () => {
+  it("treats a successful terminal review with no relevant comment as PROCESSED no feedback", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
@@ -888,8 +894,8 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "The latest automated review run is still active.",
-              "READY_FOR_AGENT_RESULT: WAITING",
+              "Terminal successful review with no relevant comment; no feedback.",
+              "READY_FOR_AGENT_RESULT: PROCESSED",
             ]),
             DatabaseTest,
           ),
@@ -898,9 +904,26 @@ describe("PR status check steps", () => {
     )
 
     expect(result).toEqual({
-      _tag: "waiting",
-      handledCheckIds: [],
+      _tag: "processed",
+      handledCheckIds: [expect.any(String)],
     })
+  })
+
+  it("rejects removed WAITING verdicts", () => {
+    expect(parseInvestigationResult("READY_FOR_AGENT_RESULT: WAITING")).toBe(
+      null,
+    )
+  })
+
+  it("parses CHECKS_TRIGGERED as a distinct valid result", () => {
+    expect(
+      parseInvestigationResult("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"),
+    ).toBe("checks_triggered")
+    expect(
+      parseInvestigationResult(
+        "notes\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+      ),
+    ).toBe("checks_triggered")
   })
 
   it("returns OpenCode's structured human intervention reason", async () => {
@@ -1207,9 +1230,10 @@ describe("PR status check steps", () => {
             ],
           )
           const result = yield* investigatePrStatusChecks(context)
-          expect(result._tag).toBe("processed")
-          if (result._tag === "processed") {
+          expect(result._tag).toBe("checks_triggered")
+          if (result._tag === "checks_triggered") {
             expect(result.handledCheckIds).toEqual([`psc-review-${attempt}`])
+            expect(result.checkStartAnchorRecorded).toBe(true)
             const handledAt = Date.now()
             for (const checkId of result.handledCheckIds) {
               yield* sql.unsafe(
@@ -1220,6 +1244,16 @@ describe("PR status check steps", () => {
               )
             }
           }
+          const anchors = (yield* sql.unsafe(
+            `SELECT check_start_anchor_at, check_start_anchor_head_sha
+             FROM work_item WHERE id = ?`,
+            [context.workItemId],
+          )) as readonly {
+            readonly check_start_anchor_at: number | null
+            readonly check_start_anchor_head_sha: string | null
+          }[]
+          expect(anchors[0]?.check_start_anchor_at).not.toBeNull()
+          expect(anchors[0]?.check_start_anchor_head_sha).toBe(headSha)
         }
         const now = Date.now()
         yield* sql.unsafe(
@@ -1275,15 +1309,31 @@ describe("PR status check steps", () => {
       Effect.gen(function* () {
         yield* seedWorkItem
         yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE work_item
+           SET check_start_anchor_at = 1234,
+               check_start_anchor_head_sha = 'prior-head',
+               updated_at = 1234
+           WHERE id = ?`,
+          [context.workItemId],
+        )
         const investigation = yield* Effect.result(
           investigatePrStatusChecks(context),
         )
-        const sql = yield* SqlClient.SqlClient
         const permits = (yield* sql.unsafe(
           `SELECT status FROM automated_review_rerun WHERE work_item_id = ?`,
           [context.workItemId],
         )) as readonly { readonly status: string }[]
-        return { investigation, permits }
+        const anchors = (yield* sql.unsafe(
+          `SELECT check_start_anchor_at, check_start_anchor_head_sha
+           FROM work_item WHERE id = ?`,
+          [context.workItemId],
+        )) as readonly {
+          readonly check_start_anchor_at: number | null
+          readonly check_start_anchor_head_sha: string | null
+        }[]
+        return { investigation, permits, anchors }
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1327,6 +1377,12 @@ describe("PR status check steps", () => {
     expect(rerunCalls).toBe(1)
     expect(result.investigation._tag).toBe("Failure")
     expect(result.permits).toEqual([{ status: "reserved" }])
+    expect(result.anchors).toEqual([
+      {
+        check_start_anchor_at: 1234,
+        check_start_anchor_head_sha: "prior-head",
+      },
+    ])
   })
 
   it("gives a new PR head a fresh automated-review rerun budget", async () => {
@@ -1360,7 +1416,7 @@ describe("PR status check steps", () => {
           [context.workItemId, now, now, now],
         )
         const result = yield* investigatePrStatusChecks(context)
-        expect(result._tag).toBe("processed")
+        expect(result._tag).toBe("checks_triggered")
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
