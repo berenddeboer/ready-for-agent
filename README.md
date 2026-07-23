@@ -4,6 +4,8 @@ Agentic software engineering harness which watches the GitHub issue
 queue for issues marked with `ready-for-agent`. Select an issue in the
 UI to start working on it.
 
+<img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
+
 It does this by creating a new worktree, installing packages, and
 asking [OpenCode](https://opencode.ai/) to implement the issue, review
 the issue, create a PR, and merge if allowed.
