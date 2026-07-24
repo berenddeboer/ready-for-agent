@@ -242,13 +242,13 @@ describe("Opencode AgentBackend adapter", () => {
 
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const opencode = yield* Opencode
-          return yield* opencode.continue({
+          const backend = yield* AgentBackend
+          return yield* backend.continueTurn({
             sessionId: "ses_parent",
             cwd: process.cwd(),
             prompt: "Review uncommitted worktree changes.",
             model: "test/model",
-            variant: "test",
+            thinkingLevel: "test",
             command: "/review",
             timeout: "3 seconds",
           })
@@ -309,13 +309,13 @@ describe("Opencode AgentBackend adapter", () => {
 
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const opencode = yield* Opencode
-          return yield* opencode.continue({
+          const backend = yield* AgentBackend
+          return yield* backend.continueTurn({
             sessionId: "ses_parent",
             cwd: process.cwd(),
             prompt: "Review uncommitted worktree changes.",
             model: "test/model",
-            variant: "test",
+            thinkingLevel: "test",
             command: "/review",
             timeout: "3 seconds",
           })

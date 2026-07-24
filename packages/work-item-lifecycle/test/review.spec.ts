@@ -583,7 +583,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               prompt: input.prompt,
               ...(input.command !== undefined

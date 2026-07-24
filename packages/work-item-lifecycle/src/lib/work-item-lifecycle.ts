@@ -2583,8 +2583,7 @@ export const makeWorkItemLifecycleLive = (
                   const remainingMs = maxDurationMs - productiveElapsedMs
                   const waitingForSession =
                     current.session_wait_started_at !== null ||
-                    current.reason_code ===
-                      STEP_RUN_REASON.waitingForAgentTurn
+                    current.reason_code === STEP_RUN_REASON.waitingForAgentTurn
                   // While session-slot wait freezes the clock, poll; otherwise
                   // sleep up to the remaining productive budget (capped).
                   const sleepMs = waitingForSession
