@@ -82,4 +82,5 @@ bunx nx run harness:e2e
 Local runs leave `~/.keymaxxer` untouched and use your matching
 `provider=github` / `account=berenddeboer/test-ready-for-agent` credential
 (normal Keymaxxer prompts allowed). CI will unlock the checked-in fixture vault
-with `E2E_KEYMAXXER_MASTER_KEY` (see `docs/e2e-fixture.md` and ADR 0021).
+with `E2E_KEYMAXXER_MASTER_KEY` (see `docs/e2e-fixture.md` and
+`docs/adr/0021-live-harness-end-to-end-test.md`).

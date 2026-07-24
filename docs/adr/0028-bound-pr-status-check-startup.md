@@ -1,6 +1,5 @@
 ---
 status: accepted
-supersedes: 0013
 amends:
   - 0014
   - 0027
