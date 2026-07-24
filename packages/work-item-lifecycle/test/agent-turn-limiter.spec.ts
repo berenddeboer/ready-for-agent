@@ -68,6 +68,7 @@ describe("limitAgentTurns", () => {
         const db = yield* DbService
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: "low",
           reviewModel: null,
@@ -145,6 +146,7 @@ describe("limitAgentTurns", () => {
         const db = yield* DbService
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: "low",
           reviewModel: null,
@@ -202,6 +204,7 @@ describe("limitAgentTurns", () => {
         const db = yield* DbService
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: "low",
           reviewModel: null,
@@ -249,6 +252,7 @@ describe("limitAgentTurns", () => {
         expect(starts).toBe(1)
 
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: "low",
           reviewModel: null,
@@ -271,6 +275,7 @@ describe("limitAgentTurns", () => {
         const db = yield* DbService
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: "low",
           reviewModel: null,
@@ -385,6 +390,7 @@ describe("limitAgentTurns", () => {
         const db = yield* DbService
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel: "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: "low",
           reviewModel: null,

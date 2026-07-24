@@ -15,6 +15,7 @@ import {
   WORK_ITEM_LIFECYCLE_QUEUE,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
+  stubActiveAgentBackendLayer,
   syncNeedsHumanMergeHandoffs,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -85,6 +86,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     steps: LifecycleStepsShape = successfulSteps,
   ) =>
     WorkItemLifecycleLive.pipe(
+      Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -115,6 +117,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     const db = yield* DbService
     const lifecycle = yield* WorkItemLifecycle
     yield* db.updateConfig({
+      selectedAgentBackend: "opencode",
       defaultModel: "opencode/deepseek-v4-flash-free",
       defaultThinkingLevel: "low",
       reviewModel: null,
@@ -165,6 +168,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     const db = yield* DbService
     const lifecycle = yield* WorkItemLifecycle
     yield* db.updateConfig({
+      selectedAgentBackend: "opencode",
       defaultModel: "opencode/deepseek-v4-flash-free",
       defaultThinkingLevel: "low",
       reviewModel: null,

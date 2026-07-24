@@ -3,6 +3,7 @@ import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
 import {
+  AgentBackendChangeBlockedError,
   DatabaseError,
   InvalidConfigInputError,
   InvalidIssueInputError,
@@ -193,7 +194,11 @@ export interface DbServiceShape {
   readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
   readonly updateConfig: (
     input: UpdateConfigInput,
-  ) => Effect.Effect<ConfigRecord, InvalidConfigInputError | DatabaseError>
+  ) => Effect.Effect<
+    ConfigRecord,
+    InvalidConfigInputError | AgentBackendChangeBlockedError | DatabaseError
+  >
+  readonly countUnfinishedWorkItems: Effect.Effect<number, DatabaseError>
   readonly addRepository: (
     input: AddRepositoryInput,
   ) => Effect.Effect<
@@ -337,24 +342,61 @@ export const DbServiceLive = Layer.effect(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
 
+    const configSelect = `selected_agent_backend, default_model, default_thinking_level,
+                    review_model, review_thinking_level,
+                    max_concurrent_agent_turns, max_concurrent_work_items`
+
+    const toConfigRecord = (row: {
+      readonly selectedAgentBackend: string
+      readonly defaultModel: string | null
+      readonly defaultThinkingLevel: string | null
+      readonly reviewModel: string | null
+      readonly reviewThinkingLevel: string | null
+      readonly maxConcurrentAgentTurns: number
+      readonly maxConcurrentWorkItems: number
+    }): ConfigRecord =>
+      ConfigRecord.make({
+        selectedAgentBackend: row.selectedAgentBackend,
+        defaultModel: row.defaultModel,
+        defaultThinkingLevel: row.defaultThinkingLevel,
+        reviewModel: row.reviewModel,
+        reviewThinkingLevel: row.reviewThinkingLevel,
+        maxConcurrentAgentTurns: row.maxConcurrentAgentTurns,
+        maxConcurrentWorkItems: row.maxConcurrentWorkItems,
+      })
+
+    const countUnfinishedWorkItems: Effect.Effect<number, DatabaseError> =
+      Effect.gen(function* () {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT COUNT(*) AS count FROM work_item
+             WHERE state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')`,
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly count: number
+        }[]
+        const count = rows[0]?.count
+        return typeof count === "number" && Number.isFinite(count) ? count : 0
+      }).pipe(Effect.withSpan("DbService.countUnfinishedWorkItems"))
+
     const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
       function* () {
         const now = yield* Clock.currentTimeMillis
         yield* sql
           .unsafe(
             `INSERT OR IGNORE INTO config (
-               id, default_model, default_thinking_level, review_model, review_thinking_level,
+               id, selected_agent_backend, default_model, default_thinking_level,
+               review_model, review_thinking_level,
                max_concurrent_agent_turns, max_concurrent_work_items,
                created_at, updated_at
-             ) VALUES ('default', NULL, NULL, NULL, NULL, 2, 5, ?, ?)`,
+             ) VALUES ('default', 'opencode', NULL, NULL, NULL, NULL, 2, 5, ?, ?)`,
             [now, now],
           )
           .pipe(Effect.mapError(toDatabaseError))
 
         const rows = yield* sql
           .unsafe(
-            `SELECT default_model, default_thinking_level, review_model, review_thinking_level,
-                    max_concurrent_agent_turns, max_concurrent_work_items
+            `SELECT ${configSelect}
              FROM config WHERE id = 'default'`,
           )
           .pipe(Effect.mapError(toDatabaseError))
@@ -365,36 +407,28 @@ export const DbServiceLive = Layer.effect(
             message: "No config returned after initialization",
           })
         }
-        return ConfigRecord.make({
-          defaultModel: row.defaultModel,
-          defaultThinkingLevel: row.defaultThinkingLevel,
-          reviewModel: row.reviewModel,
-          reviewThinkingLevel: row.reviewThinkingLevel,
-          maxConcurrentAgentTurns: row.maxConcurrentAgentTurns,
-          maxConcurrentWorkItems: row.maxConcurrentWorkItems,
-        })
+        return toConfigRecord(row)
       },
     ).pipe(Effect.withSpan("DbService.getConfig"))
 
     const updateConfig = Effect.fn("DbService.updateConfig")(function* (
       input: UpdateConfigInput,
     ) {
-      const defaultModel = input.defaultModel.trim()
-      if (defaultModel.length === 0) {
+      const selectedAgentBackend = input.selectedAgentBackend.trim()
+      if (selectedAgentBackend.length === 0) {
         return yield* new InvalidConfigInputError({
-          field: "defaultModel",
-          message: "defaultModel cannot be empty",
+          field: "selectedAgentBackend",
+          message: "selectedAgentBackend cannot be empty",
         })
       }
-      const defaultThinkingLevel = yield* normalizeOptionalConfigSetting(
-        input.defaultThinkingLevel,
-      )
-      const reviewModel = yield* normalizeOptionalConfigSetting(
-        input.reviewModel,
-      )
-      const reviewThinkingLevel = yield* normalizeOptionalConfigSetting(
-        input.reviewThinkingLevel,
-      )
+      // Only built-in registry IDs are accepted (OpenCode in this PR).
+      if (selectedAgentBackend !== "opencode") {
+        return yield* new InvalidConfigInputError({
+          field: "selectedAgentBackend",
+          message: `Unknown Agent Backend: ${selectedAgentBackend}`,
+        })
+      }
+
       if (
         !Number.isSafeInteger(input.maxConcurrentAgentTurns) ||
         input.maxConcurrentAgentTurns < 1
@@ -416,34 +450,93 @@ export const DbServiceLive = Layer.effect(
       }
       const maxConcurrentWorkItems = input.maxConcurrentWorkItems
 
+      const current = yield* getConfig
+      const backendChanging =
+        selectedAgentBackend !== current.selectedAgentBackend
+
+      if (backendChanging) {
+        const unfinished = yield* countUnfinishedWorkItems
+        if (unfinished > 0) {
+          return yield* new AgentBackendChangeBlockedError({
+            message: `Cannot change Agent Backend while ${unfinished} Work Item(s) are unfinished`,
+            unfinishedWorkItemCount: unfinished,
+          })
+        }
+      }
+
+      let defaultModel: string | null
+      let defaultThinkingLevel: string | null
+      let reviewModel: string | null
+      let reviewThinkingLevel: string | null
+
+      if (backendChanging) {
+        defaultModel = null
+        defaultThinkingLevel = null
+        reviewModel = null
+        reviewThinkingLevel = null
+      } else {
+        const trimmedDefaultModel = (input.defaultModel ?? "").trim()
+        if (trimmedDefaultModel.length === 0) {
+          return yield* new InvalidConfigInputError({
+            field: "defaultModel",
+            message: "defaultModel cannot be empty",
+          })
+        }
+        defaultModel = trimmedDefaultModel
+        defaultThinkingLevel = yield* normalizeOptionalConfigSetting(
+          input.defaultThinkingLevel,
+        )
+        reviewModel = yield* normalizeOptionalConfigSetting(input.reviewModel)
+        reviewThinkingLevel = yield* normalizeOptionalConfigSetting(
+          input.reviewThinkingLevel,
+        )
+      }
+
       const now = yield* Clock.currentTimeMillis
       const rows = yield* sql
-        .unsafe(
-          `INSERT INTO config (
-               id, default_model, default_thinking_level, review_model, review_thinking_level,
-               max_concurrent_agent_turns, max_concurrent_work_items,
-               created_at, updated_at
-             ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (id) DO UPDATE SET
-               default_model = excluded.default_model,
-               default_thinking_level = excluded.default_thinking_level,
-               review_model = excluded.review_model,
-               review_thinking_level = excluded.review_thinking_level,
-               max_concurrent_agent_turns = excluded.max_concurrent_agent_turns,
-               max_concurrent_work_items = excluded.max_concurrent_work_items,
-               updated_at = excluded.updated_at
-             RETURNING default_model, default_thinking_level, review_model, review_thinking_level,
-                       max_concurrent_agent_turns, max_concurrent_work_items`,
-          [
-            defaultModel,
-            defaultThinkingLevel,
-            reviewModel,
-            reviewThinkingLevel,
-            maxConcurrentAgentTurns,
-            maxConcurrentWorkItems,
-            now,
-            now,
-          ],
+        .withTransaction(
+          Effect.gen(function* () {
+            if (backendChanging) {
+              yield* sql.unsafe(
+                `UPDATE repository SET
+                   default_model = NULL,
+                   default_thinking_level = NULL,
+                   review_model = NULL,
+                   review_thinking_level = NULL,
+                   updated_at = ?`,
+                [now],
+              )
+            }
+            return yield* sql.unsafe(
+              `INSERT INTO config (
+                   id, selected_agent_backend, default_model, default_thinking_level,
+                   review_model, review_thinking_level,
+                   max_concurrent_agent_turns, max_concurrent_work_items,
+                   created_at, updated_at
+                 ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (id) DO UPDATE SET
+                   selected_agent_backend = excluded.selected_agent_backend,
+                   default_model = excluded.default_model,
+                   default_thinking_level = excluded.default_thinking_level,
+                   review_model = excluded.review_model,
+                   review_thinking_level = excluded.review_thinking_level,
+                   max_concurrent_agent_turns = excluded.max_concurrent_agent_turns,
+                   max_concurrent_work_items = excluded.max_concurrent_work_items,
+                   updated_at = excluded.updated_at
+                 RETURNING ${configSelect}`,
+              [
+                selectedAgentBackend,
+                defaultModel,
+                defaultThinkingLevel,
+                reviewModel,
+                reviewThinkingLevel,
+                maxConcurrentAgentTurns,
+                maxConcurrentWorkItems,
+                now,
+                now,
+              ],
+            )
+          }),
         )
         .pipe(Effect.mapError(toDatabaseError))
       const decoded = yield* decodeConfigRows(rows)
@@ -453,14 +546,7 @@ export const DbServiceLive = Layer.effect(
           message: "No config returned from update",
         })
       }
-      return ConfigRecord.make({
-        defaultModel: row.defaultModel,
-        defaultThinkingLevel: row.defaultThinkingLevel,
-        reviewModel: row.reviewModel,
-        reviewThinkingLevel: row.reviewThinkingLevel,
-        maxConcurrentAgentTurns: row.maxConcurrentAgentTurns,
-        maxConcurrentWorkItems: row.maxConcurrentWorkItems,
-      })
+      return toConfigRecord(row)
     })
 
     const addRepository = Effect.fn("DbService.addRepository")(function* (
@@ -1086,6 +1172,7 @@ export const DbServiceLive = Layer.effect(
       notifyWorkItemsChanged,
       getConfig,
       updateConfig,
+      countUnfinishedWorkItems,
       addRepository,
       updateRepositorySettings,
       pauseRepository,

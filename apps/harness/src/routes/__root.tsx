@@ -35,6 +35,7 @@ const configQuery = {
   queryFn: async () => {
     const result = await graphql.query({
       config: {
+        selectedAgentBackend: true,
         defaultModel: true,
         defaultThinkingLevel: true,
         reviewModel: true,
@@ -44,6 +45,23 @@ const configQuery = {
       },
     })
     return result.config
+  },
+}
+
+const agentBackendStatusQuery = {
+  queryKey: ["agentBackendStatus"],
+  queryFn: async () => {
+    const result = await graphql.query({
+      agentBackendStatus: {
+        selectedBackend: { id: true, label: true },
+        activeBackend: { id: true, label: true },
+        kind: true,
+        reason: true,
+        models: { id: true, thinkingLevels: true },
+      },
+      agentBackends: { id: true, label: true },
+    })
+    return result
   },
 }
 
@@ -171,7 +189,9 @@ function SettingsButton() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [autoOpenAttempted, setAutoOpenAttempted] = useState(false)
   const config = useQuery(configQuery)
+  const backendStatus = useQuery(agentBackendStatusQuery)
   const models = useQuery({ ...modelsQuery, enabled: dialogOpen })
+  const [selectedAgentBackend, setSelectedAgentBackend] = useState("opencode")
   const [defaultModel, setDefaultModel] = useState("")
   const [defaultThinkingLevel, setDefaultVariant] = useState("")
   const [reviewModel, setReviewModel] = useState("")
@@ -180,11 +200,14 @@ function SettingsButton() {
     useState("2")
   const [maxConcurrentWorkItems, setMaxConcurrentWorkItems] = useState("5")
   const buildConfigured = isBuildModelConfigured(config.data)
+  const status = backendStatus.data?.agentBackendStatus
+  const backendKind = status?.kind
 
   useEffect(() => {
     if (!dialogOpen || !config.data) {
       return
     }
+    setSelectedAgentBackend(config.data.selectedAgentBackend)
     setDefaultModel(config.data.defaultModel ?? "")
     setDefaultVariant(config.data.defaultThinkingLevel ?? "")
     setReviewModel(config.data.reviewModel ?? "")
@@ -197,7 +220,8 @@ function SettingsButton() {
 
   const updateConfig = useMutation({
     mutationFn: (input: {
-      defaultModel: string
+      selectedAgentBackend: string
+      defaultModel: string | null
       defaultThinkingLevel: string | null
       reviewModel: string | null
       reviewThinkingLevel: string | null
@@ -207,6 +231,7 @@ function SettingsButton() {
       graphql.mutation({
         updateConfig: {
           __args: { input },
+          selectedAgentBackend: true,
           defaultModel: true,
           defaultThinkingLevel: true,
           reviewModel: true,
@@ -217,8 +242,39 @@ function SettingsButton() {
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
       queryClient.setQueryData(configQuery.queryKey, updatedConfig)
+      void queryClient.invalidateQueries({
+        queryKey: agentBackendStatusQuery.queryKey,
+      })
+      void queryClient.invalidateQueries({ queryKey: modelsQuery.queryKey })
       dialogRef.current?.close()
       setDialogOpen(false)
+    },
+  })
+
+  const recheckBackend = useMutation({
+    mutationFn: () =>
+      graphql.mutation({
+        recheckAgentBackend: {
+          selectedBackend: { id: true, label: true },
+          activeBackend: { id: true, label: true },
+          kind: true,
+          reason: true,
+          models: { id: true, thinkingLevels: true },
+        },
+      }),
+    onSuccess: ({ recheckAgentBackend }) => {
+      queryClient.setQueryData(agentBackendStatusQuery.queryKey, (current) =>
+        current === undefined
+          ? {
+              agentBackendStatus: recheckAgentBackend,
+              agentBackends: [],
+            }
+          : {
+              ...current,
+              agentBackendStatus: recheckAgentBackend,
+            },
+      )
+      void queryClient.invalidateQueries({ queryKey: modelsQuery.queryKey })
     },
   })
 
@@ -230,7 +286,11 @@ function SettingsButton() {
     if (models.isError) {
       void models.refetch()
     }
+    if (backendStatus.isError) {
+      void backendStatus.refetch()
+    }
     if (config.data) {
+      setSelectedAgentBackend(config.data.selectedAgentBackend)
       setDefaultModel(config.data.defaultModel ?? "")
       setDefaultVariant(config.data.defaultThinkingLevel ?? "")
       setReviewModel(config.data.reviewModel ?? "")
@@ -241,6 +301,7 @@ function SettingsButton() {
       setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     }
     updateConfig.reset()
+    recheckBackend.reset()
     dialogRef.current?.showModal()
   }
 
@@ -258,13 +319,30 @@ function SettingsButton() {
     event.preventDefault()
     const parsedMaxSessions = Number(maxConcurrentAgentTurns)
     const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
+    const backendChanging =
+      selectedAgentBackend !== (config.data?.selectedAgentBackend ?? "opencode")
     updateConfig.mutate({
-      defaultModel,
-      defaultThinkingLevel:
-        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
-      reviewModel: reviewModel.trim() === "" ? null : reviewModel,
-      reviewThinkingLevel:
-        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
+      selectedAgentBackend,
+      defaultModel: backendChanging
+        ? null
+        : defaultModel.trim() === ""
+          ? null
+          : defaultModel,
+      defaultThinkingLevel: backendChanging
+        ? null
+        : defaultThinkingLevel.trim() === ""
+          ? null
+          : defaultThinkingLevel,
+      reviewModel: backendChanging
+        ? null
+        : reviewModel.trim() === ""
+          ? null
+          : reviewModel,
+      reviewThinkingLevel: backendChanging
+        ? null
+        : reviewThinkingLevel.trim() === ""
+          ? null
+          : reviewThinkingLevel,
       maxConcurrentAgentTurns: parsedMaxSessions,
       maxConcurrentWorkItems: parsedMaxWorkItems,
     })
@@ -291,10 +369,33 @@ function SettingsButton() {
       (reviewModel.length === 0 && hasUnavailableBuildModel) ||
       !reviewThinkingLevels.includes(reviewThinkingLevel))
   const showUnconfiguredGuidance = config.isSuccess && !buildConfigured
+  const showBackendBanner =
+    config.isSuccess &&
+    (backendKind === "UNAVAILABLE" || backendKind === "RESTART_REQUIRED")
 
   return (
     <>
-      {showUnconfiguredGuidance && !dialogOpen && (
+      {showBackendBanner && !dialogOpen && (
+        <div
+          className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
+          role="status"
+        >
+          <span>
+            {backendKind === "RESTART_REQUIRED"
+              ? (status?.reason ??
+                "Restart the Harness to activate the selected Agent Backend")
+              : (status?.reason ?? "Agent Backend is unavailable")}
+          </span>
+          <button
+            type="button"
+            className="border border-oxblood/50 bg-paper px-2 py-0.5 text-xs font-semibold text-oxblood underline-offset-2 hover:bg-oxblood hover:text-paper"
+            onClick={openSettings}
+          >
+            Open Settings
+          </button>
+        </div>
+      )}
+      {showUnconfiguredGuidance && !dialogOpen && !showBackendBanner && (
         <div
           className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
           role="status"
@@ -357,17 +458,78 @@ function SettingsButton() {
                 Select a default build model before the harness can create work.
               </p>
             )}
+            {status?.kind === "RESTART_REQUIRED" && (
+              <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                {status.reason ??
+                  "Restart the Harness to activate the selected Agent Backend."}
+              </p>
+            )}
+            {status?.kind === "UNAVAILABLE" && (
+              <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                {status.reason ?? "Agent Backend is unavailable."}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-5 px-6 py-5">
-            {config.isPending || (dialogOpen && models.isPending) ? (
+            {config.isPending ||
+            (dialogOpen && (models.isPending || backendStatus.isPending)) ? (
               <p className="text-sm text-ink-soft">Loading settings...</p>
-            ) : config.isError || models.isError ? (
+            ) : config.isError || models.isError || backendStatus.isError ? (
               <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Settings could not be loaded. Close this dialog and try again.
               </p>
             ) : (
               <>
+                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  Agent Backend
+                  <select
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                    name="selectedAgentBackend"
+                    value={selectedAgentBackend}
+                    onChange={(event) =>
+                      setSelectedAgentBackend(event.target.value)
+                    }
+                  >
+                    {(backendStatus.data?.agentBackends ?? []).map(
+                      (backend) => (
+                        <option key={backend.id} value={backend.id}>
+                          {backend.label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <span className="text-xs font-normal text-ink-faint">
+                    Takes effect after restart. Changing backend clears all
+                    model selections when no Work Items are unfinished.
+                  </span>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="m-0 text-xs text-ink-soft">
+                    Active:{" "}
+                    <span className="font-semibold text-ink-2">
+                      {status?.activeBackend.label ?? "—"}
+                    </span>
+                    {status?.kind === "READY" ? " · Ready" : null}
+                  </p>
+                  <button
+                    type="button"
+                    className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
+                    disabled={
+                      recheckBackend.isPending ||
+                      status?.kind === "RESTART_REQUIRED"
+                    }
+                    onClick={() => {
+                      recheckBackend.mutate()
+                    }}
+                  >
+                    {recheckBackend.isPending
+                      ? "Rechecking…"
+                      : "Recheck Agent Backend"}
+                  </button>
+                </div>
+
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Build model
                   <select
@@ -550,9 +712,8 @@ function SettingsButton() {
                     }
                   />
                   <span className="text-xs font-normal text-ink-faint">
-                    Caps how many OpenCode lifecycle processes run at once
-                    (default 2). Non-OpenCode steps and model listing are not
-                    counted.
+                    Caps how many Agent Turn CLI processes run at once (default
+                    2). Agent-free steps and model listing are not counted.
                   </span>
                 </label>
 
@@ -581,7 +742,14 @@ function SettingsButton() {
 
             {updateConfig.isError && (
               <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                Settings could not be saved. Check the values and try again.
+                {updateConfig.error instanceof Error
+                  ? updateConfig.error.message
+                  : "Settings could not be saved. Check the values and try again."}
+              </p>
+            )}
+            {recheckBackend.isError && (
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                Recheck failed. Try again after fixing the Agent Backend.
               </p>
             )}
           </div>
@@ -607,8 +775,9 @@ function SettingsButton() {
                 models.isPending ||
                 models.isError ||
                 updateConfig.isPending ||
-                defaultModel.length === 0 ||
-                hasUnavailableBuildModel
+                (selectedAgentBackend ===
+                  (config.data?.selectedAgentBackend ?? "opencode") &&
+                  (defaultModel.length === 0 || hasUnavailableBuildModel))
               }
             >
               {updateConfig.isPending ? "Saving..." : "Save settings"}

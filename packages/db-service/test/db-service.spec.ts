@@ -48,6 +48,7 @@ describe("DbService", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           expect(yield* db.getConfig).toEqual({
+            selectedAgentBackend: "opencode",
             defaultModel: null,
             defaultThinkingLevel: null,
             reviewModel: null,
@@ -58,6 +59,7 @@ describe("DbService", () => {
 
           expect(
             yield* db.updateConfig({
+              selectedAgentBackend: "opencode",
               defaultModel: "  anthropic/claude-sonnet-4-5  ",
               defaultThinkingLevel: "  high  ",
               reviewModel: "  anthropic/claude-opus-4-6  ",
@@ -66,6 +68,7 @@ describe("DbService", () => {
               maxConcurrentWorkItems: 5,
             }),
           ).toEqual({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
@@ -74,6 +77,7 @@ describe("DbService", () => {
             maxConcurrentWorkItems: 5,
           })
           expect(yield* db.getConfig).toEqual({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
@@ -90,6 +94,7 @@ describe("DbService", () => {
           const db = yield* DbService
           const error = yield* Effect.flip(
             db.updateConfig({
+              selectedAgentBackend: "opencode",
               defaultModel: " ",
               defaultThinkingLevel: "high",
               reviewModel: null,
@@ -109,6 +114,7 @@ describe("DbService", () => {
           for (const value of [0, -1, 1.5, Number.NaN]) {
             const error = yield* Effect.flip(
               db.updateConfig({
+                selectedAgentBackend: "opencode",
                 defaultModel: "anthropic/claude-sonnet-4-5",
                 defaultThinkingLevel: "high",
                 reviewModel: null,
@@ -132,6 +138,7 @@ describe("DbService", () => {
           for (const value of [0, -1, 1.5, Number.NaN]) {
             const error = yield* Effect.flip(
               db.updateConfig({
+                selectedAgentBackend: "opencode",
                 defaultModel: "anthropic/claude-sonnet-4-5",
                 defaultThinkingLevel: "high",
                 reviewModel: null,

@@ -84,6 +84,8 @@ export interface WorkItemRecord {
   readonly githubIssueNumber: number
   readonly issueTitle: string | null
   readonly githubPullRequestNumber: number | null
+  /** Active Agent Backend captured at creation (provenance). */
+  readonly agentBackend: string
   readonly model: string
   readonly thinkingLevel: string | null
   readonly reviewModel: string
@@ -266,6 +268,10 @@ export const STEP_RUN_REASON = {
   paused: "paused",
   /** Mid-run: Step Run is Running but blocked on maxConcurrentAgentTurns. */
   waitingForAgentTurn: "waiting_for_agent_turn",
+  /** Agent-dependent step blocked because Active Agent Backend is unavailable. */
+  agentBackendUnavailable: "agent_backend_unavailable",
+  /** Agent-dependent step blocked until Harness restart activates selection. */
+  agentBackendRestartRequired: "agent_backend_restart_required",
   /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */

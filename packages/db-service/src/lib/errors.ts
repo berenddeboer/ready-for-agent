@@ -60,6 +60,7 @@ export class InvalidConfigInputError extends Schema.TaggedErrorClass<InvalidConf
   "InvalidConfigInputError",
   {
     field: Schema.Literals([
+      "selectedAgentBackend",
       "defaultModel",
       "defaultThinkingLevel",
       "reviewModel",
@@ -68,6 +69,14 @@ export class InvalidConfigInputError extends Schema.TaggedErrorClass<InvalidConf
       "maxConcurrentWorkItems",
     ]),
     message: Schema.String,
+  },
+) {}
+
+export class AgentBackendChangeBlockedError extends Schema.TaggedErrorClass<AgentBackendChangeBlockedError>()(
+  "AgentBackendChangeBlockedError",
+  {
+    message: Schema.String,
+    unfinishedWorkItemCount: Schema.Finite,
   },
 ) {}
 

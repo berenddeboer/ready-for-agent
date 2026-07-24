@@ -1,22 +1,18 @@
-import {
-  Effect,
-  type ManagedRuntime,
-  Ref,
-  Result,
-  Semaphore,
-  Stream,
-} from "effect"
+import { Effect, type ManagedRuntime, Result, Semaphore, Stream } from "effect"
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
-import { AgentBackend, type AgentModel } from "@ready-for-agent/agent-backend"
+import {
+  ActiveAgentBackend,
+  type AgentBackendStatus,
+  type SessionTelemetry,
+  type SessionTelemetryAvailability,
+  getBuiltInAgentBackend,
+  isSelectableAgentBackendId,
+  listBuiltInAgentBackends,
+} from "@ready-for-agent/agent-backend"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import {
-  type OpencodeSession,
-  OpencodeSessionStore,
-  type SessionAvailability,
-} from "@ready-for-agent/opencode"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
@@ -77,7 +73,8 @@ type RepositoryCredentialArgs = {
 
 type UpdateConfigArgs = {
   input: {
-    defaultModel: string
+    selectedAgentBackend: string
+    defaultModel?: string | null
     defaultThinkingLevel?: string | null
     reviewModel?: string | null
     reviewThinkingLevel?: string | null
@@ -115,26 +112,59 @@ type CommittedPullRequestsCountArgs = {
 }
 
 type SessionArgs = {
-  id: string
+  workItemId: string
 }
 
 const toGraphqlSessionAvailability = (
-  availability: SessionAvailability,
-): "AVAILABLE" | "MISSING" | "UNAVAILABLE" => {
+  availability: SessionTelemetryAvailability,
+): "AVAILABLE" | "MISSING" | "UNAVAILABLE" | "UNSUPPORTED" => {
   if (availability === "available") return "AVAILABLE"
   if (availability === "missing") return "MISSING"
+  if (availability === "unsupported") return "UNSUPPORTED"
   return "UNAVAILABLE"
 }
 
-const toGraphqlSession = (session: OpencodeSession) => ({
+const toGraphqlBackend = (backend: {
+  readonly id: string
+  readonly label: string
+}) => ({
+  id: backend.id,
+  label: backend.label,
+})
+
+const toGraphqlSession = (session: SessionTelemetry) => ({
   id: session.id,
   availability: toGraphqlSessionAvailability(session.availability),
-  model: session.model,
+  backend: toGraphqlBackend(session.backend),
+  model:
+    session.model === null
+      ? null
+      : {
+          providerId: session.model.providerId,
+          id: session.model.id,
+          thinkingLevel: session.model.thinkingLevel,
+        },
   tokens: session.tokens,
   cost: session.cost,
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
 })
+
+const toGraphqlAgentBackendStatus = (status: AgentBackendStatus) => ({
+  selectedBackend: toGraphqlBackend(status.selectedBackend),
+  activeBackend: toGraphqlBackend(status.activeBackend),
+  kind: status.kind.toUpperCase(),
+  reason: status.reason,
+  models: status.models,
+})
+
+const resolveWorkItemBackend = (agentBackendId: string) => {
+  const registration = getBuiltInAgentBackend(agentBackendId)
+  if (registration !== undefined) {
+    return registration.descriptor
+  }
+  return { id: agentBackendId, label: agentBackendId }
+}
 
 const parseIsoInstantMs = (value: string, field: string): number => {
   const ms = Date.parse(value)
@@ -168,8 +198,7 @@ type ResetWorkItemArgs = WorkItemArgs
 export type GraphqlServices =
   | DbService
   | KeymaxxerService
-  | AgentBackend
-  | OpencodeSessionStore
+  | ActiveAgentBackend
   | QueueService
   | WorkItemLifecycle
 
@@ -197,17 +226,16 @@ const toNativeResponse = (response: unknown): Response => {
 export const createGraphqlApi = (
   runtime: GraphqlRuntime,
   options: {
+    readonly agentBackendCwd?: string
+    /** @deprecated Use agentBackendCwd */
     readonly opencodeCwd?: string
     readonly commandExists?: (command: string) => boolean
   } = {},
 ) => {
-  const opencodeCwd = options.opencodeCwd ?? process.cwd()
+  const agentBackendCwd =
+    options.agentBackendCwd ?? options.opencodeCwd ?? process.cwd()
   const commandExists = options.commandExists ?? commandExistsOnPath
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
-  const modelsCache = Effect.runSync(
-    Ref.make<ReadonlyArray<AgentModel> | null>(null),
-  )
-  const modelsLock = Effect.runSync(Semaphore.make(1))
 
   const runGraphql = <A>(
     effect: Effect.Effect<A, unknown, GraphqlServices>,
@@ -220,26 +248,9 @@ export const createGraphqlApi = (
     })
 
   const listModels = Effect.fn("graphql-api.models")(function* () {
-    const cached = yield* Ref.get(modelsCache)
-    if (cached !== null) {
-      return cached
-    }
-    return yield* modelsLock.withPermits(1)(
-      Effect.gen(function* () {
-        const again = yield* Ref.get(modelsCache)
-        if (again !== null) {
-          return again
-        }
-        const backend = yield* AgentBackend
-        const inspected = yield* backend.inspect({
-          cwd: opencodeCwd,
-          timeout: "30 seconds",
-        })
-        const models = inspected.models
-        yield* Ref.set(modelsCache, models)
-        return models
-      }),
-    )
+    const active = yield* ActiveAgentBackend
+    const status = yield* active.getStatus
+    return status.models
   })
 
   const yoga = createYoga({
@@ -287,6 +298,17 @@ export const createGraphqlApi = (
                 const db = yield* DbService
                 return yield* db.getConfig
               }).pipe(Effect.withSpan("graphql-api.config")),
+            ),
+          agentBackends: () =>
+            listBuiltInAgentBackends().map((entry) =>
+              toGraphqlBackend(entry.descriptor),
+            ),
+          agentBackendStatus: async () =>
+            runGraphql(
+              Effect.gen(function* () {
+                const active = yield* ActiveAgentBackend
+                return toGraphqlAgentBackendStatus(yield* active.getStatus)
+              }).pipe(Effect.withSpan("graphql-api.agentBackendStatus")),
             ),
           models: async () => runGraphql(listModels()),
           issues: async (_parent: unknown, args: IssuesArgs) =>
@@ -354,12 +376,21 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const lifecycle = yield* WorkItemLifecycle
-                const owned = yield* lifecycle.ownsSessionId(args.id)
-                if (!owned) {
+                const workItem = yield* lifecycle
+                  .getWorkItem(args.workItemId)
+                  .pipe(
+                    Effect.catchTag("WorkItemNotFoundError", () =>
+                      Effect.succeed(null),
+                    ),
+                  )
+                if (workItem === null) {
                   return null
                 }
-                const store = yield* OpencodeSessionStore
-                const session = yield* store.getSession(args.id)
+                const active = yield* ActiveAgentBackend
+                const session = yield* active.getSessionTelemetry({
+                  backendId: workItem.agentBackend,
+                  sessionId: workItem.sessionId,
+                })
                 return toGraphqlSession(session)
               }).pipe(Effect.withSpan("graphql-api.session")),
             ),
@@ -374,6 +405,8 @@ export const createGraphqlApi = (
           }) => repository.issuesReconciledAt?.toISOString() ?? null,
         },
         WorkItem: {
+          agentBackend: (workItem: WorkItemRecord) =>
+            toGraphqlBackend(resolveWorkItemBackend(workItem.agentBackend)),
           state: (workItem: { state: string }) => workItem.state.toUpperCase(),
           stateLabel: (workItem: WorkItemRecord) =>
             workItemStateLabel(workItem),
@@ -465,14 +498,24 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
+                const previous = yield* db.getConfig
                 const updated = yield* db.updateConfig({
-                  defaultModel: args.input.defaultModel,
+                  selectedAgentBackend: args.input.selectedAgentBackend,
+                  defaultModel: args.input.defaultModel ?? null,
                   defaultThinkingLevel: args.input.defaultThinkingLevel ?? null,
                   reviewModel: args.input.reviewModel ?? null,
                   reviewThinkingLevel: args.input.reviewThinkingLevel ?? null,
                   maxConcurrentAgentTurns: args.input.maxConcurrentAgentTurns,
                   maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
                 })
+                if (
+                  updated.selectedAgentBackend !==
+                    previous.selectedAgentBackend &&
+                  isSelectableAgentBackendId(updated.selectedAgentBackend)
+                ) {
+                  const active = yield* ActiveAgentBackend
+                  yield* active.setSelectedBackend(updated.selectedAgentBackend)
+                }
                 const lifecycle = yield* WorkItemLifecycle
                 yield* lifecycle.admitWaitingWorkItems.pipe(
                   Effect.catch((error) =>
@@ -484,6 +527,17 @@ export const createGraphqlApi = (
                 )
                 return updated
               }).pipe(Effect.withSpan("graphql-api.updateConfig")),
+            ),
+          recheckAgentBackend: async () =>
+            runGraphql(
+              Effect.gen(function* () {
+                const active = yield* ActiveAgentBackend
+                const status = yield* active.recheck({
+                  cwd: agentBackendCwd,
+                  timeout: "30 seconds",
+                })
+                return toGraphqlAgentBackendStatus(status)
+              }).pipe(Effect.withSpan("graphql-api.recheckAgentBackend")),
             ),
           updateRepositorySettings: async (
             _parent: unknown,

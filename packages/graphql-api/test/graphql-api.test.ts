@@ -1,5 +1,11 @@
 import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import {
+  ActiveAgentBackend,
+  type ActiveAgentBackendShape,
+  type AgentBackendStatus,
+  type SessionTelemetry,
+  missingSessionTelemetry,
+} from "@ready-for-agent/agent-backend"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -9,11 +15,6 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
-import {
-  type OpencodeSession,
-  OpencodeSessionStore,
-  type OpencodeSessionStoreShape,
-} from "@ready-for-agent/opencode"
 import {
   EnqueueError,
   QueueService,
@@ -42,6 +43,7 @@ const repository = makeRepositoryRecord({
 })
 
 const config = {
+  selectedAgentBackend: "opencode",
   defaultModel: "opencode/deepseek-v4-flash-free",
   defaultThinkingLevel: "low",
   reviewModel: null as string | null,
@@ -49,6 +51,27 @@ const config = {
   maxConcurrentAgentTurns: 2,
   maxConcurrentWorkItems: 5,
 }
+
+const defaultModels = [
+  {
+    id: "opencode/deepseek-v4-flash-free",
+    thinkingLevels: ["high", "max"],
+  },
+  {
+    id: "anthropic/claude-sonnet-4-5",
+    thinkingLevels: ["low", "medium", "high", "max"],
+  },
+] as const
+
+const readyStatus = (
+  models: AgentBackendStatus["models"] = defaultModels,
+): AgentBackendStatus => ({
+  selectedBackend: { id: "opencode", label: "OpenCode" },
+  activeBackend: { id: "opencode", label: "OpenCode" },
+  kind: "ready",
+  reason: null,
+  models,
+})
 
 const issue = {
   id: "issue-test",
@@ -76,6 +99,7 @@ const workItem = {
   repositoryId: repository.id,
   githubIssueNumber: issue.githubIssueNumber,
   issueTitle: issue.title,
+  agentBackend: "opencode",
   model: config.defaultModel,
   thinkingLevel: config.defaultThinkingLevel,
   reviewModel: config.defaultModel,
@@ -83,11 +107,14 @@ const workItem = {
   state: "create_worktree",
   stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
   paused: false,
+  waitingSince: null,
+  holdsWorkerSlot: true,
   pauseBeforeStep: null,
   worktreePath: null,
   startingCommitOid: null,
   completionSummary: null,
   sessionId: null,
+  githubPullRequestNumber: null,
   failureCode: null,
   failureMessage: null,
   createdAt: new Date("2026-07-14T08:00:00.000Z"),
@@ -116,55 +143,20 @@ const makeRuntime = (
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
   queueOverrides: Partial<QueueServiceShape> = {},
   lifecycleOverrides: Partial<WorkItemLifecycleShape> = {},
-  opencodeOverrides: {
-    inspect?: () => Effect.Effect<
-      {
-        readonly backend: { readonly id: "opencode"; readonly label: string }
-        readonly models: ReadonlyArray<{
-          id: string
-          thinkingLevels: ReadonlyArray<string>
-        }>
-      },
-      never
-    >
-  } = {},
-  sessionStoreOverrides: Partial<OpencodeSessionStoreShape> = {},
+  activeBackendOverrides: Partial<ActiveAgentBackendShape> = {},
 ) => {
-  const opencode = AgentBackend.of({
-    startTurn: () => Effect.die("not used"),
-    continueTurn: () => Effect.die("not used"),
-    inspect: () =>
-      Effect.succeed({
-        backend: { id: "opencode" as const, label: "OpenCode" },
-        models: [
-          {
-            id: "opencode/deepseek-v4-flash-free",
-            thinkingLevels: ["high", "max"],
-          },
-          {
-            id: "anthropic/claude-sonnet-4-5",
-            thinkingLevels: ["low", "medium", "high", "max"],
-          },
-        ],
-      }),
-    ...opencodeOverrides,
-  })
-  const sessionStore: OpencodeSessionStoreShape = {
-    getSession: (id) =>
-      Effect.succeed({
-        id,
-        availability: "missing",
-        model: null,
-        tokens: null,
-        cost: null,
-        createdAt: null,
-        updatedAt: null,
-      } satisfies OpencodeSession),
-    ...sessionStoreOverrides,
-  }
   const db = stubDbService({
     getConfig: Effect.succeed(config),
-    updateConfig: (input) => Effect.succeed(input),
+    updateConfig: (input) =>
+      Effect.succeed({
+        selectedAgentBackend: input.selectedAgentBackend,
+        defaultModel: input.defaultModel,
+        defaultThinkingLevel: input.defaultThinkingLevel,
+        reviewModel: input.reviewModel,
+        reviewThinkingLevel: input.reviewThinkingLevel,
+        maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+        maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+      }),
     addRepository: () => Effect.succeed(repository),
     updateRepositorySettings: (input) =>
       Effect.succeed({
@@ -232,12 +224,32 @@ const makeRuntime = (
     admitWaitingWorkItems: Effect.succeed(0),
     ...lifecycleOverrides,
   }
+  const activeBackend: ActiveAgentBackendShape = {
+    getStatus: Effect.succeed(readyStatus()),
+    recheck: () => Effect.succeed(readyStatus()),
+    requireAgentTurnsAllowed: Effect.void,
+    setSelectedBackend: () => Effect.succeed(readyStatus()),
+    getActiveRegistration: Effect.succeed({
+      descriptor: { id: "opencode", label: "OpenCode" },
+      capabilities: [
+        { _tag: "SessionTelemetry", supported: true },
+        { _tag: "KeymaxxerMcp", supported: true },
+      ],
+    }),
+    getSessionTelemetry: (input) =>
+      Effect.succeed(
+        missingSessionTelemetry(input.sessionId ?? "", {
+          id: "opencode",
+          label: "OpenCode",
+        }) satisfies SessionTelemetry,
+      ),
+    ...activeBackendOverrides,
+  }
   return ManagedRuntime.make(
     Layer.mergeAll(
       Layer.succeed(DbService, db),
       Layer.succeed(KeymaxxerService, keymaxxer),
-      Layer.succeed(AgentBackend, opencode),
-      Layer.succeed(OpencodeSessionStore, sessionStore),
+      Layer.succeed(ActiveAgentBackend, activeBackend),
       Layer.succeed(QueueService, queue),
       Layer.succeed(WorkItemLifecycle, lifecycle),
     ),
@@ -879,7 +891,7 @@ describe("GraphQL API", () => {
   test("reads and updates config", async () => {
     const queryResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query { config { defaultModel defaultThinkingLevel reviewModel reviewThinkingLevel maxConcurrentAgentTurns maxConcurrentWorkItems } }`,
+        query: `query { config { selectedAgentBackend defaultModel defaultThinkingLevel reviewModel reviewThinkingLevel maxConcurrentAgentTurns maxConcurrentWorkItems } }`,
       }),
     )
     expect(await queryResponse.json()).toEqual({ data: { config } })
@@ -888,11 +900,12 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
           updateConfig(input: $input) {
-            defaultModel defaultThinkingLevel reviewModel reviewThinkingLevel maxConcurrentAgentTurns maxConcurrentWorkItems
+            selectedAgentBackend defaultModel defaultThinkingLevel reviewModel reviewThinkingLevel maxConcurrentAgentTurns maxConcurrentWorkItems
           }
         }`,
         variables: {
           input: {
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
@@ -906,6 +919,7 @@ describe("GraphQL API", () => {
     expect(await mutationResponse.json()).toEqual({
       data: {
         updateConfig: {
+          selectedAgentBackend: "opencode",
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultThinkingLevel: "high",
           reviewModel: "anthropic/claude-opus-4-6",
@@ -1021,8 +1035,8 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("lists models provided by OpenCode and caches the result", async () => {
-    let listCount = 0
+  test("lists models from Active Agent Backend status", async () => {
+    let statusCount = 0
     await runtime.dispose()
     runtime = makeRuntime(
       {},
@@ -1030,22 +1044,10 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        inspect: () => {
-          listCount += 1
-          return Effect.succeed({
-            backend: { id: "opencode" as const, label: "OpenCode" },
-            models: [
-              {
-                id: "opencode/deepseek-v4-flash-free",
-                thinkingLevels: ["high", "max"],
-              },
-              {
-                id: "anthropic/claude-sonnet-4-5",
-                thinkingLevels: ["low", "medium", "high", "max"],
-              },
-            ],
-          })
-        },
+        getStatus: Effect.sync(() => {
+          statusCount += 1
+          return readyStatus()
+        }),
       },
     )
 
@@ -1089,7 +1091,7 @@ describe("GraphQL API", () => {
         ],
       },
     })
-    expect(listCount).toBe(1)
+    expect(statusCount).toBe(2)
   })
 
   test("lists issues for a repository", async () => {
@@ -3196,24 +3198,26 @@ describe("GraphQL API", () => {
     expect(body.errors?.[0]?.message).toContain("Invalid ISO instant for from")
   })
 
-  test("session returns null for non-owned Session id", async () => {
+  test("session returns null for unknown Work Item", async () => {
     runtime = makeRuntime(
       {},
       {},
       {},
-      { ownsSessionId: () => Effect.succeed(false) },
-      {},
       {
-        getSession: () => Effect.die("session store must not run"),
+        getWorkItem: () =>
+          Effect.fail(new WorkItemNotFoundError({ workItemId: "wi-missing" })),
+      },
+      {
+        getSessionTelemetry: () => Effect.die("telemetry must not run"),
       },
     )
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query Session($id: String!) {
-          session(id: $id) { id availability }
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) { id availability }
         }`,
-        variables: { id: "ses_unowned" },
+        variables: { workItemId: "wi-missing" },
       }),
     )
 
@@ -3223,22 +3227,28 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("session returns AVAILABLE usage for owned fixture Session", async () => {
+  test("session returns AVAILABLE usage for Work Item Session", async () => {
     runtime = makeRuntime(
       {},
       {},
       {},
-      { ownsSessionId: (id) => Effect.succeed(id === "ses_owned") },
-      {},
       {
-        getSession: (id) =>
+        getWorkItem: () =>
           Effect.succeed({
-            id,
+            ...workItem,
+            sessionId: "ses_owned",
+          }),
+      },
+      {
+        getSessionTelemetry: (input) =>
+          Effect.succeed({
+            id: input.sessionId ?? "",
             availability: "available",
+            backend: { id: "opencode", label: "OpenCode" },
             model: {
               providerId: "openai",
               id: "gpt-5.5",
-              variant: "xhigh",
+              thinkingLevel: "xhigh",
             },
             tokens: {
               input: 100,
@@ -3256,18 +3266,19 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query Session($id: String!) {
-          session(id: $id) {
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) {
             id
             availability
-            model { providerId id variant }
+            backend { id label }
+            model { providerId id thinkingLevel }
             tokens { input output reasoning cacheRead cacheWrite }
             cost
             createdAt
             updatedAt
           }
         }`,
-        variables: { id: "ses_owned" },
+        variables: { workItemId: workItem.id },
       }),
     )
 
@@ -3277,10 +3288,11 @@ describe("GraphQL API", () => {
         session: {
           id: "ses_owned",
           availability: "AVAILABLE",
+          backend: { id: "opencode", label: "OpenCode" },
           model: {
             providerId: "openai",
             id: "gpt-5.5",
-            variant: "xhigh",
+            thinkingLevel: "xhigh",
           },
           tokens: {
             input: 100,
@@ -3297,18 +3309,24 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("session returns MISSING with null metrics when OpenCode row is gone", async () => {
+  test("session returns MISSING with null metrics when Session row is gone", async () => {
     runtime = makeRuntime(
       {},
       {},
       {},
-      { ownsSessionId: () => Effect.succeed(true) },
-      {},
       {
-        getSession: (id) =>
+        getWorkItem: () =>
           Effect.succeed({
-            id,
+            ...workItem,
+            sessionId: "ses_missing",
+          }),
+      },
+      {
+        getSessionTelemetry: (input) =>
+          Effect.succeed({
+            id: input.sessionId ?? "",
             availability: "missing",
+            backend: { id: "opencode", label: "OpenCode" },
             model: null,
             tokens: null,
             cost: null,
@@ -3320,10 +3338,11 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query Session($id: String!) {
-          session(id: $id) {
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) {
             id
             availability
+            backend { label }
             model { id }
             tokens { input }
             cost
@@ -3331,7 +3350,7 @@ describe("GraphQL API", () => {
             updatedAt
           }
         }`,
-        variables: { id: "ses_missing" },
+        variables: { workItemId: workItem.id },
       }),
     )
 
@@ -3341,6 +3360,7 @@ describe("GraphQL API", () => {
         session: {
           id: "ses_missing",
           availability: "MISSING",
+          backend: { label: "OpenCode" },
           model: null,
           tokens: null,
           cost: null,
@@ -3356,13 +3376,19 @@ describe("GraphQL API", () => {
       {},
       {},
       {},
-      { ownsSessionId: () => Effect.succeed(true) },
-      {},
       {
-        getSession: (id) =>
+        getWorkItem: () =>
           Effect.succeed({
-            id,
+            ...workItem,
+            sessionId: "ses_locked",
+          }),
+      },
+      {
+        getSessionTelemetry: (input) =>
+          Effect.succeed({
+            id: input.sessionId ?? "",
             availability: "unavailable",
+            backend: { id: "opencode", label: "OpenCode" },
             model: null,
             tokens: null,
             cost: null,
@@ -3374,16 +3400,17 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query Session($id: String!) {
-          session(id: $id) {
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) {
             id
             availability
+            backend { label }
             model { id }
             tokens { input }
             cost
           }
         }`,
-        variables: { id: "ses_locked" },
+        variables: { workItemId: workItem.id },
       }),
     )
 
@@ -3393,8 +3420,66 @@ describe("GraphQL API", () => {
         session: {
           id: "ses_locked",
           availability: "UNAVAILABLE",
+          backend: { label: "OpenCode" },
           model: null,
           tokens: null,
+          cost: null,
+        },
+      },
+    })
+  })
+
+  test("session returns UNSUPPORTED when backend has no telemetry capability", async () => {
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        getWorkItem: () =>
+          Effect.succeed({
+            ...workItem,
+            agentBackend: "opencode",
+            sessionId: "ses_any",
+          }),
+      },
+      {
+        getSessionTelemetry: (input) =>
+          Effect.succeed({
+            id: input.sessionId ?? "",
+            availability: "unsupported",
+            backend: { id: "opencode", label: "OpenCode" },
+            model: null,
+            tokens: null,
+            cost: null,
+            createdAt: null,
+            updatedAt: null,
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Session($workItemId: ID!) {
+          session(workItemId: $workItemId) {
+            id
+            availability
+            backend { id label }
+            model { id }
+            cost
+          }
+        }`,
+        variables: { workItemId: workItem.id },
+      }),
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        session: {
+          id: "ses_any",
+          availability: "UNSUPPORTED",
+          backend: { id: "opencode", label: "OpenCode" },
+          model: null,
           cost: null,
         },
       },

@@ -48,6 +48,7 @@ const configQuery = {
   queryFn: async () => {
     const result = await graphql.query({
       config: {
+        selectedAgentBackend: true,
         defaultModel: true,
         defaultThinkingLevel: true,
         reviewModel: true,
@@ -75,18 +76,19 @@ const modelsQuery = {
   },
 }
 
-const sessionQuery = (sessionId: string) => ({
-  queryKey: ["session", sessionId] as const,
+const sessionQuery = (workItemId: string) => ({
+  queryKey: ["session", workItemId] as const,
   queryFn: async () => {
     const result = await graphql.query({
       session: {
-        __args: { id: sessionId },
+        __args: { workItemId },
         id: true,
         availability: true,
+        backend: { id: true, label: true },
         model: {
           providerId: true,
           id: true,
-          variant: true,
+          thinkingLevel: true,
         },
         tokens: {
           input: true,
@@ -306,6 +308,7 @@ type WorkItem = {
   githubIssueNumber: number
   issueTitle: string | null
   githubPullRequestNumber: number | null
+  agentBackend: { id: string; label: string }
   state: WorkItemState
   stateLabel: string
   status: WorkItemStatus
@@ -333,6 +336,7 @@ const workItemFields = {
   githubIssueNumber: true,
   issueTitle: true,
   githubPullRequestNumber: true,
+  agentBackend: { id: true, label: true },
   state: true,
   stateLabel: true,
   status: true,
@@ -2021,18 +2025,20 @@ const jobsTabListAriaLabel = (tab: JobsTab): string => {
 }
 
 function SessionUsageDialog({
+  workItemId,
   sessionId,
   open,
   onClose,
 }: {
+  workItemId: string | null
   sessionId: string | null
   open: boolean
   onClose: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const enabled = open && sessionId !== null
+  const enabled = open && workItemId !== null
   const session = useQuery({
-    ...sessionQuery(sessionId ?? ""),
+    ...sessionQuery(workItemId ?? ""),
     enabled,
   })
 
@@ -2045,6 +2051,8 @@ function SessionUsageDialog({
       dialog.close()
     }
   }, [open])
+
+  const backendLabel = session.data?.backend.label
 
   return (
     <dialog
@@ -2061,7 +2069,7 @@ function SessionUsageDialog({
           id="session-usage-title"
           className="mt-1.5 font-serif text-lg font-semibold"
         >
-          OpenCode Session
+          {backendLabel ? `${backendLabel} Session` : "Session"}
         </h2>
         {sessionId !== null && (
           <p
@@ -2087,14 +2095,22 @@ function SessionUsageDialog({
             className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
             role="status"
           >
-            This Session is not owned by a Work Item.
+            Work Item not found.
+          </p>
+        ) : session.data.availability === "UNSUPPORTED" ? (
+          <p
+            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+            role="status"
+          >
+            {session.data.backend.label} does not provide Session Telemetry.
           </p>
         ) : session.data.availability === "MISSING" ? (
           <p
             className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
             role="status"
           >
-            OpenCode no longer has this Session locally. Usage cannot be loaded.
+            {session.data.backend.label} no longer has this Session locally.
+            Usage cannot be loaded.
           </p>
         ) : session.data.availability === "UNAVAILABLE" ? (
           <div className="grid gap-3">
@@ -2102,8 +2118,8 @@ function SessionUsageDialog({
               className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
               role="status"
             >
-              OpenCode’s database is temporarily unavailable (for example
-              locked). Retry in a moment.
+              {session.data.backend.label} Session Telemetry is temporarily
+              unavailable. Retry in a moment.
             </p>
             <button
               type="button"
@@ -2132,7 +2148,7 @@ function SessionUsageDialog({
                     : [
                         session.data.model.providerId,
                         session.data.model.id,
-                        session.data.model.variant,
+                        session.data.model.thinkingLevel,
                       ]
                         .filter(
                           (part) =>
@@ -2252,7 +2268,10 @@ function SessionUsageDialog({
 
 function JobsCard() {
   const [selectedTab, setSelectedTab] = useState<JobsTab>("working")
-  const [sessionDialogId, setSessionDialogId] = useState<string | null>(null)
+  const [sessionDialog, setSessionDialog] = useState<{
+    workItemId: string
+    sessionId: string
+  } | null>(null)
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const workingQueries = useQueries({
     queries: repositories.map((repository) =>
@@ -2467,6 +2486,11 @@ function JobsCard() {
                       <WorkItemPauseButton workItem={workItem} />
                     </div>
                   </div>
+                  {selectedTab === "completed" && (
+                    <p className="mt-1 mb-0 font-mono text-xs text-ink-faint">
+                      {workItem.agentBackend.label}
+                    </p>
+                  )}
                   {(sessionId !== null || worktreePath !== null) && (
                     <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
                       {sessionId !== null &&
@@ -2477,7 +2501,10 @@ function JobsCard() {
                               className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
                               title={sessionId}
                               onClick={() => {
-                                setSessionDialogId(sessionId)
+                                setSessionDialog({
+                                  workItemId: workItem.id,
+                                  sessionId,
+                                })
                               }}
                             >
                               {sessionId}
@@ -2530,10 +2557,11 @@ function JobsCard() {
         )}
       </div>
       <SessionUsageDialog
-        sessionId={sessionDialogId}
-        open={sessionDialogId !== null}
+        workItemId={sessionDialog?.workItemId ?? null}
+        sessionId={sessionDialog?.sessionId ?? null}
+        open={sessionDialog !== null}
         onClose={() => {
-          setSessionDialogId(null)
+          setSessionDialog(null)
         }}
       />
     </article>

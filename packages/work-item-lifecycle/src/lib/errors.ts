@@ -60,6 +60,23 @@ export class BuildModelNotConfiguredError extends Schema.TaggedErrorClass<BuildM
   },
 ) {}
 
+export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
+  "AgentBackendUnavailableError",
+  {
+    message: Schema.String,
+    reason: Schema.String,
+  },
+) {}
+
+export class AgentBackendRestartRequiredError extends Schema.TaggedErrorClass<AgentBackendRestartRequiredError>()(
+  "AgentBackendRestartRequiredError",
+  {
+    message: Schema.String,
+    selectedBackendId: Schema.String,
+    activeBackendId: Schema.String,
+  },
+) {}
+
 export class WorkItemNotFoundError extends Schema.TaggedErrorClass<WorkItemNotFoundError>()(
   "WorkItemNotFoundError",
   {

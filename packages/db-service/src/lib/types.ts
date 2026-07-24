@@ -59,6 +59,7 @@ export type UpdateRepositorySettingsInput =
   typeof UpdateRepositorySettingsInput.Type
 
 export const ConfigRecord = Schema.Struct({
+  selectedAgentBackend: Schema.String,
   defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
@@ -73,7 +74,9 @@ export const ConfigRecord = Schema.Struct({
 export type ConfigRecord = typeof ConfigRecord.Type
 
 export const UpdateConfigInput = Schema.Struct({
-  defaultModel: Schema.String,
+  selectedAgentBackend: Schema.String,
+  /** Required when not changing backend; ignored/cleared on backend change. */
+  defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
@@ -158,6 +161,7 @@ export const RepositorySqlRow = Schema.Struct({
 export type RepositorySqlRow = typeof RepositorySqlRow.Type
 
 export const ConfigSqlRow = Schema.Struct({
+  selectedAgentBackend: Schema.String,
   defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
@@ -166,6 +170,7 @@ export const ConfigSqlRow = Schema.Struct({
   maxConcurrentWorkItems: Schema.Int,
 }).pipe(
   Schema.encodeKeys({
+    selectedAgentBackend: "selected_agent_backend",
     defaultModel: "default_model",
     defaultThinkingLevel: "default_thinking_level",
     reviewModel: "review_model",

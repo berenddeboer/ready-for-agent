@@ -37,6 +37,7 @@ export const stubDbService = (
   notifyIssuesChanged: () => Effect.void,
   notifyWorkItemsChanged: () => Effect.void,
   getConfig: Effect.succeed({
+    selectedAgentBackend: "opencode",
     defaultModel: "opencode/deepseek-v4-flash-free",
     defaultThinkingLevel: "low",
     reviewModel: null,
@@ -45,6 +46,7 @@ export const stubDbService = (
     maxConcurrentWorkItems: 5,
   }),
   updateConfig: unused,
+  countUnfinishedWorkItems: Effect.succeed(0),
   addRepository: unused,
   updateRepositorySettings: unused,
   pauseRepository: unused,

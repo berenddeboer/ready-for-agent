@@ -13,6 +13,9 @@ type TaggedError = {
   readonly githubOwner?: string
   readonly githubRepo?: string
   readonly localPath?: string
+  readonly selectedBackendId?: string
+  readonly activeBackendId?: string
+  readonly unfinishedWorkItemCount?: number
 }
 
 const isTaggedError = (error: unknown): error is TaggedError =>
@@ -74,6 +77,36 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       return gql(
         error.message ?? "Build model not configured",
         "BUILD_MODEL_NOT_CONFIGURED",
+      )
+    case "AgentBackendUnavailableError":
+      return gql(
+        error.message ?? "Agent Backend is unavailable",
+        "AGENT_BACKEND_UNAVAILABLE",
+        { reason: "reason" in error ? error.reason : error.message },
+      )
+    case "AgentBackendRestartRequiredError":
+      return gql(
+        error.message ??
+          "Restart the Harness to activate the selected Agent Backend",
+        "AGENT_BACKEND_RESTART_REQUIRED",
+        {
+          selectedBackendId:
+            "selectedBackendId" in error ? error.selectedBackendId : undefined,
+          activeBackendId:
+            "activeBackendId" in error ? error.activeBackendId : undefined,
+        },
+      )
+    case "AgentBackendChangeBlockedError":
+      return gql(
+        error.message ??
+          "Cannot change Agent Backend while Work Items are unfinished",
+        "AGENT_BACKEND_CHANGE_BLOCKED",
+        {
+          unfinishedWorkItemCount:
+            "unfinishedWorkItemCount" in error
+              ? error.unfinishedWorkItemCount
+              : undefined,
+        },
       )
     case "WorkItemLifecycleDatabaseError":
       return gql(

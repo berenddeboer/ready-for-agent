@@ -8,6 +8,7 @@ import {
   type LifecycleStepsShape,
   WorkItemLifecycle,
   WorkItemLifecycleLive,
+  stubActiveAgentBackendLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -44,6 +45,7 @@ const successfulSteps: LifecycleStepsShape = {
 }
 
 const TestLayer = WorkItemLifecycleLive.pipe(
+  Layer.provideMerge(stubActiveAgentBackendLayer()),
   Layer.provideMerge(
     Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
   ),
