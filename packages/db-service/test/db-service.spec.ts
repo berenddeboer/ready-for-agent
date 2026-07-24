@@ -106,6 +106,62 @@ describe("DbService", () => {
         }),
       ))
 
+    it("clears harness and repository model selections when Agent Backend changes", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/gpt-5.6-terra",
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          const repository = yield* db.addRepository(sampleInput)
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: false,
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/gpt-5.6-terra",
+            reviewThinkingLevel: "max",
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+
+          const updated = yield* db.updateConfig({
+            selectedAgentBackend: "grok",
+            defaultModel: "should-be-ignored",
+            defaultThinkingLevel: "should-be-ignored",
+            reviewModel: "should-be-ignored",
+            reviewThinkingLevel: "should-be-ignored",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(updated).toEqual({
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+
+          const repos = yield* db.listRepositories
+          expect(repos).toHaveLength(1)
+          expect(repos[0]).toMatchObject({
+            id: repository.id,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+        }),
+      ))
+
     it("rejects unknown Agent Backend ids", () =>
       runTest(
         Effect.gen(function* () {

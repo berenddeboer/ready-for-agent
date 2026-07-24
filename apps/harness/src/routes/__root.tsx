@@ -315,12 +315,28 @@ function SettingsButton() {
     dialogRef.current?.showModal()
   }, [autoOpenAttempted, buildConfigured, config.isSuccess, updateConfig.reset])
 
+  const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
+  const backendChanging = selectedAgentBackend !== savedAgentBackend
+
+  const applyAgentBackendSelection = (nextBackend: string) => {
+    setSelectedAgentBackend(nextBackend)
+    if (nextBackend === savedAgentBackend && config.data) {
+      setDefaultModel(config.data.defaultModel ?? "")
+      setDefaultVariant(config.data.defaultThinkingLevel ?? "")
+      setReviewModel(config.data.reviewModel ?? "")
+      setReviewVariant(config.data.reviewThinkingLevel ?? "")
+      return
+    }
+    setDefaultModel("")
+    setDefaultVariant("")
+    setReviewModel("")
+    setReviewVariant("")
+  }
+
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const parsedMaxSessions = Number(maxConcurrentAgentTurns)
     const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
-    const backendChanging =
-      selectedAgentBackend !== (config.data?.selectedAgentBackend ?? "opencode")
     updateConfig.mutate({
       selectedAgentBackend,
       defaultModel: backendChanging
@@ -488,7 +504,7 @@ function SettingsButton() {
                     name="selectedAgentBackend"
                     value={selectedAgentBackend}
                     onChange={(event) =>
-                      setSelectedAgentBackend(event.target.value)
+                      applyAgentBackendSelection(event.target.value)
                     }
                   >
                     {(backendStatus.data?.agentBackends ?? []).map(
@@ -552,11 +568,14 @@ function SettingsButton() {
                         )
                       }
                     }}
-                    required
+                    required={!backendChanging}
+                    disabled={backendChanging}
                   >
-                    {!buildConfigured && defaultModel.length === 0 && (
-                      <option value="" disabled>
-                        Select a build model
+                    {defaultModel.length === 0 && (
+                      <option value="">
+                        {backendChanging
+                          ? "Cleared — choose after restart"
+                          : "Select a build model"}
                       </option>
                     )}
                     {hasUnavailableBuildModel && (
@@ -595,7 +614,7 @@ function SettingsButton() {
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
                       }
-                      disabled={defaultModel.length === 0}
+                      disabled={backendChanging || defaultModel.length === 0}
                     >
                       <option value="">
                         {buildVariants.length === 0
@@ -626,6 +645,7 @@ function SettingsButton() {
                     className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="reviewModel"
                     value={reviewModel}
+                    disabled={backendChanging}
                     onChange={(event) => {
                       const nextModel = event.target.value
                       setReviewModel(nextModel)
@@ -638,7 +658,11 @@ function SettingsButton() {
                       )
                     }}
                   >
-                    <option value="">Same as build model</option>
+                    <option value="">
+                      {backendChanging
+                        ? "Cleared — choose after restart"
+                        : "Same as build model"}
+                    </option>
                     {hasUnavailableReviewModel && (
                       <option value={reviewModel}>
                         {reviewModel} (not in Agent Model catalog)
@@ -678,6 +702,7 @@ function SettingsButton() {
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
+                        backendChanging ||
                         reviewThinkingLevelSourceModel.length === 0 ||
                         reviewThinkingLevels.length === 0
                       }
@@ -775,8 +800,7 @@ function SettingsButton() {
                 models.isPending ||
                 models.isError ||
                 updateConfig.isPending ||
-                (selectedAgentBackend ===
-                  (config.data?.selectedAgentBackend ?? "opencode") &&
+                (!backendChanging &&
                   (defaultModel.length === 0 || hasUnavailableBuildModel))
               }
             >
