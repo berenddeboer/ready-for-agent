@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, Layer, Ref, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Ref, Result, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { buildRunArgs, shouldUsePromptStdin } from "./build-args.js"
@@ -12,6 +12,7 @@ import {
   SessionIdNotFoundError,
 } from "./errors.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
+import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
 import type {
@@ -149,66 +150,101 @@ export class Opencode extends Context.Service<
             const result = yield* Effect.scoped(
               Effect.gen(function* () {
                 const handle = yield* spawner.spawn(command)
+                const commandName = input.command
 
                 const collectOutput = Stream.decodeText(handle.stdout).pipe(
                   Stream.splitLines,
-                  Stream.map((line) => ({
-                    sessionId: parseSessionIdFromLine(line),
-                    text: parseAssistantTextFromLine(line),
-                  })),
-                  Stream.tap(({ sessionId }) =>
-                    sessionId === undefined
-                      ? Effect.void
-                      : Effect.gen(function* () {
+                  Stream.runFoldEffect(
+                    (): {
+                      sessionId?: string
+                      assistantText: string
+                      commandText?: string
+                      stoppedForCommand: boolean
+                    } => ({
+                      assistantText: "",
+                      stoppedForCommand: false,
+                    }),
+                    (acc, line) =>
+                      Effect.gen(function* () {
+                        const sessionId =
+                          parseSessionIdFromLine(line) ?? acc.sessionId
+                        if (sessionId !== undefined) {
                           yield* Ref.set(seenSessionId, sessionId)
                           const alreadyNotified = yield* Ref.getAndSet(
                             sessionIdNotified,
                             true,
                           )
                           if (
-                            alreadyNotified ||
-                            input.onSessionId === undefined
+                            !alreadyNotified &&
+                            input.onSessionId !== undefined
                           ) {
-                            return
-                          }
-                          yield* input.onSessionId(sessionId).pipe(
-                            Effect.catch((error) =>
-                              Effect.logWarning(
-                                "OpenCode onSessionId observer failed",
-                                { sessionId, error },
+                            yield* input.onSessionId(sessionId).pipe(
+                              Effect.catch((error) =>
+                                Effect.logWarning(
+                                  "OpenCode onSessionId observer failed",
+                                  { sessionId, error },
+                                ),
                               ),
-                            ),
-                            Effect.forkDetach({ startImmediately: true }),
+                              Effect.forkDetach({ startImmediately: true }),
+                            )
+                          }
+                        }
+
+                        let commandText = acc.commandText
+                        let stoppedForCommand = acc.stoppedForCommand
+                        if (
+                          commandName !== undefined &&
+                          commandText === undefined
+                        ) {
+                          const extracted = parseCommandTaskResultFromLine(
+                            line,
+                            commandName,
                           )
-                        }),
-                  ),
-                  Stream.runFold(
-                    (): { sessionId?: string; assistantText: string } => ({
-                      assistantText: "",
-                    }),
-                    (acc, event) => {
-                      return {
-                        sessionId: event.sessionId ?? acc.sessionId,
-                        assistantText:
-                          event.text === undefined
-                            ? acc.assistantText
-                            : acc.assistantText.length === 0
-                              ? event.text
-                              : `${acc.assistantText}\n${event.text}`,
-                      }
-                    },
+                          if (extracted !== undefined) {
+                            commandText = extracted
+                            // Stop the automatic parent resume that OpenCode
+                            // injects after --command task completion so it
+                            // cannot edit the worktree before the lifecycle
+                            // interprets the command result.
+                            yield* handle.kill()
+                            stoppedForCommand = true
+                          }
+                        }
+
+                        if (commandText !== undefined) {
+                          return {
+                            sessionId,
+                            assistantText: commandText,
+                            commandText,
+                            stoppedForCommand,
+                          }
+                        }
+
+                        const text = parseAssistantTextFromLine(line)
+                        return {
+                          sessionId,
+                          assistantText:
+                            text === undefined
+                              ? acc.assistantText
+                              : acc.assistantText.length === 0
+                                ? text
+                                : `${acc.assistantText}\n${text}`,
+                          stoppedForCommand,
+                        }
+                      }),
                   ),
                 )
 
-                const [exitCode, output] = yield* Effect.all(
-                  [handle.exitCode, collectOutput],
+                const [exitOutcome, output] = yield* Effect.all(
+                  [handle.exitCode.pipe(Effect.result), collectOutput],
                   { concurrency: 2 },
                 )
 
                 return {
-                  exitCode: Number(exitCode),
+                  exitOutcome,
                   sessionId: output.sessionId,
                   assistantText: output.assistantText,
+                  stoppedForCommand: output.stoppedForCommand,
                 }
               }),
             ).pipe(
@@ -227,13 +263,21 @@ export class Opencode extends Context.Service<
               ),
             )
 
-            if (result.exitCode !== 0) {
-              const sessionId = result.sessionId ?? knownSessionId
-              return yield* new OpencodeExitError({
-                exitCode: result.exitCode,
-                cwd: input.cwd,
-                ...(sessionId !== undefined ? { sessionId } : {}),
-              })
+            // Intentional kill after capturing a command task result yields a
+            // signalled/non-zero exit; that is success for the command boundary.
+            if (!result.stoppedForCommand) {
+              if (Result.isFailure(result.exitOutcome)) {
+                return yield* result.exitOutcome.failure
+              }
+              const exitCode = Number(result.exitOutcome.success)
+              if (exitCode !== 0) {
+                const sessionId = result.sessionId ?? knownSessionId
+                return yield* new OpencodeExitError({
+                  exitCode,
+                  cwd: input.cwd,
+                  ...(sessionId !== undefined ? { sessionId } : {}),
+                })
+              }
             }
 
             const sessionId = result.sessionId ?? knownSessionId

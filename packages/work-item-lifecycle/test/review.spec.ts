@@ -565,6 +565,58 @@ describe("review", () => {
       )
     }))
 
+  it("enters a Review Fix Round from normalized /review child findings (not parent REVIEW_FIXED)", () =>
+    withTemp(async (root) => {
+      // Models the OpenCode adapter contract after #439: command turns return
+      // only the nested reviewer text, never the automatic parent resume.
+      const normalizedChildReview = [
+        "## Review Findings",
+        "- Medium: example finding",
+        "",
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
+      ].join("\n")
+      const continues: Array<{ command?: string; prompt: string }> = []
+      const result = await run(
+        review(baseContext(root)),
+        stubOpencode({
+          continue: (input) => {
+            continues.push({
+              prompt: input.prompt,
+              ...(input.command !== undefined
+                ? { command: input.command }
+                : {}),
+            })
+            if (input.command === REVIEW_AGENT_COMMAND) {
+              return Effect.succeed({
+                sessionId: "ses_implement_session",
+                assistantText: normalizedChildReview,
+              })
+            }
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText:
+                "READY_FOR_AGENT_RESULT: REVIEW_DEFERRED: medium: follow-up",
+            })
+          },
+        }),
+      )
+
+      expect(result).toEqual({
+        _tag: "deferred",
+        severity: "medium",
+        reason: "follow-up",
+      })
+      expect(continues).toHaveLength(2)
+      expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
+      expect(continues[1]!.command).toBeUndefined()
+      expect(continues[1]!.prompt).toContain("Interpret those findings")
+      expect(continues[1]!.prompt).toContain("REVIEW_HAS_FINDINGS: medium")
+      // Parent resume marker must not be accepted as the reviewing outcome.
+      expect(parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_FIXED")).toBe(
+        null,
+      )
+    }))
+
   it("classifies severity on the fallback verdict without another /review command", () =>
     withTemp(async (root) => {
       const continues: Array<{
