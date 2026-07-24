@@ -14,7 +14,8 @@ export const buildRunArgs = (input: {
   readonly prompt: string
   readonly cwd: string
   readonly model: string
-  readonly variant: string
+  /** Null omits `--variant` so OpenCode uses the model default. */
+  readonly thinkingLevel: string | null
   readonly sessionId?: string
   readonly command?: string
 }): ReadonlyArray<string> => {
@@ -27,9 +28,11 @@ export const buildRunArgs = (input: {
     input.cwd,
     "-m",
     input.model,
-    "--variant",
-    input.variant,
   ]
+
+  if (input.thinkingLevel !== null) {
+    args.push("--variant", input.thinkingLevel)
+  }
 
   if (input.sessionId !== undefined) {
     args.push("--session", input.sessionId)

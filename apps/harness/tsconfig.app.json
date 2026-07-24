@@ -17,6 +17,9 @@
   "include": ["server.ts", "src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../packages/agent-backend/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/work-item-lifecycle/tsconfig.lib.json"
     },
     {
@@ -27,9 +30,6 @@
     },
     {
       "path": "../../packages/opencode/tsconfig.lib.json"
-    },
-    {
-      "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
     },
     {
       "path": "../../packages/issue-reconciler/tsconfig.lib.json"
@@ -48,6 +48,9 @@
     },
     {
       "path": "../../packages/db/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
     }
   ]
 }

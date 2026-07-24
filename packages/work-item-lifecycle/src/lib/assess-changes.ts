@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Opencode } from "@ready-for-agent/opencode"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import {
   AssessChangesInvalidWorktreeContextError,
   AssessChangesOpenCodeError,
@@ -188,14 +188,14 @@ const confirmNoObservableChange = (
       "READY_FOR_AGENT_RESULT: NO_CHANGES",
     ].join("\n")
 
-    const opencode = yield* Opencode
-    const result = yield* opencode
-      .continue({
+    const agentBackend = yield* AgentBackend
+    const result = yield* agentBackend
+      .continueTurn({
         sessionId,
         prompt,
         cwd: worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout:
           context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.assess_changes,
       })

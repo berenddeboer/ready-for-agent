@@ -107,13 +107,14 @@ export const latestStepRun = (
   workItem: WorkItemRecord,
 ): StepRunRecord | undefined => workItem.stepRuns.at(-1)
 
-/** Running Step Run blocked on maxConcurrentOpencodeSessions → operator Queued. */
-const isWaitingForOpencodeSession = (stepRun: StepRunRecord): boolean =>
+/** Running Step Run blocked on maxConcurrentAgentTurns → operator Queued. */
+const isWaitingForAgentTurn = (stepRun: StepRunRecord): boolean =>
   stepRun.status === "running" &&
-  stepRun.reasonCode === STEP_RUN_REASON.waitingForOpencodeSession
+  (stepRun.reasonCode === STEP_RUN_REASON.waitingForAgentTurn ||
+    stepRun.reasonCode === "waiting_for_opencode_session")
 
 const stepRunDisplayStatus = (stepRun: StepRunRecord): WorkItemStatus =>
-  isWaitingForOpencodeSession(stepRun) ? "queued" : stepRun.status
+  isWaitingForAgentTurn(stepRun) ? "queued" : stepRun.status
 
 export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
   if (workItem.waitingSince != null) return "waiting_for_worker_slot"

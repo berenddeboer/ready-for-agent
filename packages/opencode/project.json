@@ -1,6 +1,9 @@
 {
   "name": "opencode",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/opencode/src",
+  "projectType": "library",
+  "tags": [],
   "targets": {
     "test": {
       "executor": "nx:run-commands",
@@ -9,7 +12,8 @@
         "command": "bun test"
       },
       "inputs": ["default", "^production"],
-      "cache": true
+      "cache": true,
+      "dependsOn": ["^build"]
     }
   }
 }

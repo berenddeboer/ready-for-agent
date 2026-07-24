@@ -4,15 +4,15 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Fiber, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import {
+  AgentBackend,
+  AgentBackendExitError,
+  AgentBackendSessionIdMissingError,
+  AgentBackendTimeoutError,
+  type StartInput,
+} from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
-import {
-  Opencode,
-  OpencodeExitError,
-  OpencodeTimeoutError,
-  SessionIdNotFoundError,
-  type StartInput,
-} from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   ImplementInvalidWorktreeContextError,
@@ -35,9 +35,9 @@ const baseContext = (
   repositoryId: "repo-missing",
   githubIssueNumber: 80,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
@@ -46,33 +46,37 @@ const baseContext = (
 })
 
 const stubOpencode = (impl: {
-  readonly start?: (
+  readonly startTurn?: (
     input: StartInput,
   ) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
-  readonly continue?: (input: {
+  readonly continueTurn?: (input: {
     readonly sessionId: string
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
   }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: (input) =>
-        impl.start?.(input) ??
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: (input) =>
+        impl.startTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_implement_default",
           assistantText: "",
         }),
-      continue: (input) =>
-        impl.continue?.(input) ??
+      continueTurn: (input) =>
+        impl.continueTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_continue_should_not_run",
           assistantText: "",
         }),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
@@ -83,9 +87,9 @@ const run = <A, E>(
     | Layer.Layer.Success<typeof PlatformLayer>
     | Layer.Layer.Success<typeof DbServiceLive>
     | Layer.Layer.Success<typeof DatabaseTest>
-    | Opencode
+    | AgentBackend
   >,
-  opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
+  opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
@@ -102,8 +106,8 @@ const seedWorkItem = (workItemId: string, repositoryId: string) =>
     const now = Date.now()
     yield* sql.unsafe(
       `INSERT INTO work_item (
-         id, repository_id, github_issue_number, model, variant,
-         review_model, review_variant, state, state_ready_at, worktree_path,
+         id, repository_id, github_issue_number, model, thinking_level,
+         review_model, review_thinking_level, state, state_ready_at, worktree_path,
          session_id, failure_code, failure_message, created_at, updated_at
        ) VALUES (?, ?, 80, 'opencode/test-model', 'high', 'opencode/test-model', 'high',
          'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -194,23 +198,23 @@ describe("implement", () => {
               repositoryId: repository.id,
               githubIssueNumber: 80,
               model: "opencode/implement-model",
-              variant: "max",
+              thinkingLevel: "max",
               reviewModel: "opencode/implement-model",
-              reviewVariant: "max",
+              reviewThinkingLevel: "max",
               sessionId: null,
               maxDuration: Duration.minutes(90),
             }),
           )
         }),
         stubOpencode({
-          start: (input) => {
+          startTurn: (input) => {
             started = input
             return Effect.succeed({
               sessionId: "ses_fresh_implement",
               assistantText: "",
             })
           },
-          continue: () => {
+          continueTurn: () => {
             continued = true
             return Effect.succeed({ sessionId: "ses_wrong", assistantText: "" })
           },
@@ -221,7 +225,7 @@ describe("implement", () => {
       expect(started).not.toBeNull()
       expect(started!.cwd).toBe(root)
       expect(started!.model).toBe("opencode/implement-model")
-      expect(started!.variant).toBe("max")
+      expect(started!.thinkingLevel).toBe("max")
       expect(Duration.toMillis(started!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(90)),
       )
@@ -248,14 +252,14 @@ describe("implement", () => {
           )
         }),
         stubOpencode({
-          start: () => {
+          startTurn: () => {
             started = true
             return Effect.succeed({
               sessionId: "ses_blank_prior_start",
               assistantText: "",
             })
           },
-          continue: () => {
+          continueTurn: () => {
             continued = true
             return Effect.succeed({
               sessionId: "ses_should_not",
@@ -290,21 +294,21 @@ describe("implement", () => {
               repositoryId: repository.id,
               githubIssueNumber: 80,
               model: "opencode/implement-model",
-              variant: "max",
+              thinkingLevel: "max",
               sessionId: "ses_interrupted_build",
               maxDuration: Duration.minutes(90),
             }),
           )
         }),
         stubOpencode({
-          start: () => {
+          startTurn: () => {
             started = true
             return Effect.succeed({
               sessionId: "ses_should_not_start",
               assistantText: "",
             })
           },
-          continue: (input) => {
+          continueTurn: (input) => {
             continued = input
             return Effect.succeed({
               sessionId: input.sessionId,
@@ -320,7 +324,7 @@ describe("implement", () => {
       expect(continued!.sessionId).toBe("ses_interrupted_build")
       expect(continued!.cwd).toBe(root)
       expect(continued!.model).toBe("opencode/implement-model")
-      expect(continued!.variant).toBe("max")
+      expect(continued!.thinkingLevel).toBe("max")
       expect(Duration.toMillis(continued!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(90)),
       )
@@ -345,14 +349,14 @@ describe("implement", () => {
           )
         }),
         stubOpencode({
-          start: () => {
+          startTurn: () => {
             calls.push("start")
             return Effect.succeed({
               sessionId: "ses_wrong",
               assistantText: "",
             })
           },
-          continue: (input) => {
+          continueTurn: (input) => {
             calls.push(`continue:${input.sessionId}`)
             return Effect.succeed({
               sessionId: input.sessionId,
@@ -376,13 +380,19 @@ describe("implement", () => {
           )
         }).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
-              Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
-            continue: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
+              Effect.fail(
+                new AgentBackendExitError({ exitCode: 2, cwd: root }),
+              ),
+            continueTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            listModels: () => Effect.succeed([]),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -400,15 +410,19 @@ describe("implement", () => {
           )
         }).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.fail(
-                new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
+                new AgentBackendTimeoutError({ cwd: root, timeoutMs: 1_000 }),
               ),
-            continue: () =>
+            continueTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            listModels: () => Effect.succeed([]),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -425,12 +439,17 @@ describe("implement", () => {
           )
         }).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () => Effect.fail(new SessionIdNotFoundError({ cwd: root })),
-            continue: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
+              Effect.fail(new AgentBackendSessionIdMissingError({ cwd: root })),
+            continueTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            listModels: () => Effect.succeed([]),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -447,7 +466,8 @@ describe("implement", () => {
           )
         }).pipe(Effect.flip),
         stubOpencode({
-          start: () => Effect.succeed({ sessionId: "   ", assistantText: "" }),
+          startTurn: () =>
+            Effect.succeed({ sessionId: "   ", assistantText: "" }),
         }),
       )
       expect(error).toBeInstanceOf(ImplementOpenCodeError)
@@ -485,7 +505,7 @@ describe("implement", () => {
           return { midSessionId, finalSessionId }
         }),
         stubOpencode({
-          start: (input) =>
+          startTurn: (input) =>
             Effect.gen(function* () {
               expect(input.onSessionId).toBeDefined()
               yield* input.onSessionId!("ses_mid_build")
@@ -519,11 +539,11 @@ describe("implement", () => {
           return { error, sessionId }
         }),
         stubOpencode({
-          start: (input) =>
+          startTurn: (input) =>
             Effect.gen(function* () {
               yield* input.onSessionId!("ses_failed_after_emit")
               return yield* Effect.fail(
-                new OpencodeExitError({ exitCode: 2, cwd: root }),
+                new AgentBackendExitError({ exitCode: 2, cwd: root }),
               )
             }),
         }),
@@ -547,7 +567,7 @@ describe("implement", () => {
           )
         }),
         stubOpencode({
-          start: (input) =>
+          startTurn: (input) =>
             Effect.gen(function* () {
               yield* input.onSessionId!("ses_no_row")
               return {

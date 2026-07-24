@@ -191,15 +191,15 @@ describe("WorkItemLifecycle", () => {
   const seedHarnessBuildModel = Effect.gen(function* () {
     const db = yield* DbService
     const config = yield* db.getConfig
-    if (config.defaultModel !== null && config.defaultVariant !== null) {
+    if (config.defaultModel !== null && config.defaultThinkingLevel !== null) {
       return
     }
     yield* db.updateConfig({
       defaultModel: config.defaultModel ?? "opencode/deepseek-v4-flash-free",
-      defaultVariant: config.defaultVariant ?? "low",
+      defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
       reviewModel: config.reviewModel,
-      reviewVariant: config.reviewVariant,
-      maxConcurrentOpencodeSessions: config.maxConcurrentOpencodeSessions,
+      reviewThinkingLevel: config.reviewThinkingLevel,
+      maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
       maxConcurrentWorkItems: config.maxConcurrentWorkItems,
     })
   })
@@ -250,7 +250,7 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.issueTitle).toBe(sampleIssueFields.title)
           expect(workItem.state).toBe("create_worktree")
           expect(workItem.model).toBe("opencode/deepseek-v4-flash-free")
-          expect(workItem.variant).toBe("low")
+          expect(workItem.thinkingLevel).toBe("low")
           expect(workItem.paused).toBe(false)
           expect(workItem.pauseBeforeStep).toBeNull()
           expect(workItem.worktreePath).toBeNull()
@@ -280,9 +280,9 @@ describe("WorkItemLifecycle", () => {
 
           const config = yield* db.getConfig
           expect(workItem.model).toBe(config.defaultModel)
-          expect(workItem.variant).toBe(config.defaultVariant)
+          expect(workItem.thinkingLevel).toBe(config.defaultThinkingLevel)
           expect(workItem.reviewModel).toBe(config.defaultModel)
-          expect(workItem.reviewVariant).toBe(config.defaultVariant)
+          expect(workItem.reviewThinkingLevel).toBe(config.defaultThinkingLevel)
 
           yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
           const reloaded = yield* lifecycle.getWorkItem(workItem.id)
@@ -328,9 +328,9 @@ describe("WorkItemLifecycle", () => {
             repositoryId: repository.id,
             paused: repository.paused,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "max",
+            defaultThinkingLevel: "max",
             reviewModel: null,
-            reviewVariant: null,
+            reviewThinkingLevel: null,
             autoMerge: repository.autoMerge,
             includeAllIssueAuthors: repository.includeAllIssueAuthors,
           })
@@ -341,9 +341,9 @@ describe("WorkItemLifecycle", () => {
           )
 
           expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.variant).toBe("max")
+          expect(workItem.thinkingLevel).toBe("max")
           expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.reviewVariant).toBe("max")
+          expect(workItem.reviewThinkingLevel).toBe("max")
         }),
       ))
 
@@ -356,10 +356,10 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.updateConfig({
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -369,9 +369,83 @@ describe("WorkItemLifecycle", () => {
           )
 
           expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.variant).toBe("high")
+          expect(workItem.thinkingLevel).toBe("high")
           expect(workItem.reviewModel).toBe("anthropic/claude-opus-4-6")
-          expect(workItem.reviewVariant).toBe("max")
+          expect(workItem.reviewThinkingLevel).toBe("max")
+        }),
+      ))
+
+    it("does not inherit thinking level when an explicit model has none", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* db.updateConfig({
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: "low",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: repository.paused,
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: repository.autoMerge,
+            includeAllIssueAuthors: repository.includeAllIssueAuthors,
+          })
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.thinkingLevel).toBeNull()
+          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.reviewThinkingLevel).toBeNull()
+        }),
+      ))
+
+    it("inherits the complete harness selection when repository model is absent", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* db.updateConfig({
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: repository.paused,
+            defaultModel: null,
+            defaultThinkingLevel: "max",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: repository.autoMerge,
+            includeAllIssueAuthors: repository.includeAllIssueAuthors,
+          })
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.thinkingLevel).toBe("high")
         }),
       ))
 
@@ -384,19 +458,19 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/deepseek-v4-flash-free",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
           yield* db.updateRepositorySettings({
             repositoryId: repository.id,
             paused: repository.paused,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "max",
+            defaultThinkingLevel: "max",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "high",
+            reviewThinkingLevel: "high",
             autoMerge: repository.autoMerge,
             includeAllIssueAuthors: repository.includeAllIssueAuthors,
           })
@@ -407,9 +481,9 @@ describe("WorkItemLifecycle", () => {
           )
 
           expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.variant).toBe("max")
+          expect(workItem.thinkingLevel).toBe("max")
           expect(workItem.reviewModel).toBe("anthropic/claude-opus-4-6")
-          expect(workItem.reviewVariant).toBe("high")
+          expect(workItem.reviewThinkingLevel).toBe("high")
         }),
       ))
 
@@ -422,10 +496,10 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.updateConfig({
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -435,7 +509,43 @@ describe("WorkItemLifecycle", () => {
           )
 
           expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.reviewVariant).toBe("high")
+          expect(workItem.reviewThinkingLevel).toBe("high")
+        }),
+      ))
+
+    it("keeps a configured review thinking level when review model falls back to build", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* db.updateConfig({
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: "medium",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: repository.paused,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: "max",
+            autoMerge: repository.autoMerge,
+            includeAllIssueAuthors: repository.includeAllIssueAuthors,
+          })
+
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
+          expect(workItem.reviewThinkingLevel).toBe("max")
         }),
       ))
 
@@ -3990,10 +4100,10 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.updateConfig({
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -4014,7 +4124,7 @@ describe("WorkItemLifecycle", () => {
           expect(seen[0]!.worktreePath).toBeNull()
           expect(seen[0]!.sessionId).toBeNull()
           expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(seen[0]!.variant).toBe("high")
+          expect(seen[0]!.thinkingLevel).toBe("high")
 
           expect(seen[1]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[1]!.sessionId).toBeNull()
@@ -4022,28 +4132,28 @@ describe("WorkItemLifecycle", () => {
           expect(seen[2]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[2]!.sessionId).toBeNull()
           expect(seen[2]!.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(seen[2]!.variant).toBe("high")
+          expect(seen[2]!.thinkingLevel).toBe("high")
 
           expect(seen[3]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[3]!.startingCommitOid).toBe("abc123")
           expect(seen[3]!.sessionId).toBe("ses_recorded")
           expect(seen[3]!.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(seen[3]!.variant).toBe("high")
+          expect(seen[3]!.thinkingLevel).toBe("high")
 
           expect(seen[4]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[4]!.sessionId).toBe("ses_recorded")
           expect(seen[4]!.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(seen[4]!.variant).toBe("high")
+          expect(seen[4]!.thinkingLevel).toBe("high")
 
           expect(seen[5]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[5]!.sessionId).toBe("ses_recorded")
           expect(seen[5]!.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(seen[5]!.variant).toBe("high")
+          expect(seen[5]!.thinkingLevel).toBe("high")
 
           expect(seen[6]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[6]!.sessionId).toBe("ses_recorded")
           expect(seen[6]!.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(seen[6]!.variant).toBe("high")
+          expect(seen[6]!.thinkingLevel).toBe("high")
           expect(seen[7]!.worktreePath).toBe("/tmp/worktrees/recorded")
           expect(seen[7]!.sessionId).toBe("ses_recorded")
           expect(seen[8]!.worktreePath).toBe("/tmp/worktrees/recorded")
@@ -6126,7 +6236,7 @@ describe("WorkItemLifecycle", () => {
             [
               startedAt,
               startedAt + 100,
-              STEP_RUN_REASON.waitingForOpencodeSession,
+              STEP_RUN_REASON.waitingForAgentTurn,
               "Waiting for an OpenCode session slot",
               now,
               stepRunId,
@@ -6175,7 +6285,7 @@ describe("WorkItemLifecycle", () => {
                WHERE id = ?`,
               [
                 waitStart,
-                STEP_RUN_REASON.waitingForOpencodeSession,
+                STEP_RUN_REASON.waitingForAgentTurn,
                 "Waiting for an OpenCode session slot",
                 waitStart,
                 stepRunId,
@@ -6273,7 +6383,7 @@ describe("WorkItemLifecycle", () => {
                WHERE id = ?`,
               [
                 waitStart,
-                STEP_RUN_REASON.waitingForOpencodeSession,
+                STEP_RUN_REASON.waitingForAgentTurn,
                 waitStart,
                 stepRunId,
               ],
@@ -7002,9 +7112,9 @@ describe("WorkItemLifecycle", () => {
             repositoryId: repository.id,
             githubIssueNumber: issue.githubIssueNumber,
             model: afterCreate.model,
-            variant: afterCreate.variant,
+            thinkingLevel: afterCreate.thinkingLevel,
             reviewModel: afterCreate.reviewModel,
-            reviewVariant: afterCreate.reviewVariant,
+            reviewThinkingLevel: afterCreate.reviewThinkingLevel,
             worktreePath: "/tmp/worktrees/reset-me",
             startingCommitOid: "abc123",
             completionSummary: null,
@@ -7330,10 +7440,10 @@ describe("WorkItemLifecycle", () => {
         yield* db.updateConfig({
           defaultModel:
             config.defaultModel ?? "opencode/deepseek-v4-flash-free",
-          defaultVariant: config.defaultVariant ?? "low",
+          defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
           reviewModel: config.reviewModel,
-          reviewVariant: config.reviewVariant,
-          maxConcurrentOpencodeSessions: config.maxConcurrentOpencodeSessions,
+          reviewThinkingLevel: config.reviewThinkingLevel,
+          maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
           maxConcurrentWorkItems,
         })
       })

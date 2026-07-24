@@ -1,6 +1,7 @@
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ulid } from "ulidx"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   GitHubService,
@@ -8,7 +9,6 @@ import {
   type TerminalPrStatusCheck,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemBranchName } from "./worktree-names.js"
@@ -615,9 +615,9 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           ),
         )
     }
-    const opencode = yield* Opencode
-    yield* opencode
-      .continue({
+    const agentBackend = yield* AgentBackend
+    yield* agentBackend
+      .continueTurn({
         sessionId,
         prompt: [
           buildInvestigationWorkPrompt(unhandled, diagnostics),
@@ -629,7 +629,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         ].join("\n"),
         cwd: worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout:
           context.maxDuration ??
           DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
@@ -645,13 +645,13 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         ),
       )
     const requestVerdict = (phase: string) =>
-      opencode
-        .continue({
+      agentBackend
+        .continueTurn({
           sessionId,
           prompt: buildInvestigationVerdictPrompt(),
           cwd: worktreePath,
           model: context.model,
-          variant: context.variant,
+          thinkingLevel: context.thinkingLevel,
           timeout:
             context.maxDuration ??
             DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
@@ -679,13 +679,13 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
 
     let investigation = yield* requestVerdict("verdict")
     if (typeof investigation !== "string" && investigation._tag === "failed") {
-      yield* opencode
-        .continue({
+      yield* agentBackend
+        .continueTurn({
           sessionId,
           prompt: buildInvestigationRecoveryPrompt(investigation.reason),
           cwd: worktreePath,
           model: context.model,
-          variant: context.variant,
+          thinkingLevel: context.thinkingLevel,
           timeout:
             context.maxDuration ??
             DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,

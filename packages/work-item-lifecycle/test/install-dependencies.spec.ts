@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
-import { Opencode } from "@ready-for-agent/opencode"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   InstallDependenciesFallbackError,
@@ -21,9 +21,9 @@ const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
   repositoryId: "repo-test",
   githubIssueNumber: 79,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
@@ -31,22 +31,26 @@ const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
 })
 
 const stubOpencode = (impl: {
-  readonly start?: (input: {
+  readonly startTurn?: (input: {
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
   }) => Effect.Effect<{ sessionId: string }, never>
 }) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: (input) =>
-        impl.start?.(input) ??
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: (input) =>
+        impl.startTurn?.(input) ??
         Effect.succeed({ sessionId: "ses_fallback", assistantText: "" }),
-      continue: () =>
+      continueTurn: () =>
         Effect.succeed({ sessionId: "ses_continue", assistantText: "" }),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
@@ -54,9 +58,9 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    Layer.Layer.Success<typeof PlatformLayer> | Opencode
+    Layer.Layer.Success<typeof PlatformLayer> | AgentBackend
   >,
-  opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
+  opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(Effect.provide(opencodeLayer), Effect.provide(PlatformLayer)),
@@ -242,7 +246,7 @@ describe("installDependencies", () => {
         await run(
           installDependencies(baseContext(root)),
           stubOpencode({
-            start: (input) => {
+            startTurn: (input) => {
               started = input
               return Effect.succeed({
                 sessionId: "ses_ambiguous",
@@ -254,7 +258,7 @@ describe("installDependencies", () => {
         expect(started).not.toBeNull()
         expect(started!.cwd).toBe(root)
         expect(started!.model).toBe("opencode/test-model")
-        expect(started!.variant).toBe("high")
+        expect(started!.thinkingLevel).toBe("high")
         expect(started!.prompt).toContain("could not choose")
       },
     ))
@@ -273,7 +277,7 @@ describe("installDependencies", () => {
         await run(
           installDependencies(baseContext(root)),
           stubOpencode({
-            start: () => {
+            startTurn: () => {
               started = true
               return Effect.succeed({
                 sessionId: "ses_conflict",
@@ -303,7 +307,7 @@ describe("installDependencies", () => {
           run(
             installDependencies(baseContext(root)),
             stubOpencode({
-              start: (input) => {
+              startTurn: (input) => {
                 started = { prompt: input.prompt }
                 return Effect.succeed({
                   sessionId: "ses_after_fail",
@@ -337,7 +341,7 @@ describe("installDependencies", () => {
           await run(
             installDependencies(baseContext(root)),
             stubOpencode({
-              start: (input) => {
+              startTurn: (input) => {
                 started = { prompt: input.prompt }
                 return Effect.succeed({
                   sessionId: "ses_missing_manager",
@@ -377,7 +381,7 @@ describe("installDependencies", () => {
           run(
             installDependencies(baseContext(root)),
             stubOpencode({
-              start: (input) => {
+              startTurn: (input) => {
                 started = { prompt: input.prompt }
                 return Effect.succeed({
                   sessionId: "ses_bounded_stderr",
@@ -402,7 +406,7 @@ describe("installDependencies", () => {
             Effect.map(() => "void-success" as const),
           ),
           stubOpencode({
-            start: () =>
+            startTurn: () =>
               Effect.succeed({
                 sessionId: "ses_must_discard",
                 assistantText: "",
@@ -417,7 +421,9 @@ describe("installDependencies", () => {
 
 describe("installDependencies fallback failure", () => {
   it("maps OpenCode exit into InstallDependenciesFallbackError", async () => {
-    const { OpencodeExitError } = await import("@ready-for-agent/opencode")
+    const { AgentBackendExitError } = await import(
+      "@ready-for-agent/agent-backend"
+    )
     const root = await mkdtemp(join(tmpdir(), "rfa-install-fallback-fail-"))
     try {
       const error = await Effect.runPromise(
@@ -425,15 +431,19 @@ describe("installDependencies fallback failure", () => {
           Effect.flip,
           Effect.provide(
             Layer.succeed(
-              Opencode,
-              Opencode.of({
-                start: () =>
+              AgentBackend,
+              AgentBackend.of({
+                startTurn: () =>
                   Effect.fail(
-                    new OpencodeExitError({ exitCode: 2, cwd: root }),
+                    new AgentBackendExitError({ exitCode: 2, cwd: root }),
                   ),
-                continue: () =>
+                continueTurn: () =>
                   Effect.succeed({ sessionId: "unused", assistantText: "" }),
-                listModels: () => Effect.succeed([]),
+                inspect: () =>
+                  Effect.succeed({
+                    backend: { id: "opencode" as const, label: "OpenCode" },
+                    models: [],
+                  }),
               }),
             ),
           ),

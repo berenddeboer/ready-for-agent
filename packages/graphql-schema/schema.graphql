@@ -9,11 +9,10 @@ type Query {
   repositoryCredentials: [RepositoryCredential!]!
   config: Config!
   """
-  OpenCode models available to the harness, each with that model's thinking-level
-  (variant) keys from `opencode models --verbose`. Empty variants means the model
-  has no thinking levels.
+  Agent Models available from the Active Agent Backend, each with optional
+  Thinking Levels. Empty thinkingLevels means the model has no Thinking Levels.
   """
-  models: [OpencodeModel!]!
+  models: [AgentModel!]!
   issues(repositoryId: ID!): [Issue!]!
   """
   Work Items for a repository (or one issue when githubIssueNumber is set).
@@ -95,19 +94,20 @@ enum WorkItemsListKind {
 
 type Config {
   defaultModel: String
-  defaultVariant: String
+  defaultThinkingLevel: String
   reviewModel: String
-  reviewVariant: String
-  maxConcurrentOpencodeSessions: Int!
+  reviewThinkingLevel: String
+  maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
 }
 
-type OpencodeModel {
+type AgentModel {
   id: String!
   """
-  Thinking-level keys supported by this model (OpenCode variants), e.g. low, high, xhigh.
+  Thinking Levels supported by this model, e.g. low, high, xhigh.
+  Empty when the model has no Thinking Levels.
   """
-  variants: [String!]!
+  thinkingLevels: [String!]!
 }
 
 type Repository {
@@ -118,9 +118,9 @@ type Repository {
   isBare: Boolean!
   paused: Boolean!
   defaultModel: String
-  defaultVariant: String
+  defaultThinkingLevel: String
   reviewModel: String
-  reviewVariant: String
+  reviewThinkingLevel: String
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!
   issuesReconciledAt: String
@@ -235,7 +235,7 @@ type WorkItem {
   issueTitle: String
   githubPullRequestNumber: Int
   model: String!
-  variant: String!
+  thinkingLevel: String
   state: WorkItemState!
   stateLabel: String!
   status: WorkItemStatus!
@@ -269,10 +269,10 @@ input AddRepositoryInput {
 
 input UpdateConfigInput {
   defaultModel: String!
-  defaultVariant: String!
+  defaultThinkingLevel: String
   reviewModel: String
-  reviewVariant: String
-  maxConcurrentOpencodeSessions: Int!
+  reviewThinkingLevel: String
+  maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
 }
 
@@ -280,9 +280,9 @@ input UpdateRepositorySettingsInput {
   repositoryId: ID!
   paused: Boolean!
   defaultModel: String
-  defaultVariant: String
+  defaultThinkingLevel: String
   reviewModel: String
-  reviewVariant: String
+  reviewThinkingLevel: String
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!
 }

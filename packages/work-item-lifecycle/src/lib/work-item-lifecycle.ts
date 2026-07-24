@@ -30,6 +30,7 @@ import {
   type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
+import { CurrentStepRun } from "./agent-turn-limiter.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   AbandonCleanupError,
@@ -55,7 +56,6 @@ import {
   LifecycleSteps,
   type RunHandlerError,
 } from "./lifecycle-steps.js"
-import { CurrentStepRun } from "./opencode-session-limiter.js"
 import { PrStatusChecksUnresolvedError } from "./pr-status-checks.js"
 import {
   PreCommitHookFailedError,
@@ -237,9 +237,9 @@ type WorkItemRow = {
   readonly issue_title: string | null
   readonly github_pull_request_number: number | null
   readonly model: string
-  readonly variant: string
+  readonly thinking_level: string | null
   readonly review_model: string
-  readonly review_variant: string
+  readonly review_thinking_level: string | null
   readonly state: WorkItemState
   readonly state_ready_at: number
   readonly paused: boolean | number
@@ -322,9 +322,9 @@ const toWorkItemRecord = (
   issueTitle: row.issue_title,
   githubPullRequestNumber: row.github_pull_request_number,
   model: row.model,
-  variant: row.variant,
+  thinkingLevel: row.thinking_level,
   reviewModel: row.review_model,
-  reviewVariant: row.review_variant,
+  reviewThinkingLevel: row.review_thinking_level,
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
   paused: Boolean(row.paused),
@@ -346,8 +346,8 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
-const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, model, variant, review_model,
-                   review_variant, state, state_ready_at, paused, waiting_since, holds_worker_slot,
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, model, thinking_level, review_model,
+                   review_thinking_level, state, state_ready_at, paused, waiting_since, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
@@ -2552,9 +2552,9 @@ export const makeWorkItemLifecycleLive = (
                 repositoryId: workItem.repository_id,
                 githubIssueNumber: workItem.github_issue_number,
                 model: workItem.model,
-                variant: workItem.variant,
+                thinkingLevel: workItem.thinking_level,
                 reviewModel: workItem.review_model,
-                reviewVariant: workItem.review_variant,
+                reviewThinkingLevel: workItem.review_thinking_level,
                 worktreePath: workItem.worktree_path,
                 startingCommitOid: workItem.starting_commit_oid,
                 completionSummary: workItem.completion_summary,
@@ -2583,8 +2583,7 @@ export const makeWorkItemLifecycleLive = (
                   const remainingMs = maxDurationMs - productiveElapsedMs
                   const waitingForSession =
                     current.session_wait_started_at !== null ||
-                    current.reason_code ===
-                      STEP_RUN_REASON.waitingForOpencodeSession
+                    current.reason_code === STEP_RUN_REASON.waitingForAgentTurn
                   // While session-slot wait freezes the clock, poll; otherwise
                   // sleep up to the remaining productive budget (capped).
                   const sleepMs = waitingForSession
@@ -3008,9 +3007,9 @@ export const makeWorkItemLifecycleLive = (
         repositoryId: row.repository_id,
         githubIssueNumber: row.github_issue_number,
         model: row.model,
-        variant: row.variant,
+        thinkingLevel: row.thinking_level,
         reviewModel: row.review_model,
-        reviewVariant: row.review_variant,
+        reviewThinkingLevel: row.review_thinking_level,
         worktreePath: row.worktree_path,
         startingCommitOid: row.starting_commit_oid,
         completionSummary: row.completion_summary,
@@ -3430,9 +3429,9 @@ export const makeWorkItemLifecycleLive = (
             repositoryId: currentWorkItem.repository_id,
             githubIssueNumber: currentWorkItem.github_issue_number,
             model: currentWorkItem.model,
-            variant: currentWorkItem.variant,
+            thinkingLevel: currentWorkItem.thinking_level,
             reviewModel: currentWorkItem.review_model,
-            reviewVariant: currentWorkItem.review_variant,
+            reviewThinkingLevel: currentWorkItem.review_thinking_level,
             worktreePath: currentWorkItem.worktree_path,
             startingCommitOid: currentWorkItem.starting_commit_oid,
             completionSummary: currentWorkItem.completion_summary,
@@ -3876,17 +3875,56 @@ export const makeWorkItemLifecycleLive = (
           const config = yield* db.getConfig
           const repositories = yield* db.listRepositories
           const repository = repositories.find(({ id }) => id === repositoryId)
-          const model = repository?.defaultModel ?? config.defaultModel
-          const variant = repository?.defaultVariant ?? config.defaultVariant
-          if (model === null || variant === null) {
+          const hasRepoBuildModel =
+            repository?.defaultModel !== null &&
+            repository?.defaultModel !== undefined &&
+            repository.defaultModel.trim() !== ""
+          const buildSelection = hasRepoBuildModel
+            ? {
+                model: repository.defaultModel as string,
+                thinkingLevel: repository.defaultThinkingLevel ?? null,
+              }
+            : {
+                model: config.defaultModel,
+                thinkingLevel: config.defaultThinkingLevel ?? null,
+              }
+          if (
+            buildSelection.model === null ||
+            buildSelection.model.trim() === ""
+          ) {
             return yield* new BuildModelNotConfiguredError({
               message: "Select a default build model first",
             })
           }
-          const reviewModel =
-            repository?.reviewModel ?? config.reviewModel ?? model
-          const reviewVariant =
-            repository?.reviewVariant ?? config.reviewVariant ?? variant
+          const model = buildSelection.model
+          const thinkingLevel = buildSelection.thinkingLevel
+          const hasRepoReviewModel =
+            repository?.reviewModel !== null &&
+            repository?.reviewModel !== undefined &&
+            repository.reviewModel.trim() !== ""
+          const hasHarnessReviewModel =
+            config.reviewModel !== null &&
+            config.reviewModel !== undefined &&
+            config.reviewModel.trim() !== ""
+          const reviewSelection = hasRepoReviewModel
+            ? {
+                model: repository.reviewModel as string,
+                thinkingLevel: repository.reviewThinkingLevel ?? null,
+              }
+            : hasHarnessReviewModel
+              ? {
+                  model: config.reviewModel as string,
+                  thinkingLevel: config.reviewThinkingLevel ?? null,
+                }
+              : {
+                  model: buildSelection.model,
+                  thinkingLevel:
+                    repository?.reviewThinkingLevel ??
+                    config.reviewThinkingLevel ??
+                    buildSelection.thinkingLevel,
+                }
+          const reviewModel = reviewSelection.model
+          const reviewThinkingLevel = reviewSelection.thinkingLevel
           const workItemId = makeWorkItemId()
           const now = yield* Clock.currentTimeMillis
           const step: OperationalLifecycleStep = "create_worktree"
@@ -3900,8 +3938,8 @@ export const makeWorkItemLifecycleLive = (
 
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
-                 id, repository_id, github_issue_number, model, variant,
-                  issue_title, review_model, review_variant, state, state_ready_at, paused,
+                 id, repository_id, github_issue_number, model, thinking_level,
+                  issue_title, review_model, review_thinking_level, state, state_ready_at, paused,
                   waiting_since, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
@@ -3911,10 +3949,10 @@ export const makeWorkItemLifecycleLive = (
                     repositoryId,
                     githubIssueNumber,
                     model,
-                    variant,
+                    thinkingLevel,
                     issue.title,
                     reviewModel,
-                    reviewVariant,
+                    reviewThinkingLevel,
                     step,
                     now,
                     admit ? null : now,

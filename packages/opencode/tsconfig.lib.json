@@ -9,5 +9,9 @@
     "types": ["node", "bun"]
   },
   "include": ["src/**/*.ts"],
-  "references": []
+  "references": [
+    {
+      "path": "../agent-backend/tsconfig.lib.json"
+    }
+  ]
 }

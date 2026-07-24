@@ -1,15 +1,11 @@
 import { Effect, Schema } from "effect"
+import { sanitizeInheritedEnvironment } from "@ready-for-agent/agent-backend"
 import { OpencodeConfigError } from "./errors.js"
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
 const DEFAULT_MCP_TIMEOUT_MS = 300_000
-
-const isGitHubTokenEnvName = (name: string) =>
-  name === "GH_TOKEN" ||
-  name === "GITHUB_TOKEN" ||
-  name.startsWith("GITHUB_TOKEN_")
 
 const OpencodeConfigObject = Schema.Record(Schema.String, Schema.Unknown)
 const OpencodeConfigFromJson = Schema.fromJsonString(OpencodeConfigObject)
@@ -67,12 +63,7 @@ export const makeOpencodeEnvironment = Effect.fn("makeOpencodeEnvironment")(
           }
 
     return {
-      ...Object.fromEntries(
-        Object.entries(environment).filter(
-          (entry): entry is [string, string] =>
-            entry[1] !== undefined && !isGitHubTokenEnvName(entry[0]),
-        ),
-      ),
+      ...sanitizeInheritedEnvironment(environment),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
     }
   },

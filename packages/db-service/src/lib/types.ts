@@ -36,9 +36,9 @@ export const RepositoryRecord = Schema.Struct({
   isBare: Schema.Boolean,
   paused: Schema.Boolean,
   defaultModel: Schema.NullOr(Schema.String),
-  defaultVariant: Schema.NullOr(Schema.String),
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
-  reviewVariant: Schema.NullOr(Schema.String),
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
   autoMerge: Schema.Boolean,
   includeAllIssueAuthors: Schema.Boolean,
   issuesReconciledAt: Schema.NullOr(Schema.Date),
@@ -49,9 +49,9 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   repositoryId: Schema.String,
   paused: Schema.Boolean,
   defaultModel: Schema.NullOr(Schema.String),
-  defaultVariant: Schema.NullOr(Schema.String),
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
-  reviewVariant: Schema.NullOr(Schema.String),
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
   autoMerge: Schema.Boolean,
   includeAllIssueAuthors: Schema.Boolean,
 })
@@ -60,10 +60,10 @@ export type UpdateRepositorySettingsInput =
 
 export const ConfigRecord = Schema.Struct({
   defaultModel: Schema.NullOr(Schema.String),
-  defaultVariant: Schema.NullOr(Schema.String),
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
-  reviewVariant: Schema.NullOr(Schema.String),
-  maxConcurrentOpencodeSessions: Schema.Int.pipe(
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
+  maxConcurrentAgentTurns: Schema.Int.pipe(
     Schema.check(Schema.isGreaterThan(0)),
   ),
   maxConcurrentWorkItems: Schema.Int.pipe(
@@ -74,10 +74,10 @@ export type ConfigRecord = typeof ConfigRecord.Type
 
 export const UpdateConfigInput = Schema.Struct({
   defaultModel: Schema.String,
-  defaultVariant: Schema.String,
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
-  reviewVariant: Schema.NullOr(Schema.String),
-  maxConcurrentOpencodeSessions: Schema.Finite,
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
+  maxConcurrentAgentTurns: Schema.Finite,
   maxConcurrentWorkItems: Schema.Finite,
 })
 export type UpdateConfigInput = typeof UpdateConfigInput.Type
@@ -134,9 +134,9 @@ export const RepositorySqlRow = Schema.Struct({
   isBare: SqlBoolean,
   paused: SqlBoolean,
   defaultModel: Schema.NullOr(Schema.String),
-  defaultVariant: Schema.NullOr(Schema.String),
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
-  reviewVariant: Schema.NullOr(Schema.String),
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
   autoMerge: SqlBoolean,
   includeAllIssueAuthors: SqlBoolean,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
@@ -147,9 +147,9 @@ export const RepositorySqlRow = Schema.Struct({
     localPath: "local_path",
     isBare: "is_bare",
     defaultModel: "default_model",
-    defaultVariant: "default_variant",
+    defaultThinkingLevel: "default_thinking_level",
     reviewModel: "review_model",
-    reviewVariant: "review_variant",
+    reviewThinkingLevel: "review_thinking_level",
     autoMerge: "auto_merge",
     includeAllIssueAuthors: "include_all_issue_authors",
     issuesReconciledAt: "issues_reconciled_at",
@@ -159,18 +159,18 @@ export type RepositorySqlRow = typeof RepositorySqlRow.Type
 
 export const ConfigSqlRow = Schema.Struct({
   defaultModel: Schema.NullOr(Schema.String),
-  defaultVariant: Schema.NullOr(Schema.String),
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
-  reviewVariant: Schema.NullOr(Schema.String),
-  maxConcurrentOpencodeSessions: Schema.Int,
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
+  maxConcurrentAgentTurns: Schema.Int,
   maxConcurrentWorkItems: Schema.Int,
 }).pipe(
   Schema.encodeKeys({
     defaultModel: "default_model",
-    defaultVariant: "default_variant",
+    defaultThinkingLevel: "default_thinking_level",
     reviewModel: "review_model",
-    reviewVariant: "review_variant",
-    maxConcurrentOpencodeSessions: "max_concurrent_opencode_sessions",
+    reviewThinkingLevel: "review_thinking_level",
+    maxConcurrentAgentTurns: "max_concurrent_agent_turns",
     maxConcurrentWorkItems: "max_concurrent_work_items",
   }),
 )

@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   makeRepositoryRecord,
@@ -15,7 +16,6 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import {
   AUTOMATED_REVIEW_RERUN_LIMIT,
   type LifecycleStepContext,
@@ -43,9 +43,9 @@ const context: LifecycleStepContext = {
   repositoryId: repository.id,
   githubIssueNumber: 42,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath: "/tmp/worktree",
   startingCommitOid: null,
   completionSummary: null,
@@ -77,7 +77,7 @@ const seedWorkItem = Effect.gen(function* () {
   )
   yield* sql.unsafe(
     `INSERT INTO work_item (
-       id, repository_id, github_issue_number, model, variant, review_model, review_variant, state,
+       id, repository_id, github_issue_number, model, thinking_level, review_model, review_thinking_level, state,
        state_ready_at, worktree_path, session_id, failure_code, failure_message,
        created_at, updated_at
       ) VALUES (?, ?, 42, 'opencode/test-model', 'high', 'opencode/test-model', 'high',
@@ -111,16 +111,20 @@ const opencodeWith = (
 ) => {
   let call = 0
   return Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: () => Effect.die("unused"),
-      continue: (input) => {
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: () => Effect.die("unused"),
+      continueTurn: (input) => {
         onContinue?.(input.prompt, input.sessionId)
         const assistantText = outputs[call] ?? outputs.at(-1) ?? ""
         call += 1
         return Effect.succeed({ sessionId: input.sessionId, assistantText })
       },
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 }

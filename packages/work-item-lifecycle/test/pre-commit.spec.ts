@@ -12,11 +12,11 @@ import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { type Duration, Effect, Layer } from "effect"
 import {
-  Opencode,
-  OpencodeExitError,
-  OpencodeTimeoutError,
-  SessionIdNotFoundError,
-} from "@ready-for-agent/opencode"
+  AgentBackend,
+  AgentBackendExitError,
+  AgentBackendSessionIdMissingError,
+  AgentBackendTimeoutError,
+} from "@ready-for-agent/agent-backend"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   PreCommitInvalidWorktreeContextError,
@@ -38,9 +38,9 @@ const baseContext = (
   repositoryId: "repo-test",
   githubIssueNumber: 90,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
@@ -49,44 +49,48 @@ const baseContext = (
 })
 
 const stubOpencode = (impl: {
-  readonly start?: (input: {
+  readonly startTurn?: (input: {
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
     readonly timeout?: Duration.Input
   }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
-  readonly continue?: (input: {
+  readonly continueTurn?: (input: {
     readonly sessionId: string
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
     readonly timeout?: Duration.Input
   }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: (input) =>
-        impl.start?.(input) ??
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: (input) =>
+        impl.startTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_start_should_not_run",
           assistantText: "",
         }),
-      continue: (input) =>
-        impl.continue?.(input) ??
+      continueTurn: (input) =>
+        impl.continueTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_pre_commit_default",
           assistantText: "",
         }),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Opencode>,
-  opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
+  effect: Effect.Effect<A, E, AgentBackend>,
+  opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(Effect.provide(opencodeLayer), Effect.provide(PlatformLayer)),
@@ -155,7 +159,7 @@ describe("preCommit", () => {
       await run(
         preCommit(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             continues += 1
             return Effect.succeed({
               sessionId: "ses_unused",
@@ -175,7 +179,7 @@ describe("preCommit", () => {
       await run(
         preCommit(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             continues += 1
             return Effect.succeed({
               sessionId: "ses_unused",
@@ -209,12 +213,12 @@ describe("preCommit", () => {
       await run(
         preCommit(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             prompts.push(input.prompt)
             expect(input.sessionId).toBe("ses_pre_commit")
             expect(input.cwd).toBe(root)
             expect(input.model).toBe("opencode/test-model")
-            expect(input.variant).toBe("high")
+            expect(input.thinkingLevel).toBe("high")
             return Effect.promise(async () => {
               await writeFile(join(root, ".pre-commit-fixed"), "ok\n")
               return {
@@ -264,7 +268,7 @@ describe("preCommit", () => {
       await run(
         preCommit(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             prompt = input.prompt
             const match = input.prompt.match(/Full hook output is at: (.+)$/m)
             logPath = match?.[1]?.trim() ?? ""
@@ -309,7 +313,7 @@ describe("preCommit", () => {
       await run(
         preCommit(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             const match = input.prompt.match(/Full hook output is at: (.+)$/m)
             const logPath = match?.[1]?.trim() ?? ""
             return Effect.promise(async () => {
@@ -353,7 +357,7 @@ describe("preCommit", () => {
       await run(
         preCommit(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             continues += 1
             return Effect.succeed({
               sessionId: "ses_pre_commit",
@@ -373,9 +377,9 @@ describe("preCommit", () => {
       const error = await run(
         preCommit(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () =>
+          continueTurn: () =>
             Effect.fail(
-              new OpencodeExitError({
+              new AgentBackendExitError({
                 exitCode: 2,
                 cwd: root,
                 sessionId: "ses_pre_commit",
@@ -394,17 +398,17 @@ describe("preCommit", () => {
       await writeFile(join(root, "change.txt"), "hello\n")
 
       for (const cause of [
-        new OpencodeTimeoutError({
+        new AgentBackendTimeoutError({
           cwd: root,
           timeoutMs: 1,
           sessionId: "ses_pre_commit",
         }),
-        new SessionIdNotFoundError({ cwd: root }),
+        new AgentBackendSessionIdMissingError({ cwd: root }),
       ]) {
         const error = await run(
           preCommit(baseContext(root)).pipe(Effect.flip),
           stubOpencode({
-            continue: () => Effect.fail(cause),
+            continueTurn: () => Effect.fail(cause),
           }),
         )
         expect(error).toBeInstanceOf(PreCommitOpenCodeError)

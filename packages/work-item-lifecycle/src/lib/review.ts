@@ -1,9 +1,9 @@
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
-import { Opencode } from "@ready-for-agent/opencode"
+import { CurrentStepRun } from "./agent-turn-limiter.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
-import { CurrentStepRun } from "./opencode-session-limiter.js"
 import { preCommit } from "./pre-commit.js"
 import {
   ReviewInvalidWorktreeContextError,
@@ -474,20 +474,20 @@ export const review = (context: LifecycleStepContext) =>
     const sessionId = yield* resolveSessionId(context)
     const timeout =
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.review
-    const opencode = yield* Opencode
+    const agentBackend = yield* AgentBackend
     let fixRoundsUsed = 0
 
     for (;;) {
       yield* markReviewingPhase
 
-      const reviewing = yield* opencode
-        .continue({
+      const reviewing = yield* agentBackend
+        .continueTurn({
           sessionId,
           command: REVIEW_AGENT_COMMAND,
           prompt: buildReviewingPrompt(),
           cwd: worktreePath,
           model: context.reviewModel,
-          variant: context.reviewVariant,
+          thinkingLevel: context.reviewThinkingLevel,
           timeout,
         })
         .pipe(
@@ -504,13 +504,13 @@ export const review = (context: LifecycleStepContext) =>
 
       let reviewingParsed = parseReviewResult(reviewing.assistantText)
       if (reviewingParsed === null && !hasResultLine(reviewing.assistantText)) {
-        const verdict = yield* opencode
-          .continue({
+        const verdict = yield* agentBackend
+          .continueTurn({
             sessionId,
             prompt: buildReviewVerdictPrompt(),
             cwd: worktreePath,
             model: context.reviewModel,
-            variant: context.reviewVariant,
+            thinkingLevel: context.reviewThinkingLevel,
             timeout,
           })
           .pipe(
@@ -550,13 +550,13 @@ export const review = (context: LifecycleStepContext) =>
 
       yield* markApplyingFindingsPhase
 
-      const applying = yield* opencode
-        .continue({
+      const applying = yield* agentBackend
+        .continueTurn({
           sessionId,
           prompt: buildApplyFindingsPrompt(originalSeverity),
           cwd: worktreePath,
           model: context.model,
-          variant: context.variant,
+          thinkingLevel: context.thinkingLevel,
           timeout,
         })
         .pipe(
@@ -632,13 +632,13 @@ export const review = (context: LifecycleStepContext) =>
 
       if (originalSeverity === "low") {
         yield* markAssessingRerunPhase
-        const assessment = yield* opencode
-          .continue({
+        const assessment = yield* agentBackend
+          .continueTurn({
             sessionId,
             prompt: buildRerunAssessmentPrompt(),
             cwd: worktreePath,
             model: context.model,
-            variant: context.variant,
+            thinkingLevel: context.thinkingLevel,
             timeout,
           })
           .pipe(

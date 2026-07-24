@@ -57,9 +57,9 @@ export interface LifecycleStepContext {
   readonly repositoryId: string
   readonly githubIssueNumber: number
   readonly model: string
-  readonly variant: string
+  readonly thinkingLevel: string | null
   readonly reviewModel: string
-  readonly reviewVariant: string
+  readonly reviewThinkingLevel: string | null
   readonly worktreePath: string | null
   readonly startingCommitOid: string | null
   readonly completionSummary: string | null

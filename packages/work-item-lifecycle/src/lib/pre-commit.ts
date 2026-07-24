@@ -1,7 +1,7 @@
 import { dirname } from "node:path"
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Opencode } from "@ready-for-agent/opencode"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   PreCommitInvalidWorktreeContextError,
@@ -132,14 +132,14 @@ const askOpencodeToFix = (
   Effect.scoped(
     Effect.gen(function* () {
       const logPath = yield* writeHookOutputLog(context.workItemId, output)
-      const opencode = yield* Opencode
-      yield* opencode
-        .continue({
+      const agentBackend = yield* AgentBackend
+      yield* agentBackend
+        .continueTurn({
           sessionId,
           prompt: buildFixPrompt(exitCode, logPath),
           cwd: worktreePath,
           model: context.model,
-          variant: context.variant,
+          thinkingLevel: context.thinkingLevel,
           timeout:
             context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.pre_commit,
         })

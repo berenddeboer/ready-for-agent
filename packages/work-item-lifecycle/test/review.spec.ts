@@ -4,14 +4,14 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import {
+  AgentBackend,
+  AgentBackendExitError,
+  AgentBackendSessionIdMissingError,
+  AgentBackendTimeoutError,
+} from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbServiceLive } from "@ready-for-agent/db-service"
-import {
-  Opencode,
-  OpencodeExitError,
-  OpencodeTimeoutError,
-  SessionIdNotFoundError,
-} from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CurrentStepRun,
@@ -52,9 +52,9 @@ const baseContext = (
   repositoryId: "repo-test",
   githubIssueNumber: 91,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
@@ -63,39 +63,43 @@ const baseContext = (
 })
 
 const stubOpencode = (impl: {
-  readonly start?: (input: {
+  readonly startTurn?: (input: {
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
     readonly timeout?: Duration.Input
   }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
-  readonly continue?: (input: {
+  readonly continueTurn?: (input: {
     readonly sessionId: string
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
     readonly timeout?: Duration.Input
     readonly command?: string
   }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: (input) =>
-        impl.start?.(input) ??
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: (input) =>
+        impl.startTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_start_should_not_run",
           assistantText: "",
         }),
-      continue: (input) =>
-        impl.continue?.(input) ??
+      continueTurn: (input) =>
+        impl.continueTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_review_default",
           assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
         }),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
@@ -103,12 +107,12 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    | Opencode
+    | AgentBackend
     | Layer.Layer.Success<typeof PlatformLayer>
     | Layer.Layer.Success<typeof DbServiceLive>
     | Layer.Layer.Success<typeof DatabaseTest>
   >,
-  opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
+  opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
@@ -460,18 +464,18 @@ describe("review", () => {
           baseContext(root, {
             sessionId: "ses_from_implement",
             model: "opencode/build-model",
-            variant: "high",
+            thinkingLevel: "high",
             reviewModel: "opencode/review-model",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             maxDuration: Duration.minutes(45),
           }),
         ),
         stubOpencode({
-          start: () => {
+          startTurn: () => {
             started = true
             return Effect.succeed({ sessionId: "ses_wrong", assistantText: "" })
           },
-          continue: (input) => {
+          continueTurn: (input) => {
             continued = input
             return Effect.succeed({
               sessionId: "ses_from_implement",
@@ -487,7 +491,7 @@ describe("review", () => {
       expect(continued!.sessionId).toBe("ses_from_implement")
       expect(continued!.cwd).toBe(root)
       expect(continued!.model).toBe("opencode/review-model")
-      expect(continued!.variant).toBe("max")
+      expect(continued!.thinkingLevel).toBe("max")
       expect(Duration.toMillis(continued!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(45)),
       )
@@ -515,7 +519,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
@@ -532,7 +536,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               prompt: input.prompt,
               ...(input.command !== undefined
@@ -579,7 +583,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               prompt: input.prompt,
               ...(input.command !== undefined
@@ -632,7 +636,7 @@ describe("review", () => {
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               prompt: input.prompt,
               model: input.model,
@@ -690,16 +694,16 @@ describe("review", () => {
         review(
           baseContext(root, {
             model: "opencode/build-model",
-            variant: "high",
+            thinkingLevel: "high",
             reviewModel: "opencode/review-model",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               model: input.model,
-              variant: input.variant,
+              thinkingLevel: input.thinkingLevel,
               prompt: input.prompt,
               command: input.command,
             })
@@ -721,11 +725,11 @@ describe("review", () => {
 
       expect(continues).toHaveLength(2)
       expect(continues[0]!.model).toBe("opencode/review-model")
-      expect(continues[0]!.variant).toBe("max")
+      expect(continues[0]!.thinkingLevel).toBe("max")
       expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
       expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
-      expect(continues[1]!.variant).toBe("high")
+      expect(continues[1]!.thinkingLevel).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[1]!.prompt).toContain("REVIEW_DEFERRED:")
       expect(continues[1]!.prompt).toContain("severity low")
@@ -742,7 +746,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
@@ -767,7 +771,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
@@ -791,7 +795,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
@@ -816,7 +820,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
@@ -840,7 +844,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
@@ -874,16 +878,16 @@ describe("review", () => {
         review(
           baseContext(root, {
             model: "opencode/build-model",
-            variant: "high",
+            thinkingLevel: "high",
             reviewModel: "opencode/review-model",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               model: input.model,
-              variant: input.variant,
+              thinkingLevel: input.thinkingLevel,
               prompt: input.prompt,
               command: input.command,
             })
@@ -913,14 +917,14 @@ describe("review", () => {
       expect(result).toEqual({ _tag: "clean" })
       expect(continues).toHaveLength(3)
       expect(continues[0]!.model).toBe("opencode/review-model")
-      expect(continues[0]!.variant).toBe("max")
+      expect(continues[0]!.thinkingLevel).toBe("max")
       expect(continues[0]!.command).toBe(REVIEW_AGENT_COMMAND)
       expect(continues[0]!.prompt).toBe(buildReviewingPrompt())
       expect(continues[1]!.model).toBe("opencode/build-model")
-      expect(continues[1]!.variant).toBe("high")
+      expect(continues[1]!.thinkingLevel).toBe("high")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[2]!.model).toBe("opencode/review-model")
-      expect(continues[2]!.variant).toBe("max")
+      expect(continues[2]!.thinkingLevel).toBe("max")
       expect(continues[2]!.command).toBe(REVIEW_AGENT_COMMAND)
       expect(continues[2]!.prompt).toBe(buildReviewingPrompt())
       expect(continues.some((turn) => isAssessmentTurn(turn))).toBe(false)
@@ -945,7 +949,7 @@ describe("review", () => {
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               model: input.model,
               prompt: input.prompt,
@@ -997,7 +1001,7 @@ describe("review", () => {
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               model: input.model,
               prompt: input.prompt,
@@ -1050,16 +1054,16 @@ describe("review", () => {
         review(
           baseContext(root, {
             model: "opencode/build-model",
-            variant: "high",
+            thinkingLevel: "high",
             reviewModel: "opencode/review-model",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               model: input.model,
-              variant: input.variant,
+              thinkingLevel: input.thinkingLevel,
               prompt: input.prompt,
               command: input.command,
             })
@@ -1096,7 +1100,7 @@ describe("review", () => {
       expect(continues[1]!.model).toBe("opencode/build-model")
       expect(continues[1]!.prompt).toContain("REVIEW_FIXED")
       expect(continues[2]!.model).toBe("opencode/build-model")
-      expect(continues[2]!.variant).toBe("high")
+      expect(continues[2]!.thinkingLevel).toBe("high")
       expect(continues[2]!.command).toBeUndefined()
       expect(continues[2]!.prompt).toBe(buildRerunAssessmentPrompt())
       expect(continues[2]!.prompt).toContain(
@@ -1118,7 +1122,7 @@ describe("review", () => {
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
@@ -1171,7 +1175,7 @@ describe("review", () => {
           }),
         ),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               model: input.model,
               prompt: input.prompt,
@@ -1221,7 +1225,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             continues.push({
               prompt: input.prompt,
               command: input.command,
@@ -1272,7 +1276,7 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             if (turn <= 2) {
               return Effect.succeed({
@@ -1284,7 +1288,7 @@ describe("review", () => {
               })
             }
             return Effect.fail(
-              new OpencodeExitError({ exitCode: 2, cwd: root }),
+              new AgentBackendExitError({ exitCode: 2, cwd: root }),
             )
           },
         }),
@@ -1303,7 +1307,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             turn += 1
             if (isReviewingTurn(input)) {
               return Effect.succeed({
@@ -1344,7 +1348,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             if (isReviewingTurn(input)) {
               reviewingPasses += 1
               return Effect.succeed({
@@ -1389,7 +1393,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             if (isReviewingTurn(input)) {
               reviewingPasses += 1
               return Effect.succeed({
@@ -1424,7 +1428,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             if (isReviewingTurn(input)) {
               return Effect.succeed({
                 sessionId: "ses_implement_session",
@@ -1473,7 +1477,7 @@ describe("review", () => {
       const result = await run(
         review(baseContext(root)),
         stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             if (isReviewingTurn(input)) {
               reviewingPasses += 1
               return Effect.succeed({
@@ -1547,8 +1551,8 @@ describe("review", () => {
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant,
-               review_model, review_variant, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, model, thinking_level,
+               review_model, review_thinking_level, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'review', ?,
                ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
@@ -1571,7 +1575,7 @@ describe("review", () => {
             }),
             Effect.provide(
               stubOpencode({
-                continue: (input) =>
+                continueTurn: (input) =>
                   Effect.gen(function* () {
                     turn += 1
                     if (input.prompt.includes("pre-commit")) {
@@ -1640,8 +1644,8 @@ describe("review", () => {
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant,
-               review_model, review_variant, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, model, thinking_level,
+               review_model, review_thinking_level, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'review', ?,
                ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
@@ -1664,7 +1668,7 @@ describe("review", () => {
             }),
             Effect.provide(
               stubOpencode({
-                continue: () =>
+                continueTurn: () =>
                   Effect.gen(function* () {
                     turn += 1
                     if (turn === 2) {
@@ -1727,8 +1731,8 @@ describe("review", () => {
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant,
-               review_model, review_variant, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, model, thinking_level,
+               review_model, review_thinking_level, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'review', ?,
                ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
@@ -1750,7 +1754,7 @@ describe("review", () => {
             }),
             Effect.provide(
               stubOpencode({
-                continue: (input) =>
+                continueTurn: (input) =>
                   Effect.gen(function* () {
                     if (isAssessmentTurn(input)) {
                       const rows = (yield* sql.unsafe(
@@ -1800,7 +1804,7 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText: "Review complete with no machine line",
@@ -1816,7 +1820,7 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             turn += 1
             return Effect.succeed({
               sessionId: "ses_implement_session",
@@ -1838,7 +1842,7 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () => {
+          continueTurn: () => {
             continues += 1
             return continues === 1
               ? Effect.succeed({
@@ -1864,7 +1868,7 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         stubOpencode({
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({
               sessionId: "ses_implement_session",
               assistantText:
@@ -1880,13 +1884,19 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            continue: () =>
-              Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
-            listModels: () => Effect.succeed([]),
+            continueTurn: () =>
+              Effect.fail(
+                new AgentBackendExitError({ exitCode: 2, cwd: root }),
+              ),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -1899,15 +1909,19 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            continue: () =>
+            continueTurn: () =>
               Effect.fail(
-                new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
+                new AgentBackendTimeoutError({ cwd: root, timeoutMs: 1_000 }),
               ),
-            listModels: () => Effect.succeed([]),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -1919,13 +1933,17 @@ describe("review", () => {
       const error = await run(
         review(baseContext(root)).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            continue: () =>
-              Effect.fail(new SessionIdNotFoundError({ cwd: root })),
-            listModels: () => Effect.succeed([]),
+            continueTurn: () =>
+              Effect.fail(new AgentBackendSessionIdMissingError({ cwd: root })),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )

@@ -4,13 +4,13 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import {
+  AgentBackend,
+  AgentBackendExitError,
+  AgentBackendMalformedOutputError,
+  AgentBackendTimeoutError,
   type OnSessionId,
-  Opencode,
-  OpencodeExitError,
-  OpencodeIncompleteOutputError,
-  OpencodeTimeoutError,
-  parseVerboseModelsOutput,
-} from "../src/index.js"
+} from "@ready-for-agent/agent-backend"
+import { Opencode, parseVerboseModelsOutput } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 const withExecutable = async <A>(
@@ -28,19 +28,20 @@ const withExecutable = async <A>(
   }
 }
 
-const start = (
+const startTurn = (
   binary: string,
   timeout: string,
   onSessionId?: OnSessionId,
   prompt = "test",
+  thinkingLevel: string | null = "test",
 ) =>
   Effect.gen(function* () {
-    const opencode = yield* Opencode
-    return yield* opencode.start({
+    const backend = yield* AgentBackend
+    return yield* backend.startTurn({
       cwd: process.cwd(),
       prompt,
       model: "test/model",
-      variant: "test",
+      thinkingLevel,
       timeout,
       ...(onSessionId !== undefined ? { onSessionId } : {}),
     })
@@ -53,7 +54,7 @@ const start = (
     ),
   )
 
-describe("Opencode Effect service", () => {
+describe("Opencode AgentBackend adapter", () => {
   it("collects structured output from a scoped child process", async () => {
     await withExecutable(
       [
@@ -63,7 +64,7 @@ describe("Opencode Effect service", () => {
       ].join("\n"),
       async (binary) => {
         await expect(
-          Effect.runPromise(start(binary, "2 seconds")),
+          Effect.runPromise(startTurn(binary, "2 seconds")),
         ).resolves.toEqual({
           sessionId: "ses_test",
           assistantText: "first\nsecond",
@@ -83,9 +84,29 @@ describe("Opencode Effect service", () => {
       ].join("\n"),
       async (binary) => {
         await expect(
-          Effect.runPromise(start(binary, "2 seconds", undefined, prompt)),
+          Effect.runPromise(startTurn(binary, "2 seconds", undefined, prompt)),
         ).resolves.toEqual({
           sessionId: "ses_stdin",
+          assistantText: "",
+        })
+      },
+    )
+  })
+
+  it("omits --variant when thinkingLevel is null", async () => {
+    await withExecutable(
+      [
+        'printf "%s\\n" "$*" > /tmp/opencode-args-$$.txt 2>/dev/null || true',
+        'case " $* " in *" --variant "*) exit 11 ;; esac',
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_default"}'`,
+      ].join("\n"),
+      async (binary) => {
+        await expect(
+          Effect.runPromise(
+            startTurn(binary, "2 seconds", undefined, "test", null),
+          ),
+        ).resolves.toEqual({
+          sessionId: "ses_default",
           assistantText: "",
         })
       },
@@ -100,10 +121,10 @@ describe("Opencode Effect service", () => {
       ].join("\n"),
       async (binary) => {
         const error = await Effect.runPromise(
-          start(binary, "2 seconds").pipe(Effect.flip),
+          startTurn(binary, "2 seconds").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new OpencodeExitError({
+          new AgentBackendExitError({
             exitCode: 7,
             cwd: process.cwd(),
             sessionId: "ses_failed",
@@ -121,10 +142,10 @@ describe("Opencode Effect service", () => {
       ].join("\n"),
       async (binary) => {
         const error = await Effect.runPromise(
-          start(binary, "200 millis").pipe(Effect.flip),
+          startTurn(binary, "200 millis").pipe(Effect.flip),
         )
         expect(error).toEqual(
-          new OpencodeTimeoutError({
+          new AgentBackendTimeoutError({
             cwd: process.cwd(),
             timeoutMs: 200,
             sessionId: "ses_timeout",
@@ -146,7 +167,7 @@ describe("Opencode Effect service", () => {
           Effect.gen(function* () {
             const deferred = yield* Deferred.make<string>()
             const fiber = yield* Effect.forkChild(
-              start(binary, "5 seconds", (sessionId) =>
+              startTurn(binary, "5 seconds", (sessionId) =>
                 Deferred.succeed(deferred, sessionId).pipe(Effect.asVoid),
               ),
             )
@@ -221,13 +242,13 @@ describe("Opencode Effect service", () => {
 
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const opencode = yield* Opencode
-          return yield* opencode.continue({
+          const backend = yield* AgentBackend
+          return yield* backend.continueTurn({
             sessionId: "ses_parent",
             cwd: process.cwd(),
             prompt: "Review uncommitted worktree changes.",
             model: "test/model",
-            variant: "test",
+            thinkingLevel: "test",
             command: "/review",
             timeout: "3 seconds",
           })
@@ -288,13 +309,13 @@ describe("Opencode Effect service", () => {
 
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const opencode = yield* Opencode
-          return yield* opencode.continue({
+          const backend = yield* AgentBackend
+          return yield* backend.continueTurn({
             sessionId: "ses_parent",
             cwd: process.cwd(),
             prompt: "Review uncommitted worktree changes.",
             model: "test/model",
-            variant: "test",
+            thinkingLevel: "test",
             command: "/review",
             timeout: "3 seconds",
           })
@@ -326,7 +347,7 @@ describe("Opencode Effect service", () => {
       async (binary) => {
         await expect(
           Effect.runPromise(
-            start(binary, "2 seconds", () =>
+            startTurn(binary, "2 seconds", () =>
               Effect.fail(new Error("observer boom") as never),
             ),
           ),
@@ -338,7 +359,7 @@ describe("Opencode Effect service", () => {
     )
   })
 
-  it("lists models with variants from verbose OpenCode output", async () => {
+  it("inspects models with thinking levels from verbose OpenCode output", async () => {
     await withExecutable(
       [
         'if [ "$1" = "models" ] && [ "$2" = "--verbose" ]; then',
@@ -359,10 +380,10 @@ describe("Opencode Effect service", () => {
         "exit 1",
       ].join("\n"),
       async (binary) => {
-        const models = await Effect.runPromise(
+        const result = await Effect.runPromise(
           Effect.gen(function* () {
-            const opencode = yield* Opencode
-            return yield* opencode.listModels({
+            const backend = yield* AgentBackend
+            return yield* backend.inspect({
               cwd: process.cwd(),
               timeout: "2 seconds",
             })
@@ -376,14 +397,18 @@ describe("Opencode Effect service", () => {
           ),
         )
 
-        expect(models).toEqual([
+        expect(result.backend).toEqual({
+          id: "opencode",
+          label: "OpenCode",
+        })
+        expect(result.models).toEqual([
           {
             id: "xai/grok-4.5",
-            variants: ["low", "medium", "high"],
+            thinkingLevels: ["low", "medium", "high"],
           },
           {
             id: "xai/empty-variants",
-            variants: [],
+            thinkingLevels: [],
           },
         ])
       },
@@ -424,9 +449,9 @@ describe("Opencode Effect service", () => {
     )
     const fullStdout = `${entries.join("\n")}\n`
     expect(Buffer.byteLength(fullStdout, "utf8")).toBeGreaterThan(64 * 1024)
-    const expected = parseVerboseModelsOutput(fullStdout)
-    expect(expected.length).toBe(56)
-    expect(expected.at(-1)).toEqual({
+    const expectedParsed = parseVerboseModelsOutput(fullStdout)
+    expect(expectedParsed.length).toBe(56)
+    expect(expectedParsed.at(-1)).toEqual({
       id: "xai/grok-4.5",
       variants: ["low", "medium", "high"],
     })
@@ -450,10 +475,10 @@ describe("Opencode Effect service", () => {
       )
       await chmod(binaryPath, 0o700)
 
-      const models = await Effect.runPromise(
+      const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const opencode = yield* Opencode
-          return yield* opencode.listModels({
+          const backend = yield* AgentBackend
+          return yield* backend.inspect({
             cwd: process.cwd(),
             timeout: "5 seconds",
           })
@@ -467,10 +492,17 @@ describe("Opencode Effect service", () => {
         ),
       )
 
-      expect(models).toEqual(expected)
-      expect(models.find((model) => model.id === "xai/grok-4.5")).toEqual({
+      expect(result.models).toEqual(
+        expectedParsed.map((model) => ({
+          id: model.id,
+          thinkingLevels: model.variants,
+        })),
+      )
+      expect(
+        result.models.find((model) => model.id === "xai/grok-4.5"),
+      ).toEqual({
         id: "xai/grok-4.5",
-        variants: ["low", "medium", "high"],
+        thinkingLevels: ["low", "medium", "high"],
       })
     } finally {
       await rm(directory, { recursive: true, force: true })
@@ -492,8 +524,8 @@ describe("Opencode Effect service", () => {
       async (binary) => {
         const error = await Effect.runPromise(
           Effect.gen(function* () {
-            const opencode = yield* Opencode
-            return yield* opencode.listModels({
+            const backend = yield* AgentBackend
+            return yield* backend.inspect({
               cwd: process.cwd(),
               timeout: "2 seconds",
             })
@@ -508,8 +540,8 @@ describe("Opencode Effect service", () => {
           ),
         )
 
-        expect(error).toBeInstanceOf(OpencodeIncompleteOutputError)
-        if (error instanceof OpencodeIncompleteOutputError) {
+        expect(error).toBeInstanceOf(AgentBackendMalformedOutputError)
+        if (error instanceof AgentBackendMalformedOutputError) {
           expect(error.cwd).toBe(process.cwd())
           expect(error.byteLength).toBeGreaterThan(0)
         }

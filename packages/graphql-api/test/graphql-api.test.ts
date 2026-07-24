@@ -1,4 +1,5 @@
 import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -9,7 +10,6 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import {
-  Opencode,
   type OpencodeSession,
   OpencodeSessionStore,
   type OpencodeSessionStoreShape,
@@ -23,7 +23,7 @@ import {
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import {
   STEP_RUN_REASON,
-  WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+  WAITING_FOR_AGENT_TURN_MESSAGE,
   WorkItemLifecycle,
   type WorkItemLifecycleShape,
   WorkItemNotFoundError,
@@ -43,10 +43,10 @@ const repository = makeRepositoryRecord({
 
 const config = {
   defaultModel: "opencode/deepseek-v4-flash-free",
-  defaultVariant: "low",
+  defaultThinkingLevel: "low",
   reviewModel: null as string | null,
-  reviewVariant: null as string | null,
-  maxConcurrentOpencodeSessions: 2,
+  reviewThinkingLevel: null as string | null,
+  maxConcurrentAgentTurns: 2,
   maxConcurrentWorkItems: 5,
 }
 
@@ -77,9 +77,9 @@ const workItem = {
   githubIssueNumber: issue.githubIssueNumber,
   issueTitle: issue.title,
   model: config.defaultModel,
-  variant: config.defaultVariant,
+  thinkingLevel: config.defaultThinkingLevel,
   reviewModel: config.defaultModel,
-  reviewVariant: config.defaultVariant,
+  reviewThinkingLevel: config.defaultThinkingLevel,
   state: "create_worktree",
   stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
   paused: false,
@@ -117,29 +117,38 @@ const makeRuntime = (
   queueOverrides: Partial<QueueServiceShape> = {},
   lifecycleOverrides: Partial<WorkItemLifecycleShape> = {},
   opencodeOverrides: {
-    listModels?: () => Effect.Effect<
-      ReadonlyArray<{ id: string; variants: ReadonlyArray<string> }>,
+    inspect?: () => Effect.Effect<
+      {
+        readonly backend: { readonly id: "opencode"; readonly label: string }
+        readonly models: ReadonlyArray<{
+          id: string
+          thinkingLevels: ReadonlyArray<string>
+        }>
+      },
       never
     >
   } = {},
   sessionStoreOverrides: Partial<OpencodeSessionStoreShape> = {},
 ) => {
-  const opencode = {
-    start: () => Effect.die("not used"),
-    continue: () => Effect.die("not used"),
-    listModels: () =>
-      Effect.succeed([
-        {
-          id: "opencode/deepseek-v4-flash-free",
-          variants: ["high", "max"],
-        },
-        {
-          id: "anthropic/claude-sonnet-4-5",
-          variants: ["low", "medium", "high", "max"],
-        },
-      ]),
+  const opencode = AgentBackend.of({
+    startTurn: () => Effect.die("not used"),
+    continueTurn: () => Effect.die("not used"),
+    inspect: () =>
+      Effect.succeed({
+        backend: { id: "opencode" as const, label: "OpenCode" },
+        models: [
+          {
+            id: "opencode/deepseek-v4-flash-free",
+            thinkingLevels: ["high", "max"],
+          },
+          {
+            id: "anthropic/claude-sonnet-4-5",
+            thinkingLevels: ["low", "medium", "high", "max"],
+          },
+        ],
+      }),
     ...opencodeOverrides,
-  }
+  })
   const sessionStore: OpencodeSessionStoreShape = {
     getSession: (id) =>
       Effect.succeed({
@@ -162,9 +171,9 @@ const makeRuntime = (
         ...repository,
         paused: input.paused,
         defaultModel: input.defaultModel,
-        defaultVariant: input.defaultVariant,
+        defaultThinkingLevel: input.defaultThinkingLevel,
         reviewModel: input.reviewModel,
-        reviewVariant: input.reviewVariant,
+        reviewThinkingLevel: input.reviewThinkingLevel,
         autoMerge: input.autoMerge,
         includeAllIssueAuthors: input.includeAllIssueAuthors,
       }),
@@ -227,7 +236,7 @@ const makeRuntime = (
     Layer.mergeAll(
       Layer.succeed(DbService, db),
       Layer.succeed(KeymaxxerService, keymaxxer),
-      Layer.succeed(Opencode, opencode),
+      Layer.succeed(AgentBackend, opencode),
       Layer.succeed(OpencodeSessionStore, sessionStore),
       Layer.succeed(QueueService, queue),
       Layer.succeed(WorkItemLifecycle, lifecycle),
@@ -544,7 +553,7 @@ describe("GraphQL API", () => {
             isBare
             paused
             defaultModel
-            defaultVariant
+            defaultThinkingLevel
             autoMerge
             includeAllIssueAuthors
             issuesReconciledAt
@@ -565,7 +574,7 @@ describe("GraphQL API", () => {
             isBare: repository.isBare,
             paused: repository.paused,
             defaultModel: null,
-            defaultVariant: null,
+            defaultThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
             issuesReconciledAt: null,
@@ -870,7 +879,7 @@ describe("GraphQL API", () => {
   test("reads and updates config", async () => {
     const queryResponse = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query { config { defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions maxConcurrentWorkItems } }`,
+        query: `query { config { defaultModel defaultThinkingLevel reviewModel reviewThinkingLevel maxConcurrentAgentTurns maxConcurrentWorkItems } }`,
       }),
     )
     expect(await queryResponse.json()).toEqual({ data: { config } })
@@ -879,16 +888,16 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
           updateConfig(input: $input) {
-            defaultModel defaultVariant reviewModel reviewVariant maxConcurrentOpencodeSessions maxConcurrentWorkItems
+            defaultModel defaultThinkingLevel reviewModel reviewThinkingLevel maxConcurrentAgentTurns maxConcurrentWorkItems
           }
         }`,
         variables: {
           input: {
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
-            maxConcurrentOpencodeSessions: 3,
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 3,
             maxConcurrentWorkItems: 7,
           },
         },
@@ -898,10 +907,10 @@ describe("GraphQL API", () => {
       data: {
         updateConfig: {
           defaultModel: "anthropic/claude-sonnet-4-5",
-          defaultVariant: "high",
+          defaultThinkingLevel: "high",
           reviewModel: "anthropic/claude-opus-4-6",
-          reviewVariant: "max",
-          maxConcurrentOpencodeSessions: 3,
+          reviewThinkingLevel: "max",
+          maxConcurrentAgentTurns: 3,
           maxConcurrentWorkItems: 7,
         },
       },
@@ -916,9 +925,9 @@ describe("GraphQL API", () => {
             id
             paused
             defaultModel
-            defaultVariant
+            defaultThinkingLevel
             reviewModel
-            reviewVariant
+            reviewThinkingLevel
             autoMerge
             includeAllIssueAuthors
           }
@@ -928,9 +937,9 @@ describe("GraphQL API", () => {
             repositoryId: repository.id,
             paused: false,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: true,
           },
@@ -943,9 +952,9 @@ describe("GraphQL API", () => {
           id: repository.id,
           paused: false,
           defaultModel: "anthropic/claude-sonnet-4-5",
-          defaultVariant: "high",
+          defaultThinkingLevel: "high",
           reviewModel: "anthropic/claude-opus-4-6",
-          reviewVariant: "max",
+          reviewThinkingLevel: "max",
           autoMerge: true,
           includeAllIssueAuthors: true,
         },
@@ -1021,18 +1030,21 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        listModels: () => {
+        inspect: () => {
           listCount += 1
-          return Effect.succeed([
-            {
-              id: "opencode/deepseek-v4-flash-free",
-              variants: ["high", "max"],
-            },
-            {
-              id: "anthropic/claude-sonnet-4-5",
-              variants: ["low", "medium", "high", "max"],
-            },
-          ])
+          return Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [
+              {
+                id: "opencode/deepseek-v4-flash-free",
+                thinkingLevels: ["high", "max"],
+              },
+              {
+                id: "anthropic/claude-sonnet-4-5",
+                thinkingLevels: ["low", "medium", "high", "max"],
+              },
+            ],
+          })
         },
       },
     )
@@ -1040,12 +1052,12 @@ describe("GraphQL API", () => {
     const api = createGraphqlApi(runtime)
     const first = await api.fetch(
       graphqlRequest({
-        query: `query { models { id variants } }`,
+        query: `query { models { id thinkingLevels } }`,
       }),
     )
     const second = await api.fetch(
       graphqlRequest({
-        query: `query { models { id variants } }`,
+        query: `query { models { id thinkingLevels } }`,
       }),
     )
 
@@ -1054,11 +1066,11 @@ describe("GraphQL API", () => {
         models: [
           {
             id: "opencode/deepseek-v4-flash-free",
-            variants: ["high", "max"],
+            thinkingLevels: ["high", "max"],
           },
           {
             id: "anthropic/claude-sonnet-4-5",
-            variants: ["low", "medium", "high", "max"],
+            thinkingLevels: ["low", "medium", "high", "max"],
           },
         ],
       },
@@ -1068,11 +1080,11 @@ describe("GraphQL API", () => {
         models: [
           {
             id: "opencode/deepseek-v4-flash-free",
-            variants: ["high", "max"],
+            thinkingLevels: ["high", "max"],
           },
           {
             id: "anthropic/claude-sonnet-4-5",
-            variants: ["low", "medium", "high", "max"],
+            thinkingLevels: ["low", "medium", "high", "max"],
           },
         ],
       },
@@ -1676,8 +1688,8 @@ describe("GraphQL API", () => {
           ...baseRun,
           step: "implement",
           status: "running",
-          reasonCode: STEP_RUN_REASON.waitingForOpencodeSession,
-          reasonMessage: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+          reasonCode: STEP_RUN_REASON.waitingForAgentTurn,
+          reasonMessage: WAITING_FOR_AGENT_TURN_MESSAGE,
         },
       ],
     } as WorkItemRecord
@@ -1713,7 +1725,7 @@ describe("GraphQL API", () => {
             stateLabel: "Build",
             status: "QUEUED",
             statusLabel: "Queued",
-            statusMessage: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+            statusMessage: WAITING_FOR_AGENT_TURN_MESSAGE,
             lifecycleLabels: [
               {
                 phase: "IMPLEMENT",

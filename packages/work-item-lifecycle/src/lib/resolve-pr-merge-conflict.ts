@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
@@ -114,17 +114,17 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
         message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
       })
     }
-    const opencode = yield* Opencode
+    const agentBackend = yield* AgentBackend
     const timeout =
       context.maxDuration ??
       DEFAULT_LIFECYCLE_MAX_DURATIONS.resolve_pr_merge_conflict
-    yield* opencode
-      .continue({
+    yield* agentBackend
+      .continueTurn({
         sessionId: context.sessionId,
         prompt: workPrompt(tokenName),
         cwd: context.worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout,
       })
       .pipe(
@@ -137,13 +137,13 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
             }),
         ),
       )
-    const verdict = yield* opencode
-      .continue({
+    const verdict = yield* agentBackend
+      .continueTurn({
         sessionId: context.sessionId,
         prompt: verdictPrompt(),
         cwd: context.worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout,
       })
       .pipe(

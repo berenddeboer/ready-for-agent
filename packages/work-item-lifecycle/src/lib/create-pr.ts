@@ -1,8 +1,8 @@
 import { Effect, FileSystem } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import {
   CreatePrCredentialError,
   CreatePrInvalidWorktreeContextError,
@@ -153,9 +153,9 @@ export const createPr = (context: LifecycleStepContext) =>
 
     const timeout =
       context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.create_pr
-    const opencode = yield* Opencode
-    yield* opencode
-      .continue({
+    const agentBackend = yield* AgentBackend
+    yield* agentBackend
+      .continueTurn({
         sessionId,
         prompt: buildCreatePrPrompt(
           context.githubIssueNumber,
@@ -164,7 +164,7 @@ export const createPr = (context: LifecycleStepContext) =>
         ),
         cwd: worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout,
       })
       .pipe(

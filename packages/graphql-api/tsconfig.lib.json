@@ -11,6 +11,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../agent-backend/tsconfig.lib.json"
+    },
+    {
       "path": "../work-item-lifecycle/tsconfig.lib.json"
     },
     {

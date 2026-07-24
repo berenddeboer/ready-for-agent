@@ -1,7 +1,7 @@
 import { Effect, Schema } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
@@ -124,14 +124,14 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
       "or, only when a human must merge:",
       "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
     ].join("\n")
-    const opencode = yield* Opencode
-    const result = yield* opencode
-      .continue({
+    const agentBackend = yield* AgentBackend
+    const result = yield* agentBackend
+      .continueTurn({
         sessionId,
         prompt,
         cwd: worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout:
           context.maxDuration ??
           DEFAULT_LIFECYCLE_MAX_DURATIONS.decide_pr_merge,

@@ -1,7 +1,7 @@
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import {
   ImplementInvalidWorktreeContextError,
   ImplementIssueContextMissingError,
@@ -167,7 +167,7 @@ export const implement = (context: LifecycleStepContext) =>
             githubIssueNumber,
           )
 
-    const opencode = yield* Opencode
+    const agentBackend = yield* AgentBackend
     const sql = yield* SqlClient.SqlClient
     const db = yield* DbService
     const onSessionId = (sessionId: string) =>
@@ -182,21 +182,21 @@ export const implement = (context: LifecycleStepContext) =>
 
     const run =
       existingSessionId === null
-        ? opencode.start({
+        ? agentBackend.startTurn({
             prompt,
             cwd: worktreePath,
             model: context.model,
-            variant: context.variant,
+            thinkingLevel: context.thinkingLevel,
             timeout:
               context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
             onSessionId,
           })
-        : opencode.continue({
+        : agentBackend.continueTurn({
             sessionId: existingSessionId,
             prompt,
             cwd: worktreePath,
             model: context.model,
-            variant: context.variant,
+            thinkingLevel: context.thinkingLevel,
             timeout:
               context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.implement,
             onSessionId,

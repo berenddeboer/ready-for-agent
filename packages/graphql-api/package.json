@@ -16,6 +16,7 @@
     }
   },
   "dependencies": {
+    "@ready-for-agent/agent-backend": "workspace:*",
     "@ready-for-agent/db-service": "workspace:*",
     "@ready-for-agent/graphql-schema": "workspace:*",
     "@ready-for-agent/keymaxxer-service": "workspace:*",

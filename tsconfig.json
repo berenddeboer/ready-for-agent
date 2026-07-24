@@ -37,6 +37,9 @@
       "path": "./packages/keymaxxer-service"
     },
     {
+      "path": "./packages/agent-backend"
+    },
+    {
       "path": "./packages/opencode"
     },
     {

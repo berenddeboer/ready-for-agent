@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Opencode } from "@ready-for-agent/opencode"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import {
   type InstallCommand,
   type InstallPlan,
@@ -132,14 +132,14 @@ const runOpencodeFallback = (
   prompt: string,
 ) =>
   Effect.gen(function* () {
-    const opencode = yield* Opencode
+    const agentBackend = yield* AgentBackend
     // Session id is intentionally discarded: install never persists a Session.
-    yield* opencode
-      .start({
+    yield* agentBackend
+      .startTurn({
         prompt,
         cwd: worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
       })
       .pipe(
         Effect.mapError(
