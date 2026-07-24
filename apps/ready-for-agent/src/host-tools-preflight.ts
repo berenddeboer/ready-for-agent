@@ -62,7 +62,7 @@ export type HostToolsPreflightResult =
       readonly message: string
     }
 
-export const resolveRequiredAgentBackendBinary = (
+const resolveRequiredAgentBackendBinary = (
   selectedAgentBackendId?: string,
 ): { readonly name: string; readonly installHint: string } => {
   const id =
