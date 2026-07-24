@@ -15,6 +15,10 @@ import {
 import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
+  ActiveAgentBackend,
+  isAgentDependentLifecycleStep,
+} from "@ready-for-agent/agent-backend"
+import {
   type DatabaseError,
   DbService,
   type RepositoryNotFoundError,
@@ -35,6 +39,8 @@ import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
+  AgentBackendRestartRequiredError,
+  AgentBackendUnavailableError,
   BuildModelNotConfiguredError,
   IssueBlockedError,
   IssueNotFoundError,
@@ -236,6 +242,7 @@ type WorkItemRow = {
   readonly github_issue_number: number
   readonly issue_title: string | null
   readonly github_pull_request_number: number | null
+  readonly agent_backend: string
   readonly model: string
   readonly thinking_level: string | null
   readonly review_model: string
@@ -321,6 +328,7 @@ const toWorkItemRecord = (
   githubIssueNumber: row.github_issue_number,
   issueTitle: row.issue_title,
   githubPullRequestNumber: row.github_pull_request_number,
+  agentBackend: row.agent_backend,
   model: row.model,
   thinkingLevel: row.thinking_level,
   reviewModel: row.review_model,
@@ -346,7 +354,7 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
-const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, model, thinking_level, review_model,
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend, model, thinking_level, review_model,
                    review_thinking_level, state, state_ready_at, paused, waiting_since, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
@@ -451,6 +459,8 @@ export type ImplementNowError =
   | IssueBlockedError
   | UnfinishedWorkItemExistsError
   | BuildModelNotConfiguredError
+  | AgentBackendUnavailableError
+  | AgentBackendRestartRequiredError
   | WorkItemLifecycleDatabaseError
   | RepositoryNotFoundError
   | DatabaseError
@@ -622,7 +632,11 @@ export const makeWorkItemLifecycleLive = (
 ): Layer.Layer<
   WorkItemLifecycle,
   NonTransactionalQueueError,
-  SqlClient.SqlClient | DbService | QueueService | LifecycleSteps
+  | SqlClient.SqlClient
+  | DbService
+  | QueueService
+  | LifecycleSteps
+  | ActiveAgentBackend
 > =>
   Layer.effect(
     WorkItemLifecycle,
@@ -631,6 +645,7 @@ export const makeWorkItemLifecycleLive = (
       const db = yield* DbService
       const queue = yield* QueueService
       const steps = yield* LifecycleSteps
+      const activeAgentBackend = yield* ActiveAgentBackend
       const notifyWorkItemsChanged = (
         repositoryId: string,
       ): Effect.Effect<void> => db.notifyWorkItemsChanged(repositoryId)
@@ -2453,7 +2468,7 @@ export const makeWorkItemLifecycleLive = (
             activeStepExecutions.set(stepRunId, controller)
             return true
           }),
-          (registered) => {
+          (registered): Effect.Effect<RunStepResult, RunStepError> => {
             if (!registered) {
               return Effect.succeed({ _tag: "noop" as const })
             }
@@ -2545,6 +2560,35 @@ export const makeWorkItemLifecycleLive = (
               }
 
               yield* notifyWorkItemsChanged(workItem.repository_id)
+
+              if (isAgentDependentLifecycleStep(stepRun.step)) {
+                const readiness = yield* activeAgentBackend.getStatus
+                if (readiness.kind === "unavailable") {
+                  const reasonMessage =
+                    readiness.reason ?? "Agent Backend is unavailable"
+                  const failed = yield* completeFailedStep({
+                    stepRun: afterStart,
+                    workItem,
+                    reasonCode: STEP_RUN_REASON.agentBackendUnavailable,
+                    reasonMessage,
+                    cause: Cause.fail(reasonMessage),
+                  })
+                  return { _tag: "processed" as const, workItem: failed }
+                }
+                if (readiness.kind === "restart_required") {
+                  const reasonMessage =
+                    readiness.reason ??
+                    "Restart the Harness to activate the selected Agent Backend"
+                  const failed = yield* completeFailedStep({
+                    stepRun: afterStart,
+                    workItem,
+                    reasonCode: STEP_RUN_REASON.agentBackendRestartRequired,
+                    reasonMessage,
+                    cause: Cause.fail(reasonMessage),
+                  })
+                  return { _tag: "processed" as const, workItem: failed }
+                }
+              }
 
               const maxDuration = maxDurations[stepRun.step]
               const context: LifecycleStepContext = {
@@ -3819,6 +3863,22 @@ export const makeWorkItemLifecycleLive = (
         },
       ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
         Effect.gen(function* () {
+          yield* activeAgentBackend.requireAgentTurnsAllowed.pipe(
+            Effect.mapError((error) => {
+              if (error._tag === "AgentBackendRestartRequiredError") {
+                return new AgentBackendRestartRequiredError({
+                  message: error.message,
+                  selectedBackendId: error.selectedBackendId,
+                  activeBackendId: error.activeBackendId,
+                })
+              }
+              return new AgentBackendUnavailableError({
+                message: error.message,
+                reason: error.reason,
+              })
+            }),
+          )
+
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
             (candidate) => candidate.githubIssueNumber === githubIssueNumber,
@@ -3925,6 +3985,9 @@ export const makeWorkItemLifecycleLive = (
                 }
           const reviewModel = reviewSelection.model
           const reviewThinkingLevel = reviewSelection.thinkingLevel
+          const activeRegistration =
+            yield* activeAgentBackend.getActiveRegistration
+          const agentBackendId = activeRegistration.descriptor.id
           const workItemId = makeWorkItemId()
           const now = yield* Clock.currentTimeMillis
           const step: OperationalLifecycleStep = "create_worktree"
@@ -3938,16 +4001,17 @@ export const makeWorkItemLifecycleLive = (
 
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
-                 id, repository_id, github_issue_number, model, thinking_level,
+                 id, repository_id, github_issue_number, agent_backend, model, thinking_level,
                   issue_title, review_model, review_thinking_level, state, state_ready_at, paused,
                   waiting_since, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
                     githubIssueNumber,
+                    agentBackendId,
                     model,
                     thinkingLevel,
                     issue.title,

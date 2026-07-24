@@ -92,6 +92,7 @@ describe("runMigrations", () => {
           { name: "20260723072032_free_shadow_king" },
           { name: "20260724001032_furry_wild_pack" },
           { name: "20260724120000_agent_backend_vocabulary" },
+          { name: "20260724180000_agent_backend_selection" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -356,6 +357,94 @@ describe("runMigrations", () => {
         )
         expect(checks).toEqual([
           { id: "psc-existing", external_id: "checkrun:1" },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("defaults selected Agent Backend and backfills Work Item provenance as OpenCode", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260724180000_agent_backend_selection/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE config (
+             id text PRIMARY KEY,
+             default_model text,
+             default_thinking_level text,
+             review_model text,
+             review_thinking_level text,
+             max_concurrent_agent_turns integer NOT NULL DEFAULT 2,
+             max_concurrent_work_items integer NOT NULL DEFAULT 5,
+             created_at integer NOT NULL,
+             updated_at integer NOT NULL
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO config (
+             id, default_model, default_thinking_level, review_model, review_thinking_level,
+             max_concurrent_agent_turns, max_concurrent_work_items, created_at, updated_at
+           ) VALUES ('default', 'opencode/deepseek-v4-flash-free', 'low', NULL, NULL, 2, 5, 1, 1)`,
+        )
+        yield* sql.unsafe(
+          `CREATE TABLE work_item (
+             id text PRIMARY KEY,
+             repository_id text NOT NULL,
+             github_issue_number integer NOT NULL,
+             model text NOT NULL,
+             thinking_level text,
+             review_model text NOT NULL,
+             review_thinking_level text,
+             state text NOT NULL,
+             session_id text
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO work_item VALUES
+             ('wi-existing', 'repo-1', 1, 'opencode/deepseek-v4-flash-free', 'low',
+              'opencode/deepseek-v4-flash-free', 'low', 'implement', 'ses_old')`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const configRows = yield* sql.unsafe(
+          `SELECT selected_agent_backend, default_model, max_concurrent_agent_turns
+           FROM config WHERE id = 'default'`,
+        )
+        expect(configRows).toEqual([
+          {
+            selected_agent_backend: "opencode",
+            default_model: "opencode/deepseek-v4-flash-free",
+            max_concurrent_agent_turns: 2,
+          },
+        ])
+
+        const workItems = yield* sql.unsafe(
+          `SELECT id, agent_backend, model, thinking_level, state, session_id
+           FROM work_item WHERE id = 'wi-existing'`,
+        )
+        expect(workItems).toEqual([
+          {
+            id: "wi-existing",
+            agent_backend: "opencode",
+            model: "opencode/deepseek-v4-flash-free",
+            thinking_level: "low",
+            state: "implement",
+            session_id: "ses_old",
+          },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

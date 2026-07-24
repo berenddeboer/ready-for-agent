@@ -9,8 +9,18 @@ type Query {
   repositoryCredentials: [RepositoryCredential!]!
   config: Config!
   """
+  Built-in Agent Backends available for Harness Config selection.
+  """
+  agentBackends: [AgentBackendInfo!]!
+  """
+  Selected backend, Active backend, readiness/restart state, actionable reason,
+  and the instance-wide model catalog from the latest successful inspection.
+  """
+  agentBackendStatus: AgentBackendStatus!
+  """
   Agent Models available from the Active Agent Backend, each with optional
   Thinking Levels. Empty thinkingLevels means the model has no Thinking Levels.
+  Empty when the backend is unavailable.
   """
   models: [AgentModel!]!
   issues(repositoryId: ID!): [Issue!]!
@@ -39,27 +49,30 @@ type Query {
   """
   committedPullRequestsCount(from: String!, to: String!): Int!
   """
-  OpenCode Session usage for a Session id owned by a Work Item.
-  Returns null when no Work Item has that sessionId (unrelated local chats
-  are not exposed). When owned, availability is AVAILABLE, MISSING, or
-  UNAVAILABLE; metric fields are null unless AVAILABLE.
+  Session Telemetry for a Work Item. Authorizes ownership, uses captured
+  backend provenance, and dispatches to the owning backend's optional provider.
+  Returns null when the Work Item does not exist. Availability may be
+  AVAILABLE, MISSING, UNAVAILABLE, or UNSUPPORTED; metric fields are null
+  unless AVAILABLE.
   """
-  session(id: String!): Session
+  session(workItemId: ID!): Session
 }
 
 """
-Whether OpenCode's local SQLite still has this Session's usage row.
+Whether Session Telemetry can be loaded for a Work Item Session.
+UNSUPPORTED means the backend does not provide telemetry (distinct from MISSING).
 """
 enum SessionAvailability {
   AVAILABLE
   MISSING
   UNAVAILABLE
+  UNSUPPORTED
 }
 
 type SessionModel {
   providerId: String!
   id: String!
-  variant: String
+  thinkingLevel: String
 }
 
 type SessionTokens {
@@ -70,12 +83,38 @@ type SessionTokens {
   cacheWrite: Int!
 }
 
+type AgentBackendInfo {
+  id: String!
+  label: String!
+}
+
 """
-OpenCode Session usage totals (live-read from OpenCode SQLite).
+Instance-wide Agent Backend readiness for Settings and lifecycle guards.
+"""
+type AgentBackendStatus {
+  selectedBackend: AgentBackendInfo!
+  activeBackend: AgentBackendInfo!
+  """
+  ready | unavailable | restart_required
+  """
+  kind: AgentBackendStatusKind!
+  reason: String
+  models: [AgentModel!]!
+}
+
+enum AgentBackendStatusKind {
+  READY
+  UNAVAILABLE
+  RESTART_REQUIRED
+}
+
+"""
+Session Telemetry totals for a Work Item Session.
 """
 type Session {
   id: String!
   availability: SessionAvailability!
+  backend: AgentBackendInfo!
   model: SessionModel
   tokens: SessionTokens
   cost: Float
@@ -93,6 +132,10 @@ enum WorkItemsListKind {
 }
 
 type Config {
+  """
+  Agent Backend selected for the next Harness startup.
+  """
+  selectedAgentBackend: String!
   defaultModel: String
   defaultThinkingLevel: String
   reviewModel: String
@@ -234,6 +277,10 @@ type WorkItem {
   githubIssueNumber: Int!
   issueTitle: String
   githubPullRequestNumber: Int
+  """
+  Active Agent Backend captured at Work Item creation (provenance).
+  """
+  agentBackend: AgentBackendInfo!
   model: String!
   thinkingLevel: String
   state: WorkItemState!
@@ -268,7 +315,11 @@ input AddRepositoryInput {
 }
 
 input UpdateConfigInput {
-  defaultModel: String!
+  selectedAgentBackend: String!
+  """
+  Required when not changing Agent Backend. Ignored (cleared) when the backend changes.
+  """
+  defaultModel: String
   defaultThinkingLevel: String
   reviewModel: String
   reviewThinkingLevel: String
@@ -302,6 +353,10 @@ type Mutation {
   startWorkItem(workItemId: ID!): WorkItem!
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
+  """
+  Revalidate the Active Agent Backend and refresh its model catalog.
+  """
+  recheckAgentBackend: AgentBackendStatus!
   updateRepositorySettings(input: UpdateRepositorySettingsInput!): Repository!
   pauseRepository(repositoryId: ID!): Repository!
   unpauseRepository(repositoryId: ID!): Repository!

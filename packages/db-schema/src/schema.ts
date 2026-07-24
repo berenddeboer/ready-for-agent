@@ -45,6 +45,8 @@ export const repository = snakeCase.table(
 
 export const config = snakeCase.table("config", {
   id: text().primaryKey().default("default"),
+  /** Agent Backend selected for the next Harness startup (OpenCode by default). */
+  selectedAgentBackend: text().notNull().default("opencode"),
   defaultModel: text(),
   defaultThinkingLevel: text(),
   reviewModel: text(),
@@ -200,6 +202,8 @@ export const workItem = snakeCase.table(
     githubIssueNumber: integer().notNull(),
     issueTitle: text(),
     githubPullRequestNumber: integer(),
+    /** Active Agent Backend captured at Work Item creation (provenance). */
+    agentBackend: text().notNull().default("opencode"),
     model: text().notNull(),
     thinkingLevel: text(),
     reviewModel: text().notNull(),

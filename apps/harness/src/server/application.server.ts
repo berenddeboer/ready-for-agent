@@ -3,8 +3,15 @@ import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpa
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import { Effect, Layer, Logger, ManagedRuntime } from "effect"
+import {
+  AGENT_BACKEND_IDS,
+  ActiveAgentBackend,
+  ActiveAgentBackendLive,
+  type AgentBackendId,
+  resolveActiveRegistration,
+} from "@ready-for-agent/agent-backend"
 import { DatabaseLive } from "@ready-for-agent/db"
-import { DbServiceLive } from "@ready-for-agent/db-service"
+import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
@@ -12,7 +19,10 @@ import {
   disabledKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode, OpencodeSessionStoreLive } from "@ready-for-agent/opencode"
+import {
+  Opencode,
+  OpencodeSessionTelemetryLive,
+} from "@ready-for-agent/opencode"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
   LifecycleStepsLive,
@@ -49,13 +59,13 @@ export const createApplication = async (
       ? disabledKeymaxxerLayer
       : sidecarKeymaxxerLayer(sidecarUrl)
   const toolCwd = config.hostToolCwd
-  const opencodePlatformLayer = BunChildProcessSpawner.layer.pipe(
+  const platformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
   const githubLayer =
     sidecarUrl === undefined
       ? ambientGitHubLayer({ workspaceRoot: toolCwd }).pipe(
-          Layer.provide(opencodePlatformLayer),
+          Layer.provide(platformLayer),
         )
       : keymaxxerGitHubLayer({ workspaceRoot: toolCwd }).pipe(
           Layer.provide(keymaxxerLayer),
@@ -67,18 +77,40 @@ export const createApplication = async (
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
   )
-  const opencodeLayer = Opencode.layer({
+
+  const selectedBackendId = await Effect.runPromise(
+    Effect.gen(function* () {
+      const db = yield* DbService
+      const harnessConfig = yield* db.getConfig
+      return harnessConfig.selectedAgentBackend
+    }).pipe(Effect.provide(databaseLayer)),
+  )
+    .then((id) => id as AgentBackendId)
+    .catch(() => AGENT_BACKEND_IDS.opencode)
+
+  // OpenCode is the only registered production backend in this PR.
+  const activeRegistration = resolveActiveRegistration(selectedBackendId)
+  const adapterLayer = Opencode.layer({
     ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
-  }).pipe(Layer.provide(opencodePlatformLayer))
-  const opencodeSessionStoreLayer = OpencodeSessionStoreLive()
+  }).pipe(Layer.provide(platformLayer))
+  const telemetryLayer = OpencodeSessionTelemetryLive()
+  const activeLayer = ActiveAgentBackendLive({
+    selectedBackendId:
+      activeRegistration.descriptor.id === selectedBackendId
+        ? selectedBackendId
+        : activeRegistration.descriptor.id,
+    activeRegistration,
+  }).pipe(Layer.provide(adapterLayer), Layer.provide(telemetryLayer))
+
   const lifecycleLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(queueLayer),
-    Layer.provideMerge(opencodeLayer),
+    Layer.provideMerge(adapterLayer),
+    Layer.provideMerge(activeLayer),
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(githubLayer),
-    Layer.provide(opencodePlatformLayer),
+    Layer.provide(platformLayer),
   )
   const workerLayer = JobWorkerLive.pipe(
     Layer.provideMerge(queueLayer),
@@ -93,8 +125,9 @@ export const createApplication = async (
           reconcilerLayer,
           queueLayer,
           keymaxxerLayer,
-          opencodeLayer,
-          opencodeSessionStoreLayer,
+          adapterLayer,
+          telemetryLayer,
+          activeLayer,
           lifecycleLayer,
           loggingLayer,
         )
@@ -103,8 +136,9 @@ export const createApplication = async (
           workerLayer,
           queueLayer,
           keymaxxerLayer,
-          opencodeLayer,
-          opencodeSessionStoreLayer,
+          adapterLayer,
+          telemetryLayer,
+          activeLayer,
           lifecycleLayer,
           loggingLayer,
         )
@@ -116,6 +150,12 @@ export const createApplication = async (
       Effect.gen(function* () {
         const keymaxxer = yield* KeymaxxerService
         yield* keymaxxer.initialize
+        // Startup inspection: failure must not terminate the Harness.
+        const active = yield* ActiveAgentBackend
+        yield* active.recheck({
+          cwd: toolCwd,
+          timeout: "30 seconds",
+        })
       }),
     )
   } catch (error) {
@@ -125,7 +165,7 @@ export const createApplication = async (
 
   return {
     context: {
-      graphqlApi: createGraphqlApi(runtime, { opencodeCwd: toolCwd }),
+      graphqlApi: createGraphqlApi(runtime, { agentBackendCwd: toolCwd }),
     },
     dispose: runtime.dispose,
   }

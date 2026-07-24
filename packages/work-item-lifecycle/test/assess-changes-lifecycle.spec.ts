@@ -15,6 +15,7 @@ import {
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   assessChanges,
+  stubActiveAgentBackendLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -99,6 +100,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -114,6 +116,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -243,6 +246,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -258,6 +262,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -357,6 +362,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -372,6 +378,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -510,6 +517,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -525,6 +533,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -665,6 +674,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -680,6 +690,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -785,6 +796,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -800,6 +812,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -910,6 +923,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -925,6 +939,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -1076,6 +1091,7 @@ describe("Assess Changes lifecycle routes", () => {
       }
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -1091,6 +1107,7 @@ describe("Assess Changes lifecycle routes", () => {
           const db = yield* DbService
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/test",
             defaultThinkingLevel: "low",
             reviewModel: null,

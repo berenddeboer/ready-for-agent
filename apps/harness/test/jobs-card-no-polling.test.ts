@@ -148,7 +148,9 @@ describe("JobsCard live updates", () => {
   test("Completed Session id opens usage dialog; Working/Failed keep plain copy", () => {
     const { source, jobsCard } = jobsCardSource()
     expect(jobsCard).toContain('selectedTab === "completed"')
-    expect(jobsCard).toContain("setSessionDialogId(sessionId)")
+    expect(jobsCard).toContain("setSessionDialog({")
+    expect(jobsCard).toContain("workItemId: workItem.id")
+    expect(jobsCard).toContain("sessionId")
     expect(jobsCard).toContain("SessionUsageDialog")
     expect(jobsCard).toContain("showValue={false}")
     expect(source).toContain("sessionQuery")

@@ -11,16 +11,10 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../agent-backend/tsconfig.lib.json"
-    },
-    {
       "path": "../work-item-lifecycle/tsconfig.lib.json"
     },
     {
       "path": "../queue-service/tsconfig.lib.json"
-    },
-    {
-      "path": "../opencode/tsconfig.lib.json"
     },
     {
       "path": "../keymaxxer-service/tsconfig.lib.json"
@@ -30,6 +24,9 @@
     },
     {
       "path": "../db-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../agent-backend/tsconfig.lib.json"
     }
   ]
 }

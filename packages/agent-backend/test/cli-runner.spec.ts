@@ -80,7 +80,7 @@ describe("runCliCapture", () => {
       [
         'printf "cwd=%s\\n" "$(pwd)"',
         'printf "marker=%s\\n" "$CLI_MARKER"',
-        'printf "gh=%s\\n" "${GH_TOKEN-}"',
+        'printf "gh=%s\\n" "$' + "{GH_TOKEN-}" + '"',
       ].join("\n"),
       async (binary) => {
         const directory = await mkdtemp(join(tmpdir(), "agent-backend-cwd-"))

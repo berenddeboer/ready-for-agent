@@ -1,3 +1,4 @@
+export * from "./lib/active-agent-backend-test.js"
 export * from "./lib/agent-turn-limiter.js"
 export * from "./lib/assess-changes.js"
 export * from "./lib/assess-changes-errors.js"

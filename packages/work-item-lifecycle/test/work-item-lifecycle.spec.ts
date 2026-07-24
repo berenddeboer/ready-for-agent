@@ -59,6 +59,7 @@ import {
   filterWorkItemsByListKind,
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
+  stubActiveAgentBackendLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -118,6 +119,7 @@ describe("WorkItemLifecycle", () => {
   )
 
   const TestLayer = WorkItemLifecycleLive.pipe(
+    Layer.provideMerge(stubActiveAgentBackendLayer()),
     Layer.provideMerge(SuccessfulStepsLive),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),
@@ -132,6 +134,7 @@ describe("WorkItemLifecycle", () => {
 
   const makeTestLayer = (steps: LifecycleStepsShape) =>
     WorkItemLifecycleLive.pipe(
+      Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -142,6 +145,7 @@ describe("WorkItemLifecycle", () => {
 
   const makeRestartTestLayer = (steps: LifecycleStepsShape, filename: string) =>
     WorkItemLifecycleLive.pipe(
+      Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -195,6 +199,7 @@ describe("WorkItemLifecycle", () => {
       return
     }
     yield* db.updateConfig({
+      selectedAgentBackend: "opencode",
       defaultModel: config.defaultModel ?? "opencode/deepseek-v4-flash-free",
       defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
       reviewModel: config.reviewModel,
@@ -355,6 +360,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
@@ -383,6 +389,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/deepseek-v4-flash-free",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -421,6 +428,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: null,
@@ -457,6 +465,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "opencode/deepseek-v4-flash-free",
             defaultThinkingLevel: "low",
             reviewModel: null,
@@ -495,6 +504,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: null,
@@ -521,6 +531,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: null,
@@ -723,6 +734,7 @@ describe("WorkItemLifecycle", () => {
       })
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1203,6 +1215,7 @@ describe("WorkItemLifecycle", () => {
       )
 
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(NonTransactionalQueueLive),
@@ -4099,6 +4112,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: null,
@@ -5264,6 +5278,7 @@ describe("WorkItemLifecycle", () => {
       // Real DB + fake queue so we can fail the post-success enqueue.
       // Step run is started via runStep using the id from implementNow.
       const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -5455,6 +5470,7 @@ describe("WorkItemLifecycle", () => {
           local_cleanup: Duration.minutes(5),
         },
       }).pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(slowSteps)),
         ),
@@ -6331,6 +6347,7 @@ describe("WorkItemLifecycle", () => {
           local_cleanup: Duration.minutes(5),
         },
       }).pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -6428,6 +6445,7 @@ describe("WorkItemLifecycle", () => {
           local_cleanup: Duration.minutes(5),
         },
       }).pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -7438,6 +7456,7 @@ describe("WorkItemLifecycle", () => {
         const db = yield* DbService
         const config = yield* db.getConfig
         yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
           defaultModel:
             config.defaultModel ?? "opencode/deepseek-v4-flash-free",
           defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
