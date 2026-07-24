@@ -58,9 +58,11 @@ This boots the full Harness (UI + backend) on the existing monorepo dev path
 (`harness:dev`), including the Keymaxxer sidecar when available.
 
 Before start, the binary checks that required host tools are on `PATH`: `git`,
-`gh`, and OpenCode. Missing tools fail immediately with install hints. Keymaxxer
-is optional (`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH); ambient GitHub auth
-still works without it.
+`gh`, and the selected Agent Backend executable (`opencode` by default, or
+`grok` when Grok Build is selected). Missing tools fail immediately with install
+hints. Keymaxxer is optional (`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH);
+ambient GitHub auth still works without it. Grok Build Agent Turns always use
+ambient `gh` and do not configure Keymaxxer MCP.
 
 On successful start the default browser opens to the local UI
 (`http://127.0.0.1:6056/` by default). Disable with:

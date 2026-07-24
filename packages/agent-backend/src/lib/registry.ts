@@ -22,9 +22,21 @@ const OPENCODE_REGISTRATION: AgentBackendRegistration = {
   ],
 }
 
-/** Production selectable backends. OpenCode is the only entry in this PR. */
+const GROK_REGISTRATION: AgentBackendRegistration = {
+  descriptor: {
+    id: AGENT_BACKEND_IDS.grok,
+    label: "Grok Build",
+  },
+  capabilities: [
+    { _tag: "SessionTelemetry", supported: false },
+    { _tag: "KeymaxxerMcp", supported: false },
+  ],
+}
+
+/** Production selectable backends registered at build time. */
 const BUILT_IN_REGISTRY: ReadonlyArray<AgentBackendRegistration> = [
   OPENCODE_REGISTRATION,
+  GROK_REGISTRATION,
 ]
 
 export const listBuiltInAgentBackends =

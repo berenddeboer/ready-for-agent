@@ -88,6 +88,44 @@ describe("DbService", () => {
         }),
       ))
 
+    it("accepts Grok Build as a selectable Agent Backend", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          expect(
+            yield* db.updateConfig({
+              selectedAgentBackend: "grok",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
+              maxConcurrentWorkItems: 5,
+            }),
+          ).toMatchObject({ selectedAgentBackend: "grok" })
+        }),
+      ))
+
+    it("rejects unknown Agent Backend ids", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const error = yield* Effect.flip(
+            db.updateConfig({
+              selectedAgentBackend: "not-a-backend",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
+              maxConcurrentWorkItems: 5,
+            }),
+          )
+          expect(error).toBeInstanceOf(InvalidConfigInputError)
+          expect(error).toMatchObject({ field: "selectedAgentBackend" })
+        }),
+      ))
+
     it("rejects empty values", () =>
       runTest(
         Effect.gen(function* () {

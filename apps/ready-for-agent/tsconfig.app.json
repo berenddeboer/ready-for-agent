@@ -17,6 +17,9 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     {
+      "path": "../../packages/agent-backend/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
     },
     {

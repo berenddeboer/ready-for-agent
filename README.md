@@ -7,8 +7,9 @@ UI to start working on it.
 <img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
 
 It does this by creating a new worktree, installing packages, and
-asking [OpenCode](https://opencode.ai/) to implement the issue, review
-the issue, create a PR, and merge if allowed.
+asking a selectable headless Agent Backend
+([OpenCode](https://opencode.ai/) or [Grok Build](https://docs.x.ai/))
+to implement the issue, review the issue, create a PR, and merge if allowed.
 
 The goal of this clanker harness is to get you to that 50+ PRs merged
 a day nirvana. You focus on design, creating specifications, and
@@ -104,19 +105,35 @@ worktree, but withoutr creating a PR yet. This allows you to test and verify.
 
 # Requirements
 
-**Required on PATH** (start fails fast if missing):
+**Always required on PATH** (start fails fast if missing):
 
 1. [git](https://git-scm.com/)
-2. [GitHub CLI (`gh`)](https://cli.github.com/)
-3. [OpenCode](https://opencode.ai)
+2. [GitHub CLI (`gh`)](https://cli.github.com/) — used by the Harness and, for
+   Grok Build Agent Turns, as authenticated ambient `gh` (no raw token is
+   copied into the agent environment)
+
+**Agent Backend executable** (only the backend selected in Settings is
+required; default is OpenCode):
+
+3. [OpenCode](https://opencode.ai) when OpenCode is the selected Agent Backend
+4. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is selected
+
+Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
+Agent Turns. Harness-launched Grok processes disable auto-update for that
+session (`--no-auto-update` / `GROK_DISABLE_AUTOUPDATER`). Initial Grok Build
+support does not integrate Keymaxxer for Agent Turns and does not expose
+Session Telemetry (shown as unsupported). Opt-in live adapter tests use
+`GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1`; normal CI does not need paid
+model credentials.
 
 **Optional:**
 
-4. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets.
+5. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets for
+   Harness-owned GitHub operations and OpenCode Agent Turns.
    Resolved as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise
    the `keymaxxer` command on PATH. When neither is available, the harness uses
    ambient GitHub authentication. Set `KEYMAXXER_ENABLED=false` to force that
-   mode.
+   mode. Grok Build Agent Turns always use ambient `gh` in this release.
 
 # KeyMaxxer
 
@@ -135,9 +152,9 @@ KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 
 1. Is there support for agents other than OpenCode?
 
-Not yet, but open for properly structured PRs. Currently everything is
-hard-coded for opencode, so the first step would be to make this more
-generalisable.
+Yes. Settings can select **OpenCode** or **Grok Build** as the instance-wide
+Agent Backend. The change activates after restart (and is rejected while any
+Work Item is unfinished). Model catalogs and Thinking Levels are backend-local.
 
 2. Does the harness support any other backend than GitHub?
 

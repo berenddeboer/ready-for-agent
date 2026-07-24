@@ -10,20 +10,29 @@ import {
 import { describe, expect, it } from "bun:test"
 
 describe("Agent Backend registry", () => {
-  it("exposes only OpenCode as a selectable production backend", () => {
+  it("exposes OpenCode and Grok Build as selectable production backends", () => {
     const backends = listBuiltInAgentBackends()
     expect(backends.map((entry) => entry.descriptor.id)).toEqual([
       AGENT_BACKEND_IDS.opencode,
+      AGENT_BACKEND_IDS.grok,
     ])
     expect(defaultAgentBackendId).toBe(AGENT_BACKEND_IDS.opencode)
     expect(getBuiltInAgentBackend("missing")).toBeUndefined()
+    expect(
+      getBuiltInAgentBackend(AGENT_BACKEND_IDS.grok)?.descriptor.label,
+    ).toBe("Grok Build")
   })
 
-  it("declares typed capabilities for OpenCode", () => {
+  it("declares typed capabilities for OpenCode and Grok Build", () => {
     const opencode = getBuiltInAgentBackend(AGENT_BACKEND_IDS.opencode)
     expect(opencode).toBeDefined()
     expect(capabilitySupported(opencode!, "SessionTelemetry")).toBe(true)
     expect(capabilitySupported(opencode!, "KeymaxxerMcp")).toBe(true)
+
+    const grok = getBuiltInAgentBackend(AGENT_BACKEND_IDS.grok)
+    expect(grok).toBeDefined()
+    expect(capabilitySupported(grok!, "SessionTelemetry")).toBe(false)
+    expect(capabilitySupported(grok!, "KeymaxxerMcp")).toBe(false)
   })
 })
 

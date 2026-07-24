@@ -6,15 +6,12 @@
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "emitDeclarationOnly": false,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node", "bun"]
   },
   "include": ["src/**/*.ts"],
   "references": [
     {
       "path": "../agent-backend/tsconfig.lib.json"
-    },
-    {
-      "path": "../db/tsconfig.lib.json"
     }
   ]
 }
