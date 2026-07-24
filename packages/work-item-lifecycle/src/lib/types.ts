@@ -266,8 +266,6 @@ export const STEP_RUN_REASON = {
   waitingForAgentTurn: "waiting_for_agent_turn",
   /** Agent-dependent step blocked because Active Agent Backend is unavailable. */
   agentBackendUnavailable: "agent_backend_unavailable",
-  /** Agent-dependent step blocked until Harness restart activates selection. */
-  agentBackendRestartRequired: "agent_backend_restart_required",
   /** Agent-dependent step blocked because no build Agent Model is configured. */
   buildModelNotConfigured: "build_model_not_configured",
   /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */

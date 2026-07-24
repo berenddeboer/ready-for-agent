@@ -13,10 +13,20 @@ type Query {
   """
   agentBackends: [AgentBackendInfo!]!
   """
-  Selected backend, Active backend, readiness/restart state, actionable reason,
-  and the instance-wide model catalog from the latest successful inspection.
+  Active Agent Backend readiness, actionable reason, and the instance-wide
+  model catalog from the latest successful inspection. Selected and Active
+  always match after Save (hot-activate).
   """
   agentBackendStatus: AgentBackendStatus!
+  """
+  Settings-only inspection of a not-yet-saved Agent Backend catalog.
+  Does not change the Active Agent Backend.
+  """
+  previewAgentBackend(backendId: String!): AgentBackendPreview!
+  """
+  Remembered build/review model prefs for a backend (Harness Config scope).
+  """
+  harnessModelPrefs(backendId: String!): BackendModelPrefs!
   """
   Agent Models available from the Active Agent Backend, each with optional
   Thinking Levels. Empty thinkingLevels means the model has no Thinking Levels.
@@ -90,12 +100,13 @@ type AgentBackendInfo {
 
 """
 Instance-wide Agent Backend readiness for Settings and lifecycle guards.
+Selected and Active always match (hot-activate on Save).
 """
 type AgentBackendStatus {
   selectedBackend: AgentBackendInfo!
   activeBackend: AgentBackendInfo!
   """
-  ready | unavailable | restart_required
+  ready | unavailable
   """
   kind: AgentBackendStatusKind!
   reason: String
@@ -105,7 +116,31 @@ type AgentBackendStatus {
 enum AgentBackendStatusKind {
   READY
   UNAVAILABLE
-  RESTART_REQUIRED
+}
+
+"""
+Settings-only preview of a not-yet-saved Agent Backend.
+"""
+type AgentBackendPreview {
+  backend: AgentBackendInfo!
+  kind: AgentBackendPreviewKind!
+  reason: String
+  models: [AgentModel!]!
+}
+
+enum AgentBackendPreviewKind {
+  READY
+  UNAVAILABLE
+}
+
+"""
+Backend-scoped build/review model preferences.
+"""
+type BackendModelPrefs {
+  defaultModel: String
+  defaultThinkingLevel: String
+  reviewModel: String
+  reviewThinkingLevel: String
 }
 
 """
@@ -133,7 +168,7 @@ enum WorkItemsListKind {
 
 type Config {
   """
-  Agent Backend selected for the next Harness startup.
+  Active Agent Backend (hot-activated on Save).
   """
   selectedAgentBackend: String!
   defaultModel: String
@@ -142,6 +177,10 @@ type Config {
   reviewThinkingLevel: String
   maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
+  """
+  Count of Work Items that block Agent Backend change (includes Needs Human).
+  """
+  unfinishedWorkItemCount: Int!
 }
 
 type AgentModel {
@@ -315,7 +354,8 @@ input AddRepositoryInput {
 input UpdateConfigInput {
   selectedAgentBackend: String!
   """
-  Required when not changing Agent Backend. Ignored (cleared) when the backend changes.
+  Required when not changing Agent Backend. Optional on backend change
+  (empty is allowed, same as first-run).
   """
   defaultModel: String
   defaultThinkingLevel: String

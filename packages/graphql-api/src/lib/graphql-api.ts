@@ -158,6 +158,18 @@ const toGraphqlAgentBackendStatus = (status: AgentBackendStatus) => ({
   models: status.models,
 })
 
+const toGraphqlAgentBackendPreview = (preview: {
+  readonly backend: AgentBackendStatus["selectedBackend"]
+  readonly kind: "ready" | "unavailable"
+  readonly reason: string | null
+  readonly models: AgentBackendStatus["models"]
+}) => ({
+  backend: toGraphqlBackend(preview.backend),
+  kind: preview.kind.toUpperCase(),
+  reason: preview.reason,
+  models: preview.models,
+})
+
 const resolveWorkItemBackend = (agentBackendId: string) => {
   const registration = getBuiltInAgentBackend(agentBackendId)
   if (registration !== undefined) {
@@ -296,7 +308,11 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
-                return yield* db.getConfig
+                const [config, unfinishedWorkItemCount] = yield* Effect.all([
+                  db.getConfig,
+                  db.countUnfinishedWorkItems,
+                ])
+                return { ...config, unfinishedWorkItemCount }
               }).pipe(Effect.withSpan("graphql-api.config")),
             ),
           agentBackends: () =>
@@ -309,6 +325,42 @@ export const createGraphqlApi = (
                 const active = yield* ActiveAgentBackend
                 return toGraphqlAgentBackendStatus(yield* active.getStatus)
               }).pipe(Effect.withSpan("graphql-api.agentBackendStatus")),
+            ),
+          previewAgentBackend: async (
+            _parent: unknown,
+            args: { backendId: string },
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const backendId = args.backendId.trim()
+                if (!isSelectableAgentBackendId(backendId)) {
+                  return {
+                    backend: {
+                      id: args.backendId,
+                      label: args.backendId,
+                    },
+                    kind: "UNAVAILABLE",
+                    reason: `Unknown Agent Backend: ${args.backendId}`,
+                    models: [],
+                  }
+                }
+                const active = yield* ActiveAgentBackend
+                const preview = yield* active.preview(backendId, {
+                  cwd: agentBackendCwd,
+                  timeout: "30 seconds",
+                })
+                return toGraphqlAgentBackendPreview(preview)
+              }).pipe(Effect.withSpan("graphql-api.previewAgentBackend")),
+            ),
+          harnessModelPrefs: async (
+            _parent: unknown,
+            args: { backendId: string },
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                return yield* db.getBackendModelPrefs(args.backendId)
+              }).pipe(Effect.withSpan("graphql-api.harnessModelPrefs")),
             ),
           models: async () => runGraphql(listModels()),
           issues: async (_parent: unknown, args: IssuesArgs) =>
@@ -498,24 +550,42 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
-                const previous = yield* db.getConfig
-                const updated = yield* db.updateConfig({
-                  selectedAgentBackend: args.input.selectedAgentBackend,
-                  defaultModel: args.input.defaultModel ?? null,
-                  defaultThinkingLevel: args.input.defaultThinkingLevel ?? null,
-                  reviewModel: args.input.reviewModel ?? null,
-                  reviewThinkingLevel: args.input.reviewThinkingLevel ?? null,
-                  maxConcurrentAgentTurns: args.input.maxConcurrentAgentTurns,
-                  maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
-                })
-                if (
-                  updated.selectedAgentBackend !==
-                    previous.selectedAgentBackend &&
-                  isSelectableAgentBackendId(updated.selectedAgentBackend)
-                ) {
-                  const active = yield* ActiveAgentBackend
-                  yield* active.setSelectedBackend(updated.selectedAgentBackend)
-                }
+                const active = yield* ActiveAgentBackend
+                // Serialize config commit + activate with Work Item creation so
+                // Implement Now cannot capture pre-activate Active provenance.
+                const updated = yield* active.withConfigCoordination(
+                  Effect.gen(function* () {
+                    const next = yield* db.updateConfig({
+                      selectedAgentBackend: args.input.selectedAgentBackend,
+                      defaultModel: args.input.defaultModel ?? null,
+                      defaultThinkingLevel:
+                        args.input.defaultThinkingLevel ?? null,
+                      reviewModel: args.input.reviewModel ?? null,
+                      reviewThinkingLevel:
+                        args.input.reviewThinkingLevel ?? null,
+                      maxConcurrentAgentTurns:
+                        args.input.maxConcurrentAgentTurns,
+                      maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
+                    })
+                    if (
+                      !isSelectableAgentBackendId(next.selectedAgentBackend)
+                    ) {
+                      return next
+                    }
+                    const status = yield* active.getStatus
+                    // Only hot-activate when Active differs from committed Config.
+                    // Same-backend Saves skip full inspect (Recheck remains explicit).
+                    if (status.activeBackend.id !== next.selectedAgentBackend) {
+                      yield* active.activate(next.selectedAgentBackend, {
+                        cwd: agentBackendCwd,
+                        timeout: "30 seconds",
+                      })
+                    }
+                    return next
+                  }),
+                )
+                const unfinishedWorkItemCount =
+                  yield* db.countUnfinishedWorkItems
                 const lifecycle = yield* WorkItemLifecycle
                 yield* lifecycle.admitWaitingWorkItems.pipe(
                   Effect.catch((error) =>
@@ -525,7 +595,7 @@ export const createGraphqlApi = (
                     ),
                   ),
                 )
-                return updated
+                return { ...updated, unfinishedWorkItemCount }
               }).pipe(Effect.withSpan("graphql-api.updateConfig")),
             ),
           recheckAgentBackend: async () =>

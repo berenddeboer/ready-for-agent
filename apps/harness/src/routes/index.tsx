@@ -53,6 +53,11 @@ const configQuery = {
         defaultThinkingLevel: true,
         reviewModel: true,
         reviewThinkingLevel: true,
+        maxConcurrentAgentTurns: true,
+        maxConcurrentWorkItems: true,
+        // Keep selection aligned with Harness Settings so shared cache never
+        // drops unfinishedWorkItemCount (backend-change idle gate).
+        unfinishedWorkItemCount: true,
       },
     })
     return result.config

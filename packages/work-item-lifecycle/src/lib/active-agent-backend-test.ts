@@ -50,7 +50,15 @@ export const stubActiveAgentBackendLayer = (
       recheck: () => Effect.succeed(readyStatus(registration)),
       requireAgentTurnsAllowed:
         overrides.requireAgentTurnsAllowed ?? Effect.void,
-      setSelectedBackend: () => Effect.succeed(readyStatus(registration)),
+      activate: () => Effect.succeed(readyStatus(registration)),
+      preview: () =>
+        Effect.succeed({
+          backend: registration.descriptor,
+          kind: "ready" as const,
+          reason: null,
+          models: [],
+        }),
+      withConfigCoordination: (effect) => effect,
       getActiveRegistration: Effect.succeed(registration),
       getSessionTelemetry: (input) =>
         Effect.succeed(

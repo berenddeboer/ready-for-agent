@@ -94,6 +94,7 @@ describe("runMigrations", () => {
           { name: "20260724120000_agent_backend_vocabulary" },
           { name: "20260724180000_agent_backend_selection" },
           { name: "20260724190000_work_item_turn_time_models" },
+          { name: "20260725120000_backend_model_prefs" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -447,6 +448,97 @@ describe("runMigrations", () => {
             session_id: "ses_old",
           },
         ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("migrates flat model columns into per-backend prefs JSON", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260725120000_backend_model_prefs/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE config (
+             id text PRIMARY KEY,
+             selected_agent_backend text NOT NULL DEFAULT 'opencode',
+             default_model text,
+             default_thinking_level text,
+             review_model text,
+             review_thinking_level text,
+             max_concurrent_agent_turns integer NOT NULL DEFAULT 2,
+             max_concurrent_work_items integer NOT NULL DEFAULT 5,
+             created_at integer NOT NULL,
+             updated_at integer NOT NULL
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO config (
+             id, selected_agent_backend, default_model, default_thinking_level,
+             review_model, review_thinking_level,
+             max_concurrent_agent_turns, max_concurrent_work_items,
+             created_at, updated_at
+           ) VALUES (
+             'default', 'opencode', 'openai/gpt-5.6-terra', 'high',
+             'openai/gpt-5.6-terra', 'max', 2, 5, 1, 1
+           )`,
+        )
+        yield* sql.unsafe(
+          `CREATE TABLE repository (
+             id text PRIMARY KEY,
+             default_model text,
+             default_thinking_level text,
+             review_model text,
+             review_thinking_level text
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO repository (
+             id, default_model, default_thinking_level, review_model, review_thinking_level
+           ) VALUES (
+             'repo-1', 'openai/gpt-5.6-terra', 'high', NULL, NULL
+           )`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const configRows = (yield* sql.unsafe(
+          `SELECT backend_model_prefs FROM config WHERE id = 'default'`,
+        )) as readonly { backend_model_prefs: string }[]
+        const configPrefs = JSON.parse(configRows[0]!.backend_model_prefs)
+        expect(configPrefs).toEqual({
+          opencode: {
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/gpt-5.6-terra",
+            reviewThinkingLevel: "max",
+          },
+        })
+
+        const repoRows = (yield* sql.unsafe(
+          `SELECT backend_model_prefs FROM repository WHERE id = 'repo-1'`,
+        )) as readonly { backend_model_prefs: string }[]
+        const repoPrefs = JSON.parse(repoRows[0]!.backend_model_prefs)
+        expect(repoPrefs).toEqual({
+          opencode: {
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          },
+        })
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

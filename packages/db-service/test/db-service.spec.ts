@@ -106,7 +106,7 @@ describe("DbService", () => {
         }),
       ))
 
-    it("clears harness and repository model selections when Agent Backend changes", () =>
+    it("remembers harness and repository model prefs per Agent Backend", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
@@ -131,33 +131,104 @@ describe("DbService", () => {
             includeAllIssueAuthors: false,
           })
 
-          const updated = yield* db.updateConfig({
+          const switched = yield* db.updateConfig({
             selectedAgentBackend: "grok",
-            defaultModel: "should-be-ignored",
-            defaultThinkingLevel: "should-be-ignored",
-            reviewModel: "should-be-ignored",
-            reviewThinkingLevel: "should-be-ignored",
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-          expect(updated).toEqual({
-            selectedAgentBackend: "grok",
-            defaultModel: null,
+            defaultModel: "grok-code",
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
             maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
+          expect(switched).toEqual({
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(yield* db.getBackendModelPrefs("opencode")).toEqual({
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/gpt-5.6-terra",
+            reviewThinkingLevel: "max",
+          })
+          expect(yield* db.getBackendModelPrefs("grok")).toEqual({
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
 
-          const repos = yield* db.listRepositories
-          expect(repos).toHaveLength(1)
-          expect(repos[0]).toMatchObject({
+          // Repository flat columns project the Active backend's prefs (empty for grok).
+          const reposAfterSwitch = yield* db.listRepositories
+          expect(reposAfterSwitch).toHaveLength(1)
+          expect(reposAfterSwitch[0]).toMatchObject({
             id: repository.id,
             defaultModel: null,
             defaultThinkingLevel: null,
             reviewModel: null,
             reviewThinkingLevel: null,
+          })
+
+          // Switching back restores OpenCode harness prefs and repository projection.
+          const restored = yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/gpt-5.6-terra",
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(restored).toMatchObject({
+            selectedAgentBackend: "opencode",
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+          })
+          const reposRestored = yield* db.listRepositories
+          expect(reposRestored[0]).toMatchObject({
+            id: repository.id,
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/gpt-5.6-terra",
+            reviewThinkingLevel: "max",
+          })
+        }),
+      ))
+
+    it("rejects Agent Backend change while a Needs Human Work Item exists", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 42, 'needs_human', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-needs-human-backend", repository.id, now, now, now],
+          )
+
+          const error = yield* Effect.flip(
+            db.updateConfig({
+              selectedAgentBackend: "grok",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
+              maxConcurrentWorkItems: 5,
+            }),
+          )
+          expect(error).toMatchObject({
+            _tag: "AgentBackendChangeBlockedError",
+            unfinishedWorkItemCount: 1,
           })
         }),
       ))

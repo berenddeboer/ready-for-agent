@@ -45,6 +45,13 @@ export const stubDbService = (
     maxConcurrentAgentTurns: 2,
     maxConcurrentWorkItems: 5,
   }),
+  getBackendModelPrefs: () =>
+    Effect.succeed({
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultThinkingLevel: "low",
+      reviewModel: null,
+      reviewThinkingLevel: null,
+    }),
   updateConfig: unused,
   countUnfinishedWorkItems: Effect.succeed(0),
   addRepository: unused,

@@ -224,7 +224,15 @@ const makeRuntime = (
     getStatus: Effect.succeed(readyStatus()),
     recheck: () => Effect.succeed(readyStatus()),
     requireAgentTurnsAllowed: Effect.void,
-    setSelectedBackend: () => Effect.succeed(readyStatus()),
+    activate: () => Effect.succeed(readyStatus()),
+    preview: () =>
+      Effect.succeed({
+        backend: { id: "opencode", label: "OpenCode" },
+        kind: "ready" as const,
+        reason: null,
+        models: readyStatus().models,
+      }),
+    withConfigCoordination: (effect) => effect,
     getActiveRegistration: Effect.succeed({
       descriptor: { id: "opencode", label: "OpenCode" },
       capabilities: [
@@ -925,6 +933,77 @@ describe("GraphQL API", () => {
         },
       },
     })
+  })
+
+  test("updateConfig activates only when Active differs from committed backend", async () => {
+    const activated: string[] = []
+    const activateRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getStatus: Effect.succeed(readyStatus()),
+        activate: (backendId) => {
+          activated.push(backendId)
+          return Effect.succeed({
+            selectedBackend: { id: backendId, label: backendId },
+            activeBackend: { id: backendId, label: backendId },
+            kind: "ready",
+            reason: null,
+            models: defaultModels,
+          })
+        },
+      },
+    )
+
+    const switchResponse = await createGraphqlApi(activateRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { selectedAgentBackend }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await switchResponse.json()).toEqual({
+      data: { updateConfig: { selectedAgentBackend: "grok" } },
+    })
+    expect(activated).toEqual(["grok"])
+
+    // Same-backend save skips activate (no full inspect on every Save).
+    activated.length = 0
+    const sameBackend = await createGraphqlApi(activateRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { selectedAgentBackend }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await sameBackend.json()).toEqual({
+      data: { updateConfig: { selectedAgentBackend: "opencode" } },
+    })
+    expect(activated).toEqual([])
   })
 
   test("updates repository settings", async () => {

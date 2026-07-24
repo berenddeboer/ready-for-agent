@@ -2,13 +2,22 @@ import "@tanstack/react-start/server-only"
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
-import { Effect, Layer, Logger, ManagedRuntime } from "effect"
+import {
+  Effect,
+  type FileSystem,
+  Layer,
+  Logger,
+  ManagedRuntime,
+  type Path,
+} from "effect"
+import type { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AGENT_BACKEND_IDS,
   ActiveAgentBackend,
   ActiveAgentBackendLive,
+  AgentBackend,
   type AgentBackendId,
-  type AgentBackendRegistration,
+  type ResolveAgentBackendRuntime,
   SessionTelemetryProvider,
   resolveActiveRegistration,
   unsupportedSessionTelemetry,
@@ -50,35 +59,54 @@ export interface CreateApplicationOptions {
   readonly startWorker?: boolean
 }
 
-const unsupportedSessionTelemetryLive = (
-  registration: AgentBackendRegistration,
-) =>
-  Layer.succeed(SessionTelemetryProvider, {
-    getSession: (sessionId) =>
-      Effect.succeed(
-        unsupportedSessionTelemetry(sessionId, registration.descriptor),
-      ),
-  })
+type PlatformServices =
+  | ChildProcessSpawner.ChildProcessSpawner
+  | FileSystem.FileSystem
+  | Path.Path
 
-const agentBackendLayers = <R>(input: {
-  readonly activeRegistration: AgentBackendRegistration
-  readonly platformLayer: Layer.Layer<R>
-  readonly sidecarUrl: string | undefined
-}) => {
-  if (input.activeRegistration.descriptor.id === AGENT_BACKEND_IDS.grok) {
-    return {
-      adapterLayer: Grok.layer().pipe(Layer.provide(input.platformLayer)),
-      telemetryLayer: unsupportedSessionTelemetryLive(input.activeRegistration),
+const makeResolveRuntime = (
+  platformLayer: Layer.Layer<PlatformServices>,
+  sidecarUrl: string | undefined,
+): ResolveAgentBackendRuntime => {
+  return (backendId: AgentBackendId) => {
+    const registration = resolveActiveRegistration(backendId)
+
+    if (registration.descriptor.id === AGENT_BACKEND_IDS.grok) {
+      return Effect.gen(function* () {
+        const adapter = yield* AgentBackend
+        return {
+          registration,
+          adapter,
+          telemetry: {
+            getSession: (sessionId: string) =>
+              Effect.succeed(
+                unsupportedSessionTelemetry(sessionId, registration.descriptor),
+              ),
+          },
+        }
+      }).pipe(Effect.provide(Grok.layer().pipe(Layer.provide(platformLayer))))
     }
-  }
 
-  return {
-    adapterLayer: Opencode.layer({
-      ...(input.sidecarUrl === undefined
-        ? {}
-        : { keymaxxerMcpUrl: input.sidecarUrl }),
-    }).pipe(Layer.provide(input.platformLayer)),
-    telemetryLayer: OpencodeSessionTelemetryLive(),
+    return Effect.gen(function* () {
+      const adapter = yield* AgentBackend
+      const telemetry = yield* SessionTelemetryProvider
+      return {
+        registration,
+        adapter,
+        telemetry,
+      }
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          Opencode.layer({
+            ...(sidecarUrl === undefined
+              ? {}
+              : { keymaxxerMcpUrl: sidecarUrl }),
+          }).pipe(Layer.provide(platformLayer)),
+          OpencodeSessionTelemetryLive(),
+        ),
+      ),
+    )
   }
 }
 
@@ -124,25 +152,17 @@ export const createApplication = async (
     .then((id) => id as AgentBackendId)
     .catch(() => AGENT_BACKEND_IDS.opencode)
 
+  const resolveRuntime = makeResolveRuntime(platformLayer, sidecarUrl)
   const activeRegistration = resolveActiveRegistration(selectedBackendId)
-  const { adapterLayer, telemetryLayer } = agentBackendLayers({
-    activeRegistration,
-    platformLayer,
-    sidecarUrl,
-  })
   const activeLayer = ActiveAgentBackendLive({
-    selectedBackendId:
-      activeRegistration.descriptor.id === selectedBackendId
-        ? selectedBackendId
-        : activeRegistration.descriptor.id,
-    activeRegistration,
-  }).pipe(Layer.provide(adapterLayer), Layer.provide(telemetryLayer))
+    selectedBackendId: activeRegistration.descriptor.id,
+    resolveRuntime,
+  })
 
   const lifecycleLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(LifecycleStepsLive),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(queueLayer),
-    Layer.provideMerge(adapterLayer),
     Layer.provideMerge(activeLayer),
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(githubLayer),
@@ -161,8 +181,6 @@ export const createApplication = async (
           reconcilerLayer,
           queueLayer,
           keymaxxerLayer,
-          adapterLayer,
-          telemetryLayer,
           activeLayer,
           lifecycleLayer,
           loggingLayer,
@@ -172,8 +190,6 @@ export const createApplication = async (
           workerLayer,
           queueLayer,
           keymaxxerLayer,
-          adapterLayer,
-          telemetryLayer,
           activeLayer,
           lifecycleLayer,
           loggingLayer,
