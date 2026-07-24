@@ -305,18 +305,24 @@ describe("limitOpencodeSessions", () => {
         expect(starts).toBe(1)
 
         const waitingRows = (yield* sql.unsafe(
-          `SELECT status, reason_code, reason_message FROM step_run WHERE id = ?`,
+          `SELECT status, reason_code, reason_message, session_wait_started_at,
+                  session_wait_ms
+           FROM step_run WHERE id = ?`,
           [stepRunId],
         )) as readonly {
           readonly status: string
           readonly reason_code: string | null
           readonly reason_message: string | null
+          readonly session_wait_started_at: number | null
+          readonly session_wait_ms: number | null
         }[]
-        expect(waitingRows[0]).toEqual({
+        expect(waitingRows[0]).toMatchObject({
           status: "running",
           reason_code: STEP_RUN_REASON.waitingForOpencodeSession,
           reason_message: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+          session_wait_ms: 0,
         })
+        expect(waitingRows[0]!.session_wait_started_at).toBeTypeOf("number")
 
         yield* Deferred.succeed(releaseFirst, undefined)
         yield* Deferred.await(secondStarted)
@@ -324,18 +330,24 @@ describe("limitOpencodeSessions", () => {
         yield* Fiber.join(second)
 
         const afterRows = (yield* sql.unsafe(
-          `SELECT status, reason_code, reason_message FROM step_run WHERE id = ?`,
+          `SELECT status, reason_code, reason_message, session_wait_started_at,
+                  session_wait_ms
+           FROM step_run WHERE id = ?`,
           [stepRunId],
         )) as readonly {
           readonly status: string
           readonly reason_code: string | null
           readonly reason_message: string | null
+          readonly session_wait_started_at: number | null
+          readonly session_wait_ms: number | null
         }[]
-        expect(afterRows[0]).toEqual({
+        expect(afterRows[0]).toMatchObject({
           status: "running",
           reason_code: null,
           reason_message: null,
+          session_wait_started_at: null,
         })
+        expect(afterRows[0]!.session_wait_ms ?? 0).toBeGreaterThanOrEqual(40)
         expect(starts).toBe(2)
       }),
     ))

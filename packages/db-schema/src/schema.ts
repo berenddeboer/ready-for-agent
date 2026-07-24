@@ -371,6 +371,13 @@ export const stepRun = snakeCase.table(
     finishedAt: integer({ mode: "number" }),
     reasonCode: text(),
     reasonMessage: text(),
+    /**
+     * Cumulative ms spent blocked on an OpenCode session slot (completed waits).
+     * Excluded from max-duration / visibility-lease productive time.
+     */
+    sessionWaitMs: integer({ mode: "number" }).notNull().default(0),
+    /** Wall-clock start of the current OpenCode session-slot wait, if any. */
+    sessionWaitStartedAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),

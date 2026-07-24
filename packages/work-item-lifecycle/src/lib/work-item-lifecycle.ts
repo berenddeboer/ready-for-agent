@@ -65,6 +65,7 @@ import {
   formatAcceptedReviewSummary,
   formatDeferredReviewSummary,
 } from "./review.js"
+import { computeProductiveElapsedMs } from "./step-run-productive-time.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
@@ -271,7 +272,13 @@ type StepRunRow = {
   readonly finished_at: number | null
   readonly reason_code: string | null
   readonly reason_message: string | null
+  readonly session_wait_ms: number | null
+  readonly session_wait_started_at: number | null
 }
+
+const STEP_RUN_SELECT_COLUMNS = `id, work_item_id, step, status, queue_job_id, queued_at,
+                        started_at, finished_at, reason_code, reason_message,
+                        session_wait_ms, session_wait_started_at`
 
 const deriveQueueWaitMs = (row: StepRunRow, nowMs: number): number => {
   const endMs = row.started_at ?? row.finished_at ?? nowMs
@@ -725,8 +732,7 @@ export const makeWorkItemLifecycleLive = (
           const placeholders = workItemIds.map(() => "?").join(", ")
           const rows = (yield* sql
             .unsafe(
-              `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
-                    started_at, finished_at, reason_code, reason_message
+              `SELECT ${STEP_RUN_SELECT_COLUMNS}
              FROM step_run
              WHERE work_item_id IN (${placeholders})
              ORDER BY queued_at ASC, rowid ASC`,
@@ -864,11 +870,10 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const rows = (yield* sql
             .unsafe(
-              `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
-                    started_at, finished_at, reason_code, reason_message
-             FROM step_run
-             WHERE id = ?
-             LIMIT 1`,
+              `SELECT ${STEP_RUN_SELECT_COLUMNS}
+              FROM step_run
+              WHERE id = ?
+              LIMIT 1`,
               [stepRunId],
             )
             .pipe(Effect.mapError(toDatabaseError))) as readonly StepRunRow[]
@@ -2475,8 +2480,7 @@ export const makeWorkItemLifecycleLive = (
                    AND other.status = 'running'
                    AND other.id != step_run.id
                )
-             RETURNING id, work_item_id, step, status, queue_job_id, queued_at,
-                       started_at, finished_at, reason_code, reason_message`,
+              RETURNING ${STEP_RUN_SELECT_COLUMNS}`,
                   [startedAt, startedAt, stepRunId, stepRun.step],
                 )
                 .pipe(
@@ -2487,15 +2491,41 @@ export const makeWorkItemLifecycleLive = (
               if (!afterStart) {
                 const current = yield* loadStepRunRow(stepRunId)
                 if (current?.status === "running") {
+                  const recovered =
+                    current.session_wait_started_at === null
+                      ? current
+                      : ((
+                          (yield* sql
+                            .unsafe(
+                              `UPDATE step_run
+                             SET session_wait_started_at = NULL,
+                                 reason_code = NULL,
+                                 reason_message = NULL,
+                                 updated_at = ?
+                             WHERE id = ?
+                               AND status = 'running'
+                             RETURNING ${STEP_RUN_SELECT_COLUMNS}`,
+                              [startedAt, current.id],
+                            )
+                            .pipe(
+                              Effect.mapError(toDatabaseError),
+                            )) as readonly StepRunRow[]
+                        )[0] ?? current)
+                  // A duplicate delivery in this process exits before this point
+                  // because activeStepExecutions already contains the Step Run.
+                  // An open wait here therefore belongs to a stopped process.
                   const maxDurationMs = Duration.toMillis(
-                    maxDurations[current.step],
+                    maxDurations[recovered.step],
                   )
-                  const startedMs = current.started_at ?? 0
                   const nowMs = yield* Clock.currentTimeMillis
-                  const leaseExpired = nowMs - startedMs >= maxDurationMs
+                  const productiveElapsedMs = computeProductiveElapsedMs(
+                    recovered,
+                    nowMs,
+                  )
+                  const leaseExpired = productiveElapsedMs >= maxDurationMs
                   if (leaseExpired) {
                     yield* completeInterruptedStep({
-                      stepRun: current,
+                      stepRun: recovered,
                       reasonMessage:
                         "Visibility lease expired while the Step Run was still Running",
                     })
@@ -2532,6 +2562,38 @@ export const makeWorkItemLifecycleLive = (
                 maxDuration,
               }
 
+              const productiveTimeout: Effect.Effect<
+                never,
+                Cause.TimeoutError | WorkItemLifecycleDatabaseError
+              > = Effect.gen(function* () {
+                const maxDurationMs = Duration.toMillis(maxDuration)
+                for (;;) {
+                  const nowMs = yield* Clock.currentTimeMillis
+                  const current = yield* loadStepRunRow(afterStart.id)
+                  if (current === null || current.status !== "running") {
+                    return yield* Effect.never
+                  }
+                  const productiveElapsedMs = computeProductiveElapsedMs(
+                    current,
+                    nowMs,
+                  )
+                  if (productiveElapsedMs >= maxDurationMs) {
+                    return yield* new Cause.TimeoutError()
+                  }
+                  const remainingMs = maxDurationMs - productiveElapsedMs
+                  const waitingForSession =
+                    current.session_wait_started_at !== null ||
+                    current.reason_code ===
+                      STEP_RUN_REASON.waitingForOpencodeSession
+                  // While session-slot wait freezes the clock, poll; otherwise
+                  // sleep up to the remaining productive budget (capped).
+                  const sleepMs = waitingForSession
+                    ? Math.min(500, Math.max(remainingMs, 50))
+                    : Math.min(remainingMs, 50)
+                  yield* Effect.sleep(Duration.millis(Math.max(1, sleepMs)))
+                }
+              })
+
               const result = yield* Effect.uninterruptibleMask((restore) =>
                 Effect.gen(function* () {
                   const handlerExit = yield* Effect.exit(
@@ -2544,7 +2606,7 @@ export const makeWorkItemLifecycleLive = (
                             stepRunId: afterStart.id,
                             repositoryId: workItem.repository_id,
                           }),
-                          Effect.timeout(maxDuration),
+                          Effect.raceFirst(productiveTimeout),
                         ),
                         Deferred.await(cancel).pipe(
                           Effect.andThen(Effect.interrupt),
@@ -3528,8 +3590,7 @@ export const makeWorkItemLifecycleLive = (
 
         const latestRows = (yield* sql
           .unsafe(
-            `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
-                    started_at, finished_at, reason_code, reason_message
+            `SELECT ${STEP_RUN_SELECT_COLUMNS}
              FROM step_run
              WHERE work_item_id = ?
              ORDER BY queued_at DESC, rowid DESC
@@ -3578,8 +3639,7 @@ export const makeWorkItemLifecycleLive = (
 
         const activeRows = (yield* sql
           .unsafe(
-            `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
-                  started_at, finished_at, reason_code, reason_message
+            `SELECT ${STEP_RUN_SELECT_COLUMNS}
            FROM step_run
            WHERE work_item_id = ?
              AND status IN ('queued', 'running')
@@ -3601,8 +3661,7 @@ export const makeWorkItemLifecycleLive = (
         if (!recoverableStatusCheckFailure && !retryableNeedsHumanHandoff) {
           const latestPendingRows = (yield* sql
             .unsafe(
-              `SELECT id, work_item_id, step, status, queue_job_id, queued_at,
-                    started_at, finished_at, reason_code, reason_message
+              `SELECT ${STEP_RUN_SELECT_COLUMNS}
              FROM step_run
              WHERE work_item_id = ?
                AND step = ?
