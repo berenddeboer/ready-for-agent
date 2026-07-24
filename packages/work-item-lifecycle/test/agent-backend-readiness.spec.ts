@@ -1,7 +1,6 @@
 import { Effect, Layer } from "effect"
 import {
   ActiveAgentBackend,
-  AgentBackendRestartRequiredError,
   type AgentBackendStatus,
   AgentBackendUnavailableError,
 } from "@ready-for-agent/agent-backend"
@@ -9,7 +8,6 @@ import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
-  AgentBackendRestartRequiredError as LifecycleRestartRequiredError,
   LifecycleSteps,
   type LifecycleStepsShape,
   AgentBackendUnavailableError as LifecycleUnavailableError,
@@ -57,14 +55,6 @@ const statusUnavailable = (): AgentBackendStatus => ({
   activeBackend: { id: "opencode", label: "OpenCode" },
   kind: "unavailable",
   reason: "opencode binary not found",
-  models: [],
-})
-
-const statusRestart = (): AgentBackendStatus => ({
-  selectedBackend: { id: "opencode", label: "OpenCode" },
-  activeBackend: { id: "opencode", label: "OpenCode" },
-  kind: "restart_required",
-  reason: "Restart required",
   models: [],
 })
 
@@ -129,67 +119,6 @@ describe("Agent Backend readiness gates", () => {
     )
   })
 
-  it("rejects Implement Now while restart is required", async () => {
-    const layer = WorkItemLifecycleLive.pipe(
-      Layer.provideMerge(
-        stubActiveAgentBackendLayer({
-          getStatus: Effect.succeed(statusRestart()),
-          requireAgentTurnsAllowed: Effect.fail(
-            new AgentBackendRestartRequiredError({
-              message: "Restart required",
-              selectedBackendId: "opencode",
-              activeBackendId: "opencode",
-            }),
-          ),
-        }),
-      ),
-      Layer.provideMerge(
-        Layer.succeed(LifecycleSteps, LifecycleSteps.of(successfulSteps)),
-      ),
-      Layer.provideMerge(DbServiceLive),
-      Layer.provideMerge(SqliteQueueServiceLive),
-      Layer.provideMerge(DatabaseTest),
-    )
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const db = yield* DbService
-        const lifecycle = yield* WorkItemLifecycle
-        const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
-          localPath: "/repos/acme/widgets.git",
-          isBare: true,
-        })
-        yield* db.updateConfig({
-          selectedAgentBackend: "opencode",
-          defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultThinkingLevel: "low",
-          reviewModel: null,
-          reviewThinkingLevel: null,
-          maxConcurrentAgentTurns: 2,
-          maxConcurrentWorkItems: 5,
-        })
-        yield* db.storeIssue({
-          repositoryId: repo.id,
-          githubIssueNumber: 1,
-          title: "Issue",
-          body: "body",
-          url: "https://github.com/acme/widgets/issues/1",
-          state: "OPEN",
-          githubCreatedAt: new Date(),
-          issueAuthor: null,
-          parent: null,
-          parentPosition: null,
-          hasChildren: false,
-          blockedBy: [],
-        })
-        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 1))
-        expect(error).toBeInstanceOf(LifecycleRestartRequiredError)
-      }).pipe(Effect.provide(layer)),
-    )
-  })
-
   it("allows Agent-free create_worktree while backend is unavailable", async () => {
     const layer = WorkItemLifecycleLive.pipe(
       Layer.provideMerge(
@@ -199,7 +128,15 @@ describe("Agent Backend readiness gates", () => {
             getStatus: Effect.succeed(statusUnavailable()),
             recheck: () => Effect.succeed(statusUnavailable()),
             requireAgentTurnsAllowed: Effect.void,
-            setSelectedBackend: () => Effect.succeed(statusUnavailable()),
+            activate: () => Effect.succeed(statusUnavailable()),
+            preview: () =>
+              Effect.succeed({
+                backend: { id: "opencode", label: "OpenCode" },
+                kind: "unavailable" as const,
+                reason: "opencode binary not found",
+                models: [],
+              }),
+            withConfigCoordination: (effect) => effect,
             getActiveRegistration: Effect.succeed({
               descriptor: { id: "opencode", label: "OpenCode" },
               capabilities: [

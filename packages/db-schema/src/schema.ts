@@ -23,6 +23,11 @@ export const repository = snakeCase.table(
     defaultThinkingLevel: text(),
     reviewModel: text(),
     reviewThinkingLevel: text(),
+    /**
+     * Per-Agent-Backend model preferences (JSON map keyed by backend id).
+     * Flat model columns mirror the Active/selected backend entry.
+     */
+    backendModelPrefs: text().notNull().default("{}"),
     autoMerge: integer({ mode: "boolean" }).notNull().default(false),
     includeAllIssueAuthors: integer({ mode: "boolean" })
       .notNull()
@@ -45,12 +50,17 @@ export const repository = snakeCase.table(
 
 export const config = snakeCase.table("config", {
   id: text().primaryKey().default("default"),
-  /** Agent Backend selected for the next Harness startup (OpenCode by default). */
+  /** Active Agent Backend for the Harness instance (OpenCode by default). */
   selectedAgentBackend: text().notNull().default("opencode"),
   defaultModel: text(),
   defaultThinkingLevel: text(),
   reviewModel: text(),
   reviewThinkingLevel: text(),
+  /**
+   * Per-Agent-Backend model preferences (JSON map keyed by backend id).
+   * Flat model columns mirror the selected backend entry.
+   */
+  backendModelPrefs: text().notNull().default("{}"),
   maxConcurrentAgentTurns: integer({ mode: "number" }).notNull().default(2),
   maxConcurrentWorkItems: integer({ mode: "number" }).notNull().default(5),
   createdAt: integer({ mode: "number" })

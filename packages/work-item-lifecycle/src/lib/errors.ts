@@ -68,15 +68,6 @@ export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentB
   },
 ) {}
 
-export class AgentBackendRestartRequiredError extends Schema.TaggedErrorClass<AgentBackendRestartRequiredError>()(
-  "AgentBackendRestartRequiredError",
-  {
-    message: Schema.String,
-    selectedBackendId: Schema.String,
-    activeBackendId: Schema.String,
-  },
-) {}
-
 export class WorkItemNotFoundError extends Schema.TaggedErrorClass<WorkItemNotFoundError>()(
   "WorkItemNotFoundError",
   {

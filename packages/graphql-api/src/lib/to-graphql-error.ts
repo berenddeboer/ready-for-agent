@@ -84,18 +84,6 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         "AGENT_BACKEND_UNAVAILABLE",
         { reason: "reason" in error ? error.reason : error.message },
       )
-    case "AgentBackendRestartRequiredError":
-      return gql(
-        error.message ??
-          "Restart the Harness to activate the selected Agent Backend",
-        "AGENT_BACKEND_RESTART_REQUIRED",
-        {
-          selectedBackendId:
-            "selectedBackendId" in error ? error.selectedBackendId : undefined,
-          activeBackendId:
-            "activeBackendId" in error ? error.activeBackendId : undefined,
-        },
-      )
     case "AgentBackendChangeBlockedError":
       return gql(
         error.message ??

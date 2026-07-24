@@ -153,8 +153,9 @@ KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 1. Is there support for agents other than OpenCode?
 
 Yes. Settings can select **OpenCode** or **Grok Build** as the instance-wide
-Agent Backend. The change activates after restart (and is rejected while any
-Work Item is unfinished). Model catalogs and Thinking Levels are backend-local.
+Agent Backend. The change hot-activates on Save when no Work Items are
+unfinished (including Needs Human). Model catalogs and Thinking Levels are
+backend-local, and build/review prefs are remembered per backend.
 
 2. Does the harness support any other backend than GitHub?
 

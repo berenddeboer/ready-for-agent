@@ -58,6 +58,21 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
 export type UpdateRepositorySettingsInput =
   typeof UpdateRepositorySettingsInput.Type
 
+export const BackendModelPrefs = Schema.Struct({
+  defaultModel: Schema.NullOr(Schema.String),
+  defaultThinkingLevel: Schema.NullOr(Schema.String),
+  reviewModel: Schema.NullOr(Schema.String),
+  reviewThinkingLevel: Schema.NullOr(Schema.String),
+})
+export type BackendModelPrefs = typeof BackendModelPrefs.Type
+
+export const emptyBackendModelPrefs = (): BackendModelPrefs => ({
+  defaultModel: null,
+  defaultThinkingLevel: null,
+  reviewModel: null,
+  reviewThinkingLevel: null,
+})
+
 export const ConfigRecord = Schema.Struct({
   selectedAgentBackend: Schema.String,
   defaultModel: Schema.NullOr(Schema.String),
@@ -75,7 +90,11 @@ export type ConfigRecord = typeof ConfigRecord.Type
 
 export const UpdateConfigInput = Schema.Struct({
   selectedAgentBackend: Schema.String,
-  /** Required when not changing backend; ignored/cleared on backend change. */
+  /**
+   * Build model for the selected backend. Required when keeping the same
+   * backend (except empty first-run rows already null). Optional on backend
+   * change so operators can hot-activate unconfigured.
+   */
   defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
@@ -140,6 +159,7 @@ export const RepositorySqlRow = Schema.Struct({
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
+  backendModelPrefs: Schema.String,
   autoMerge: SqlBoolean,
   includeAllIssueAuthors: SqlBoolean,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
@@ -153,6 +173,7 @@ export const RepositorySqlRow = Schema.Struct({
     defaultThinkingLevel: "default_thinking_level",
     reviewModel: "review_model",
     reviewThinkingLevel: "review_thinking_level",
+    backendModelPrefs: "backend_model_prefs",
     autoMerge: "auto_merge",
     includeAllIssueAuthors: "include_all_issue_authors",
     issuesReconciledAt: "issues_reconciled_at",
@@ -166,6 +187,7 @@ export const ConfigSqlRow = Schema.Struct({
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
   reviewThinkingLevel: Schema.NullOr(Schema.String),
+  backendModelPrefs: Schema.String,
   maxConcurrentAgentTurns: Schema.Int,
   maxConcurrentWorkItems: Schema.Int,
 }).pipe(
@@ -175,6 +197,7 @@ export const ConfigSqlRow = Schema.Struct({
     defaultThinkingLevel: "default_thinking_level",
     reviewModel: "review_model",
     reviewThinkingLevel: "review_thinking_level",
+    backendModelPrefs: "backend_model_prefs",
     maxConcurrentAgentTurns: "max_concurrent_agent_turns",
     maxConcurrentWorkItems: "max_concurrent_work_items",
   }),

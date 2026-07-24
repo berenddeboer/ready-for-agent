@@ -42,6 +42,7 @@ const configQuery = {
         reviewThinkingLevel: true,
         maxConcurrentAgentTurns: true,
         maxConcurrentWorkItems: true,
+        unfinishedWorkItemCount: true,
       },
     })
     return result.config
@@ -199,9 +200,17 @@ function SettingsButton() {
   const [maxConcurrentAgentTurns, setMaxConcurrentOpencodeSessions] =
     useState("2")
   const [maxConcurrentWorkItems, setMaxConcurrentWorkItems] = useState("5")
+  const [previewModels, setPreviewModels] = useState<
+    readonly AgentModelOption[] | null
+  >(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewPending, setPreviewPending] = useState(false)
+  const previewGenerationRef = useRef(0)
   const buildConfigured = isBuildModelConfigured(config.data)
   const status = backendStatus.data?.agentBackendStatus
   const backendKind = status?.kind
+  const unfinishedWorkItemCount = config.data?.unfinishedWorkItemCount ?? 0
+  const backendChangeBlocked = unfinishedWorkItemCount > 0
 
   useEffect(() => {
     if (!dialogOpen || !config.data) {
@@ -216,6 +225,10 @@ function SettingsButton() {
       String(config.data.maxConcurrentAgentTurns),
     )
     setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
+    previewGenerationRef.current += 1
+    setPreviewModels(null)
+    setPreviewError(null)
+    setPreviewPending(false)
   }, [config.data, dialogOpen])
 
   const updateConfig = useMutation({
@@ -238,6 +251,7 @@ function SettingsButton() {
           reviewThinkingLevel: true,
           maxConcurrentAgentTurns: true,
           maxConcurrentWorkItems: true,
+          unfinishedWorkItemCount: true,
         },
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
@@ -278,8 +292,97 @@ function SettingsButton() {
     },
   })
 
+  const applyModelPrefs = (prefs: {
+    defaultModel: string | null
+    defaultThinkingLevel: string | null
+    reviewModel: string | null
+    reviewThinkingLevel: string | null
+  }) => {
+    setDefaultModel(prefs.defaultModel ?? "")
+    setDefaultVariant(prefs.defaultThinkingLevel ?? "")
+    setReviewModel(prefs.reviewModel ?? "")
+    setReviewVariant(prefs.reviewThinkingLevel ?? "")
+  }
+
+  const applyAgentBackendSelection = async (nextBackend: string) => {
+    const generation = ++previewGenerationRef.current
+    setSelectedAgentBackend(nextBackend)
+    const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
+    if (nextBackend === savedAgentBackend) {
+      if (config.data) {
+        applyModelPrefs({
+          defaultModel: config.data.defaultModel,
+          defaultThinkingLevel: config.data.defaultThinkingLevel,
+          reviewModel: config.data.reviewModel,
+          reviewThinkingLevel: config.data.reviewThinkingLevel,
+        })
+      }
+      setPreviewModels(null)
+      setPreviewError(null)
+      setPreviewPending(false)
+      return
+    }
+
+    setPreviewPending(true)
+    setPreviewError(null)
+    try {
+      const [prefsResult, previewResult] = await Promise.all([
+        graphql.query({
+          harnessModelPrefs: {
+            __args: { backendId: nextBackend },
+            defaultModel: true,
+            defaultThinkingLevel: true,
+            reviewModel: true,
+            reviewThinkingLevel: true,
+          },
+        }),
+        graphql.query({
+          previewAgentBackend: {
+            __args: { backendId: nextBackend },
+            backend: { id: true, label: true },
+            kind: true,
+            reason: true,
+            models: { id: true, thinkingLevels: true },
+          },
+        }),
+      ])
+      // Ignore stale responses after a newer dropdown selection.
+      if (generation !== previewGenerationRef.current) {
+        return
+      }
+      applyModelPrefs(prefsResult.harnessModelPrefs)
+      const preview = previewResult.previewAgentBackend
+      if (preview.kind === "READY") {
+        setPreviewModels(preview.models)
+        setPreviewError(null)
+      } else {
+        setPreviewModels([])
+        setPreviewError(
+          preview.reason ??
+            "Could not load model catalog for the selected Agent Backend",
+        )
+      }
+    } catch (error) {
+      if (generation !== previewGenerationRef.current) {
+        return
+      }
+      setPreviewModels([])
+      setPreviewError(
+        error instanceof Error
+          ? error.message
+          : "Could not preview the selected Agent Backend",
+      )
+    } finally {
+      if (generation === previewGenerationRef.current) {
+        setPreviewPending(false)
+      }
+    }
+  }
+
   const openSettings = () => {
     setDialogOpen(true)
+    // Discard any in-flight preview from a previous dialog session.
+    previewGenerationRef.current += 1
     if (config.isError) {
       void config.refetch()
     }
@@ -291,15 +394,20 @@ function SettingsButton() {
     }
     if (config.data) {
       setSelectedAgentBackend(config.data.selectedAgentBackend)
-      setDefaultModel(config.data.defaultModel ?? "")
-      setDefaultVariant(config.data.defaultThinkingLevel ?? "")
-      setReviewModel(config.data.reviewModel ?? "")
-      setReviewVariant(config.data.reviewThinkingLevel ?? "")
+      applyModelPrefs({
+        defaultModel: config.data.defaultModel,
+        defaultThinkingLevel: config.data.defaultThinkingLevel,
+        reviewModel: config.data.reviewModel,
+        reviewThinkingLevel: config.data.reviewThinkingLevel,
+      })
       setMaxConcurrentOpencodeSessions(
         String(config.data.maxConcurrentAgentTurns),
       )
       setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     }
+    setPreviewModels(null)
+    setPreviewError(null)
+    setPreviewPending(false)
     updateConfig.reset()
     recheckBackend.reset()
     dialogRef.current?.showModal()
@@ -318,58 +426,32 @@ function SettingsButton() {
   const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
   const backendChanging = selectedAgentBackend !== savedAgentBackend
 
-  const applyAgentBackendSelection = (nextBackend: string) => {
-    setSelectedAgentBackend(nextBackend)
-    if (nextBackend === savedAgentBackend && config.data) {
-      setDefaultModel(config.data.defaultModel ?? "")
-      setDefaultVariant(config.data.defaultThinkingLevel ?? "")
-      setReviewModel(config.data.reviewModel ?? "")
-      setReviewVariant(config.data.reviewThinkingLevel ?? "")
-      return
-    }
-    setDefaultModel("")
-    setDefaultVariant("")
-    setReviewModel("")
-    setReviewVariant("")
-  }
-
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const parsedMaxSessions = Number(maxConcurrentAgentTurns)
     const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
     updateConfig.mutate({
       selectedAgentBackend,
-      defaultModel: backendChanging
-        ? null
-        : defaultModel.trim() === ""
-          ? null
-          : defaultModel,
-      defaultThinkingLevel: backendChanging
-        ? null
-        : defaultThinkingLevel.trim() === ""
-          ? null
-          : defaultThinkingLevel,
-      reviewModel: backendChanging
-        ? null
-        : reviewModel.trim() === ""
-          ? null
-          : reviewModel,
-      reviewThinkingLevel: backendChanging
-        ? null
-        : reviewThinkingLevel.trim() === ""
-          ? null
-          : reviewThinkingLevel,
+      defaultModel: defaultModel.trim() === "" ? null : defaultModel,
+      defaultThinkingLevel:
+        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
+      reviewModel: reviewModel.trim() === "" ? null : reviewModel,
+      reviewThinkingLevel:
+        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
       maxConcurrentAgentTurns: parsedMaxSessions,
       maxConcurrentWorkItems: parsedMaxWorkItems,
     })
   }
 
-  const modelIds = (models.data ?? []).map((model) => model.id)
-  const buildVariants = variantsForModel(models.data, defaultModel)
+  const catalogModels: readonly AgentModelOption[] | undefined = backendChanging
+    ? (previewModels ?? undefined)
+    : models.data
+  const modelIds = (catalogModels ?? []).map((model) => model.id)
+  const buildVariants = variantsForModel(catalogModels, defaultModel)
   const reviewThinkingLevelSourceModel =
     reviewModel.length > 0 ? reviewModel : defaultModel
   const reviewThinkingLevels = variantsForModel(
-    models.data,
+    catalogModels,
     reviewThinkingLevelSourceModel,
   )
   const hasUnavailableBuildModel =
@@ -385,9 +467,14 @@ function SettingsButton() {
       (reviewModel.length === 0 && hasUnavailableBuildModel) ||
       !reviewThinkingLevels.includes(reviewThinkingLevel))
   const showUnconfiguredGuidance = config.isSuccess && !buildConfigured
-  const showBackendBanner =
-    config.isSuccess &&
-    (backendKind === "UNAVAILABLE" || backendKind === "RESTART_REQUIRED")
+  const showBackendBanner = config.isSuccess && backendKind === "UNAVAILABLE"
+  const modelsDisabled =
+    backendChanging && (previewPending || previewError !== null)
+  const modelsLoading =
+    dialogOpen &&
+    (backendChanging
+      ? previewPending
+      : models.isPending || backendStatus.isPending)
 
   return (
     <>
@@ -396,12 +483,7 @@ function SettingsButton() {
           className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
           role="status"
         >
-          <span>
-            {backendKind === "RESTART_REQUIRED"
-              ? (status?.reason ??
-                "Restart the Harness to activate the selected Agent Backend")
-              : (status?.reason ?? "Agent Backend is unavailable")}
-          </span>
+          <span>{status?.reason ?? "Agent Backend is unavailable"}</span>
           <button
             type="button"
             className="border border-oxblood/50 bg-paper px-2 py-0.5 text-xs font-semibold text-oxblood underline-offset-2 hover:bg-oxblood hover:text-paper"
@@ -474,13 +556,7 @@ function SettingsButton() {
                 Select a default build model before the harness can create work.
               </p>
             )}
-            {status?.kind === "RESTART_REQUIRED" && (
-              <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                {status.reason ??
-                  "Restart the Harness to activate the selected Agent Backend."}
-              </p>
-            )}
-            {status?.kind === "UNAVAILABLE" && (
+            {!backendChanging && status?.kind === "UNAVAILABLE" && (
               <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 {status.reason ?? "Agent Backend is unavailable."}
               </p>
@@ -488,10 +564,11 @@ function SettingsButton() {
           </div>
 
           <div className="grid gap-5 px-6 py-5">
-            {config.isPending ||
-            (dialogOpen && (models.isPending || backendStatus.isPending)) ? (
+            {config.isPending || modelsLoading ? (
               <p className="text-sm text-ink-soft">Loading settings...</p>
-            ) : config.isError || models.isError || backendStatus.isError ? (
+            ) : config.isError ||
+              (!backendChanging &&
+                (models.isError || backendStatus.isError)) ? (
               <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Settings could not be loaded. Close this dialog and try again.
               </p>
@@ -500,12 +577,13 @@ function SettingsButton() {
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Agent Backend
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="selectedAgentBackend"
                     value={selectedAgentBackend}
-                    onChange={(event) =>
-                      applyAgentBackendSelection(event.target.value)
-                    }
+                    disabled={backendChangeBlocked || updateConfig.isPending}
+                    onChange={(event) => {
+                      void applyAgentBackendSelection(event.target.value)
+                    }}
                   >
                     {(backendStatus.data?.agentBackends ?? []).map(
                       (backend) => (
@@ -516,8 +594,9 @@ function SettingsButton() {
                     )}
                   </select>
                   <span className="text-xs font-normal text-ink-faint">
-                    Takes effect after restart. Changing backend clears all
-                    model selections when no Work Items are unfinished.
+                    {backendChangeBlocked
+                      ? `${unfinishedWorkItemCount} unfinished Work Item${unfinishedWorkItemCount === 1 ? "" : "s"} — finish or abandon them before changing Agent Backend.`
+                      : "Activates immediately on Save when no Work Items are unfinished. Model prefs are remembered per backend."}
                   </span>
                 </label>
 
@@ -528,14 +607,12 @@ function SettingsButton() {
                       {status?.activeBackend.label ?? "—"}
                     </span>
                     {status?.kind === "READY" ? " · Ready" : null}
+                    {backendChanging ? " · Previewing selection" : null}
                   </p>
                   <button
                     type="button"
                     className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
-                    disabled={
-                      recheckBackend.isPending ||
-                      status?.kind === "RESTART_REQUIRED"
-                    }
+                    disabled={recheckBackend.isPending || backendChanging}
                     onClick={() => {
                       recheckBackend.mutate()
                     }}
@@ -546,17 +623,25 @@ function SettingsButton() {
                   </button>
                 </div>
 
+                {backendChanging && previewError !== null && (
+                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                    Preview failed: {previewError}. Model fields stay disabled
+                    until preview succeeds. Active backend is unchanged until
+                    Save.
+                  </p>
+                )}
+
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Build model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="defaultModel"
                     value={defaultModel}
                     onChange={(event) => {
                       const nextModel = event.target.value
                       setDefaultModel(nextModel)
                       const nextVariants = variantsForModel(
-                        models.data,
+                        catalogModels,
                         nextModel,
                       )
                       setDefaultVariant((current) =>
@@ -569,12 +654,12 @@ function SettingsButton() {
                       }
                     }}
                     required={!backendChanging}
-                    disabled={backendChanging}
+                    disabled={modelsDisabled}
                   >
                     {defaultModel.length === 0 && (
                       <option value="">
-                        {backendChanging
-                          ? "Cleared — choose after restart"
+                        {previewPending
+                          ? "Loading catalog…"
                           : "Select a build model"}
                       </option>
                     )}
@@ -583,7 +668,7 @@ function SettingsButton() {
                         {defaultModel} (not in Agent Model catalog)
                       </option>
                     )}
-                    {(models.data ?? []).map((model) => (
+                    {(catalogModels ?? []).map((model) => (
                       <option key={model.id} value={model.id}>
                         {model.id}
                       </option>
@@ -608,13 +693,13 @@ function SettingsButton() {
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Build thinking level
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       name="defaultThinkingLevel"
                       value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
                       }
-                      disabled={backendChanging || defaultModel.length === 0}
+                      disabled={modelsDisabled || defaultModel.length === 0}
                     >
                       <option value="">
                         {buildVariants.length === 0
@@ -642,15 +727,15 @@ function SettingsButton() {
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Review model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="reviewModel"
                     value={reviewModel}
-                    disabled={backendChanging}
+                    disabled={modelsDisabled}
                     onChange={(event) => {
                       const nextModel = event.target.value
                       setReviewModel(nextModel)
                       const nextVariants = variantsForModel(
-                        models.data,
+                        catalogModels,
                         nextModel.length > 0 ? nextModel : defaultModel,
                       )
                       setReviewVariant((current) =>
@@ -658,17 +743,13 @@ function SettingsButton() {
                       )
                     }}
                   >
-                    <option value="">
-                      {backendChanging
-                        ? "Cleared — choose after restart"
-                        : "Same as build model"}
-                    </option>
+                    <option value="">Same as build model</option>
                     {hasUnavailableReviewModel && (
                       <option value={reviewModel}>
                         {reviewModel} (not in Agent Model catalog)
                       </option>
                     )}
-                    {(models.data ?? []).map((model) => (
+                    {(catalogModels ?? []).map((model) => (
                       <option key={`review-${model.id}`} value={model.id}>
                         {model.id}
                       </option>
@@ -697,12 +778,12 @@ function SettingsButton() {
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Review thinking level
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       name="reviewThinkingLevel"
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
-                        backendChanging ||
+                        modelsDisabled ||
                         reviewThinkingLevelSourceModel.length === 0 ||
                         reviewThinkingLevels.length === 0
                       }
@@ -797,11 +878,13 @@ function SettingsButton() {
               disabled={
                 config.isPending ||
                 config.isError ||
-                models.isPending ||
-                models.isError ||
+                modelsLoading ||
                 updateConfig.isPending ||
-                (!backendChanging &&
-                  (defaultModel.length === 0 || hasUnavailableBuildModel))
+                (backendChanging && previewError !== null) ||
+                // Empty build model allowed on backend change (first-run style);
+                // non-empty must still be in the preview/active catalog.
+                (defaultModel.length > 0 && hasUnavailableBuildModel) ||
+                (!backendChanging && defaultModel.length === 0)
               }
             >
               {updateConfig.isPending ? "Saving..." : "Save settings"}

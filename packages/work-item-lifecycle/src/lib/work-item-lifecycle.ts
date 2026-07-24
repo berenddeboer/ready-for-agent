@@ -39,7 +39,6 @@ import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
-  AgentBackendRestartRequiredError,
   AgentBackendUnavailableError,
   BuildModelNotConfiguredError,
   IssueBlockedError,
@@ -463,7 +462,6 @@ export type ImplementNowError =
   | UnfinishedWorkItemExistsError
   | BuildModelNotConfiguredError
   | AgentBackendUnavailableError
-  | AgentBackendRestartRequiredError
   | WorkItemLifecycleDatabaseError
   | RepositoryNotFoundError
   | DatabaseError
@@ -2596,19 +2594,6 @@ export const makeWorkItemLifecycleLive = (
                   })
                   return { _tag: "processed" as const, workItem: failed }
                 }
-                if (readiness.kind === "restart_required") {
-                  const reasonMessage =
-                    readiness.reason ??
-                    "Restart the Harness to activate the selected Agent Backend"
-                  const failed = yield* completeFailedStep({
-                    stepRun: afterStart,
-                    workItem,
-                    reasonCode: STEP_RUN_REASON.agentBackendRestartRequired,
-                    reasonMessage,
-                    cause: Cause.fail(reasonMessage),
-                  })
-                  return { _tag: "processed" as const, workItem: failed }
-                }
               }
 
               const maxDuration = maxDurations[stepRun.step]
@@ -3933,22 +3918,6 @@ export const makeWorkItemLifecycleLive = (
         },
       ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
         Effect.gen(function* () {
-          yield* activeAgentBackend.requireAgentTurnsAllowed.pipe(
-            Effect.mapError((error) => {
-              if (error._tag === "AgentBackendRestartRequiredError") {
-                return new AgentBackendRestartRequiredError({
-                  message: error.message,
-                  selectedBackendId: error.selectedBackendId,
-                  activeBackendId: error.activeBackendId,
-                })
-              }
-              return new AgentBackendUnavailableError({
-                message: error.message,
-                reason: error.reason,
-              })
-            }),
-          )
-
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
             (candidate) => candidate.githubIssueNumber === githubIssueNumber,
@@ -4002,88 +3971,106 @@ export const makeWorkItemLifecycleLive = (
             )
           }
 
-          // Fail fast when no build model is configured; models are not stored
-          // on the Work Item and are resolved again at each Agent Turn.
-          yield* resolveModelsForRepository(repositoryId)
-          const activeRegistration =
-            yield* activeAgentBackend.getActiveRegistration
-          const agentBackendId = activeRegistration.descriptor.id
-          const workItemId = makeWorkItemId()
-          const now = yield* Clock.currentTimeMillis
-          const step: OperationalLifecycleStep = "create_worktree"
+          // Coordinate with Config hot-activate so provenance cannot be captured
+          // while Selected is already switching Active. Fail-fast model resolve
+          // runs inside the same section so it matches the backend that is stamped.
+          const createdId = yield* activeAgentBackend.withConfigCoordination(
+            Effect.gen(function* () {
+              yield* activeAgentBackend.requireAgentTurnsAllowed.pipe(
+                Effect.mapError(
+                  (error) =>
+                    new AgentBackendUnavailableError({
+                      message: error.message,
+                      reason: error.reason,
+                    }),
+                ),
+              )
+              // Models are not stored on the Work Item; resolve against the
+              // Active backend / prefs after coordination has locked the switch.
+              yield* resolveModelsForRepository(repositoryId)
+              const activeRegistration =
+                yield* activeAgentBackend.getActiveRegistration
+              const agentBackendId = activeRegistration.descriptor.id
+              const workItemId = makeWorkItemId()
+              const now = yield* Clock.currentTimeMillis
+              const step: OperationalLifecycleStep = "create_worktree"
 
-          const createdId = yield* sql
-            .withTransaction(
-              Effect.gen(function* () {
-                const limit = yield* maxWorkerSlots()
-                const occupied = yield* countOccupiedWorkerSlots()
-                const admit = occupied < limit
+              return yield* sql
+                .withTransaction(
+                  Effect.gen(function* () {
+                    const limit = yield* maxWorkerSlots()
+                    const occupied = yield* countOccupiedWorkerSlots()
+                    const admit = occupied < limit
 
-                yield* sql.unsafe(
-                  `INSERT INTO work_item (
+                    yield* sql.unsafe(
+                      `INSERT INTO work_item (
                  id, repository_id, github_issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
-                  [
-                    workItemId,
-                    repositoryId,
-                    githubIssueNumber,
-                    agentBackendId,
-                    issue.title,
-                    step,
-                    now,
-                    admit ? null : now,
-                    admit ? 1 : 0,
-                    options.pauseBeforeStep,
-                    now,
-                    now,
-                  ],
-                )
-
-                if (admit) {
-                  yield* enqueueStepRunForWorkItem(workItemId, step, now)
-                }
-
-                return workItemId
-              }),
-            )
-            .pipe(
-              Effect.catch((error): Effect.Effect<never, ImplementNowError> => {
-                if (error instanceof WorkItemLifecycleDatabaseError) {
-                  return Effect.fail(error)
-                }
-                if (error instanceof EnqueueError) {
-                  return Effect.fail(error)
-                }
-                if (error instanceof InvalidQueueNameError) {
-                  return Effect.fail(error)
-                }
-                if (
-                  typeof error === "object" &&
-                  error !== null &&
-                  "_tag" in error &&
-                  (error as { _tag: string })._tag === "SqlError"
-                ) {
-                  const sqlError = error as SqlError
-                  if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
-                    return unfinishedWorkItemExistsError(
-                      repositoryId,
-                      githubIssueNumber,
+                      [
+                        workItemId,
+                        repositoryId,
+                        githubIssueNumber,
+                        agentBackendId,
+                        issue.title,
+                        step,
+                        now,
+                        admit ? null : now,
+                        admit ? 1 : 0,
+                        options.pauseBeforeStep,
+                        now,
+                        now,
+                      ],
                     )
-                  }
-                  return Effect.fail(toDatabaseError(sqlError))
-                }
-                return Effect.fail(
-                  new WorkItemLifecycleDatabaseError({
-                    message: `Unexpected transaction failure: ${String(error)}`,
-                    cause: error,
+
+                    if (admit) {
+                      yield* enqueueStepRunForWorkItem(workItemId, step, now)
+                    }
+
+                    return workItemId
                   }),
                 )
-              }),
-            )
+                .pipe(
+                  Effect.catch(
+                    (error): Effect.Effect<never, ImplementNowError> => {
+                      if (error instanceof WorkItemLifecycleDatabaseError) {
+                        return Effect.fail(error)
+                      }
+                      if (error instanceof EnqueueError) {
+                        return Effect.fail(error)
+                      }
+                      if (error instanceof InvalidQueueNameError) {
+                        return Effect.fail(error)
+                      }
+                      if (
+                        typeof error === "object" &&
+                        error !== null &&
+                        "_tag" in error &&
+                        (error as { _tag: string })._tag === "SqlError"
+                      ) {
+                        const sqlError = error as SqlError
+                        if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
+                          return unfinishedWorkItemExistsError(
+                            repositoryId,
+                            githubIssueNumber,
+                          )
+                        }
+                        return Effect.fail(toDatabaseError(sqlError))
+                      }
+                      return Effect.fail(
+                        new WorkItemLifecycleDatabaseError({
+                          message: `Unexpected transaction failure: ${String(error)}`,
+                          cause: error,
+                        }),
+                      )
+                    },
+                  ),
+                )
+            }),
+          )
 
           const created = yield* getWorkItem(createdId).pipe(
             Effect.catchTag(

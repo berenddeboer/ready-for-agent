@@ -2,8 +2,8 @@
  * Central classification of Lifecycle Steps as Agent-free (guaranteed not to
  * invoke an Agent Turn) vs agent-dependent (always or conditionally may).
  *
- * While the Active Agent Backend is unavailable or restart-required, only
- * Agent-free steps may start.
+ * While the Active Agent Backend is unavailable, only Agent-free steps may
+ * start.
  */
 
 const AGENT_FREE_STEPS = new Set<string>([

@@ -17,6 +17,7 @@ import {
 } from "./errors.js"
 import {
   type AddRepositoryInput,
+  type BackendModelPrefs,
   ConfigRecord,
   ConfigSqlRow,
   type IssueDependency,
@@ -32,7 +33,53 @@ import {
   type UpdateRepositorySettingsInput,
   WorkItemPullRequest,
   WorkItemPullRequestSqlRow,
+  emptyBackendModelPrefs,
 } from "./types.js"
+
+type BackendModelPrefsMap = Record<string, BackendModelPrefs>
+
+const parseBackendModelPrefsMap = (raw: string): BackendModelPrefsMap => {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return {}
+    }
+    const out: BackendModelPrefsMap = {}
+    for (const [backendId, value] of Object.entries(
+      parsed as Record<string, unknown>,
+    )) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        continue
+      }
+      const entry = value as Record<string, unknown>
+      const asOptionalString = (field: unknown): string | null =>
+        typeof field === "string" && field.trim().length > 0
+          ? field.trim()
+          : null
+      out[backendId] = {
+        defaultModel: asOptionalString(entry.defaultModel),
+        defaultThinkingLevel: asOptionalString(entry.defaultThinkingLevel),
+        reviewModel: asOptionalString(entry.reviewModel),
+        reviewThinkingLevel: asOptionalString(entry.reviewThinkingLevel),
+      }
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+const serializeBackendModelPrefsMap = (map: BackendModelPrefsMap): string =>
+  JSON.stringify(map)
+
+const prefsForBackend = (
+  map: BackendModelPrefsMap,
+  backendId: string,
+): BackendModelPrefs => map[backendId] ?? emptyBackendModelPrefs()
 
 const formatSqlError = (error: SqlError): string => {
   const parts: string[] = [error.message]
@@ -148,12 +195,30 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
   )
 
 const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
-             default_model, default_thinking_level, review_model, review_thinking_level, auto_merge,
+             default_model, default_thinking_level, review_model, review_thinking_level,
+             backend_model_prefs, auto_merge,
              include_all_issue_authors, issues_reconciled_at`
 
 const issueSelectColumns = `id, repository_id, github_issue_number, title, body, url, state,
                 github_created_at, issue_author, parent_github_issue_number,
                 parent_github_issue_url, parent_position, has_children`
+
+const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
+  RepositoryRecord.make({
+    id: row.id,
+    githubOwner: row.githubOwner,
+    githubRepo: row.githubRepo,
+    localPath: row.localPath,
+    isBare: row.isBare,
+    paused: row.paused,
+    defaultModel: row.defaultModel,
+    defaultThinkingLevel: row.defaultThinkingLevel,
+    reviewModel: row.reviewModel,
+    reviewThinkingLevel: row.reviewThinkingLevel,
+    autoMerge: row.autoMerge,
+    includeAllIssueAuthors: row.includeAllIssueAuthors,
+    issuesReconciledAt: row.issuesReconciledAt,
+  })
 
 const toIssueRecord = (
   row: IssueSqlRow,
@@ -193,12 +258,19 @@ export interface DbServiceShape {
   readonly notifyIssuesChanged: (repositoryId: string) => Effect.Effect<void>
   readonly notifyWorkItemsChanged: (repositoryId: string) => Effect.Effect<void>
   readonly getConfig: Effect.Effect<ConfigRecord, DatabaseError>
+  readonly getBackendModelPrefs: (
+    backendId: string,
+  ) => Effect.Effect<BackendModelPrefs, DatabaseError>
   readonly updateConfig: (
     input: UpdateConfigInput,
   ) => Effect.Effect<
     ConfigRecord,
     InvalidConfigInputError | AgentBackendChangeBlockedError | DatabaseError
   >
+  /**
+   * Work Items that block Agent Backend change: anything not terminal
+   * complete/failed/abandoned (includes Needs Human and waiting/in-progress).
+   */
   readonly countUnfinishedWorkItems: Effect.Effect<number, DatabaseError>
   readonly addRepository: (
     input: AddRepositoryInput,
@@ -344,7 +416,7 @@ export const DbServiceLive = Layer.effect(
     const sql = yield* SqlClient.SqlClient
 
     const configSelect = `selected_agent_backend, default_model, default_thinking_level,
-                    review_model, review_thinking_level,
+                    review_model, review_thinking_level, backend_model_prefs,
                     max_concurrent_agent_turns, max_concurrent_work_items`
 
     const toConfigRecord = (row: {
@@ -371,7 +443,7 @@ export const DbServiceLive = Layer.effect(
         const rows = (yield* sql
           .unsafe(
             `SELECT COUNT(*) AS count FROM work_item
-             WHERE state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')`,
+             WHERE state NOT IN ('complete', 'failed', 'abandoned')`,
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly {
           readonly count: number
@@ -380,37 +452,85 @@ export const DbServiceLive = Layer.effect(
         return typeof count === "number" && Number.isFinite(count) ? count : 0
       }).pipe(Effect.withSpan("DbService.countUnfinishedWorkItems"))
 
-    const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
-      function* () {
-        const now = yield* Clock.currentTimeMillis
-        yield* sql
-          .unsafe(
-            `INSERT OR IGNORE INTO config (
+    const readConfigRow = Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      yield* sql
+        .unsafe(
+          `INSERT OR IGNORE INTO config (
                id, selected_agent_backend, default_model, default_thinking_level,
-               review_model, review_thinking_level,
+               review_model, review_thinking_level, backend_model_prefs,
                max_concurrent_agent_turns, max_concurrent_work_items,
                created_at, updated_at
-             ) VALUES ('default', 'opencode', NULL, NULL, NULL, NULL, 2, 5, ?, ?)`,
-            [now, now],
-          )
-          .pipe(Effect.mapError(toDatabaseError))
+             ) VALUES ('default', 'opencode', NULL, NULL, NULL, NULL, '{}', 2, 5, ?, ?)`,
+          [now, now],
+        )
+        .pipe(Effect.mapError(toDatabaseError))
 
-        const rows = yield* sql
-          .unsafe(
-            `SELECT ${configSelect}
+      const rows = yield* sql
+        .unsafe(
+          `SELECT ${configSelect}
              FROM config WHERE id = 'default'`,
-          )
-          .pipe(Effect.mapError(toDatabaseError))
-        const decoded = yield* decodeConfigRows(rows)
-        const row = decoded[0]
-        if (!row) {
-          return yield* new DatabaseError({
-            message: "No config returned after initialization",
-          })
-        }
-        return toConfigRecord(row)
+        )
+        .pipe(Effect.mapError(toDatabaseError))
+      const decoded = yield* decodeConfigRows(rows)
+      const row = decoded[0]
+      if (!row) {
+        return yield* new DatabaseError({
+          message: "No config returned after initialization",
+        })
+      }
+      return row
+    })
+
+    const getConfig: Effect.Effect<ConfigRecord, DatabaseError> = Effect.gen(
+      function* () {
+        return toConfigRecord(yield* readConfigRow)
       },
     ).pipe(Effect.withSpan("DbService.getConfig"))
+
+    const getBackendModelPrefs = Effect.fn("DbService.getBackendModelPrefs")(
+      function* (backendId: string) {
+        const row = yield* readConfigRow
+        const map = parseBackendModelPrefsMap(row.backendModelPrefs)
+        return prefsForBackend(map, backendId.trim())
+      },
+    )
+
+    const projectRepositoryFlatColumns = (
+      now: number,
+      backendId: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const rows = (yield* sql.unsafe(
+          `SELECT id, backend_model_prefs AS backendModelPrefs FROM repository`,
+        )) as readonly {
+          readonly id: string
+          readonly backendModelPrefs: string
+        }[]
+        for (const row of rows) {
+          const prefs = prefsForBackend(
+            parseBackendModelPrefsMap(row.backendModelPrefs ?? "{}"),
+            backendId,
+          )
+          yield* sql.unsafe(
+            `UPDATE repository SET
+               default_model = ?,
+               default_thinking_level = ?,
+               review_model = ?,
+               review_thinking_level = ?,
+               updated_at = ?
+             WHERE id = ?`,
+            [
+              prefs.defaultModel,
+              prefs.defaultThinkingLevel,
+              prefs.reviewModel,
+              prefs.reviewThinkingLevel,
+              now,
+              row.id,
+            ],
+          )
+        }
+      })
 
     const updateConfig = Effect.fn("DbService.updateConfig")(function* (
       input: UpdateConfigInput,
@@ -450,101 +570,156 @@ export const DbServiceLive = Layer.effect(
       }
       const maxConcurrentWorkItems = input.maxConcurrentWorkItems
 
-      const current = yield* getConfig
-      const backendChanging =
-        selectedAgentBackend !== current.selectedAgentBackend
+      // Ensure config row exists (fresh DBs) before the write transaction.
+      yield* readConfigRow
 
-      if (backendChanging) {
-        const unfinished = yield* countUnfinishedWorkItems
-        if (unfinished > 0) {
-          return yield* new AgentBackendChangeBlockedError({
-            message: `Cannot change Agent Backend while ${unfinished} Work Item(s) are unfinished`,
-            unfinishedWorkItemCount: unfinished,
-          })
-        }
-      }
-
-      let defaultModel: string | null
-      let defaultThinkingLevel: string | null
-      let reviewModel: string | null
-      let reviewThinkingLevel: string | null
-
-      if (backendChanging) {
-        defaultModel = null
-        defaultThinkingLevel = null
-        reviewModel = null
-        reviewThinkingLevel = null
-      } else {
-        const trimmedDefaultModel = (input.defaultModel ?? "").trim()
-        if (trimmedDefaultModel.length === 0) {
-          return yield* new InvalidConfigInputError({
-            field: "defaultModel",
-            message: "defaultModel cannot be empty",
-          })
-        }
-        defaultModel = trimmedDefaultModel
-        defaultThinkingLevel = yield* normalizeOptionalConfigSetting(
-          input.defaultThinkingLevel,
-        )
-        reviewModel = yield* normalizeOptionalConfigSetting(input.reviewModel)
-        reviewThinkingLevel = yield* normalizeOptionalConfigSetting(
-          input.reviewThinkingLevel,
-        )
-      }
+      // Normalize model fields once; emptiness is enforced against the in-txn
+      // backend-change flag so concurrent switches cannot clear a build model.
+      const defaultModel = yield* normalizeOptionalConfigSetting(
+        input.defaultModel,
+      )
+      const defaultThinkingLevel = yield* normalizeOptionalConfigSetting(
+        input.defaultThinkingLevel,
+      )
+      const reviewModel = yield* normalizeOptionalConfigSetting(
+        input.reviewModel,
+      )
+      const reviewThinkingLevel = yield* normalizeOptionalConfigSetting(
+        input.reviewThinkingLevel,
+      )
 
       const now = yield* Clock.currentTimeMillis
-      const rows = yield* sql
+      const { rows, repositoryProjectionChanged } = yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            if (backendChanging) {
-              yield* sql.unsafe(
-                `UPDATE repository SET
-                   default_model = NULL,
-                   default_thinking_level = NULL,
-                   review_model = NULL,
-                   review_thinking_level = NULL,
-                   updated_at = ?`,
-                [now],
-              )
+            // Re-read config + unfinished count inside the transaction so a
+            // concurrent Implement Now cannot race past the idle gate.
+            // Production SqlClient uses BEGIN IMMEDIATE (write lock at start).
+            const latestRows = yield* sql
+              .unsafe(`SELECT ${configSelect} FROM config WHERE id = 'default'`)
+              .pipe(Effect.mapError(toDatabaseError))
+            const latestDecoded = yield* decodeConfigRows(latestRows)
+            const latest = latestDecoded[0]
+            if (!latest) {
+              return yield* new DatabaseError({
+                message: "No config returned during update",
+              })
             }
-            return yield* sql.unsafe(
-              `INSERT INTO config (
+            const changing =
+              selectedAgentBackend !== latest.selectedAgentBackend
+            if (changing) {
+              const unfinishedRows = (yield* sql
+                .unsafe(
+                  `SELECT COUNT(*) AS count FROM work_item
+                   WHERE state NOT IN ('complete', 'failed', 'abandoned')`,
+                )
+                .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                readonly count: number
+              }[]
+              const unfinished = unfinishedRows[0]?.count
+              const count =
+                typeof unfinished === "number" && Number.isFinite(unfinished)
+                  ? unfinished
+                  : 0
+              if (count > 0) {
+                return yield* new AgentBackendChangeBlockedError({
+                  message: `Cannot change Agent Backend while ${count} Work Item(s) are unfinished`,
+                  unfinishedWorkItemCount: count,
+                })
+              }
+              yield* projectRepositoryFlatColumns(
+                now,
+                selectedAgentBackend,
+              ).pipe(Effect.mapError(toDatabaseError))
+            } else if (defaultModel === null) {
+              // Same-backend update requires a build model (in-txn authoritative).
+              return yield* new InvalidConfigInputError({
+                field: "defaultModel",
+                message: "defaultModel cannot be empty",
+              })
+            }
+            // Merge prefs from the in-txn row so concurrent writers do not
+            // clobber each other's per-backend map entries.
+            const prefsMap = parseBackendModelPrefsMap(latest.backendModelPrefs)
+            prefsMap[selectedAgentBackend] = {
+              defaultModel,
+              defaultThinkingLevel,
+              reviewModel,
+              reviewThinkingLevel,
+            }
+            const backendModelPrefs = serializeBackendModelPrefsMap(prefsMap)
+            const written = yield* sql
+              .unsafe(
+                `INSERT INTO config (
                    id, selected_agent_backend, default_model, default_thinking_level,
-                   review_model, review_thinking_level,
+                   review_model, review_thinking_level, backend_model_prefs,
                    max_concurrent_agent_turns, max_concurrent_work_items,
                    created_at, updated_at
-                 ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (id) DO UPDATE SET
                    selected_agent_backend = excluded.selected_agent_backend,
                    default_model = excluded.default_model,
                    default_thinking_level = excluded.default_thinking_level,
                    review_model = excluded.review_model,
                    review_thinking_level = excluded.review_thinking_level,
+                   backend_model_prefs = excluded.backend_model_prefs,
                    max_concurrent_agent_turns = excluded.max_concurrent_agent_turns,
                    max_concurrent_work_items = excluded.max_concurrent_work_items,
                    updated_at = excluded.updated_at
                  RETURNING ${configSelect}`,
-              [
-                selectedAgentBackend,
-                defaultModel,
-                defaultThinkingLevel,
-                reviewModel,
-                reviewThinkingLevel,
-                maxConcurrentAgentTurns,
-                maxConcurrentWorkItems,
-                now,
-                now,
-              ],
-            )
+                [
+                  selectedAgentBackend,
+                  defaultModel,
+                  defaultThinkingLevel,
+                  reviewModel,
+                  reviewThinkingLevel,
+                  backendModelPrefs,
+                  maxConcurrentAgentTurns,
+                  maxConcurrentWorkItems,
+                  now,
+                  now,
+                ],
+              )
+              .pipe(Effect.mapError(toDatabaseError))
+            // Publish from in-txn changing (not a pre-txn snapshot) so concurrent
+            // reverse-switches still notify clients after repo flat re-projection.
+            return {
+              rows: written,
+              repositoryProjectionChanged: changing,
+            }
           }),
         )
-        .pipe(Effect.mapError(toDatabaseError))
+        .pipe(
+          Effect.mapError((error: unknown) => {
+            if (
+              typeof error === "object" &&
+              error !== null &&
+              "_tag" in error
+            ) {
+              const tag = (error as { _tag: string })._tag
+              if (
+                tag === "AgentBackendChangeBlockedError" ||
+                tag === "DatabaseError" ||
+                tag === "InvalidConfigInputError"
+              ) {
+                return error as
+                  | AgentBackendChangeBlockedError
+                  | DatabaseError
+                  | InvalidConfigInputError
+              }
+            }
+            return toDatabaseError(error as SqlError)
+          }),
+        )
       const decoded = yield* decodeConfigRows(rows)
       const row = decoded[0]
       if (!row) {
         return yield* new DatabaseError({
           message: "No config returned from update",
         })
+      }
+      if (repositoryProjectionChanged) {
+        yield* publishRepositoryChanged()
       }
       return toConfigRecord(row)
     })
@@ -587,8 +762,9 @@ export const DbServiceLive = Layer.effect(
           `INSERT INTO repository (
                id, github_owner, github_repo, local_path, is_bare, paused,
                default_model, default_thinking_level, review_model, review_thinking_level,
+               backend_model_prefs,
                auto_merge, include_all_issue_authors, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
           [
             id,
@@ -630,7 +806,7 @@ export const DbServiceLive = Layer.effect(
         })
       }
 
-      const repository = RepositoryRecord.make(row)
+      const repository = toRepositoryRecord(row)
       yield* publishRepositoryChanged()
       return repository
     })
@@ -648,31 +824,95 @@ export const DbServiceLive = Layer.effect(
       )
       const now = yield* Clock.currentTimeMillis
       const result = yield* sql
-        .unsafe(
-          `UPDATE repository
+        .withTransaction(
+          Effect.gen(function* () {
+            // Re-read Active backend selection and repo prefs inside the txn so a
+            // concurrent config backend switch cannot mis-key prefs / flat columns.
+            const configRows = yield* sql
+              .unsafe(
+                `SELECT selected_agent_backend AS selectedAgentBackend
+                 FROM config WHERE id = 'default'`,
+              )
+              .pipe(Effect.mapError(toDatabaseError))
+            const selectedAgentBackend =
+              (
+                configRows[0] as
+                  | { readonly selectedAgentBackend: string }
+                  | undefined
+              )?.selectedAgentBackend ?? "opencode"
+            const existingRows = yield* sql
+              .unsafe(
+                `SELECT backend_model_prefs AS backendModelPrefs
+                 FROM repository WHERE id = ?`,
+                [input.repositoryId],
+              )
+              .pipe(Effect.mapError(toDatabaseError))
+            const existing = existingRows[0] as
+              | { readonly backendModelPrefs: string }
+              | undefined
+            if (!existing) {
+              return yield* new RepositoryNotFoundError({
+                repositoryId: input.repositoryId,
+              })
+            }
+            const prefsMap = parseBackendModelPrefsMap(
+              existing.backendModelPrefs ?? "{}",
+            )
+            prefsMap[selectedAgentBackend] = {
+              defaultModel,
+              defaultThinkingLevel,
+              reviewModel,
+              reviewThinkingLevel,
+            }
+            const backendModelPrefs = serializeBackendModelPrefsMap(prefsMap)
+            return yield* sql
+              .unsafe(
+                `UPDATE repository
              SET paused = ?,
                  default_model = ?,
                  default_thinking_level = ?,
                  review_model = ?,
                  review_thinking_level = ?,
+                 backend_model_prefs = ?,
                  auto_merge = ?,
                  include_all_issue_authors = ?,
                  updated_at = ?
              WHERE id = ?
              RETURNING ${repositorySelectColumns}`,
-          [
-            input.paused,
-            defaultModel,
-            defaultThinkingLevel,
-            reviewModel,
-            reviewThinkingLevel,
-            input.autoMerge,
-            input.includeAllIssueAuthors,
-            now,
-            input.repositoryId,
-          ],
+                [
+                  input.paused,
+                  defaultModel,
+                  defaultThinkingLevel,
+                  reviewModel,
+                  reviewThinkingLevel,
+                  backendModelPrefs,
+                  input.autoMerge,
+                  input.includeAllIssueAuthors,
+                  now,
+                  input.repositoryId,
+                ],
+              )
+              .pipe(Effect.mapError(toDatabaseError))
+          }),
         )
-        .pipe(Effect.mapError(toDatabaseError))
+        .pipe(
+          Effect.mapError((error: unknown) => {
+            if (
+              typeof error === "object" &&
+              error !== null &&
+              "_tag" in error
+            ) {
+              const tag = (error as { _tag: string })._tag
+              if (
+                tag === "RepositoryNotFoundError" ||
+                tag === "DatabaseError"
+              ) {
+                return error as RepositoryNotFoundError | DatabaseError
+              }
+            }
+            return toDatabaseError(error as SqlError)
+          }),
+        )
 
       const decoded = yield* decodeRepositoryRows(result)
       const row = decoded[0]
@@ -682,7 +922,7 @@ export const DbServiceLive = Layer.effect(
         })
       }
 
-      const repository = RepositoryRecord.make(row)
+      const repository = toRepositoryRecord(row)
       yield* publishRepositoryChanged()
       return repository
     })
@@ -707,7 +947,7 @@ export const DbServiceLive = Layer.effect(
           return yield* new RepositoryNotFoundError({ repositoryId })
         }
 
-        const repository = RepositoryRecord.make(row)
+        const repository = toRepositoryRecord(row)
         yield* publishRepositoryChanged()
         return repository
       },
@@ -738,7 +978,7 @@ export const DbServiceLive = Layer.effect(
         .pipe(Effect.mapError(toDatabaseError))
 
       const decoded = yield* decodeRepositoryRows(repositories)
-      return decoded.map((row) => RepositoryRecord.make(row))
+      return decoded.map((row) => toRepositoryRecord(row))
     }).pipe(Effect.withSpan("DbService.listRepositories"))
 
     const ensureRepositoryExists = Effect.fn(
@@ -1171,6 +1411,7 @@ export const DbServiceLive = Layer.effect(
       notifyIssuesChanged,
       notifyWorkItemsChanged,
       getConfig,
+      getBackendModelPrefs,
       updateConfig,
       countUnfinishedWorkItems,
       addRepository,
