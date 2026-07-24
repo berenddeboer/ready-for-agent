@@ -205,8 +205,14 @@ export class Opencode extends Context.Service<
                             // Stop the automatic parent resume that OpenCode
                             // injects after --command task completion so it
                             // cannot edit the worktree before the lifecycle
-                            // interprets the command result.
-                            yield* handle.kill()
+                            // interprets the command result. If the process
+                            // already exited, isolation is moot and kill would
+                            // race; only kill while still running, and fail if
+                            // that kill fails.
+                            const running = yield* handle.isRunning
+                            if (running) {
+                              yield* handle.kill()
+                            }
                             stoppedForCommand = true
                           }
                         }

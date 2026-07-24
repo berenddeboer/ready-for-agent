@@ -256,7 +256,8 @@ describe("Opencode Effect service", () => {
     }
   })
 
-  it("fails a command turn when the process exits before its parent continuation can be stopped", async () => {
+  it("returns the command task result when the process exits immediately after the nested task", async () => {
+    const childText = "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
     const toolUse = JSON.stringify({
       type: "tool_use",
       sessionID: "ses_parent",
@@ -266,8 +267,7 @@ describe("Opencode Effect service", () => {
         state: {
           status: "completed",
           input: { command: "review" },
-          output:
-            "<task_result>\nREADY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium\n</task_result>",
+          output: `<task_result>\n${childText}\n</task_result>`,
         },
       },
     })
@@ -286,29 +286,32 @@ describe("Opencode Effect service", () => {
       )
       await chmod(binaryPath, 0o700)
 
-      await expect(
-        Effect.runPromise(
-          Effect.gen(function* () {
-            const opencode = yield* Opencode
-            return yield* opencode.continue({
-              sessionId: "ses_parent",
-              cwd: process.cwd(),
-              prompt: "Review uncommitted worktree changes.",
-              model: "test/model",
-              variant: "test",
-              command: "/review",
-              timeout: "3 seconds",
-            })
-          }).pipe(
-            Effect.provide(
-              Opencode.layer({
-                binary: binaryPath,
-                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
-              }).pipe(Layer.provide(BunServices.layer)),
-            ),
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const opencode = yield* Opencode
+          return yield* opencode.continue({
+            sessionId: "ses_parent",
+            cwd: process.cwd(),
+            prompt: "Review uncommitted worktree changes.",
+            model: "test/model",
+            variant: "test",
+            command: "/review",
+            timeout: "3 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary: binaryPath,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            }).pipe(Layer.provide(BunServices.layer)),
           ),
         ),
-      ).rejects.toBeDefined()
+      )
+
+      expect(result).toEqual({
+        sessionId: "ses_parent",
+        assistantText: childText,
+      })
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
