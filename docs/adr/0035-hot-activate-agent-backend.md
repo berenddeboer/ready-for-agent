@@ -1,0 +1,5 @@
+# Hot-activate Agent Backend without Harness restart
+
+Status: accepted (supersedes the restart-boundary portions of ADR 0032)
+
+Agent Backend change stays instance-wide and idle-only: rejected while any Work Item is unfinished so mid-ship dual-backend routing and model-on-Work-Item freezes are unnecessary. When allowed, Save hot-activates the new backend immediately (no process restart); inspect failure yields Agent Backend Unavailable on that backend rather than Selected≠Active limbo. Settings may Agent Backend Preview a not-yet-saved backend’s model catalog so build/review picks happen in one Save. Build and review model selections (Harness and Repository) are remembered per backend instead of cleared on every switch. Rejected alternatives: dual-backend drain of unfinished Work Items (breaks live mid-ship model changes and session continuity), keeping a restart boundary once the fleet is already idle (ceremony), and snapshotting models onto Work Items (fights next-turn settings resolution).

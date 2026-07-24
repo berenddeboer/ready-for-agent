@@ -17,11 +17,11 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, and Include all Issue Authors. An absent build model inherits the whole Harness build selection; an absent review model inherits the Harness review selection and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. Build and review selections are resolved at each Agent Turn from current Repository settings falling back to Harness Config, so a settings change affects the next turn of an existing Work Item without rewriting it; changing Agent Backend clears every Repository's model selections.
+Per-Repository operator preferences: Paused, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, and Include all Issue Authors. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Active Agent Backend; an absent review model inherits the Harness review selection and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. Build and review selections are resolved at each Agent Turn from current Repository settings falling back to Harness Config, so a model settings change affects the next turn of an existing Work Item without rewriting it.
 _Avoid_: Project config, repo config file
 
 **Harness Config**:
-Harness-wide operator preferences stored as a single config row: the Agent Backend selected for the next Harness startup (OpenCode by default), optional default build Agent Model and Thinking Level, optional review Agent Model and Thinking Level (no review model means the build selection), and concurrency limits (default two concurrent Agent Turns and five concurrent Work Items). An Agent Backend change takes effect after restart, is rejected while any Work Item is unfinished, and clears every Harness and Repository Agent Model selection because model identities are backend-local. On a fresh empty database the build model starts null (unconfigured); there is no product-seeded free model. First-run UI opens Settings and shows a banner until a build model is saved. Creating a Work Item fails with a structured error when neither a Repository override nor Harness Config resolves a build Agent Model.
+Harness-wide operator preferences stored as a single config row: the Agent Backend (OpenCode by default), backend-scoped optional default build Agent Model and Thinking Level, backend-scoped optional review Agent Model and Thinking Level (no review model means the build selection), and concurrency limits (default two concurrent Agent Turns and five concurrent Work Items). Changing Agent Backend is rejected while any Work Item is unfinished; when allowed it hot-activates on Save (no Harness restart), remembers each backend's model selections separately, and may leave build model null (unconfigured) like first-run. On a fresh empty database the build model starts null; there is no product-seeded free model. First-run UI opens Settings and shows a banner until a build model is saved. Creating a Work Item fails with a structured error when neither a Repository override nor Harness Config resolves a build Agent Model.
 _Avoid_: Default model seed, product default model
 
 **Auto-merge**:
@@ -76,27 +76,27 @@ A supported headless coding-agent CLI integration shipped with Ready for Agent t
 _Avoid_: Agent (ambiguous), model, provider
 
 **Active Agent Backend**:
-The one Agent Backend loaded by a running Harness to execute Agent Turns. Each Work Item captures it as provenance, and Harness Config cannot select a different backend while any Work Item is unfinished.
-_Avoid_: Repository backend, Work Item backend selection
+The one Agent Backend the running Harness uses to execute Agent Turns and whose model catalog Settings edits. It matches Harness Config after every successful Save; each Work Item captures it as provenance at creation. Harness Config cannot change Agent Backend while any Work Item is unfinished.
+_Avoid_: Repository backend, Work Item backend selection, dual active backends, Selected vs Active split
 
 **Grok Build**:
 The supported xAI coding Agent Backend selected in Harness Config with the stable ID `grok`. Distinct from a Grok Agent Model.
 _Avoid_: Grok (when referring to the backend), grok-build (as the config ID)
 
 **Agent Backend Unavailable**:
-A degraded Harness state established only by failed startup inspection or Recheck Agent Backend when the Active Agent Backend cannot execute Agent Turns or report its Agent Models. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available, but new Agent Turns and Work Item creation are blocked until a Recheck succeeds; runtime Agent Turn failures instead fail only their Step Run, and the Harness never silently falls back to another backend.
-_Avoid_: Startup failure, automatic fallback, Paused Repository
+A degraded Harness state established by failed startup inspection, failed hot-activation on Save, or Recheck Agent Backend when the Active Agent Backend cannot execute Agent Turns or report its Agent Models. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available, but new Agent Turns and Work Item creation are blocked until a Recheck succeeds; runtime Agent Turn failures instead fail only their Step Run, and the Harness never silently falls back to another backend. Unavailable does not block changing Agent Backend while the Harness is idle.
+_Avoid_: Startup failure, automatic fallback, Paused Repository, restart required
 
-**Agent Backend Restart Required**:
-A degraded Harness state after Harness Config selects an Agent Backend different from the Active Agent Backend. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available, but new Agent Turns and Work Item creation are blocked until restart activates the selection.
-_Avoid_: Hot backend switch, Agent Backend Unavailable
+**Agent Backend Preview**:
+A Settings-only inspection of a not-yet-saved Agent Backend that loads that backend's Agent Model catalog so the operator can pick backend-scoped model selections before Save. It does not change the Active Agent Backend or allow Agent Turns on the previewed backend.
+_Avoid_: Hot activate, Recheck Agent Backend, dual active backends
 
 **Recheck Agent Backend**:
 An explicit operator request that revalidates the Active Agent Backend and refreshes its Agent Model catalog. Success clears Agent Backend Unavailable and permits Agent Turns to resume; failure leaves the Harness degraded with an actionable reason.
-_Avoid_: Automatic health poll, model-cache refresh only, Harness restart
+_Avoid_: Automatic health poll, model-cache refresh only, Harness restart, Agent Backend Preview
 
 **Agent Model**:
-A model in the Active Agent Backend's instance-wide catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific; each Agent Turn resolves build and review Agent Models from current Repository settings falling back to Harness Config rather than from Work Item state.
+A model in an Agent Backend's instance-wide catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific; each Agent Turn resolves build and review Agent Models from current backend-scoped Repository settings falling back to backend-scoped Harness Config rather than from Work Item state.
 _Avoid_: Provider, Agent Backend, model profile
 
 **Thinking Level**:
@@ -120,7 +120,7 @@ The normalized successful output of an Agent Turn: its Session ID and ordered fi
 _Avoid_: CLI stdout, transcript, tool-event stream
 
 **Agent-free Lifecycle Step**:
-A Lifecycle Step guaranteed not to invoke an Agent Turn. A step that may need an Agent Turn conditionally is not Agent-free and does not start while the Agent Backend is Unavailable or an Agent Backend Restart is Required.
+A Lifecycle Step guaranteed not to invoke an Agent Turn. A step that may need an Agent Turn conditionally is not Agent-free and does not start while the Agent Backend is Unavailable.
 _Avoid_: Step that usually avoids the agent, non-OpenCode step
 
 **Agent Command**:
@@ -240,7 +240,7 @@ The state of an unfinished, non-paused Work Item that has not yet been Admitted 
 _Avoid_: Queued Step Run, paused, Not Implemented
 
 **Implement Now**:
-An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Agent Backend is Unavailable, an Agent Backend Restart is Required, or no build Agent Model can be resolved from Repository settings or Harness Config (`Select a default build model first`).
+An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Agent Backend is Unavailable or no build Agent Model can be resolved from Repository settings or Harness Config (`Select a default build model first`).
 _Avoid_: Auto-implement, enqueue Issue
 
 **Implement Locally**:
