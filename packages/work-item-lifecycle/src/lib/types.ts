@@ -86,10 +86,6 @@ export interface WorkItemRecord {
   readonly githubPullRequestNumber: number | null
   /** Active Agent Backend captured at creation (provenance). */
   readonly agentBackend: string
-  readonly model: string
-  readonly thinkingLevel: string | null
-  readonly reviewModel: string
-  readonly reviewThinkingLevel: string | null
   readonly state: WorkItemState
   readonly stateReadyAt: Date
   readonly paused: boolean
@@ -272,6 +268,8 @@ export const STEP_RUN_REASON = {
   agentBackendUnavailable: "agent_backend_unavailable",
   /** Agent-dependent step blocked until Harness restart activates selection. */
   agentBackendRestartRequired: "agent_backend_restart_required",
+  /** Agent-dependent step blocked because no build Agent Model is configured. */
+  buildModelNotConfigured: "build_model_not_configured",
   /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */

@@ -77,10 +77,10 @@ const seedWorkItem = Effect.gen(function* () {
   )
   yield* sql.unsafe(
     `INSERT INTO work_item (
-       id, repository_id, github_issue_number, model, thinking_level, review_model, review_thinking_level, state,
+       id, repository_id, github_issue_number, state,
        state_ready_at, worktree_path, session_id, failure_code, failure_message,
        created_at, updated_at
-      ) VALUES (?, ?, 42, 'opencode/test-model', 'high', 'opencode/test-model', 'high',
+      ) VALUES (?, ?, 42,
         'watch_pr_status_checks', ?, '/tmp/worktree', 'ses_implement', NULL, NULL, ?, ?)`,
     [context.workItemId, repository.id, now, now, now],
   )

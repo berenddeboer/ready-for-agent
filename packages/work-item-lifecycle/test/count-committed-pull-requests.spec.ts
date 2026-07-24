@@ -85,10 +85,10 @@ const seedWorkItemWithCommit = (input: {
     yield* sql.unsafe(
       `INSERT INTO work_item (
          id, repository_id, github_issue_number, github_pull_request_number,
-         model, thinking_level, review_model, review_thinking_level, state, state_ready_at,
+         state, state_ready_at,
          worktree_path, session_id, failure_code, failure_message,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, 'm', 'v', 'm', 'v', 'complete', ?,
+       ) VALUES (?, ?, ?, ?, 'complete', ?,
          NULL, NULL, NULL, NULL, ?, ?)`,
       [
         input.workItemId,
@@ -256,12 +256,12 @@ describe("countCommittedPullRequests", () => {
         yield* sql.unsafe(
           `INSERT INTO work_item (
              id, repository_id, github_issue_number, github_pull_request_number,
-             model, thinking_level, review_model, review_thinking_level, state, state_ready_at,
+             state, state_ready_at,
              worktree_path, session_id, failure_code, failure_message,
              completion_summary, created_at, updated_at
            ) VALUES (
              'wi-no-change', 'repo-a', 7, NULL,
-             'm', 'v', 'm', 'v', 'complete', ?,
+             'complete', ?,
              NULL, NULL, NULL, NULL,
              'Findings posted on the Issue.', ?, ?
            )`,

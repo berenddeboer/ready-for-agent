@@ -68,6 +68,10 @@ import {
   PreCommitStageError,
 } from "./pre-commit-errors.js"
 import {
+  type AgentModelSelection,
+  resolveAgentModelSelection,
+} from "./resolve-agent-models.js"
+import {
   formatAcceptedReviewSummary,
   formatDeferredReviewSummary,
 } from "./review.js"
@@ -243,10 +247,6 @@ type WorkItemRow = {
   readonly issue_title: string | null
   readonly github_pull_request_number: number | null
   readonly agent_backend: string
-  readonly model: string
-  readonly thinking_level: string | null
-  readonly review_model: string
-  readonly review_thinking_level: string | null
   readonly state: WorkItemState
   readonly state_ready_at: number
   readonly paused: boolean | number
@@ -329,10 +329,6 @@ const toWorkItemRecord = (
   issueTitle: row.issue_title,
   githubPullRequestNumber: row.github_pull_request_number,
   agentBackend: row.agent_backend,
-  model: row.model,
-  thinkingLevel: row.thinking_level,
-  reviewModel: row.review_model,
-  reviewThinkingLevel: row.review_thinking_level,
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
   paused: Boolean(row.paused),
@@ -354,14 +350,21 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
-const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend, model, thinking_level, review_model,
-                   review_thinking_level, state, state_ready_at, paused, waiting_since, holds_worker_slot,
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend,
+                   state, state_ready_at, paused, waiting_since, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
                     check_start_observed_head_sha, check_start_observed_head_at,
                     check_start_last_observed_is_draft,
                     created_at, updated_at`
+
+const EMPTY_AGENT_MODEL_SELECTION: AgentModelSelection = {
+  model: "",
+  thinkingLevel: null,
+  reviewModel: "",
+  reviewThinkingLevel: null,
+}
 
 const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
 /** Catch-up window after the latest Check-Start Anchor before startup is complete. */
@@ -646,6 +649,24 @@ export const makeWorkItemLifecycleLive = (
       const queue = yield* QueueService
       const steps = yield* LifecycleSteps
       const activeAgentBackend = yield* ActiveAgentBackend
+      const resolveModelsForRepository = (
+        repositoryId: string,
+      ): Effect.Effect<
+        AgentModelSelection,
+        BuildModelNotConfiguredError | DatabaseError
+      > =>
+        Effect.gen(function* () {
+          const configRecord = yield* db.getConfig
+          const repositories = yield* db.listRepositories
+          const repository = repositories.find(({ id }) => id === repositoryId)
+          const selection = resolveAgentModelSelection(repository, configRecord)
+          if (selection === null) {
+            return yield* new BuildModelNotConfiguredError({
+              message: "Select a default build model first",
+            })
+          }
+          return selection
+        })
       const notifyWorkItemsChanged = (
         repositoryId: string,
       ): Effect.Effect<void> => db.notifyWorkItemsChanged(repositoryId)
@@ -2591,14 +2612,74 @@ export const makeWorkItemLifecycleLive = (
               }
 
               const maxDuration = maxDurations[stepRun.step]
+              const modelOutcome = yield* resolveModelsForRepository(
+                workItem.repository_id,
+              ).pipe(
+                Effect.map(
+                  (
+                    selection,
+                  ):
+                    | {
+                        readonly _tag: "ok"
+                        readonly selection: AgentModelSelection
+                      }
+                    | {
+                        readonly _tag: "failed"
+                        readonly workItem: WorkItemRecord
+                      } => ({ _tag: "ok", selection }),
+                ),
+                Effect.catchTag(
+                  "BuildModelNotConfiguredError",
+                  (
+                    error,
+                  ): Effect.Effect<
+                    | {
+                        readonly _tag: "ok"
+                        readonly selection: AgentModelSelection
+                      }
+                    | {
+                        readonly _tag: "failed"
+                        readonly workItem: WorkItemRecord
+                      },
+                    RunStepError
+                  > => {
+                    if (!isAgentDependentLifecycleStep(stepRun.step)) {
+                      return Effect.succeed({
+                        _tag: "ok",
+                        selection: EMPTY_AGENT_MODEL_SELECTION,
+                      })
+                    }
+                    return completeFailedStep({
+                      stepRun: afterStart,
+                      workItem,
+                      reasonCode: STEP_RUN_REASON.buildModelNotConfigured,
+                      reasonMessage: error.message,
+                      cause: Cause.fail(error.message),
+                    }).pipe(
+                      Effect.map((failed) => ({
+                        _tag: "failed" as const,
+                        workItem: failed,
+                      })),
+                    )
+                  },
+                ),
+              )
+              if (modelOutcome._tag === "failed") {
+                return {
+                  _tag: "processed" as const,
+                  workItem: modelOutcome.workItem,
+                }
+              }
+              const selection = modelOutcome.selection
+
               const context: LifecycleStepContext = {
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
                 githubIssueNumber: workItem.github_issue_number,
-                model: workItem.model,
-                thinkingLevel: workItem.thinking_level,
-                reviewModel: workItem.review_model,
-                reviewThinkingLevel: workItem.review_thinking_level,
+                model: selection.model,
+                thinkingLevel: selection.thinkingLevel,
+                reviewModel: selection.reviewModel,
+                reviewThinkingLevel: selection.reviewThinkingLevel,
                 worktreePath: workItem.worktree_path,
                 startingCommitOid: workItem.starting_commit_oid,
                 completionSummary: workItem.completion_summary,
@@ -3046,14 +3127,15 @@ export const makeWorkItemLifecycleLive = (
 
       const toLifecycleStepContext = (
         row: WorkItemRow,
+        models: AgentModelSelection = EMPTY_AGENT_MODEL_SELECTION,
       ): LifecycleStepContext => ({
         workItemId: row.id as WorkItemId,
         repositoryId: row.repository_id,
         githubIssueNumber: row.github_issue_number,
-        model: row.model,
-        thinkingLevel: row.thinking_level,
-        reviewModel: row.review_model,
-        reviewThinkingLevel: row.review_thinking_level,
+        model: models.model,
+        thinkingLevel: models.thinkingLevel,
+        reviewModel: models.reviewModel,
+        reviewThinkingLevel: models.reviewThinkingLevel,
         worktreePath: row.worktree_path,
         startingCommitOid: row.starting_commit_oid,
         completionSummary: row.completion_summary,
@@ -3468,19 +3550,7 @@ export const makeWorkItemLifecycleLive = (
             return yield* new WorkItemNotFoundError({ workItemId })
           }
 
-          const cleanupContext: LifecycleStepContext = {
-            workItemId: currentWorkItem.id as WorkItemId,
-            repositoryId: currentWorkItem.repository_id,
-            githubIssueNumber: currentWorkItem.github_issue_number,
-            model: currentWorkItem.model,
-            thinkingLevel: currentWorkItem.thinking_level,
-            reviewModel: currentWorkItem.review_model,
-            reviewThinkingLevel: currentWorkItem.review_thinking_level,
-            worktreePath: currentWorkItem.worktree_path,
-            startingCommitOid: currentWorkItem.starting_commit_oid,
-            completionSummary: currentWorkItem.completion_summary,
-            sessionId: currentWorkItem.session_id,
-          }
+          const cleanupContext = toLifecycleStepContext(currentWorkItem)
 
           yield* steps.removeWorktree(cleanupContext).pipe(
             Effect.mapError(
@@ -3932,59 +4002,9 @@ export const makeWorkItemLifecycleLive = (
             )
           }
 
-          const config = yield* db.getConfig
-          const repositories = yield* db.listRepositories
-          const repository = repositories.find(({ id }) => id === repositoryId)
-          const hasRepoBuildModel =
-            repository?.defaultModel !== null &&
-            repository?.defaultModel !== undefined &&
-            repository.defaultModel.trim() !== ""
-          const buildSelection = hasRepoBuildModel
-            ? {
-                model: repository.defaultModel as string,
-                thinkingLevel: repository.defaultThinkingLevel ?? null,
-              }
-            : {
-                model: config.defaultModel,
-                thinkingLevel: config.defaultThinkingLevel ?? null,
-              }
-          if (
-            buildSelection.model === null ||
-            buildSelection.model.trim() === ""
-          ) {
-            return yield* new BuildModelNotConfiguredError({
-              message: "Select a default build model first",
-            })
-          }
-          const model = buildSelection.model
-          const thinkingLevel = buildSelection.thinkingLevel
-          const hasRepoReviewModel =
-            repository?.reviewModel !== null &&
-            repository?.reviewModel !== undefined &&
-            repository.reviewModel.trim() !== ""
-          const hasHarnessReviewModel =
-            config.reviewModel !== null &&
-            config.reviewModel !== undefined &&
-            config.reviewModel.trim() !== ""
-          const reviewSelection = hasRepoReviewModel
-            ? {
-                model: repository.reviewModel as string,
-                thinkingLevel: repository.reviewThinkingLevel ?? null,
-              }
-            : hasHarnessReviewModel
-              ? {
-                  model: config.reviewModel as string,
-                  thinkingLevel: config.reviewThinkingLevel ?? null,
-                }
-              : {
-                  model: buildSelection.model,
-                  thinkingLevel:
-                    repository?.reviewThinkingLevel ??
-                    config.reviewThinkingLevel ??
-                    buildSelection.thinkingLevel,
-                }
-          const reviewModel = reviewSelection.model
-          const reviewThinkingLevel = reviewSelection.thinkingLevel
+          // Fail fast when no build model is configured; models are not stored
+          // on the Work Item and are resolved again at each Agent Turn.
+          yield* resolveModelsForRepository(repositoryId)
           const activeRegistration =
             yield* activeAgentBackend.getActiveRegistration
           const agentBackendId = activeRegistration.descriptor.id
@@ -4001,22 +4021,18 @@ export const makeWorkItemLifecycleLive = (
 
                 yield* sql.unsafe(
                   `INSERT INTO work_item (
-                 id, repository_id, github_issue_number, agent_backend, model, thinking_level,
-                  issue_title, review_model, review_thinking_level, state, state_ready_at, paused,
+                 id, repository_id, github_issue_number, agent_backend,
+                  issue_title, state, state_ready_at, paused,
                   waiting_since, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                   [
                     workItemId,
                     repositoryId,
                     githubIssueNumber,
                     agentBackendId,
-                    model,
-                    thinkingLevel,
                     issue.title,
-                    reviewModel,
-                    reviewThinkingLevel,
                     step,
                     now,
                     admit ? null : now,

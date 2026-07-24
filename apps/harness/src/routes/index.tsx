@@ -1247,8 +1247,8 @@ function RepositoryCard({
               {repository.githubOwner}/{repository.githubRepo}
             </h2>
             <p className="mt-1.5 text-sm text-ink-soft">
-              Overrides apply to new Work Items. Empty model fields use harness
-              defaults.
+              Overrides apply on the next Agent Turn. Empty model fields use
+              harness defaults.
             </p>
           </div>
           <div className="grid gap-5 px-6 py-5">

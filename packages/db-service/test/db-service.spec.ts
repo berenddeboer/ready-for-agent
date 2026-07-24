@@ -575,10 +575,9 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, thinking_level,
-               review_model, review_thinking_level, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
-             ) VALUES (?, ?, 42, 'model', 'low', 'model', 'low', 'create_worktree',
+             ) VALUES (?, ?, 42, 'create_worktree',
                ?, NULL, NULL, NULL, NULL, ?, ?)`,
             ["wi-running-remove-test", repository.id, now, now, now],
           )
@@ -615,10 +614,9 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, thinking_level,
-               review_model, review_thinking_level, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
-             ) VALUES (?, ?, 42, 'model', 'low', 'model', 'low', 'create_worktree',
+             ) VALUES (?, ?, 42, 'create_worktree',
                ?, NULL, NULL, NULL, NULL, ?, ?)`,
             ["wi-queued-remove-test", repository.id, now, now, now],
           )
