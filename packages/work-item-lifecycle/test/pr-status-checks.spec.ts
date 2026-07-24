@@ -24,6 +24,8 @@ import {
   makeWorkItemId,
   parseInvestigationResult,
   resolvePrMergeConflict,
+  stubActiveAgentBackendLayer,
+  stubGrokActiveAgentBackendLayer,
   watchPrStatusChecks,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -56,7 +58,7 @@ const db = stubDbServiceLayer({
   listRepositories: Effect.succeed([repository]),
 })
 
-const keymaxxer = Layer.succeed(KeymaxxerService, {
+const keymaxxerService = Layer.succeed(KeymaxxerService, {
   initialize: Effect.void,
   hasSecret: () => Effect.succeed(true),
   findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -64,6 +66,12 @@ const keymaxxer = Layer.succeed(KeymaxxerService, {
   addSecret: () => Effect.succeed(true),
   runWithSecrets: () => Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
 } satisfies KeymaxxerServiceShape)
+
+/** Vault-enabled Keymaxxer plus capable (OpenCode) Active Agent Backend. */
+const keymaxxer = Layer.mergeAll(
+  keymaxxerService,
+  stubActiveAgentBackendLayer(),
+)
 
 const seedWorkItem = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
@@ -576,6 +584,59 @@ describe("PR status check steps", () => {
     expect(prompts[1]).toContain("replacement check executions")
   })
 
+  it("uses ambient gh guidance for investigate when the backend lacks KeymaxxerMcp", async () => {
+    const prompts: string[] = []
+    let findSecretCalled = false
+    const vaultOnWithoutLookup = Layer.mergeAll(
+      Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        hasSecret: () => Effect.succeed(true),
+        findSecret: () => {
+          findSecretCalled = true
+          return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
+        },
+        findSecrets: () => Effect.succeed([]),
+        addSecret: () => Effect.succeed(true),
+        runWithSecrets: () =>
+          Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+      } satisfies KeymaxxerServiceShape),
+      stubGrokActiveAgentBackendLayer,
+    )
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            vaultOnWithoutLookup,
+            opencodeWith(
+              ["fixed and pushed", "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("checks_triggered")
+    expect(findSecretCalled).toBe(false)
+    expect(prompts[0]?.toLowerCase()).not.toContain("keymaxxer")
+    expect(prompts[0]).toContain(
+      "Use the gh CLI with the existing ambient authentication",
+    )
+  })
+
   it("makes a focused recovery attempt after FAILED and accepts recovered progress", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
@@ -999,6 +1060,46 @@ describe("PR status check steps", () => {
       "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
     )
     expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+  })
+
+  it("uses ambient gh guidance for merge-conflict when Keymaxxer is disabled", async () => {
+    const prompts: string[] = []
+    const disabled = Layer.mergeAll(
+      Layer.succeed(KeymaxxerService, {
+        enabled: false,
+        initialize: Effect.void,
+        hasSecret: () => Effect.succeed(false),
+        findSecret: () => Effect.die("must not inspect the vault"),
+        findSecrets: () => Effect.succeed([]),
+        addSecret: () => Effect.succeed(false),
+        runWithSecrets: () =>
+          Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+      } satisfies KeymaxxerServiceShape),
+      stubActiveAgentBackendLayer(),
+    )
+    const result = await Effect.runPromise(
+      resolvePrMergeConflict(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            disabled,
+            opencodeWith(
+              [
+                "rebased, verified, and pushed",
+                "READY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "processed" })
+    expect(prompts[0]?.toLowerCase()).not.toContain("keymaxxer")
+    expect(prompts[0]).toContain(
+      "Use the gh CLI with the existing ambient authentication",
+    )
   })
 
   it("returns the merge-conflict resolver's human intervention reason", async () => {

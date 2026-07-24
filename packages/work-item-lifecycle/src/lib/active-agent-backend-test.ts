@@ -3,6 +3,7 @@ import {
   AGENT_BACKEND_IDS,
   ActiveAgentBackend,
   type AgentBackendBlockedError,
+  type AgentBackendRegistration,
   type AgentBackendStatus,
   type SessionTelemetry,
   getBuiltInAgentBackend,
@@ -16,10 +17,11 @@ if (opencodeRegistration === undefined) {
 const opencode = opencodeRegistration
 
 const readyStatus = (
+  registration: AgentBackendRegistration,
   models: AgentBackendStatus["models"] = [],
 ): AgentBackendStatus => ({
-  selectedBackend: opencode.descriptor,
-  activeBackend: opencode.descriptor,
+  selectedBackend: registration.descriptor,
+  activeBackend: registration.descriptor,
   kind: "ready",
   reason: null,
   models,
@@ -31,28 +33,40 @@ const readyStatus = (
  */
 export const stubActiveAgentBackendLayer = (
   overrides: Partial<{
+    readonly registration: AgentBackendRegistration
     readonly getStatus: Effect.Effect<AgentBackendStatus>
     readonly requireAgentTurnsAllowed: Effect.Effect<
       void,
       AgentBackendBlockedError
     >
   }> = {},
-): Layer.Layer<ActiveAgentBackend> =>
-  Layer.succeed(
+): Layer.Layer<ActiveAgentBackend> => {
+  const registration = overrides.registration ?? opencode
+  return Layer.succeed(
     ActiveAgentBackend,
     ActiveAgentBackend.of({
-      getStatus: overrides.getStatus ?? Effect.succeed(readyStatus()),
-      recheck: () => Effect.succeed(readyStatus()),
+      getStatus:
+        overrides.getStatus ?? Effect.succeed(readyStatus(registration)),
+      recheck: () => Effect.succeed(readyStatus(registration)),
       requireAgentTurnsAllowed:
         overrides.requireAgentTurnsAllowed ?? Effect.void,
-      setSelectedBackend: () => Effect.succeed(readyStatus()),
-      getActiveRegistration: Effect.succeed(opencode),
+      setSelectedBackend: () => Effect.succeed(readyStatus(registration)),
+      getActiveRegistration: Effect.succeed(registration),
       getSessionTelemetry: (input) =>
         Effect.succeed(
           unsupportedSessionTelemetry(
             input.sessionId ?? "",
-            opencode.descriptor,
+            registration.descriptor,
           ) satisfies SessionTelemetry,
         ),
     }),
   )
+}
+
+const grokRegistration = getBuiltInAgentBackend(AGENT_BACKEND_IDS.grok)
+if (grokRegistration === undefined) {
+  throw new Error("Grok Agent Backend registration is missing")
+}
+
+export const stubGrokActiveAgentBackendLayer: Layer.Layer<ActiveAgentBackend> =
+  stubActiveAgentBackendLayer({ registration: grokRegistration })

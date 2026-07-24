@@ -42,28 +42,31 @@ export const makeOpencodeEnvironment = Effect.fn("makeOpencodeEnvironment")(
     const mcp = isObject(config.mcp) ? config.mcp : {}
     const { keymaxxer: _keymaxxer, ...mcpWithoutKeymaxxer } = mcp
 
-    const opencodeConfig =
-      keymaxxerMcpUrl === undefined || keymaxxerMcpUrl === ""
-        ? {
-            ...config,
-            ...(config.mcp === undefined ? {} : { mcp: mcpWithoutKeymaxxer }),
-          }
-        : {
-            ...config,
-            mcp: {
-              ...mcp,
-              keymaxxer: {
-                type: "remote",
-                url: keymaxxerMcpUrl,
-                enabled: true,
-                oauth: false,
-                timeout: DEFAULT_MCP_TIMEOUT_MS,
-              },
+    const vaultMcpConfigured =
+      keymaxxerMcpUrl !== undefined && keymaxxerMcpUrl !== ""
+    const opencodeConfig = vaultMcpConfigured
+      ? {
+          ...config,
+          mcp: {
+            ...mcp,
+            keymaxxer: {
+              type: "remote",
+              url: keymaxxerMcpUrl,
+              enabled: true,
+              oauth: false,
+              timeout: DEFAULT_MCP_TIMEOUT_MS,
             },
-          }
+          },
+        }
+      : {
+          ...config,
+          ...(config.mcp === undefined ? {} : { mcp: mcpWithoutKeymaxxer }),
+        }
 
     return {
-      ...sanitizeInheritedEnvironment(environment),
+      ...sanitizeInheritedEnvironment(environment, {
+        stripGitHubTokens: vaultMcpConfigured,
+      }),
       OPENCODE_CONFIG_CONTENT: JSON.stringify(opencodeConfig),
     }
   },

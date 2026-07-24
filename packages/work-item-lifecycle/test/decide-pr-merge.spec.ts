@@ -13,6 +13,8 @@ import {
   decidePrMerge,
   makeWorkItemId,
   parseDecidePrMergeResult,
+  stubActiveAgentBackendLayer,
+  stubGrokActiveAgentBackendLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -108,7 +110,14 @@ describe("decidePrMerge", () => {
 
     const result = await Effect.runPromise(
       decidePrMerge(context).pipe(
-        Effect.provide(Layer.mergeAll(db, keymaxxer, agentBackend)),
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
       ),
     )
 
@@ -117,6 +126,112 @@ describe("decidePrMerge", () => {
     expect(prompt).toContain("CLANKER_MERGE")
     expect(prompt).toContain(
       "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
+    )
+  })
+
+  it("uses ambient gh guidance when the backend lacks KeymaxxerMcp", async () => {
+    let prompt = ""
+    let findSecretCalled = false
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: (input) => {
+          prompt = input.prompt
+          return Effect.succeed({
+            sessionId: input.sessionId,
+            assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+          })
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "grok" as const, label: "Grok Build" },
+            models: [],
+          }),
+      }),
+    )
+    const vaultOn = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      hasSecret: () => Effect.succeed(true),
+      findSecret: () => {
+        findSecretCalled = true
+        return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
+      },
+      findSecrets: () => Effect.succeed([]),
+      addSecret: () => Effect.succeed(true),
+      runWithSecrets: () =>
+        Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+    } satisfies KeymaxxerServiceShape)
+
+    const result = await Effect.runPromise(
+      decidePrMerge(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            vaultOn,
+            agentBackend,
+            stubGrokActiveAgentBackendLayer,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "clanker_merge" })
+    expect(findSecretCalled).toBe(false)
+    expect(prompt.toLowerCase()).not.toContain("keymaxxer")
+    expect(prompt).toContain(
+      "Use the gh CLI with the existing ambient authentication",
+    )
+  })
+
+  it("uses ambient gh guidance when Keymaxxer is disabled on a capable backend", async () => {
+    let prompt = ""
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: (input) => {
+          prompt = input.prompt
+          return Effect.succeed({
+            sessionId: input.sessionId,
+            assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
+          })
+        },
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
+      }),
+    )
+    const disabled = Layer.succeed(KeymaxxerService, {
+      enabled: false,
+      initialize: Effect.void,
+      hasSecret: () => Effect.succeed(false),
+      findSecret: () => Effect.die("must not inspect the vault"),
+      findSecrets: () => Effect.succeed([]),
+      addSecret: () => Effect.succeed(false),
+      runWithSecrets: () =>
+        Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+    } satisfies KeymaxxerServiceShape)
+
+    const result = await Effect.runPromise(
+      decidePrMerge(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            disabled,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "clanker_merge" })
+    expect(prompt.toLowerCase()).not.toContain("keymaxxer")
+    expect(prompt).toContain(
+      "Use the gh CLI with the existing ambient authentication",
     )
   })
 
@@ -141,7 +256,14 @@ describe("decidePrMerge", () => {
 
     const result = await Effect.runPromise(
       decidePrMerge(context).pipe(
-        Effect.provide(Layer.mergeAll(db, keymaxxer, agentBackend)),
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
       ),
     )
 
@@ -174,7 +296,14 @@ describe("decidePrMerge", () => {
 
     const result = await Effect.runPromise(
       decidePrMerge(context).pipe(
-        Effect.provide(Layer.mergeAll(pausedRepoDb, keymaxxer, agentBackend)),
+        Effect.provide(
+          Layer.mergeAll(
+            pausedRepoDb,
+            keymaxxer,
+            agentBackend,
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
       ),
     )
 

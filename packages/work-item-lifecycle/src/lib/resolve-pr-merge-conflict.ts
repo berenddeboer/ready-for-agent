@@ -1,7 +1,12 @@
 import { Effect, Schema } from "effect"
 import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
-import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  type AgentTurnGitHubAuth,
+  AgentTurnGitHubCredentialMissingError,
+  agentTurnGitHubCredentialGuidance,
+  resolveAgentTurnGitHubAuth,
+} from "./agent-turn-github-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
@@ -51,7 +56,7 @@ const parseResult = (
     : { reason: needsHuman[1].trim().slice(0, 500) }
 }
 
-const workPrompt = (tokenName: string | undefined): string =>
+const workPrompt = (auth: AgentTurnGitHubAuth): string =>
   [
     "Resolve the merge conflict on the existing pull request for this worktree by rebasing its branch.",
     "Fetch origin and inspect the pull request to determine its current base branch (normally the repository default branch).",
@@ -60,11 +65,10 @@ const workPrompt = (tokenName: string | undefined): string =>
     "Push the rebased pull-request branch with --force-with-lease. Do not use an unconditional force push.",
     "If the lease is rejected, refetch, incorporate the updated remote PR branch, rebase onto the current remote base again, verify, and retry the --force-with-lease push exactly once. If that second push cannot safely succeed, stop and report that human intervention is needed in the follow-up verdict turn.",
     "Do not create or merge another pull request and do not do unrelated work.",
-    ...(tokenName === undefined
-      ? []
-      : [
-          `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI, API, fetch, or push access; never put secret values in the environment.`,
-        ]),
+    agentTurnGitHubCredentialGuidance(
+      auth,
+      "GitHub CLI, API, fetch, or push access",
+    ),
     "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
   ].join("\n")
 
@@ -101,19 +105,21 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
-    const keymaxxer = yield* KeymaxxerService
-    const tokenName =
-      keymaxxer.enabled === false
-        ? undefined
-        : yield* keymaxxer.findSecret({
-            provider: "github",
-            account: `${repository.githubOwner}/${repository.githubRepo}`,
+    const auth = yield* resolveAgentTurnGitHubAuth({
+      githubOwner: repository.githubOwner,
+      githubRepo: repository.githubRepo,
+    }).pipe(
+      Effect.mapError((cause) => {
+        if (cause instanceof AgentTurnGitHubCredentialMissingError) {
+          return new ResolvePrMergeConflictContextError({
+            message: cause.message,
           })
-    if (tokenName === null) {
-      return yield* new ResolvePrMergeConflictContextError({
-        message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
-      })
-    }
+        }
+        return new ResolvePrMergeConflictContextError({
+          message: "Failed to resolve the repository GitHub credential",
+        })
+      }),
+    )
     const agentBackend = yield* AgentBackend
     const timeout =
       context.maxDuration ??
@@ -121,7 +127,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
     yield* agentBackend
       .continueTurn({
         sessionId: context.sessionId,
-        prompt: workPrompt(tokenName),
+        prompt: workPrompt(auth),
         cwd: context.worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
