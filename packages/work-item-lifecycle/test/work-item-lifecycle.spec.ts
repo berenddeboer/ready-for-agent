@@ -254,8 +254,6 @@ describe("WorkItemLifecycle", () => {
           expect(workItem.githubIssueNumber).toBe(42)
           expect(workItem.issueTitle).toBe(sampleIssueFields.title)
           expect(workItem.state).toBe("create_worktree")
-          expect(workItem.model).toBe("opencode/deepseek-v4-flash-free")
-          expect(workItem.thinkingLevel).toBe("low")
           expect(workItem.paused).toBe(false)
           expect(workItem.pauseBeforeStep).toBeNull()
           expect(workItem.worktreePath).toBeNull()
@@ -282,12 +280,6 @@ describe("WorkItemLifecycle", () => {
               stepRunId: stepRun.id,
             })
           }
-
-          const config = yield* db.getConfig
-          expect(workItem.model).toBe(config.defaultModel)
-          expect(workItem.thinkingLevel).toBe(config.defaultThinkingLevel)
-          expect(workItem.reviewModel).toBe(config.defaultModel)
-          expect(workItem.reviewThinkingLevel).toBe(config.defaultThinkingLevel)
 
           yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
           const reloaded = yield* lifecycle.getWorkItem(workItem.id)
@@ -345,218 +337,7 @@ describe("WorkItemLifecycle", () => {
             issue.githubIssueNumber,
           )
 
-          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.thinkingLevel).toBe("max")
-          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.reviewThinkingLevel).toBe("max")
-        }),
-      ))
-
-    it("captures the current default model and variant at creation", () =>
-      runTest(
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
-          const { repository, issue } = yield* seedActionableIssue
-
-          yield* db.updateConfig({
-            selectedAgentBackend: "opencode",
-            defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultThinkingLevel: "high",
-            reviewModel: "anthropic/claude-opus-4-6",
-            reviewThinkingLevel: "max",
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-
-          const workItem = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.thinkingLevel).toBe("high")
-          expect(workItem.reviewModel).toBe("anthropic/claude-opus-4-6")
-          expect(workItem.reviewThinkingLevel).toBe("max")
-        }),
-      ))
-
-    it("does not inherit thinking level when an explicit model has none", () =>
-      runTest(
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
-          const { repository, issue } = yield* seedActionableIssue
-
-          yield* db.updateConfig({
-            selectedAgentBackend: "opencode",
-            defaultModel: "opencode/deepseek-v4-flash-free",
-            defaultThinkingLevel: "low",
-            reviewModel: null,
-            reviewThinkingLevel: null,
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-          yield* db.updateRepositorySettings({
-            repositoryId: repository.id,
-            paused: repository.paused,
-            defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultThinkingLevel: null,
-            reviewModel: null,
-            reviewThinkingLevel: null,
-            autoMerge: repository.autoMerge,
-            includeAllIssueAuthors: repository.includeAllIssueAuthors,
-          })
-
-          const workItem = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.thinkingLevel).toBeNull()
-          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.reviewThinkingLevel).toBeNull()
-        }),
-      ))
-
-    it("inherits the complete harness selection when repository model is absent", () =>
-      runTest(
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
-          const { repository, issue } = yield* seedActionableIssue
-
-          yield* db.updateConfig({
-            selectedAgentBackend: "opencode",
-            defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultThinkingLevel: "high",
-            reviewModel: null,
-            reviewThinkingLevel: null,
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-          yield* db.updateRepositorySettings({
-            repositoryId: repository.id,
-            paused: repository.paused,
-            defaultModel: null,
-            defaultThinkingLevel: "max",
-            reviewModel: null,
-            reviewThinkingLevel: null,
-            autoMerge: repository.autoMerge,
-            includeAllIssueAuthors: repository.includeAllIssueAuthors,
-          })
-
-          const workItem = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.thinkingLevel).toBe("high")
-        }),
-      ))
-
-    it("prefers repository model and variant overrides when set", () =>
-      runTest(
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
-          const { repository, issue } = yield* seedActionableIssue
-
-          yield* db.updateConfig({
-            selectedAgentBackend: "opencode",
-            defaultModel: "opencode/deepseek-v4-flash-free",
-            defaultThinkingLevel: "low",
-            reviewModel: null,
-            reviewThinkingLevel: null,
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-          yield* db.updateRepositorySettings({
-            repositoryId: repository.id,
-            paused: repository.paused,
-            defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultThinkingLevel: "max",
-            reviewModel: "anthropic/claude-opus-4-6",
-            reviewThinkingLevel: "high",
-            autoMerge: repository.autoMerge,
-            includeAllIssueAuthors: repository.includeAllIssueAuthors,
-          })
-
-          const workItem = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          expect(workItem.model).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.thinkingLevel).toBe("max")
-          expect(workItem.reviewModel).toBe("anthropic/claude-opus-4-6")
-          expect(workItem.reviewThinkingLevel).toBe("high")
-        }),
-      ))
-
-    it("falls back review model to build model when unset", () =>
-      runTest(
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
-          const { repository, issue } = yield* seedActionableIssue
-
-          yield* db.updateConfig({
-            selectedAgentBackend: "opencode",
-            defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultThinkingLevel: "high",
-            reviewModel: null,
-            reviewThinkingLevel: null,
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-
-          const workItem = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.reviewThinkingLevel).toBe("high")
-        }),
-      ))
-
-    it("keeps a configured review thinking level when review model falls back to build", () =>
-      runTest(
-        Effect.gen(function* () {
-          const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
-          const { repository, issue } = yield* seedActionableIssue
-
-          yield* db.updateConfig({
-            selectedAgentBackend: "opencode",
-            defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultThinkingLevel: "high",
-            reviewModel: null,
-            reviewThinkingLevel: "medium",
-            maxConcurrentAgentTurns: 2,
-            maxConcurrentWorkItems: 5,
-          })
-          yield* db.updateRepositorySettings({
-            repositoryId: repository.id,
-            paused: repository.paused,
-            defaultModel: null,
-            defaultThinkingLevel: null,
-            reviewModel: null,
-            reviewThinkingLevel: "max",
-            autoMerge: repository.autoMerge,
-            includeAllIssueAuthors: repository.includeAllIssueAuthors,
-          })
-
-          const workItem = yield* lifecycle.implementNow(
-            repository.id,
-            issue.githubIssueNumber,
-          )
-
-          expect(workItem.reviewModel).toBe("anthropic/claude-sonnet-4-5")
-          expect(workItem.reviewThinkingLevel).toBe("max")
+          expect(workItem.state).toBe("create_worktree")
         }),
       ))
 
@@ -4182,6 +3963,98 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("uses freshly resolved models on the next turn after settings change", () => {
+      const seen: LifecycleStepContext[] = []
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: (context) => {
+          seen.push(context)
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/model-switch",
+            startingCommitOid: "abc123",
+          })
+        },
+        installDependencies: (context) => {
+          seen.push(context)
+          return Effect.void
+        },
+        implement: (context) => {
+          seen.push(context)
+          return Effect.succeed("ses_model_switch")
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: "high",
+            reviewModel: "anthropic/claude-opus-4-6",
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          yield* claimAndRunPending
+          expect(seen).toHaveLength(1)
+          expect(seen[0]!.model).toBe("anthropic/claude-sonnet-4-5")
+          expect(seen[0]!.thinkingLevel).toBe("high")
+          expect(seen[0]!.reviewModel).toBe("anthropic/claude-opus-4-6")
+          expect(seen[0]!.reviewThinkingLevel).toBe("max")
+
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/gpt-5",
+            defaultThinkingLevel: "low",
+            reviewModel: "opencode/gpt-5-pro",
+            reviewThinkingLevel: "medium",
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+
+          yield* claimAndRunPending
+          expect(seen).toHaveLength(2)
+          expect(seen[1]!.model).toBe("opencode/gpt-5")
+          expect(seen[1]!.thinkingLevel).toBe("low")
+          expect(seen[1]!.reviewModel).toBe("opencode/gpt-5-pro")
+          expect(seen[1]!.reviewThinkingLevel).toBe("medium")
+
+          yield* db.updateRepositorySettings({
+            repositoryId: repository.id,
+            paused: repository.paused,
+            defaultModel: "anthropic/claude-haiku-4-5",
+            defaultThinkingLevel: "max",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: repository.autoMerge,
+            includeAllIssueAuthors: repository.includeAllIssueAuthors,
+          })
+
+          yield* claimAndRunPending
+          expect(seen).toHaveLength(3)
+          expect(seen[2]!.model).toBe("anthropic/claude-haiku-4-5")
+          expect(seen[2]!.thinkingLevel).toBe("max")
+          expect(seen[2]!.reviewModel).toBe("opencode/gpt-5-pro")
+          expect(seen[2]!.reviewThinkingLevel).toBe("medium")
+
+          const workItem = yield* lifecycle.getWorkItem(created.id)
+          expect(workItem.state).toBe("assess_changes")
+          expect(workItem.sessionId).toBe("ses_model_switch")
+        }),
+      )
+    })
+
     it("hands high-risk merge decisions to a human", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
@@ -7129,10 +7002,10 @@ describe("WorkItemLifecycle", () => {
             workItemId: created.id,
             repositoryId: repository.id,
             githubIssueNumber: issue.githubIssueNumber,
-            model: afterCreate.model,
-            thinkingLevel: afterCreate.thinkingLevel,
-            reviewModel: afterCreate.reviewModel,
-            reviewThinkingLevel: afterCreate.reviewThinkingLevel,
+            model: "",
+            thinkingLevel: null,
+            reviewModel: "",
+            reviewThinkingLevel: null,
             worktreePath: "/tmp/worktrees/reset-me",
             startingCommitOid: "abc123",
             completionSummary: null,

@@ -106,10 +106,9 @@ const seedWorkItem = (workItemId: string, repositoryId: string) =>
     const now = Date.now()
     yield* sql.unsafe(
       `INSERT INTO work_item (
-         id, repository_id, github_issue_number, model, thinking_level,
-         review_model, review_thinking_level, state, state_ready_at, worktree_path,
+         id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
          session_id, failure_code, failure_message, created_at, updated_at
-       ) VALUES (?, ?, 80, 'opencode/test-model', 'high', 'opencode/test-model', 'high',
+       ) VALUES (?, ?, 80,
          'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
       [workItemId, repositoryId, now, now, now],
     )

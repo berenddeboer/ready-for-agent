@@ -204,10 +204,6 @@ export const workItem = snakeCase.table(
     githubPullRequestNumber: integer(),
     /** Active Agent Backend captured at Work Item creation (provenance). */
     agentBackend: text().notNull().default("opencode"),
-    model: text().notNull(),
-    thinkingLevel: text(),
-    reviewModel: text().notNull(),
-    reviewThinkingLevel: text(),
     state: text({
       enum: [
         "create_worktree",

@@ -281,8 +281,6 @@ type WorkItem {
   Active Agent Backend captured at Work Item creation (provenance).
   """
   agentBackend: AgentBackendInfo!
-  model: String!
-  thinkingLevel: String
   state: WorkItemState!
   stateLabel: String!
   status: WorkItemStatus!

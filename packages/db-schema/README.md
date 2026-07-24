@@ -73,8 +73,7 @@ type job queue = queue, key, job payload, job attempts, job retry limit,
 type completed job = queue, job id.
 
 type work item = repository, github issue number, issue title,
-                 github pull request number, model, variant,
-                 review model, review variant, state, state ready at,
+                 github pull request number, agent backend, state, state ready at,
                  paused, waiting since, holds worker slot, pause before step,
                  worktree path, starting commit oid, completion summary,
                  session id, failure code, failure message,

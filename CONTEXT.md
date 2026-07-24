@@ -17,7 +17,7 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, and Include all Issue Authors. An absent build model inherits the whole Harness build selection; an absent review model inherits the Harness review selection and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. Changing settings does not rewrite existing Work Items; resolved build and review selections are captured when a Work Item is created, while changing Agent Backend clears every Repository's model selections.
+Per-Repository operator preferences: Paused, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, and Include all Issue Authors. An absent build model inherits the whole Harness build selection; an absent review model inherits the Harness review selection and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. Build and review selections are resolved at each Agent Turn from current Repository settings falling back to Harness Config, so a settings change affects the next turn of an existing Work Item without rewriting it; changing Agent Backend clears every Repository's model selections.
 _Avoid_: Project config, repo config file
 
 **Harness Config**:
@@ -96,7 +96,7 @@ An explicit operator request that revalidates the Active Agent Backend and refre
 _Avoid_: Automatic health poll, model-cache refresh only, Harness restart
 
 **Agent Model**:
-A model in the Active Agent Backend's instance-wide catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific; every Work Item captures explicit build and review Agent Models.
+A model in the Active Agent Backend's instance-wide catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific; each Agent Turn resolves build and review Agent Models from current Repository settings falling back to Harness Config rather than from Work Item state.
 _Avoid_: Provider, Agent Backend, model profile
 
 **Thinking Level**:
@@ -168,7 +168,7 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the active Agent Backend as provenance and the resolved build and review Agent Model selections at creation. The build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the active Agent Backend as provenance. Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current Repository settings falling back to Harness Config. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement**:

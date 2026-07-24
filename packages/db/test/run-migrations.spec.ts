@@ -93,6 +93,7 @@ describe("runMigrations", () => {
           { name: "20260724001032_furry_wild_pack" },
           { name: "20260724120000_agent_backend_vocabulary" },
           { name: "20260724180000_agent_backend_selection" },
+          { name: "20260724190000_work_item_turn_time_models" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
