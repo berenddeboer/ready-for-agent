@@ -119,6 +119,10 @@ _Avoid_: Agent run, prompt run, OpenCode process
 The normalized successful output of an Agent Turn: its Session ID and ordered final assistant text, recovered from the Agent Backend's machine-readable output. Backend-specific events and terminal presentation are not part of the result.
 _Avoid_: CLI stdout, transcript, tool-event stream
 
+**Agent-reported Outcome**:
+A lifecycle-specific, machine-readable conclusion included in an Agent Turn's final assistant text so the Harness can choose the next lifecycle transition. It is semantic lifecycle data carried inside, but distinct from, the transport-level Agent Turn Result.
+_Avoid_: Ruling, verdict, Agent Turn Result
+
 **Agent-free Lifecycle Step**:
 A Lifecycle Step guaranteed not to invoke an Agent Turn. A step that may need an Agent Turn conditionally is not Agent-free and does not start while the Agent Backend is Unavailable.
 _Avoid_: Step that usually avoids the agent, non-OpenCode step
