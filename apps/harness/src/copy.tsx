@@ -53,7 +53,7 @@ export function Copy({
       ) : null}
       <button
         type="button"
-        className="inline-flex size-5 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        className="inline-flex size-5 shrink-0 items-center justify-center text-ink-faint transition hover:bg-paper-2 hover:text-oxblood focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
         onClick={() => {
           void handleCopy()
         }}
@@ -63,7 +63,7 @@ export function Copy({
         {copied ? (
           <svg
             aria-hidden="true"
-            className="size-3.5 text-emerald-600"
+            className="size-3.5 text-olive"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"

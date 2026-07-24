@@ -4,24 +4,24 @@
  */
 export const jobsProgressMinTextClassName = "text-xs"
 
-export const lifecycleStepChipClassName = `rounded bg-white px-1.5 py-1 ${jobsProgressMinTextClassName} text-slate-600 ring-1 ring-slate-200`
+export const lifecycleStepChipClassName = `border border-rule-2 bg-paper px-1.5 py-1 ${jobsProgressMinTextClassName} text-ink-2`
 
-export const statusBadgeBaseClassName = `rounded-full px-2 py-0.5 ${jobsProgressMinTextClassName} font-bold tracking-wide uppercase`
+export const statusBadgeBaseClassName = `inline-flex items-center border px-2 py-0.5 ${jobsProgressMinTextClassName} font-bold tracking-wide uppercase`
 
-export const prBadgeClassName = `rounded-full bg-slate-200 px-2 py-0.5 ${jobsProgressMinTextClassName} font-bold tracking-wide text-slate-700 uppercase hover:bg-slate-300 hover:underline`
+export const prBadgeClassName = `stamp border-rule-2 ${jobsProgressMinTextClassName} text-ink-2 no-underline hover:border-oxblood hover:text-oxblood hover:underline`
 
 export function statusBadgeClassNameForStatus(status: string): string {
   const tone =
     status === "FAILED" || status === "INTERRUPTED"
-      ? "bg-red-100 text-red-700"
+      ? "border-oxblood/40 bg-oxblood-wash text-oxblood"
       : status === "COMPLETE" || status === "SUCCEEDED"
-        ? "bg-green-100 text-green-700"
+        ? "border-olive/40 bg-olive-wash text-olive"
         : status === "ABANDONED" || status === "CANCELLED"
-          ? "bg-slate-200 text-slate-600"
+          ? "border-rule-2 bg-paper-2 text-ink-faint"
           : status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"
-            ? "bg-amber-100 text-amber-800"
+            ? "border-sepia/40 bg-amber-wash text-sepia"
             : status === "WAITING_FOR_WORKER_SLOT"
-              ? "bg-violet-100 text-violet-800"
-              : "bg-blue-100 text-blue-700"
+              ? "border-violet-300 bg-violet-wash text-violet-800"
+              : "border-oxblood/30 bg-oxblood-wash text-oxblood"
   return `${statusBadgeBaseClassName} ${tone}`
 }

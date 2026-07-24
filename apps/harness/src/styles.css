@@ -1,1 +1,108 @@
 @import "tailwindcss";
+
+@theme {
+  --color-paper: #f4ecdb;
+  --color-paper-2: #efe5d0;
+  --color-paper-3: #e9dcc1;
+  --color-panel: #fbf6ea;
+  --color-ink: #1d160e;
+  --color-ink-2: #34291c;
+  --color-ink-soft: #5b4d3b;
+  --color-ink-faint: #6e5b43;
+  --color-rule: #d8c9a8;
+  --color-rule-2: #cbbb96;
+  --color-rule-soft: #e7dcc2;
+  --color-oxblood: #7a1d2a;
+  --color-oxblood-deep: #5c141f;
+  --color-vermilion: #b8341b;
+  --color-sepia: #6c4f20;
+  --color-olive: #4a5d2c;
+  --color-olive-wash: #eef0e2;
+  --color-amber-wash: #f3e6c8;
+  --color-oxblood-wash: #f0ddd9;
+  --color-vermilion-wash: #f4e1d8;
+  --color-violet-wash: #e7dff0;
+  --font-serif:
+    "Iowan Old Style", "Palatino Linotype", "URW Palladio L", Palatino,
+    "Book Antiqua", Georgia, "Times New Roman", serif;
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
+    "DejaVu Sans Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    background-image:
+      radial-gradient(
+        130% 90% at 50% -10%,
+        rgba(28, 22, 14, 0) 55%,
+        rgba(28, 22, 14, 0.045) 100%
+      ),
+      repeating-linear-gradient(
+        0deg,
+        rgba(28, 22, 14, 0.012) 0 1px,
+        rgba(28, 22, 14, 0) 1px 3px
+      );
+    background-attachment: fixed;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--color-oxblood);
+    color: var(--color-paper);
+  }
+
+  :focus-visible {
+    border-radius: 1px;
+    outline: 2px solid var(--color-oxblood);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--color-rule-2);
+    padding: 0.0625rem 0.4375rem;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    line-height: 1.4;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .field-rule {
+    border: 1px solid var(--color-rule);
+    background-color: var(--color-panel);
+  }
+
+  .entry-rule {
+    border-top: 1px solid var(--color-rule-soft);
+  }
+}

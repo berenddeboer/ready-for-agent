@@ -20,13 +20,17 @@ function assertMinTextXs(className: string) {
 describe("work-item-progress-chrome", () => {
   test("lifecycle step chips use shared text-xs minimum (no sub-xs rem)", () => {
     assertMinTextXs(lifecycleStepChipClassName)
-    expect(lifecycleStepChipClassName).toContain("rounded")
-    expect(lifecycleStepChipClassName).toContain("ring-1")
+    expect(lifecycleStepChipClassName).not.toContain("rounded")
+    expect(lifecycleStepChipClassName).toContain("border")
   })
 
   test("status badge base and PR badge share text-xs minimum", () => {
     assertMinTextXs(statusBadgeBaseClassName)
     assertMinTextXs(prBadgeClassName)
+    expect(statusBadgeBaseClassName).not.toContain("rounded")
+    expect(prBadgeClassName).not.toContain("rounded")
+    expect(statusBadgeBaseClassName).toContain("border")
+    expect(prBadgeClassName).toContain("border")
     expect(statusBadgeClassNameForStatus("COMPLETE")).toContain(
       statusBadgeBaseClassName,
     )

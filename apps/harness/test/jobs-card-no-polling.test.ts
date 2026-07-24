@@ -95,7 +95,7 @@ describe("JobsCard live updates", () => {
     const { jobsCard } = jobsCardSource()
     expect(jobsCard).toContain("issue.url")
     expect(jobsCard).toContain("href={issueUrl}")
-    expect(jobsCard).toContain("text-blue-600 hover:underline")
+    expect(jobsCard).toContain("text-oxblood hover:underline")
     expect(jobsCard).not.toContain("hover:text-blue-700")
     expect(jobsCard).toContain("workItemIssueUrl(")
     expect(jobsCard).toContain("issueUrl={issueUrl}")
@@ -126,7 +126,7 @@ describe("JobsCard live updates", () => {
     expect(chrome).toContain(
       'status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"',
     )
-    expect(chrome).toContain("bg-amber-100 text-amber-800")
+    expect(chrome).toContain("bg-amber-wash text-sepia")
   })
 
   test("shows copyable session id and worktree path without Session prefix", () => {
