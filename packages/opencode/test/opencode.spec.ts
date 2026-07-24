@@ -167,6 +167,156 @@ describe("Opencode Effect service", () => {
     )
   })
 
+  it("returns the /review child task result and ignores resumed parent text", async () => {
+    const childText = [
+      "## Review Findings",
+      "- Medium: nullable thinking level treated as required",
+      "",
+      "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
+    ].join("\n")
+    const toolUse = JSON.stringify({
+      type: "tool_use",
+      sessionID: "ses_parent",
+      part: {
+        type: "tool",
+        tool: "task",
+        state: {
+          status: "completed",
+          input: {
+            prompt: "Review uncommitted worktree changes.",
+            description: "review changes",
+            subagent_type: "build",
+            command: "review",
+          },
+          output: `<task id="ses_review_child" state="completed">\n<task_result>\n${childText}\n</task_result>\n</task>`,
+        },
+      },
+    })
+    const parentFixed = JSON.stringify({
+      type: "text",
+      part: {
+        type: "text",
+        text: "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+      },
+    })
+
+    const directory = await mkdtemp(join(tmpdir(), "opencode-review-cmd-"))
+    const markerPath = join(directory, "parent-edited")
+    const binaryPath = join(directory, "opencode")
+    try {
+      await writeFile(
+        binaryPath,
+        [
+          "#!/bin/sh",
+          `printf '%s\\n' '{"type":"step_start","sessionID":"ses_parent"}'`,
+          `printf '%s\\n' '${toolUse.replace(/'/g, `'\\''`)}'`,
+          // Parent resume would apply findings; kill must stop this before edits.
+          "sleep 5",
+          `printf '%s\\n' '${parentFixed.replace(/'/g, `'\\''`)}'`,
+          `echo parent-edited > "${markerPath}"`,
+          "",
+        ].join("\n"),
+      )
+      await chmod(binaryPath, 0o700)
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const opencode = yield* Opencode
+          return yield* opencode.continue({
+            sessionId: "ses_parent",
+            cwd: process.cwd(),
+            prompt: "Review uncommitted worktree changes.",
+            model: "test/model",
+            variant: "test",
+            command: "/review",
+            timeout: "3 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary: binaryPath,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            }).pipe(Layer.provide(BunServices.layer)),
+          ),
+        ),
+      )
+
+      expect(result.sessionId).toBe("ses_parent")
+      expect(result.assistantText).toBe(childText)
+      expect(result.assistantText).toContain(
+        "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium",
+      )
+      expect(result.assistantText).not.toContain(
+        "READY_FOR_AGENT_RESULT: REVIEW_FIXED",
+      )
+      await Bun.sleep(200)
+      expect(await Bun.file(markerPath).exists()).toBe(false)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("returns the command task result when the process exits immediately after the nested task", async () => {
+    const childText = "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: medium"
+    const toolUse = JSON.stringify({
+      type: "tool_use",
+      sessionID: "ses_parent",
+      part: {
+        type: "tool",
+        tool: "task",
+        state: {
+          status: "completed",
+          input: { command: "review" },
+          output: `<task_result>\n${childText}\n</task_result>`,
+        },
+      },
+    })
+    const directory = await mkdtemp(join(tmpdir(), "opencode-review-cmd-"))
+    const binaryPath = join(directory, "opencode")
+    try {
+      await writeFile(
+        binaryPath,
+        [
+          "#!/bin/sh",
+          `printf '%s\\n' '{"type":"step_start","sessionID":"ses_parent"}'`,
+          `printf '%s\\n' '${toolUse.replace(/'/g, `'\\''`)}'`,
+          "exit 0",
+          "",
+        ].join("\n"),
+      )
+      await chmod(binaryPath, 0o700)
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const opencode = yield* Opencode
+          return yield* opencode.continue({
+            sessionId: "ses_parent",
+            cwd: process.cwd(),
+            prompt: "Review uncommitted worktree changes.",
+            model: "test/model",
+            variant: "test",
+            command: "/review",
+            timeout: "3 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary: binaryPath,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+            }).pipe(Layer.provide(BunServices.layer)),
+          ),
+        ),
+      )
+
+      expect(result).toEqual({
+        sessionId: "ses_parent",
+        assistantText: childText,
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it("does not fail the run when onSessionId fails", async () => {
     await withExecutable(
       [
