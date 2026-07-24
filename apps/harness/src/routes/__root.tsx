@@ -501,7 +501,6 @@ function SettingsButton() {
                     not in the Agent Model catalog. Choose another model or use
                     the build model.
                   </p>
-                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
                   <p className="bg-paper-2 p-3 text-sm text-ink-soft">

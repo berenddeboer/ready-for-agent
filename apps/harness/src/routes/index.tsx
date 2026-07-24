@@ -1427,9 +1427,6 @@ function RepositoryCard({
                     ))}
                   </select>
                 </label>
-                {reviewVariantSourceModel.length > 0 &&
-                reviewVariantSourceUnavailable ? (
-                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 reviewThinkingLevelSourceUnavailable ? (
                   <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
