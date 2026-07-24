@@ -59,8 +59,10 @@ type SavedStepRunReason = {
  *
  * While waiting for a permit, marks the ambient Step Run with
  * `waiting_for_opencode_session` so GraphQL can show **Queued** instead of
- * **Running**. When the slot is acquired, restores any prior mid-run phase
- * (for example Review: pre-commit) instead of clearing the reason.
+ * **Running**, and records `session_wait_started_at` so max-duration and
+ * visibility-lease clocks freeze for the wait. When the slot is acquired,
+ * accumulates the wait into `session_wait_ms` and restores any prior mid-run
+ * phase (for example Review: pre-commit) instead of clearing the reason.
  */
 export const limitOpencodeSessions = (
   opencode: OpencodeService,
@@ -84,12 +86,14 @@ export const limitOpencodeSessions = (
           return null
         }
         const rows = (yield* sql.unsafe(
-          `SELECT reason_code, reason_message FROM step_run
+          `SELECT reason_code, reason_message, session_wait_started_at
+           FROM step_run
            WHERE id = ? AND status = 'running'`,
           [current.stepRunId],
         )) as readonly {
           readonly reason_code: string | null
           readonly reason_message: string | null
+          readonly session_wait_started_at: number | null
         }[]
         const row = rows[0]
         if (row === undefined) {
@@ -106,16 +110,20 @@ export const limitOpencodeSessions = (
               : row.reason_message,
         }
         const now = Date.now()
+        // Keep the original wait start if already waiting (idempotent re-mark).
+        const waitStartedAt = row.session_wait_started_at ?? now
         yield* sql.unsafe(
           `UPDATE step_run
            SET reason_code = ?,
                reason_message = ?,
+               session_wait_started_at = ?,
                updated_at = ?
            WHERE id = ?
              AND status = 'running'`,
           [
             STEP_RUN_REASON.waitingForOpencodeSession,
             WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+            waitStartedAt,
             now,
             current.stepRunId,
           ],
@@ -140,10 +148,32 @@ export const limitOpencodeSessions = (
           return
         }
         const now = Date.now()
+        const rows = (yield* sql.unsafe(
+          `SELECT session_wait_started_at, session_wait_ms
+           FROM step_run
+           WHERE id = ?
+             AND status = 'running'
+             AND reason_code = ?`,
+          [current.stepRunId, STEP_RUN_REASON.waitingForOpencodeSession],
+        )) as readonly {
+          readonly session_wait_started_at: number | null
+          readonly session_wait_ms: number | null
+        }[]
+        const row = rows[0]
+        if (row === undefined) {
+          return
+        }
+        const openWaitMs =
+          row.session_wait_started_at === null
+            ? 0
+            : Math.max(0, now - row.session_wait_started_at)
+        const sessionWaitMs = Math.max(0, row.session_wait_ms ?? 0) + openWaitMs
         yield* sql.unsafe(
           `UPDATE step_run
            SET reason_code = ?,
                reason_message = ?,
+               session_wait_ms = ?,
+               session_wait_started_at = NULL,
                updated_at = ?
            WHERE id = ?
              AND status = 'running'
@@ -151,6 +181,7 @@ export const limitOpencodeSessions = (
           [
             saved?.reasonCode ?? null,
             saved?.reasonMessage ?? null,
+            sessionWaitMs,
             now,
             current.stepRunId,
             STEP_RUN_REASON.waitingForOpencodeSession,

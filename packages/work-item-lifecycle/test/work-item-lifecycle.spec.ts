@@ -6080,6 +6080,278 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("interrupts a stale OpenCode session-slot wait on lease redelivery", () => {
+      let createCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () => {
+          createCalls += 1
+          return Effect.succeed({
+            worktreePath: "/tmp/worktrees/should-not-rerun-wait",
+            startingCommitOid: "abc123",
+          })
+        },
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const stepRunId = created.stepRuns[0]!.id
+          const jobId = created.stepRuns[0]!.queueJobId!
+          const now = Date.now()
+          const maxMs = Duration.toMillis(
+            lifecycle.maxDurations.create_worktree,
+          )
+          const startedAt = now - maxMs - 5_000
+
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'running',
+                 started_at = ?,
+                 session_wait_started_at = ?,
+                 session_wait_ms = 0,
+                 reason_code = ?,
+                 reason_message = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+            [
+              startedAt,
+              startedAt + 100,
+              STEP_RUN_REASON.waitingForOpencodeSession,
+              "Waiting for an OpenCode session slot",
+              now,
+              stepRunId,
+            ],
+          )
+          yield* sql.unsafe(
+            `UPDATE job_queue
+             SET locked_until = ?, updated_at = ?
+             WHERE id = ?`,
+            [now - 1, now, jobId],
+          )
+
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(claimed)).toBe(true)
+
+          const result = yield* lifecycle.runStep(stepRunId)
+          expect(result._tag).toBe("noop")
+          expect(createCalls).toBe(0)
+
+          const final = yield* lifecycle.getWorkItem(created.id)
+          expect(final.stepRuns[0]!.status).toBe("interrupted")
+          expect(final.stepRuns[0]!.reasonCode).toBe(
+            STEP_RUN_REASON.interrupted,
+          )
+        }),
+      )
+    })
+
+    it("does not timeout solely for OpenCode session-slot wait longer than maxDuration", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const rows = (yield* sql.unsafe(
+              `SELECT id FROM step_run WHERE status = 'running' LIMIT 1`,
+            )) as readonly { readonly id: string }[]
+            const stepRunId = rows[0]!.id
+            const waitStart = Date.now()
+            yield* sql.unsafe(
+              `UPDATE step_run
+               SET session_wait_started_at = ?,
+                   reason_code = ?,
+                   reason_message = ?,
+                   updated_at = ?
+               WHERE id = ?`,
+              [
+                waitStart,
+                STEP_RUN_REASON.waitingForOpencodeSession,
+                "Waiting for an OpenCode session slot",
+                waitStart,
+                stepRunId,
+              ],
+            )
+            // Wall time well past maxDuration (20ms) while wait freezes the clock.
+            yield* Effect.sleep("80 millis")
+            const waitEnd = Date.now()
+            yield* sql.unsafe(
+              `UPDATE step_run
+               SET session_wait_ms = session_wait_ms + ?,
+                   session_wait_started_at = NULL,
+                   reason_code = NULL,
+                   reason_message = NULL,
+                   updated_at = ?
+               WHERE id = ?`,
+              [waitEnd - waitStart, waitEnd, stepRunId],
+            )
+            return {
+              worktreePath: "/tmp/worktrees/after-session-wait",
+              startingCommitOid: "abc123",
+            }
+          }),
+      }
+
+      const layer = makeWorkItemLifecycleLive({
+        maxDurations: {
+          create_worktree: Duration.millis(20),
+          install_dependencies: Duration.minutes(15),
+          implement: Duration.hours(2),
+          assess_changes: Duration.minutes(5),
+          pre_commit: Duration.hours(2),
+          review: Duration.hours(1),
+          commit: Duration.minutes(5),
+          create_pr: Duration.minutes(10),
+          watch_pr_status_checks: Duration.minutes(5),
+          resolve_pr_merge_conflict: Duration.hours(2),
+          investigate_pr_status_checks: Duration.hours(2),
+          mark_pr_ready_for_review: Duration.minutes(5),
+          decide_pr_merge: Duration.minutes(15),
+          merge_pr: Duration.minutes(5),
+          close_issue: Duration.minutes(5),
+          local_cleanup: Duration.minutes(5),
+        },
+      }).pipe(
+        Layer.provideMerge(
+          Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+        ),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(SqliteQueueServiceLive),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isNone(claimed)) {
+            return yield* Effect.die("expected lifecycle job")
+          }
+
+          const result = yield* lifecycle.runStep(
+            (claimed.value.payload as { stepRunId: string }).stepRunId,
+          )
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            expect(result.workItem.state).toBe("install_dependencies")
+            expect(result.workItem.stepRuns[0]!.status).toBe("succeeded")
+          }
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("still times out when productive work exceeds maxDuration after a session wait", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createWorktree: () =>
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const rows = (yield* sql.unsafe(
+              `SELECT id FROM step_run WHERE status = 'running' LIMIT 1`,
+            )) as readonly { readonly id: string }[]
+            const stepRunId = rows[0]!.id
+            const waitStart = Date.now()
+            yield* sql.unsafe(
+              `UPDATE step_run
+               SET session_wait_started_at = ?,
+                   reason_code = ?,
+                   updated_at = ?
+               WHERE id = ?`,
+              [
+                waitStart,
+                STEP_RUN_REASON.waitingForOpencodeSession,
+                waitStart,
+                stepRunId,
+              ],
+            )
+            yield* Effect.sleep("40 millis")
+            const waitEnd = Date.now()
+            yield* sql.unsafe(
+              `UPDATE step_run
+               SET session_wait_ms = session_wait_ms + ?,
+                   session_wait_started_at = NULL,
+                   reason_code = NULL,
+                   updated_at = ?
+               WHERE id = ?`,
+              [waitEnd - waitStart, waitEnd, stepRunId],
+            )
+            // Productive overrun after the wait.
+            yield* Effect.sleep("80 millis")
+            return {
+              worktreePath: "/tmp/worktrees/productive-overrun",
+              startingCommitOid: "abc123",
+            }
+          }),
+      }
+
+      const layer = makeWorkItemLifecycleLive({
+        maxDurations: {
+          create_worktree: Duration.millis(30),
+          install_dependencies: Duration.minutes(15),
+          implement: Duration.hours(2),
+          assess_changes: Duration.minutes(5),
+          pre_commit: Duration.hours(2),
+          review: Duration.hours(1),
+          commit: Duration.minutes(5),
+          create_pr: Duration.minutes(10),
+          watch_pr_status_checks: Duration.minutes(5),
+          resolve_pr_merge_conflict: Duration.hours(2),
+          investigate_pr_status_checks: Duration.hours(2),
+          mark_pr_ready_for_review: Duration.minutes(5),
+          decide_pr_merge: Duration.minutes(15),
+          merge_pr: Duration.minutes(5),
+          close_issue: Duration.minutes(5),
+          local_cleanup: Duration.minutes(5),
+        },
+      }).pipe(
+        Layer.provideMerge(
+          Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+        ),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(SqliteQueueServiceLive),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+
+          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(claimed)).toBe(true)
+          if (Option.isNone(claimed)) {
+            return yield* Effect.die("expected lifecycle job")
+          }
+
+          const result = yield* lifecycle.runStep(
+            (claimed.value.payload as { stepRunId: string }).stepRunId,
+          )
+          expect(result._tag).toBe("processed")
+          if (result._tag === "processed") {
+            const run = result.workItem.stepRuns[0]!
+            expect(run.status).toBe("failed")
+            expect(run.reasonCode).toBe(STEP_RUN_REASON.timeout)
+          }
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
     it("records Interrupted when the handler is fiber-interrupted before an outcome is established", () => {
       const hangForever: LifecycleStepsShape = {
         ...successfulSteps,

@@ -83,7 +83,8 @@ type work item = repository, github issue number, issue title,
                  check start last observed is draft.
 
 type step run = work item, step, status, queue job id,
-                queued at, started at, finished at, reason code, reason message.
+                queued at, started at, finished at, reason code, reason message,
+                session wait ms, session wait started at.
 
 type pr status check = work item, external id, name, outcome,
                        handled at, observed at.
