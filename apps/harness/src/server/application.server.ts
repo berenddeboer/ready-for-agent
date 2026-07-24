@@ -8,11 +8,15 @@ import {
   ActiveAgentBackend,
   ActiveAgentBackendLive,
   type AgentBackendId,
+  type AgentBackendRegistration,
+  SessionTelemetryProvider,
   resolveActiveRegistration,
+  unsupportedSessionTelemetry,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
+import { Grok } from "@ready-for-agent/grok"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
   KeymaxxerService,
@@ -44,6 +48,38 @@ export interface Application {
 
 export interface CreateApplicationOptions {
   readonly startWorker?: boolean
+}
+
+const unsupportedSessionTelemetryLive = (
+  registration: AgentBackendRegistration,
+) =>
+  Layer.succeed(SessionTelemetryProvider, {
+    getSession: (sessionId) =>
+      Effect.succeed(
+        unsupportedSessionTelemetry(sessionId, registration.descriptor),
+      ),
+  })
+
+const agentBackendLayers = <R>(input: {
+  readonly activeRegistration: AgentBackendRegistration
+  readonly platformLayer: Layer.Layer<R>
+  readonly sidecarUrl: string | undefined
+}) => {
+  if (input.activeRegistration.descriptor.id === AGENT_BACKEND_IDS.grok) {
+    return {
+      adapterLayer: Grok.layer().pipe(Layer.provide(input.platformLayer)),
+      telemetryLayer: unsupportedSessionTelemetryLive(input.activeRegistration),
+    }
+  }
+
+  return {
+    adapterLayer: Opencode.layer({
+      ...(input.sidecarUrl === undefined
+        ? {}
+        : { keymaxxerMcpUrl: input.sidecarUrl }),
+    }).pipe(Layer.provide(input.platformLayer)),
+    telemetryLayer: OpencodeSessionTelemetryLive(),
+  }
 }
 
 export const createApplication = async (
@@ -88,12 +124,12 @@ export const createApplication = async (
     .then((id) => id as AgentBackendId)
     .catch(() => AGENT_BACKEND_IDS.opencode)
 
-  // OpenCode is the only registered production backend in this PR.
   const activeRegistration = resolveActiveRegistration(selectedBackendId)
-  const adapterLayer = Opencode.layer({
-    ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
-  }).pipe(Layer.provide(platformLayer))
-  const telemetryLayer = OpencodeSessionTelemetryLive()
+  const { adapterLayer, telemetryLayer } = agentBackendLayers({
+    activeRegistration,
+    platformLayer,
+    sidecarUrl,
+  })
   const activeLayer = ActiveAgentBackendLive({
     selectedBackendId:
       activeRegistration.descriptor.id === selectedBackendId

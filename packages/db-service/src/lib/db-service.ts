@@ -2,6 +2,7 @@ import { Clock, Context, Effect, Layer, PubSub, Schema, Stream } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { ulid } from "ulidx"
+import { isSelectableAgentBackendId } from "@ready-for-agent/agent-backend"
 import {
   AgentBackendChangeBlockedError,
   DatabaseError,
@@ -421,8 +422,7 @@ export const DbServiceLive = Layer.effect(
           message: "selectedAgentBackend cannot be empty",
         })
       }
-      // Only built-in registry IDs are accepted (OpenCode in this PR).
-      if (selectedAgentBackend !== "opencode") {
+      if (!isSelectableAgentBackendId(selectedAgentBackend)) {
         return yield* new InvalidConfigInputError({
           field: "selectedAgentBackend",
           message: `Unknown Agent Backend: ${selectedAgentBackend}`,

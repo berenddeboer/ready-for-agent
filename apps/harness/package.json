@@ -20,6 +20,7 @@
     "@ready-for-agent/graphql-client": "workspace:*",
     "@ready-for-agent/issue-reconciler": "workspace:*",
     "@ready-for-agent/keymaxxer-service": "workspace:*",
+    "@ready-for-agent/grok": "workspace:*",
     "@ready-for-agent/opencode": "workspace:*",
     "@ready-for-agent/queue-service": "workspace:*",
     "@ready-for-agent/sqlite-queue-service": "workspace:*",

@@ -43,6 +43,9 @@
       "path": "./packages/opencode"
     },
     {
+      "path": "./packages/grok"
+    },
+    {
       "path": "./packages/github-service"
     },
     {
