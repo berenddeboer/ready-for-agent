@@ -4,10 +4,7 @@
 
 Issues live in GitHub Issues for berenddeboer/ready-for-agent (via `gh`). See `docs/agents/issue-tracker.md`.
 
-### Credentials
-
-Use `gh` and `git` with the logged-in user's existing credentials (normal `gh`
-configuration or ambient GitHub token environment variables).
+### GitHub API notes
 
 Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
 `statusCheckRollup.contexts`). That 403 is expected: the harness falls back to
@@ -22,11 +19,6 @@ Default labels: needs-triage, needs-info, ready-for-agent, ready-for-human, wont
 ### Domain docs
 
 Single-context layout (root CONTEXT.md + docs/adr/). See `docs/agents/domain.md`.
-
-### Compatibility
-
-Do not add support for legacy behavior, deprecations, or migration paths without
-explicit user confirmation.
 
 <!-- effect-solutions:start -->
 
