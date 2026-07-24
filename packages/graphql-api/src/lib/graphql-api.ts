@@ -20,6 +20,7 @@ import {
   type WorkItemsListKind,
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
+  isJobsWorkingWorkItem,
   isRetryableFailedWorkItem,
   isRetryableNeedsHumanWorkItem,
   isTerminalWorkItemState,
@@ -395,7 +396,7 @@ export const createGraphqlApi = (
                 const visible = workItems.filter(
                   (workItem) =>
                     isJobsCompletedWorkItemState(workItem.state) ||
-                    !isTerminalWorkItemState(workItem.state) ||
+                    isJobsWorkingWorkItem(workItem) ||
                     relevantIssueNumbers.has(workItem.githubIssueNumber),
                 )
                 return filterWorkItemsByListKind(visible, listKind, limit)
