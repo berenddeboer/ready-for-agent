@@ -108,9 +108,14 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   shellComponent: RootDocument,
   notFoundComponent: () => (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="field-rule mx-auto mt-12 max-w-xl p-8 text-center">
       <p>Page not found.</p>
-      <Link to="/">Back home</Link>
+      <Link
+        className="mt-2 inline-block text-oxblood underline decoration-rule underline-offset-4 hover:text-oxblood-deep"
+        to="/"
+      >
+        Back home
+      </Link>
     </div>
   ),
 })
@@ -121,7 +126,7 @@ function RootDocument({ children }: { children: ReactNode }) {
       <head>
         <HeadContent />
       </head>
-      <body className="min-h-screen min-w-80 bg-slate-50 font-sans text-slate-900 antialiased [font-synthesis:none] [text-rendering:optimizeLegibility]">
+      <body className="min-h-screen min-w-80 bg-paper font-sans text-ink antialiased [font-synthesis:none] [text-rendering:optimizeLegibility]">
         {children}
         <Scripts />
       </body>
@@ -131,22 +136,26 @@ function RootDocument({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   return (
-    <div className="mx-auto min-h-screen max-w-7xl p-4 sm:p-6">
-      <nav className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200 pb-4">
-        <Link
-          to="/"
-          className="font-medium text-slate-700 hover:underline"
-          activeProps={{ className: "font-bold text-slate-900" }}
-          activeOptions={{ exact: true }}
-        >
-          Home
-        </Link>
-        <span
-          className="text-sm tabular-nums text-slate-500"
-          title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}
-        >
-          {READY_FOR_AGENT_VERSION_LABEL}
-        </span>
+    <div className="mx-auto min-h-screen w-full max-w-[88rem] px-5 py-6 sm:px-8 lg:px-12">
+      <nav className="mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 border-b-2 border-ink pb-3">
+        <div className="grid gap-1">
+          <h1 className="m-0 font-serif text-[clamp(1.6rem,3.2vw,2.25rem)] leading-none font-semibold tracking-[-0.012em]">
+            <Link
+              to="/"
+              className="text-ink hover:text-oxblood"
+              activeProps={{ className: "text-ink" }}
+              activeOptions={{ exact: true }}
+            >
+              Clanker Harness
+            </Link>
+          </h1>
+          <span
+            className="font-mono text-xs tabular-nums tracking-[0.16em] text-ink-faint uppercase"
+            title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}
+          >
+            {READY_FOR_AGENT_VERSION_LABEL}
+          </span>
+        </div>
         <SettingsButton />
       </nav>
       <Outlet />
@@ -287,13 +296,13 @@ function SettingsButton() {
     <>
       {showUnconfiguredGuidance && !dialogOpen && (
         <div
-          className="mr-auto flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-950"
+          className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
           role="status"
         >
           <span>Select a default build model first</span>
           <button
             type="button"
-            className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-950 underline-offset-2 hover:bg-amber-200 hover:underline"
+            className="border border-oxblood/50 bg-paper px-2 py-0.5 text-xs font-semibold text-oxblood underline-offset-2 hover:bg-oxblood hover:text-paper"
             onClick={openSettings}
           >
             Open Settings
@@ -302,13 +311,13 @@ function SettingsButton() {
       )}
       <button
         type="button"
-        className="ml-auto inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+        className="ml-auto inline-flex items-center gap-2 border border-rule-2 bg-panel px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-ink-2 uppercase transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
         onClick={openSettings}
         aria-haspopup="dialog"
       >
         <svg
           aria-hidden="true"
-          className="size-4"
+          className="size-3.5"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -322,7 +331,7 @@ function SettingsButton() {
 
       <dialog
         ref={dialogRef}
-        className="m-auto w-[min(92vw,31rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
+        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-ink/45"
         aria-labelledby="settings-title"
         onCancel={(event) => {
           if (updateConfig.isPending) event.preventDefault()
@@ -330,18 +339,21 @@ function SettingsButton() {
         onClose={() => setDialogOpen(false)}
       >
         <form onSubmit={saveSettings}>
-          <div className="border-b border-slate-200 px-6 py-5">
-            <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
+          <div className="border-b border-rule px-6 py-5">
+            <p className="font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
               Harness defaults
             </p>
-            <h2 id="settings-title" className="mt-1 text-2xl font-bold">
+            <h2
+              id="settings-title"
+              className="mt-1.5 font-serif text-2xl font-semibold tracking-[-0.01em]"
+            >
               Harness settings
             </h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1.5 text-sm text-ink-soft">
               Defaults for agent sessions and Agent Turn concurrency.
             </p>
             {showUnconfiguredGuidance && (
-              <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+              <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Select a default build model before the harness can create work.
               </p>
             )}
@@ -349,9 +361,9 @@ function SettingsButton() {
 
           <div className="grid gap-5 px-6 py-5">
             {config.isPending || (dialogOpen && models.isPending) ? (
-              <p className="text-sm text-slate-500">Loading settings...</p>
+              <p className="text-sm text-ink-soft">Loading settings...</p>
             ) : config.isError || models.isError ? (
-              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Settings could not be loaded. Close this dialog and try again.
               </p>
             ) : (
@@ -359,7 +371,7 @@ function SettingsButton() {
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Build model
                   <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="defaultModel"
                     value={defaultModel}
                     onChange={(event) => {
@@ -396,18 +408,18 @@ function SettingsButton() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs font-normal text-slate-500">
+                  <span className="text-xs font-normal text-ink-faint">
                     Used for implement and other build steps.
                   </span>
                 </label>
 
                 {defaultModel.length > 0 && hasUnavailableBuildModel ? (
-                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                     Build thinking level is unavailable — the selected model is
                     not in the Agent Model catalog. Choose another build model.
                   </p>
                 ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
-                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
                     Build thinking level is unavailable — this model has no
                     Thinking Levels.
                   </p>
@@ -415,7 +427,7 @@ function SettingsButton() {
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Build thinking level
                     <select
-                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                       name="defaultThinkingLevel"
                       value={defaultThinkingLevel}
                       onChange={(event) =>
@@ -439,7 +451,7 @@ function SettingsButton() {
                         </option>
                       ))}
                     </select>
-                    <span className="text-xs font-normal text-slate-500">
+                    <span className="text-xs font-normal text-ink-faint">
                       Optional Thinking Level for this model. Options come from
                       the selected model.
                     </span>
@@ -449,7 +461,7 @@ function SettingsButton() {
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Review model
                   <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="reviewModel"
                     value={reviewModel}
                     onChange={(event) => {
@@ -476,7 +488,7 @@ function SettingsButton() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs font-normal text-slate-500">
+                  <span className="text-xs font-normal text-ink-faint">
                     Used only for the review step. Empty uses the build model.
                   </span>
                 </label>
@@ -484,14 +496,14 @@ function SettingsButton() {
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
                   (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
-                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                     Review thinking level is unavailable — the selected model is
                     not in the Agent Model catalog. Choose another model or use
                     the build model.
                   </p>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
-                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
                     Review thinking level is unavailable — this model has no
                     Thinking Levels.
                   </p>
@@ -499,7 +511,7 @@ function SettingsButton() {
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Review thinking level
                     <select
-                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                       name="reviewThinkingLevel"
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
@@ -526,7 +538,7 @@ function SettingsButton() {
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Max concurrent Agent Turns
                   <input
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="maxConcurrentAgentTurns"
                     type="number"
                     min={1}
@@ -537,7 +549,7 @@ function SettingsButton() {
                       setMaxConcurrentOpencodeSessions(event.target.value)
                     }
                   />
-                  <span className="text-xs font-normal text-slate-500">
+                  <span className="text-xs font-normal text-ink-faint">
                     Caps how many OpenCode lifecycle processes run at once
                     (default 2). Non-OpenCode steps and model listing are not
                     counted.
@@ -547,7 +559,7 @@ function SettingsButton() {
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Max concurrent Work Items
                   <input
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="maxConcurrentWorkItems"
                     type="number"
                     min={1}
@@ -558,7 +570,7 @@ function SettingsButton() {
                       setMaxConcurrentWorkItems(event.target.value)
                     }
                   />
-                  <span className="text-xs font-normal text-slate-500">
+                  <span className="text-xs font-normal text-ink-faint">
                     Caps how many Work Items may be Admitted at once (Worker
                     Slots, default 5). Extra Implement requests wait for a free
                     slot.
@@ -568,16 +580,16 @@ function SettingsButton() {
             )}
 
             {updateConfig.isError && (
-              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Settings could not be saved. Check the values and try again.
               </p>
             )}
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+          <div className="flex justify-end gap-3 border-t border-rule bg-paper-2 px-6 py-4">
             <button
               type="button"
-              className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200"
+              className="border border-rule-2 px-4 py-2 text-sm font-semibold text-ink-soft hover:bg-paper"
               onClick={() => {
                 dialogRef.current?.close()
                 setDialogOpen(false)
@@ -588,7 +600,7 @@ function SettingsButton() {
             </button>
             <button
               type="submit"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-paper uppercase hover:bg-oxblood-deep disabled:cursor-not-allowed disabled:opacity-50"
               disabled={
                 config.isPending ||
                 config.isError ||

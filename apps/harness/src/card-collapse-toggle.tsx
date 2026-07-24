@@ -15,7 +15,7 @@ export function CardCollapseToggle({
   return (
     <button
       type="button"
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+      className="inline-flex size-8 shrink-0 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
       aria-expanded={!collapsed}
       aria-controls={controlsId}
       aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}

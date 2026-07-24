@@ -442,15 +442,7 @@ export const Route = createFileRoute("/")({
 
 function HomePage() {
   return (
-    <main>
-      <header className="my-8 sm:my-14">
-        <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
-          Console
-        </p>
-        <h1 className="mt-0.5 text-[clamp(2rem,5vw,3.5rem)] leading-[1.05] font-bold tracking-[-0.045em]">
-          Clanker Harness
-        </h1>
-      </header>
+    <main className="pt-8 sm:pt-10">
       <Suspense fallback={<RepositoryCardsSkeleton />}>
         <HomeBody />
       </Suspense>
@@ -470,12 +462,12 @@ function HomeBody() {
 
   return (
     <>
-      <section aria-label="Committed pull requests" className="mb-8">
+      <section aria-label="Committed pull requests" className="mb-10">
         <CommittedPullRequestsDashboard />
       </section>
-      <section aria-label="Jobs">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="m-0 text-lg font-bold tracking-[-0.02em] text-slate-900">
+      <section aria-label="Jobs" className="border-t-2 border-ink pt-6">
+        <div className="mb-4 flex items-baseline justify-between gap-3">
+          <h2 className="m-0 font-serif text-xl font-semibold tracking-[-0.01em] text-ink">
             Jobs
           </h2>
           <CardCollapseToggle
@@ -493,7 +485,7 @@ function HomeBody() {
           </div>
         )}
       </section>
-      <div className="mt-8">
+      <div className="mt-10 border-t-2 border-ink pt-6">
         <RepositoryCards />
       </div>
     </>
@@ -558,16 +550,16 @@ function CommittedPullRequestsDashboard() {
   if (loading) {
     return (
       <article
-        className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]"
+        className="border border-rule-2 bg-panel px-4 py-4 sm:px-5"
         role="status"
         aria-label="Loading committed pull requests"
         aria-busy="true"
       >
-        <div className="grid grid-cols-4 gap-4">
-          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
-          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
-          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
-          <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
         </div>
       </article>
     )
@@ -575,8 +567,8 @@ function CommittedPullRequestsDashboard() {
 
   if (failed) {
     return (
-      <article className="rounded-[0.9rem] border border-red-200 bg-red-50 p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-        <p className="m-0 text-sm text-red-700" role="alert">
+      <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
+        <p className="m-0 text-sm text-oxblood-deep" role="alert">
           Could not load committed pull requests. Please try again.
         </p>
       </article>
@@ -589,37 +581,37 @@ function CommittedPullRequestsDashboard() {
   const lastWeek = lastWeekQuery.data ?? 0
 
   return (
-    <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-      <div className="grid grid-cols-4 gap-4">
+    <article className="border border-rule-2 bg-panel px-4 py-4 sm:px-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
-          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
             Today
           </p>
-          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
             {today}
           </p>
         </div>
         <div>
-          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
             Yesterday
           </p>
-          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
             {yesterday}
           </p>
         </div>
         <div>
-          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
             This week
           </p>
-          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
             {thisWeek}
           </p>
         </div>
         <div>
-          <p className="m-0 text-xs font-bold tracking-wide text-slate-500 uppercase">
+          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
             Last week
           </p>
-          <p className="mt-1 mb-0 text-2xl font-bold tracking-[-0.03em] text-slate-900 tabular-nums">
+          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
             {lastWeek}
           </p>
         </div>
@@ -737,7 +729,7 @@ function RepositoryCards() {
 
   const warning = liveUpdatesUnavailable ? (
     <p
-      className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+      className="mb-4 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep"
       role="status"
     >
       Live updates are unavailable. Repository information may be out of date.
@@ -748,12 +740,14 @@ function RepositoryCards() {
     return (
       <>
         {warning}
-        <div className="rounded-[0.9rem] border border-dashed border-slate-300 px-6 py-12 text-center">
-          <h2 className="m-0">No repositories configured</h2>
-          <p className="mt-1.5 text-slate-500">
+        <div className="border border-dashed border-rule-2 bg-panel px-6 py-12 text-center sm:px-10">
+          <h2 className="m-0 font-serif text-2xl font-semibold text-ink">
+            No repositories configured
+          </h2>
+          <p className="mt-2 text-sm text-ink-soft">
             Add a local Git repository with the operator binary:
           </p>
-          <code className="mt-3 inline-block rounded-md bg-slate-100 px-3 py-2 font-mono text-sm text-slate-800">
+          <code className="mt-4 inline-block max-w-full overflow-x-auto border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2">
             {addRepositoryCommand}
           </code>
         </div>
@@ -765,7 +759,7 @@ function RepositoryCards() {
     <>
       {warning}
       <section
-        className="grid grid-cols-1 gap-4 md:grid-cols-2"
+        className="grid grid-cols-1 gap-12 sm:gap-16"
         aria-label="Configured repositories"
       >
         {repositories.map((repository) => (
@@ -1085,8 +1079,8 @@ function RepositoryCard({
     ? "Unpause repository"
     : "Pause repository"
   const pauseButtonClass = repository.paused
-    ? "border-blue-300 text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
-    : "border-amber-300 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+    ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
+    : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
   const repositoryLabel = `${repository.githubOwner}/${repository.githubRepo}`
   const {
     collapsed: repositoryCollapsed,
@@ -1095,13 +1089,13 @@ function RepositoryCard({
   const repositoryBodyId = `repository-card-body-${repository.id}`
 
   return (
-    <article className="relative min-w-0 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
+    <article className="relative min-w-0 border-t-2 border-ink-soft pt-7 first:border-t-0 first:pt-0 sm:pt-8">
       <div
-        className={`flex items-center justify-between gap-4 ${repositoryCollapsed ? "" : "mb-[1.4rem]"}`}
+        className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${repositoryCollapsed ? "" : "mb-5"}`}
       >
-        <h2 className="m-0 min-w-0 truncate text-2xl tracking-[-0.025em]">
+        <h2 className="m-0 min-w-0 truncate font-serif text-2xl font-semibold tracking-[-0.012em]">
           <a
-            className="text-slate-900 hover:underline"
+            className="text-ink hover:text-oxblood hover:underline"
             href={`https://github.com/${repository.githubOwner}/${repository.githubRepo}`}
           >
             {repositoryLabel}
@@ -1116,7 +1110,7 @@ function RepositoryCard({
           />
           <button
             type="button"
-            className={`inline-flex size-8 items-center justify-center rounded-full border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "border-red-300 text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : pauseButtonClass}`}
+            className={`inline-flex size-8 items-center justify-center border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "border-oxblood text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood" : pauseButtonClass}`}
             disabled={pausePending}
             onClick={() =>
               repository.paused
@@ -1177,7 +1171,7 @@ function RepositoryCard({
           <span className="relative" data-repo-menu={repository.id}>
             <button
               type="button"
-              className="inline-flex size-8 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              className="inline-flex size-8 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
               aria-label={`Actions for ${repository.githubOwner}/${repository.githubRepo}`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
@@ -1197,12 +1191,12 @@ function RepositoryCard({
             {menuOpen && (
               <div
                 role="menu"
-                className="absolute top-full right-0 z-10 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                className="absolute top-full right-0 z-10 mt-1 min-w-40 border border-rule-2 bg-panel py-1 shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
               >
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                  className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
                   onClick={() => {
                     setMenuOpen(false)
                     openSettings()
@@ -1210,11 +1204,11 @@ function RepositoryCard({
                 >
                   Settings
                 </button>
-                <hr className="my-1 border-t border-slate-200" />
+                <hr className="my-1 border-t border-rule" />
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-2 text-left text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                  className="block w-full px-3 py-2 text-left text-sm font-medium text-oxblood hover:bg-oxblood-wash disabled:cursor-wait disabled:opacity-50"
                   disabled={removeRepository.isPending}
                   onClick={() => {
                     setMenuOpen(false)
@@ -1230,7 +1224,7 @@ function RepositoryCard({
       </div>
       <dialog
         ref={settingsDialogRef}
-        className="m-auto w-[min(92vw,31rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
+        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-ink/45"
         aria-labelledby={`repo-settings-title-${repository.id}`}
         onCancel={(event) => {
           if (updateSettings.isPending) event.preventDefault()
@@ -1238,64 +1232,64 @@ function RepositoryCard({
         onClose={() => setSettingsOpen(false)}
       >
         <form onSubmit={saveSettings}>
-          <div className="border-b border-slate-200 px-6 py-5">
-            <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
+          <div className="border-b border-rule px-6 py-5">
+            <p className="font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
               Repository settings
             </p>
             <h2
               id={`repo-settings-title-${repository.id}`}
-              className="mt-1 text-2xl font-bold"
+              className="mt-1.5 font-serif text-2xl font-semibold tracking-[-0.01em]"
             >
               {repository.githubOwner}/{repository.githubRepo}
             </h2>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1.5 text-sm text-ink-soft">
               Overrides apply to new Work Items. Empty model fields use harness
               defaults.
             </p>
           </div>
           <div className="grid gap-5 px-6 py-5">
-            <label className="flex items-center gap-3 text-sm font-semibold">
+            <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
               <input
                 type="checkbox"
-                className="size-4 rounded border-slate-300"
+                className="size-4 accent-oxblood"
                 checked={paused}
                 onChange={(event) => setPaused(event.target.checked)}
               />
               Paused
-              <span className="font-normal text-slate-500">
+              <span className="font-normal text-ink-faint">
                 Skip autonomous work selection
               </span>
             </label>
-            <label className="flex items-center gap-3 text-sm font-semibold">
+            <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
               <input
                 type="checkbox"
-                className="size-4 rounded border-slate-300"
+                className="size-4 accent-oxblood"
                 checked={autoMerge}
                 onChange={(event) => setAutoMerge(event.target.checked)}
               />
               Auto-merge
-              <span className="font-normal text-slate-500">
+              <span className="font-normal text-ink-faint">
                 Allow clanker merge when risk is low
               </span>
             </label>
-            <label className="flex items-center gap-3 text-sm font-semibold">
+            <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
               <input
                 type="checkbox"
-                className="size-4 rounded border-slate-300"
+                className="size-4 accent-oxblood"
                 checked={includeAllIssueAuthors}
                 onChange={(event) =>
                   setIncludeAllIssueAuthors(event.target.checked)
                 }
               />
               Include all Issue Authors
-              <span className="font-normal text-slate-500">
+              <span className="font-normal text-ink-faint">
                 Relevant Issues from every author after Refresh
               </span>
             </label>
             {models.isPending ? (
-              <p className="text-sm text-slate-500">Loading models...</p>
+              <p className="text-sm text-ink-soft">Loading models...</p>
             ) : models.isError ? (
-              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Models could not be loaded.
               </p>
             ) : (
@@ -1303,7 +1297,7 @@ function RepositoryCard({
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Build model
                   <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     value={defaultModel}
                     onChange={(event) => {
                       const nextModel = event.target.value
@@ -1352,14 +1346,14 @@ function RepositoryCard({
                 </label>
                 {buildVariantSourceModel.length > 0 &&
                 buildVariantSourceUnavailable ? (
-                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                     Build thinking level override is unavailable — the selected
                     model is not in the Agent Model catalog. Use harness default
                     or pick another model.
                   </p>
                 ) : buildVariantSourceModel.length > 0 &&
                   buildVariants.length === 0 ? (
-                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
                     Build thinking level override is unavailable — this model
                     has no Thinking Levels. Use harness default or pick another
                     model.
@@ -1368,7 +1362,7 @@ function RepositoryCard({
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Build thinking level
                     <select
-                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                       value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
@@ -1397,7 +1391,7 @@ function RepositoryCard({
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Review model
                   <select
-                    className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     value={reviewModel}
                     onChange={(event) => {
                       const nextModel = event.target.value
@@ -1435,14 +1429,14 @@ function RepositoryCard({
                 </label>
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 reviewThinkingLevelSourceUnavailable ? (
-                  <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
+                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                     Review thinking level override is unavailable — the selected
                     model is not in the Agent Model catalog. Use harness default
                     or pick another model.
                   </p>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
-                  <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
                     Review thinking level override is unavailable — this model
                     has no Thinking Levels. Use harness default or pick another
                     model.
@@ -1451,7 +1445,7 @@ function RepositoryCard({
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Review thinking level
                     <select
-                      className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
@@ -1478,15 +1472,15 @@ function RepositoryCard({
               </>
             )}
             {updateSettings.isError && (
-              <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Settings could not be saved. Try again.
               </p>
             )}
           </div>
-          <div className="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+          <div className="flex justify-end gap-3 border-t border-rule bg-paper-2 px-6 py-4">
             <button
               type="button"
-              className="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200"
+              className="border border-rule-2 px-4 py-2 text-sm font-semibold text-ink-soft hover:bg-paper"
               onClick={() => {
                 settingsDialogRef.current?.close()
                 setSettingsOpen(false)
@@ -1497,7 +1491,7 @@ function RepositoryCard({
             </button>
             <button
               type="submit"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
+              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-paper uppercase hover:bg-oxblood-deep disabled:cursor-wait disabled:opacity-60"
               disabled={updateSettings.isPending}
             >
               {updateSettings.isPending ? "Saving..." : "Save"}
@@ -1507,68 +1501,70 @@ function RepositoryCard({
       </dialog>
       {!repositoryCollapsed && (
         <div id={repositoryBodyId}>
-          <dl className="m-0 grid gap-1">
-            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+          <dl className="m-0 grid gap-x-8 gap-y-1.5 border-y border-rule py-3 sm:grid-cols-2">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Path:
               </dt>
               <dd
-                className="m-0 min-w-0 truncate font-mono text-slate-700"
+                className="m-0 min-w-0 truncate font-mono text-ink-2"
                 title={repository.localPath}
               >
                 {repository.localPath}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Checkout:
               </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
+              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
                 {repository.isBare ? "Bare repository" : "Working tree"}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Build model:
               </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
+              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
                 {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
                 {" · "}
                 {repository.defaultThinkingLevel ??
                   `Default (${harnessDefaultVariant})`}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Review model:
               </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
+              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
                 {repository.reviewModel ?? `Default (${harnessReviewModel})`}
                 {" · "}
                 {repository.reviewThinkingLevel ??
                   `Default (${harnessReviewVariant})`}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Auto-merge:
               </dt>
-              <dd className="m-0 text-slate-700">
+              <dd className="m-0 font-mono text-ink-2">
                 {repository.autoMerge ? "Enabled" : "Disabled"}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-[0.82rem]">
-              <dt className="shrink-0 font-[750] tracking-[0.06em] text-slate-400 uppercase">
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Include all Issue Authors:
               </dt>
-              <dd className="m-0 text-slate-700">
+              <dd className="m-0 font-mono text-ink-2">
                 {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
               </dd>
             </div>
           </dl>
           {!repository.credential.configured && (
-            <div className="mt-5 grid gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-sm text-amber-950">
-              <strong>GitHub token required</strong>
+            <div className="mt-5 grid gap-2 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep">
+              <strong className="font-serif text-base font-semibold">
+                GitHub token required
+              </strong>
               {githubTokenCreated ? (
                 <p className="m-0">
                   Store the generated token as{" "}
@@ -1593,7 +1589,7 @@ function RepositoryCard({
               {githubTokenCreated ? (
                 <button
                   type="button"
-                  className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900 disabled:cursor-wait disabled:opacity-60"
+                  className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
                   disabled={addGitHubToken.isPending}
                   onClick={() => addGitHubToken.mutate()}
                 >
@@ -1603,7 +1599,7 @@ function RepositoryCard({
                 </button>
               ) : (
                 <a
-                  className="w-fit rounded-md bg-amber-900 px-3 py-2 font-semibold text-white no-underline transition hover:bg-amber-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-900"
+                  className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper no-underline uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
                   href={repository.credential.githubTokenCreationUrl}
                   onClick={() => setGithubTokenCreated(true)}
                   rel="noreferrer"
@@ -1613,20 +1609,20 @@ function RepositoryCard({
                 </a>
               )}
               {addGitHubToken.isError && (
-                <p className="m-0 text-red-700" role="alert">
+                <p className="m-0 text-oxblood-deep" role="alert">
                   Keymaxxer setup was cancelled or failed.
                 </p>
               )}
             </div>
           )}
-          <div className="mt-5 border-t border-slate-100 pt-4">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <h3 className="m-0 text-[0.68rem] font-[750] tracking-[0.08em] text-slate-400 uppercase">
+          <div className="mt-5">
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <h3 className="m-0 font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
                 Relevant issues
               </h3>
               <button
                 type="button"
-                className="inline-flex size-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:cursor-wait disabled:opacity-60"
+                className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
                 disabled={refreshingIssues || !repository.credential.configured}
                 onClick={() => refreshIssues.mutate()}
                 aria-label={
@@ -1654,12 +1650,14 @@ function RepositoryCard({
               </button>
             </div>
             {refreshIssues.isError && (
-              <p className="mb-2 text-sm text-red-700" role="alert">
+              <p className="mb-2 text-sm text-oxblood-deep" role="alert">
                 Failed to refresh issues.
               </p>
             )}
             {repository.issuesReconciledAt === null ? (
-              <p className="m-0 text-sm text-slate-500">Not refreshed yet.</p>
+              <p className="m-0 font-serif text-sm italic text-ink-soft">
+                Not refreshed yet.
+              </p>
             ) : (
               <Suspense fallback={<RepositoryIssuesSkeleton />}>
                 <RepositoryIssues
@@ -1671,7 +1669,7 @@ function RepositoryCard({
             )}
           </div>
           {removeRepository.isError && (
-            <p className="mt-3 mb-0 text-sm text-red-700" role="alert">
+            <p className="mt-3 mb-0 text-sm text-oxblood-deep" role="alert">
               Could not remove repository. Please try again.
             </p>
           )}
@@ -1694,7 +1692,7 @@ function RepositoryIssues({
 
   if (issues.length === 0) {
     return (
-      <p className="m-0 text-sm text-slate-500">
+      <p className="m-0 font-serif text-sm italic text-ink-soft">
         No issues found this harness can work on.
       </p>
     )
@@ -1709,7 +1707,7 @@ function RepositoryIssues({
   }
 
   return (
-    <ul className="m-0 grid list-none gap-2 p-0">
+    <ul className="m-0 grid list-none gap-1 p-0">
       {issues.map((issue) => {
         if (issue.parent !== null) return null
         if (!issue.hasChildren) {
@@ -1731,28 +1729,28 @@ function RepositoryIssues({
         return (
           <li className="min-w-0" key={issue.id}>
             <details
-              className="group -mx-2.5 rounded-lg bg-slate-50/90 px-2.5 py-1"
+              className="group -mx-2 border border-rule-2 bg-panel px-2 py-1"
               open
             >
               <summary className="grid cursor-pointer list-none grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2 py-1.5 marker:content-none">
-                <span className="font-mono text-xs leading-5 font-semibold text-blue-600">
+                <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
                   #{issue.githubIssueNumber}
                 </span>
                 <span className="min-w-0">
                   <a
-                    className="font-semibold text-slate-800 hover:text-blue-700 hover:underline"
+                    className="font-serif text-[0.95rem] font-semibold text-ink hover:text-oxblood hover:underline"
                     href={issue.url}
                     onClick={(event) => event.stopPropagation()}
                   >
                     {issue.title}
                   </a>
                   {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
-                    <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                    <span className="mt-0.5 block font-mono text-xs text-ink-faint">
                       {issue.issueAuthor}
                     </span>
                   )}
                 </span>
-                <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold tracking-wide text-slate-500 uppercase">
+                <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.1em] text-ink-faint uppercase">
                   {closedChildren}/{children.length} closed
                   <svg
                     aria-hidden="true"
@@ -1768,7 +1766,7 @@ function RepositoryIssues({
                   </svg>
                 </span>
               </summary>
-              <ul className="relative m-0 grid list-none gap-1.5 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2.5 before:w-0.5 before:rounded-full before:bg-blue-200">
+              <ul className="relative m-0 grid list-none gap-1 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2 before:w-px before:bg-rule-2">
                 {children.map((child) => (
                   <RepositoryIssueRow
                     issue={child}
@@ -1870,33 +1868,31 @@ function RepositoryIssueRow({
 
   return (
     <li
-      className={`min-w-0 rounded-md text-sm ${issue.blockedBy.length > 0 ? "bg-amber-50/70 py-2" : "py-0.5"}`}
+      className={`min-w-0 text-sm ${issue.blockedBy.length > 0 ? "-mx-2 border border-sepia/40 bg-amber-wash px-2 py-2" : "entry-rule py-2"}`}
     >
       <div className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2">
-        <span className="font-mono text-xs leading-5 text-slate-400">
+        <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
           #{issue.githubIssueNumber}
         </span>
         <span className="min-w-0">
           <a
-            className="text-slate-700 hover:text-blue-700 hover:underline"
+            className="font-serif text-[0.95rem] font-semibold break-words text-ink hover:text-oxblood hover:underline"
             href={issue.url}
           >
             {issue.title}
           </a>
           {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
-            <span className="mt-0.5 block text-xs text-slate-500">
+            <span className="mt-0.5 block font-mono text-xs text-ink-faint">
               {issue.issueAuthor}
             </span>
           )}
         </span>
         <span className="flex shrink-0 items-center gap-1">
           {issue.state === "CLOSED" && (
-            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-xs font-bold tracking-wide text-slate-500 uppercase">
-              Closed
-            </span>
+            <span className="stamp border-rule-2 text-ink-faint">Closed</span>
           )}
           {issue.blockedBy.length > 0 && (
-            <span className="rounded-full bg-amber-200/70 px-1.5 py-0.5 text-xs font-bold tracking-wide text-amber-900 uppercase">
+            <span className="stamp border-sepia/50 bg-amber-wash text-sepia">
               Blocked
             </span>
           )}
@@ -1904,7 +1900,7 @@ function RepositoryIssueRow({
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
-                className="inline-flex size-7 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
                 aria-label={`Actions for issue #${issue.githubIssueNumber}`}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
@@ -1924,12 +1920,12 @@ function RepositoryIssueRow({
               {menuOpen && (
                 <div
                   role="menu"
-                  className="absolute top-full right-0 z-10 mt-1 min-w-44 rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+                  className="absolute top-full right-0 z-10 mt-1 min-w-44 border border-rule-2 bg-panel py-1 shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
                 >
                   <button
                     type="button"
                     role="menuitem"
-                    className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
                     disabled={implementPending}
                     onClick={() => {
                       setMenuOpen(false)
@@ -1942,7 +1938,7 @@ function RepositoryIssueRow({
                   <button
                     type="button"
                     role="menuitem"
-                    className="block w-full px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
                     disabled={implementPending}
                     onClick={() => {
                       setMenuOpen(false)
@@ -1980,18 +1976,18 @@ function RepositoryIssueRow({
         />
       )}
       {(implementNow.isError || implementLocally.isError) && (
-        <p className="mt-1.5 mb-0 pl-11 text-xs text-red-700" role="alert">
+        <p className="mt-1.5 mb-0 pl-11 text-xs text-oxblood-deep" role="alert">
           Could not start implementation. Refresh the issues and try again.
         </p>
       )}
       {issue.blockedBy.length > 0 && (
-        <p className="mt-1.5 mb-0 pl-11 text-xs text-amber-900">
+        <p className="mt-1.5 mb-0 pl-11 font-mono text-xs text-sepia">
           Blocked by{" "}
           {issue.blockedBy.map((blocker, index) => (
             <span key={blocker.githubIssueUrl}>
               {index > 0 && ", "}
               <a
-                className="font-mono font-semibold underline decoration-amber-400 underline-offset-2 hover:text-blue-700"
+                className="font-semibold underline decoration-rule-2 underline-offset-2 hover:text-oxblood"
                 href={blocker.githubIssueUrl}
               >
                 #{blocker.githubIssueNumber}
@@ -2053,20 +2049,23 @@ function SessionUsageDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-[min(92vw,28rem)] rounded-2xl border border-slate-200 bg-white p-0 text-slate-900 shadow-2xl backdrop:bg-slate-950/45"
+      className="m-auto w-[min(92vw,28rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-ink/45"
       aria-labelledby="session-usage-title"
       onClose={onClose}
     >
-      <div className="border-b border-slate-200 px-5 py-4">
-        <p className="text-xs font-extrabold tracking-[0.12em] text-blue-600 uppercase">
+      <div className="border-b border-rule px-5 py-4">
+        <p className="font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
           Session usage
         </p>
-        <h2 id="session-usage-title" className="mt-1 text-lg font-bold">
+        <h2
+          id="session-usage-title"
+          className="mt-1.5 font-serif text-lg font-semibold"
+        >
           OpenCode Session
         </h2>
         {sessionId !== null && (
           <p
-            className="mt-1 truncate font-mono text-xs text-slate-500"
+            className="mt-1 truncate font-mono text-xs text-ink-faint"
             title={sessionId}
           >
             {sessionId}
@@ -2075,24 +2074,24 @@ function SessionUsageDialog({
       </div>
       <div className="px-5 py-4">
         {!enabled ? null : session.isPending ? (
-          <p className="m-0 text-sm text-slate-500">Loading usage…</p>
+          <p className="m-0 text-sm text-ink-soft">Loading usage…</p>
         ) : session.isError ? (
           <p
-            className="m-0 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
             role="alert"
           >
             Could not load Session usage. Close and try again.
           </p>
         ) : session.data === null || session.data === undefined ? (
           <p
-            className="m-0 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"
+            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
             role="status"
           >
             This Session is not owned by a Work Item.
           </p>
         ) : session.data.availability === "MISSING" ? (
           <p
-            className="m-0 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"
+            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
             role="status"
           >
             OpenCode no longer has this Session locally. Usage cannot be loaded.
@@ -2100,7 +2099,7 @@ function SessionUsageDialog({
         ) : session.data.availability === "UNAVAILABLE" ? (
           <div className="grid gap-3">
             <p
-              className="m-0 rounded-lg bg-amber-50 p-3 text-sm text-amber-950"
+              className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
               role="status"
             >
               OpenCode’s database is temporarily unavailable (for example
@@ -2108,7 +2107,7 @@ function SessionUsageDialog({
             </p>
             <button
               type="button"
-              className="justify-self-start rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+              className="justify-self-start border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
               onClick={() => {
                 void session.refetch()
               }}
@@ -2119,14 +2118,14 @@ function SessionUsageDialog({
         ) : (
           <table className="w-full border-collapse text-left text-sm">
             <tbody>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Model
                 </th>
-                <td className="py-1.5 font-mono text-slate-800">
+                <td className="py-1.5 font-mono text-ink-2">
                   {session.data.model === null ||
                   session.data.model === undefined
                     ? "—"
@@ -2142,93 +2141,93 @@ function SessionUsageDialog({
                         .join(" / ")}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Input tokens
                 </th>
-                <td className="py-1.5 tabular-nums text-slate-800">
+                <td className="py-1.5 tabular-nums text-ink-2">
                   {formatTokenCount(session.data.tokens?.input ?? 0)}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Output tokens
                 </th>
-                <td className="py-1.5 tabular-nums text-slate-800">
+                <td className="py-1.5 tabular-nums text-ink-2">
                   {formatTokenCount(session.data.tokens?.output ?? 0)}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Reasoning tokens
                 </th>
-                <td className="py-1.5 tabular-nums text-slate-800">
+                <td className="py-1.5 tabular-nums text-ink-2">
                   {formatTokenCount(session.data.tokens?.reasoning ?? 0)}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Cache read
                 </th>
-                <td className="py-1.5 tabular-nums text-slate-800">
+                <td className="py-1.5 tabular-nums text-ink-2">
                   {formatTokenCount(session.data.tokens?.cacheRead ?? 0)}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Cache write
                 </th>
-                <td className="py-1.5 tabular-nums text-slate-800">
+                <td className="py-1.5 tabular-nums text-ink-2">
                   {formatTokenCount(session.data.tokens?.cacheWrite ?? 0)}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Cost
                 </th>
-                <td className="py-1.5 tabular-nums text-slate-800">
+                <td className="py-1.5 tabular-nums text-ink-2">
                   {session.data.cost === null || session.data.cost === undefined
                     ? "—"
                     : formatSessionCost(session.data.cost)}
                 </td>
               </tr>
-              <tr className="border-b border-slate-100">
+              <tr className="border-b border-rule-soft">
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Created
                 </th>
-                <td className="py-1.5 text-slate-800">
+                <td className="py-1.5 text-ink-2">
                   {formatSessionInstant(session.data.createdAt)}
                 </td>
               </tr>
               <tr>
                 <th
-                  className="py-1.5 pr-3 font-semibold text-slate-600"
+                  className="py-1.5 pr-3 font-semibold text-ink-soft"
                   scope="row"
                 >
                   Updated
                 </th>
-                <td className="py-1.5 text-slate-800">
+                <td className="py-1.5 text-ink-2">
                   {formatSessionInstant(session.data.updatedAt)}
                 </td>
               </tr>
@@ -2236,10 +2235,10 @@ function SessionUsageDialog({
           </table>
         )}
       </div>
-      <div className="flex justify-end border-t border-slate-200 px-5 py-3">
+      <div className="flex justify-end border-t border-rule px-5 py-3">
         <button
           type="button"
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          className="border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
           onClick={() => {
             dialogRef.current?.close()
           }}
@@ -2318,8 +2317,8 @@ function JobsCard() {
 
   if (repositories.length === 0) {
     return (
-      <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-        <p className="m-0 text-sm text-slate-500">
+      <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
+        <p className="m-0 font-serif text-sm italic text-ink-soft">
           Add a repository to see jobs.
         </p>
       </article>
@@ -2332,8 +2331,8 @@ function JobsCard() {
 
   if (failed) {
     return (
-      <article className="rounded-[0.9rem] border border-red-200 bg-red-50 p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
-        <p className="m-0 text-sm text-red-700" role="alert">
+      <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
+        <p className="m-0 text-sm text-oxblood-deep" role="alert">
           Could not load jobs. Please try again.
         </p>
       </article>
@@ -2341,9 +2340,9 @@ function JobsCard() {
   }
 
   return (
-    <article className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]">
+    <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
       <div
-        className="mb-3 flex gap-1 border-b border-slate-200"
+        className="mb-3 flex gap-1 overflow-x-auto border-b border-rule"
         role="tablist"
         aria-label="Jobs"
       >
@@ -2358,10 +2357,10 @@ function JobsCard() {
               aria-selected={selected}
               aria-controls={`jobs-panel-${tab.id}`}
               tabIndex={selected ? 0 : -1}
-              className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-semibold transition ${
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-semibold tracking-wide whitespace-nowrap transition ${
                 selected
-                  ? "border-blue-600 text-blue-700"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
+                  ? "border-oxblood text-oxblood"
+                  : "border-transparent text-ink-faint hover:text-ink"
               }`}
               onClick={() => setSelectedTab(tab.id)}
               onKeyDown={(event) => {
@@ -2390,10 +2389,12 @@ function JobsCard() {
         aria-labelledby={`jobs-tab-${selectedTab}`}
       >
         {activeItems.length === 0 ? (
-          <p className="m-0 text-sm text-slate-500">{emptyMessage}</p>
+          <p className="m-0 font-serif text-sm italic text-ink-soft">
+            {emptyMessage}
+          </p>
         ) : (
           <ul
-            className="m-0 grid list-none gap-2 p-0"
+            className="m-0 grid min-w-0 list-none gap-1 p-0"
             aria-label={listAriaLabel}
           >
             {activeItems.map((workItem) => {
@@ -2427,7 +2428,7 @@ function JobsCard() {
                     #{workItem.githubIssueNumber}
                   </span>
                   {issueTitle !== undefined && (
-                    <span className="font-sans"> · {issueTitle}</span>
+                    <span className="font-serif"> · {issueTitle}</span>
                   )}
                 </>
               )
@@ -2436,18 +2437,15 @@ function JobsCard() {
                 workItem.worktreePath,
               )
               return (
-                <li
-                  className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
-                  key={workItem.id}
-                >
-                  <div className="flex items-start justify-between gap-3">
+                <li className="entry-rule min-w-0 px-1 py-2" key={workItem.id}>
+                  <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
                     <div className="min-w-0">
-                      <p className="m-0 truncate text-xs font-semibold text-slate-700">
+                      <p className="m-0 truncate font-mono text-xs font-semibold tracking-[0.12em] text-ink-faint uppercase">
                         {repositoryLabel}
                       </p>
                       {issueUrl !== null && issueUrl !== "" ? (
                         <a
-                          className="m-0 block truncate text-xs font-semibold text-blue-600 hover:underline"
+                          className="m-0 mt-0.5 block truncate text-sm font-semibold text-oxblood hover:underline"
                           href={issueUrl}
                           title={issueIdentity}
                         >
@@ -2455,7 +2453,7 @@ function JobsCard() {
                         </a>
                       ) : (
                         <p
-                          className="m-0 truncate text-xs font-semibold text-blue-600"
+                          className="m-0 mt-0.5 truncate text-sm font-semibold text-oxblood"
                           title={issueIdentity}
                         >
                           {issueIdentityContent}
@@ -2463,7 +2461,7 @@ function JobsCard() {
                       )}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      <span className="text-xs font-bold tracking-wide text-slate-600 uppercase">
+                      <span className="stamp border-rule-2 text-ink-2">
                         {workItem.stateLabel}
                       </span>
                       <WorkItemPauseButton workItem={workItem} />
@@ -2476,7 +2474,7 @@ function JobsCard() {
                           <span className="inline-flex min-w-0 max-w-full items-center gap-1">
                             <button
                               type="button"
-                              className="min-w-0 truncate font-mono text-xs text-slate-500 underline-offset-2 hover:text-blue-600 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                              className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
                               title={sessionId}
                               onClick={() => {
                                 setSessionDialogId(sessionId)
@@ -2494,11 +2492,11 @@ function JobsCard() {
                           <Copy
                             value={sessionId}
                             className="min-w-0 max-w-full"
-                            textClassName="font-mono text-xs text-slate-500"
+                            textClassName="font-mono text-xs text-ink-faint"
                           />
                         ))}
                       {sessionId !== null && worktreePath !== null && (
-                        <span className="shrink-0 font-mono text-xs text-slate-500">
+                        <span className="shrink-0 font-mono text-xs text-ink-faint">
                           -
                         </span>
                       )}
@@ -2506,7 +2504,7 @@ function JobsCard() {
                         <Copy
                           value={worktreePath}
                           className="min-w-0 max-w-full"
-                          textClassName="font-mono text-xs text-slate-500"
+                          textClassName="font-mono text-xs text-ink-faint"
                         />
                       )}
                     </p>
@@ -2545,14 +2543,14 @@ function JobsCard() {
 function JobsCardSkeleton() {
   return (
     <article
-      className="rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]"
+      className="border border-rule-2 bg-panel px-4 py-3 sm:px-5"
       role="status"
       aria-label="Loading jobs"
       aria-busy="true"
     >
       <div className="grid gap-2">
-        <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
-        <span className="block h-12 animate-pulse rounded-lg bg-slate-100 motion-reduce:animate-none" />
+        <span className="block h-12 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+        <span className="block h-12 animate-pulse bg-paper-2 motion-reduce:animate-none" />
       </div>
     </article>
   )
@@ -2600,13 +2598,13 @@ function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   const failed = pause.isError || start.isError
   const label = workItem.paused ? "Start job" : "Pause job"
   const buttonClass = workItem.paused
-    ? "border-blue-300 text-blue-700 hover:bg-blue-50 focus-visible:outline-blue-600"
-    : "border-amber-300 text-amber-700 hover:bg-amber-50 focus-visible:outline-amber-600"
+    ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
+    : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
 
   return (
     <button
       type="button"
-      className={`inline-flex size-8 shrink-0 items-center justify-center rounded-full border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${failed ? "border-red-300 text-red-600 hover:bg-red-50 focus-visible:outline-red-600" : buttonClass}`}
+      className={`inline-flex size-8 shrink-0 items-center justify-center border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${failed ? "border-oxblood text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood" : buttonClass}`}
       disabled={pending}
       onClick={() => (workItem.paused ? start.mutate() : pause.mutate())}
       aria-label={pending ? `${label} in progress` : label}
@@ -2737,15 +2735,9 @@ function WorkItemLifecycleStatus({
     workItem.completionSummary.trim() !== ""
 
   return (
-    <div
-      className={
-        compact
-          ? "mt-2"
-          : "mt-2 ml-11 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
-      }
-    >
+    <div className={compact ? "mt-2" : "field-rule mt-2 ml-11 px-3 py-2"}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-normal text-slate-500">
+        <span className="font-mono text-xs tracking-[0.1em] text-ink-faint uppercase">
           {formatStartedAgo(workItem.createdAt, nowMs)}
         </span>
         <WorkItemOutcomePresentation
@@ -2778,7 +2770,7 @@ function WorkItemLifecycleStatus({
               lifecycleLabel.status === "NEEDS_HUMAN"
             const chipClassName = lifecycleStepChipClassName
             const duration = displayDurationMs !== null && (
-              <span className="ml-1 text-slate-400">
+              <span className="ml-1 font-mono text-ink-faint">
                 {formatDuration(displayDurationMs)}
               </span>
             )
@@ -2811,7 +2803,7 @@ function WorkItemLifecycleStatus({
           className={`mt-1.5 mb-0 text-xs ${
             status === "WAITING_FOR_WORKER_SLOT"
               ? "text-violet-800"
-              : "text-red-700"
+              : "text-oxblood-deep"
           }`}
         >
           {workItem.statusMessage}
@@ -2822,7 +2814,7 @@ function WorkItemLifecycleStatus({
           {canReset && (
             <button
               type="button"
-              className="inline-flex size-7 items-center justify-center rounded-md text-red-600 transition hover:bg-red-50 hover:text-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-wait disabled:opacity-60"
+              className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-oxblood transition hover:bg-oxblood-wash hover:text-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
               disabled={actionsPending}
               onClick={() => reset.mutate()}
               aria-label={reset.isPending ? "Resetting job" : "Reset job"}
@@ -2874,7 +2866,7 @@ function WorkItemLifecycleStatus({
           {canRetry && (
             <button
               type="button"
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-wait disabled:opacity-60"
+              className="border border-rule-2 bg-paper px-2.5 py-1 text-xs font-semibold text-ink-2 transition hover:border-oxblood hover:text-oxblood disabled:cursor-wait disabled:opacity-60"
               disabled={actionsPending}
               onClick={() => retry.mutate()}
             >
@@ -2890,12 +2882,12 @@ function WorkItemLifecycleStatus({
         </div>
       )}
       {reset.isError && (
-        <p className="mt-1.5 mb-0 text-xs text-red-700" role="alert">
+        <p className="mt-1.5 mb-0 text-xs text-oxblood-deep" role="alert">
           Could not reset this job.
         </p>
       )}
       {retry.isError && (
-        <p className="mt-1.5 mb-0 text-xs text-red-700" role="alert">
+        <p className="mt-1.5 mb-0 text-xs text-oxblood-deep" role="alert">
           {retriesStatusChecks
             ? "Could not retry these checks."
             : "Could not retry this job."}
@@ -2913,8 +2905,8 @@ function RepositoryIssuesSkeleton() {
       aria-label="Loading issues"
       aria-busy="true"
     >
-      <span className="block h-4 w-[85%] animate-pulse rounded bg-[#e8edf4] motion-reduce:animate-none" />
-      <span className="block h-4 w-[65%] animate-pulse rounded bg-[#e8edf4] motion-reduce:animate-none" />
+      <span className="block h-4 w-[85%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+      <span className="block h-4 w-[65%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
     </div>
   )
 }
@@ -2922,18 +2914,18 @@ function RepositoryIssuesSkeleton() {
 function RepositoryCardsSkeleton() {
   return (
     <section
-      className="grid grid-cols-1 gap-4 md:grid-cols-2"
+      className="grid grid-cols-1 gap-8"
       aria-label="Loading repositories"
       aria-busy="true"
     >
       {[0, 1].map((item) => (
         <div
-          className="grid min-w-0 gap-4 rounded-[0.9rem] border border-[#dbe3ef] bg-white p-[1.35rem] shadow-[0_10px_30px_rgb(15_23_42_/_5%)]"
+          className="grid min-w-0 gap-4 border-t border-rule-2 py-5 first:border-t-0 first:pt-0"
           key={item}
         >
-          <span className="block h-[0.85rem] w-[35%] animate-pulse rounded-[0.3rem] bg-[#e8edf4] motion-reduce:animate-none" />
-          <span className="block h-[1.6rem] w-[65%] animate-pulse rounded-[0.3rem] bg-[#e8edf4] motion-reduce:animate-none" />
-          <span className="block h-[0.85rem] w-[90%] animate-pulse rounded-[0.3rem] bg-[#e8edf4] motion-reduce:animate-none" />
+          <span className="block h-[0.85rem] w-[35%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="block h-[1.6rem] w-[65%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="block h-[0.85rem] w-[90%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
         </div>
       ))}
     </section>

@@ -51,7 +51,7 @@ export function WorkItemOutcomePresentation({
         pullRequestUrl !== null &&
         openPullRequestLabel !== null ? (
           <a
-            className={`${statusBadgeClassName} hover:underline`}
+            className={`${statusBadgeClassName} no-underline hover:underline`}
             href={pullRequestUrl}
             target="_blank"
             rel="noopener noreferrer"
@@ -67,7 +67,7 @@ export function WorkItemOutcomePresentation({
         <div className="mt-1.5 w-full basis-full">
           {issueUrl !== null && issueUrl !== "" ? (
             <a
-              className="m-0 text-xs font-semibold text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-blue-700"
+              className="m-0 text-xs font-semibold tracking-wide text-ink-2 uppercase underline decoration-rule underline-offset-4 hover:text-oxblood"
               href={issueUrl}
               target="_blank"
               rel="noopener noreferrer"
@@ -75,16 +75,16 @@ export function WorkItemOutcomePresentation({
               Issue closed without repository changes
             </a>
           ) : (
-            <p className="m-0 text-xs font-semibold text-slate-700">
+            <p className="m-0 text-xs font-semibold tracking-wide text-ink-2 uppercase">
               Issue closed without repository changes
             </p>
           )}
           {summary !== "" && (
             <section
-              className="mt-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5"
+              className="field-rule mt-1.5 px-2 py-1.5"
               aria-label="Completion summary"
             >
-              <p className="m-0 whitespace-pre-wrap text-xs text-slate-600">
+              <p className="m-0 whitespace-pre-wrap font-serif text-sm text-ink-soft">
                 {summary}
               </p>
             </section>
