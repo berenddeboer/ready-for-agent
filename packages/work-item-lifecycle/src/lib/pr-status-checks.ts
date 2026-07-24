@@ -370,6 +370,12 @@ export const parseInvestigationResult = (
   return null
 }
 
+/** True when any READY_FOR_AGENT_RESULT line is present (valid or not). */
+const hasInvestigationResultLine = (output: string): boolean =>
+  output
+    .split("\n")
+    .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
+
 const countAutomatedReviewReruns = (
   workItemId: string,
   headSha: string,
@@ -523,7 +529,7 @@ const buildInvestigationWorkPrompt = (
       "Once an automated-review check is terminal, its Automated Review Output is final: do not wait for later comments. A successful terminal review with no relevant comment means no feedback and must not be rerun.",
       "Use provider-specific progress artifacts as evidence of incompleteness only when a positively identified review comment is present but visibly incomplete. Strong evidence can include a finished banner combined with unchecked substantive review tasks, a remaining working spinner, and no final findings or synthesis. Do not treat arbitrary Markdown checkboxes in unrelated pull-request comments as an automated-review progress list.",
       "Correlate the latest relevant comment with the latest relevant run attempt. Do not rerun because of a stale incomplete comment when a newer attempt completed its review successfully.",
-      "Present, positively identified, visibly incomplete Automated Review Output requires a whole-review workflow rerun in the verdict turn (even when the run concluded success). Do not call GitHub workflow rerun APIs yourself; the harness authorizes and executes reruns. Do not use a failed-jobs-only rerun for a technically successful run.",
+      "Present, positively identified, visibly incomplete Automated Review Output requires a whole-review workflow rerun in this turn (even when the run concluded success). Do not call GitHub workflow rerun APIs yourself; the harness authorizes and executes reruns. Do not use a failed-jobs-only rerun for a technically successful run.",
       "Requesting a terminal incomplete review rerun is required recovery, not optional feedback handling. Report FAILED for a technical inability to inspect the relevant review state. Report NEEDS_HUMAN only when evidence shows that an operator must perform or decide the required action.",
       "For a genuinely completed latest review, address worthwhile feedback. A completed review with no worthwhile feedback, or a successful terminal review with no relevant comment, still needs no changes or rerun.",
       "If review feedback requires changes, verify them, commit them, and push the commit to the existing PR branch.",
@@ -533,38 +539,43 @@ const buildInvestigationWorkPrompt = (
     "If you create a commit during this handoff, after pushing it post one comment on the existing pull request that includes the commit SHA, summarizes the changes and verification, identifies the review feedback addressed, and lists any review feedback declined with a brief reason (or says none was declined).",
     "Do not post this summary comment when you did not create a commit.",
     "Do not create or merge another pull request.",
-    "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
   )
   return lines.join("\n")
 }
 
-const buildInvestigationVerdictPrompt = (): string =>
+/** Shared outcome contract for status-check work, recovery, and fallback. */
+const investigationOutcomeContractLines = (): readonly string[] => [
+  "You may include a concise work and verification summary before the result line.",
+  "End your final response with exactly one machine-readable result line:",
+  "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+  "Use CHECKS_TRIGGERED when you completed an action expected to create replacement check executions (for example a commit and push, or successfully restarting failed checks).",
+  "READY_FOR_AGENT_RESULT: PROCESSED",
+  "Use PROCESSED when the handoff is handled and no replacement execution is expected: for example a green-only handoff with no relevant automated-review run or comment (including a skipped reviewer with no review output), a successful terminal review with no relevant comment (no feedback), or a genuinely completed review that had nothing to address.",
+  "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun. Request the rerun instead.",
+  "When positive review evidence shows present, positively identified, visibly incomplete Automated Review Output that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
+  "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
+  "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id> <workflow_name>",
+  "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED or CHECKS_TRIGGERED. Report:",
+  "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
+  "Also use FAILED when a technical or observability failure prevented you from determining the relevant review state.",
+  "Use NEEDS_HUMAN only when evidence shows that an operator must perform or decide a required action:",
+  "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
+]
+
+const buildInvestigationOutcomeFallbackPrompt = (): string =>
   [
     "Based only on the PR status-check work you just did in this session, report the outcome.",
     "Do not make further code changes unless required to answer accurately.",
-    "Reply with exactly one machine-readable result line (and optional brief prose before it):",
-    "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
-    "Use CHECKS_TRIGGERED when you completed an action expected to create replacement check executions (for example a commit and push, or successfully restarting failed checks).",
-    "READY_FOR_AGENT_RESULT: PROCESSED",
-    "Use PROCESSED when the handoff is handled and no replacement execution is expected: for example a green-only handoff with no relevant automated-review run or comment (including a skipped reviewer with no review output), a successful terminal review with no relevant comment (no feedback), or a genuinely completed review that had nothing to address.",
-    "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun. Request the rerun instead.",
-    "When positive review evidence shows present, positively identified, visibly incomplete Automated Review Output that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
-    "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
-    "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id> <workflow_name>",
-    "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED or CHECKS_TRIGGERED. Report:",
-    "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
-    "Also use FAILED when a technical or observability failure prevented you from determining the relevant review state.",
-    "Use NEEDS_HUMAN only when evidence shows that an operator must perform or decide a required action:",
-    "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
+    ...investigationOutcomeContractLines(),
   ].join("\n")
 
 const buildInvestigationRecoveryPrompt = (reason: string): string =>
   [
     "Make one focused recovery attempt to process the PR Status Check Handoff.",
-    `Your previous verdict was FAILED: ${reason}`,
+    `Your previous outcome was FAILED: ${reason}`,
     "Re-check the current pull request and retry the failed inspection or any safe action that can produce a replacement check execution, including restarting an appropriate failed workflow.",
     "Do not create an empty or no-op commit merely to restart checks.",
-    "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
+    ...investigationOutcomeContractLines(),
   ].join("\n")
 
 export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
@@ -620,44 +631,27 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         )
     }
     const agentBackend = yield* AgentBackend
-    yield* agentBackend
-      .continueTurn({
-        sessionId,
-        prompt: [
-          buildInvestigationWorkPrompt(unhandled, diagnostics),
-          agentTurnGitHubCredentialGuidance(
-            auth,
-            "GitHub CLI, API, commit, or push access",
-          ),
-        ].join("\n"),
-        cwd: worktreePath,
-        model: context.model,
-        thinkingLevel: context.thinkingLevel,
-        timeout:
-          context.maxDuration ??
-          DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new PrStatusChecksOpenCodeError({
-              message:
-                "OpenCode failed while investigating PR status checks (work)",
-              cause,
-            }),
-        ),
-      )
-    const requestVerdict = (phase: string) =>
+    const timeout =
+      context.maxDuration ??
+      DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks
+    const missingOutcomeMessage =
+      "OpenCode did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN"
+
+    const continueInvestigationTurn = (
+      prompt: string,
+      phase: string,
+    ): Effect.Effect<
+      { readonly assistantText: string },
+      PrStatusChecksOpenCodeError
+    > =>
       agentBackend
         .continueTurn({
           sessionId,
-          prompt: buildInvestigationVerdictPrompt(),
+          prompt,
           cwd: worktreePath,
           model: context.model,
           thinkingLevel: context.thinkingLevel,
-          timeout:
-            context.maxDuration ??
-            DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
+          timeout,
         })
         .pipe(
           Effect.mapError(
@@ -667,43 +661,58 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
                 cause,
               }),
           ),
-          Effect.flatMap(({ assistantText }) => {
-            const result = parseInvestigationResult(assistantText)
-            return result === null
-              ? Effect.fail(
-                  new PrStatusChecksOpenCodeError({
-                    message:
-                      "OpenCode did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN",
-                  }),
-                )
-              : Effect.succeed(result)
-          }),
         )
 
-    let investigation = yield* requestVerdict("verdict")
+    /**
+     * Parse an Agent-reported Outcome from a work turn. Missing markers get one
+     * classification-only fallback; malformed or non-final markers fail strictly.
+     */
+    const parseWithMissingOutcomeFallback = (
+      assistantText: string,
+      fallbackPhase: string,
+    ): Effect.Effect<ParsedInvestigationResult, PrStatusChecksOpenCodeError> =>
+      Effect.gen(function* () {
+        let result = parseInvestigationResult(assistantText)
+        if (result === null && !hasInvestigationResultLine(assistantText)) {
+          const fallback = yield* continueInvestigationTurn(
+            buildInvestigationOutcomeFallbackPrompt(),
+            fallbackPhase,
+          )
+          result = parseInvestigationResult(fallback.assistantText)
+        }
+        if (result === null) {
+          return yield* new PrStatusChecksOpenCodeError({
+            message: missingOutcomeMessage,
+          })
+        }
+        return result
+      })
+
+    const work = yield* continueInvestigationTurn(
+      [
+        buildInvestigationWorkPrompt(unhandled, diagnostics),
+        agentTurnGitHubCredentialGuidance(
+          auth,
+          "GitHub CLI, API, commit, or push access",
+        ),
+        // Outcome contract must remain last so the final-line rule is not diluted.
+        ...investigationOutcomeContractLines(),
+      ].join("\n"),
+      "work",
+    )
+    let investigation = yield* parseWithMissingOutcomeFallback(
+      work.assistantText,
+      "outcome fallback",
+    )
     if (typeof investigation !== "string" && investigation._tag === "failed") {
-      yield* agentBackend
-        .continueTurn({
-          sessionId,
-          prompt: buildInvestigationRecoveryPrompt(investigation.reason),
-          cwd: worktreePath,
-          model: context.model,
-          thinkingLevel: context.thinkingLevel,
-          timeout:
-            context.maxDuration ??
-            DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks,
-        })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new PrStatusChecksOpenCodeError({
-                message:
-                  "OpenCode failed while investigating PR status checks (recovery)",
-                cause,
-              }),
-          ),
-        )
-      investigation = yield* requestVerdict("recovery verdict")
+      const recovery = yield* continueInvestigationTurn(
+        buildInvestigationRecoveryPrompt(investigation.reason),
+        "recovery",
+      )
+      investigation = yield* parseWithMissingOutcomeFallback(
+        recovery.assistantText,
+        "recovery outcome fallback",
+      )
     }
 
     const handledCheckIds = unhandled.map((check) => check.id)

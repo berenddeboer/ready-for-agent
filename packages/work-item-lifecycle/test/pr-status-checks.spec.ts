@@ -469,7 +469,7 @@ describe("PR status check steps", () => {
     ])
   })
 
-  it("processes a red batch in a work turn followed by a verdict turn", async () => {
+  it("processes a red batch in one combined work and outcome turn", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -535,7 +535,7 @@ describe("PR status check steps", () => {
             ),
             keymaxxer,
             opencodeWith(
-              ["fixed and pushed", "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
+              ["fixed and pushed\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
               (prompt, sessionId) => {
                 expect(sessionId).toBe("ses_implement")
                 prompts.push(prompt)
@@ -553,7 +553,7 @@ describe("PR status check steps", () => {
     }
     expect(result.investigation.handledCheckIds).toHaveLength(2)
     expect(result.rows.every((row) => row.handled_at === null)).toBe(true)
-    expect(prompts).toHaveLength(2)
+    expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain("Diagnose and fix these failing checks")
     expect(prompts[0]).toContain(
       "- lint (external id: actions-job:88026385443, source: Actions job)",
@@ -575,13 +575,21 @@ describe("PR status check steps", () => {
     )
     expect(prompts[0]).not.toContain("automated reviews may have completed")
     expect(prompts[0]).toContain("restart the failed checks when appropriate")
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
-    expect(prompts[1]).toContain(
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
+    expect(prompts[0]).toContain(
       "If this handoff contained red checks and you made no commit, push, check restart",
     )
-    expect(prompts[1]).toContain("replacement check executions")
+    expect(prompts[0]).toContain("replacement check executions")
+    const credentialIndex = prompts[0].indexOf(
+      "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
+    )
+    const outcomeContractIndex = prompts[0].indexOf(
+      "End your final response with exactly one machine-readable result line:",
+    )
+    expect(credentialIndex).toBeGreaterThan(-1)
+    expect(outcomeContractIndex).toBeGreaterThan(credentialIndex)
   })
 
   it("uses ambient gh guidance for investigate when the backend lacks KeymaxxerMcp", async () => {
@@ -620,7 +628,7 @@ describe("PR status check steps", () => {
             }),
             vaultOnWithoutLookup,
             opencodeWith(
-              ["fixed and pushed", "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
+              ["fixed and pushed\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
               (prompt) => prompts.push(prompt),
             ),
             DatabaseTest,
@@ -658,10 +666,8 @@ describe("PR status check steps", () => {
             keymaxxer,
             opencodeWith(
               [
-                "No code changes, commit, push, or PR comment were made.",
-                "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
-                "Reran the failed workflow; a replacement execution is queued.",
-                "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+                "No code changes, commit, push, or PR comment were made.\nREADY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
+                "Reran the failed workflow; a replacement execution is queued.\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
               ],
               (prompt) => prompts.push(prompt),
             ),
@@ -676,13 +682,15 @@ describe("PR status check steps", () => {
       handledCheckIds: [expect.any(String)],
       checkStartAnchorRecorded: false,
     })
-    expect(prompts).toHaveLength(4)
-    expect(prompts[2]).toContain("focused recovery attempt")
-    expect(prompts[2]).toContain("ActionLint failed on GitHub 503")
-    expect(prompts[2]).toContain("process the PR Status Check Handoff")
-    expect(prompts[2]).toContain("retry the failed inspection")
-    expect(prompts[2]).toContain("Do not create an empty or no-op commit")
-    expect(prompts[3]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
+    expect(prompts).toHaveLength(2)
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
+    expect(prompts[1]).toContain("focused recovery attempt")
+    expect(prompts[1]).toContain("ActionLint failed on GitHub 503")
+    expect(prompts[1]).toContain("process the PR Status Check Handoff")
+    expect(prompts[1]).toContain("retry the failed inspection")
+    expect(prompts[1]).toContain("Do not create an empty or no-op commit")
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: FAILED:")
   })
 
   it("fails retryably after the focused recovery attempt still cannot act", async () => {
@@ -704,10 +712,8 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "No safe action was available.",
-              "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
-              "I checked the current PR and cannot safely restart or change it.",
-              "READY_FOR_AGENT_RESULT: FAILED: No autonomous recovery action remains",
+              "No safe action was available.\nREADY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
+              "I checked the current PR and cannot safely restart or change it.\nREADY_FOR_AGENT_RESULT: FAILED: No autonomous recovery action remains",
             ]),
             DatabaseTest,
           ),
@@ -796,7 +802,7 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith(
-              ["done", "READY_FOR_AGENT_RESULT: PROCESSED"],
+              ["done\nREADY_FOR_AGENT_RESULT: PROCESSED"],
               (prompt) => {
                 prompts.push(prompt)
               },
@@ -904,8 +910,7 @@ describe("PR status check steps", () => {
             keymaxxer,
             opencodeWith(
               [
-                "No review feedback needed changes.",
-                "READY_FOR_AGENT_RESULT: PROCESSED",
+                "No review feedback needed changes.\nREADY_FOR_AGENT_RESULT: PROCESSED",
               ],
               (prompt) => prompts.push(prompt),
             ),
@@ -919,23 +924,24 @@ describe("PR status check steps", () => {
       _tag: "processed",
       handledCheckIds: [expect.any(String)],
     })
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: RERUN_REVIEW:")
-    expect(prompts[1]).toContain(
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: RERUN_REVIEW:")
+    expect(prompts[0]).toContain(
       "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun",
     )
-    expect(prompts[1]).toContain(
+    expect(prompts[0]).toContain(
       "including a skipped reviewer with no review output",
     )
-    expect(prompts[1]).toContain(
+    expect(prompts[0]).toContain(
       "genuinely completed review that had nothing to address",
     )
-    expect(prompts[1]).toContain("no relevant automated-review run or comment")
-    expect(prompts[1]).toContain(
+    expect(prompts[0]).toContain("no relevant automated-review run or comment")
+    expect(prompts[0]).toContain(
       "successful terminal review with no relevant comment (no feedback)",
     )
-    expect(prompts[1]).not.toContain("READY_FOR_AGENT_RESULT: WAITING")
-    expect(prompts[1]).toContain(
+    expect(prompts[0]).not.toContain("READY_FOR_AGENT_RESULT: WAITING")
+    expect(prompts[0]).toContain(
       "technical or observability failure prevented you from determining the relevant review state",
     )
   })
@@ -959,8 +965,7 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "Terminal successful review with no relevant comment; no feedback.",
-              "READY_FOR_AGENT_RESULT: PROCESSED",
+              "Terminal successful review with no relevant comment; no feedback.\nREADY_FOR_AGENT_RESULT: PROCESSED",
             ]),
             DatabaseTest,
           ),
@@ -1010,8 +1015,7 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "investigated",
-              "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: A maintainer must approve deployment",
+              "investigated\nREADY_FOR_AGENT_RESULT: NEEDS_HUMAN: A maintainer must approve deployment",
             ]),
             DatabaseTest,
           ),
@@ -1026,7 +1030,7 @@ describe("PR status check steps", () => {
     })
   })
 
-  it("resolves a merge conflict in a work turn followed by a verdict turn", async () => {
+  it("resolves a merge conflict in one combined work and outcome turn", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
       resolvePrMergeConflict(context).pipe(
@@ -1036,8 +1040,7 @@ describe("PR status check steps", () => {
             keymaxxer,
             opencodeWith(
               [
-                "rebased, verified, and pushed",
-                "READY_FOR_AGENT_RESULT: PROCESSED",
+                "rebased, verified, and pushed\nREADY_FOR_AGENT_RESULT: PROCESSED",
               ],
               (prompt, sessionId) => {
                 expect(sessionId).toBe("ses_implement")
@@ -1050,7 +1053,7 @@ describe("PR status check steps", () => {
     )
 
     expect(result).toEqual({ _tag: "processed" })
-    expect(prompts).toHaveLength(2)
+    expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain("Fetch origin")
     expect(prompts[0]).toContain("current base branch")
     expect(prompts[0]).toContain("every current remote commit")
@@ -1059,7 +1062,8 @@ describe("PR status check steps", () => {
     expect(prompts[0]).toContain(
       "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",
     )
-    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: PROCESSED")
+    expect(prompts[0]).toContain("READY_FOR_AGENT_RESULT: NEEDS_HUMAN:")
   })
 
   it("uses ambient gh guidance for merge-conflict when Keymaxxer is disabled", async () => {
@@ -1085,8 +1089,7 @@ describe("PR status check steps", () => {
             disabled,
             opencodeWith(
               [
-                "rebased, verified, and pushed",
-                "READY_FOR_AGENT_RESULT: PROCESSED",
+                "rebased, verified, and pushed\nREADY_FOR_AGENT_RESULT: PROCESSED",
               ],
               (prompt) => prompts.push(prompt),
             ),
@@ -1096,6 +1099,7 @@ describe("PR status check steps", () => {
     )
 
     expect(result).toEqual({ _tag: "processed" })
+    expect(prompts).toHaveLength(1)
     expect(prompts[0]?.toLowerCase()).not.toContain("keymaxxer")
     expect(prompts[0]).toContain(
       "Use the gh CLI with the existing ambient authentication",
@@ -1110,8 +1114,7 @@ describe("PR status check steps", () => {
             db,
             keymaxxer,
             opencodeWith([
-              "the second lease-protected push was rejected",
-              "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: The PR branch changed during both push attempts",
+              "the second lease-protected push was rejected\nREADY_FOR_AGENT_RESULT: NEEDS_HUMAN: The PR branch changed during both push attempts",
             ]),
           ),
         ),
@@ -1124,20 +1127,13 @@ describe("PR status check steps", () => {
     })
   })
 
-  it("leaves checks unhandled after malformed verdict output", async () => {
+  it("uses one classification fallback when the work turn omits the outcome", async () => {
+    const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
         yield* watchPrStatusChecks(context)
-        const investigation = yield* Effect.result(
-          investigatePrStatusChecks(context),
-        )
-        const sql = yield* SqlClient.SqlClient
-        const observed = (yield* sql.unsafe(
-          `SELECT handled_at FROM pr_status_check WHERE work_item_id = ?`,
-          [context.workItemId],
-        )) as readonly { handled_at: number | null }[]
-        return { investigation, observed }
+        return yield* investigatePrStatusChecks(context)
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1150,18 +1146,181 @@ describe("PR status check steps", () => {
               ],
             }),
             keymaxxer,
-            opencodeWith(["fixed", "I forgot the marker"]),
+            opencodeWith(
+              [
+                "fixed and pushed; replacement checks should run",
+                "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
             DatabaseTest,
           ),
         ),
       ),
     )
 
-    expect(result.investigation._tag).toBe("Failure")
-    expect(result.observed.every((row) => row.handled_at === null)).toBe(true)
+    expect(result).toEqual({
+      _tag: "checks_triggered",
+      handledCheckIds: [expect.any(String)],
+      checkStartAnchorRecorded: false,
+    })
+    expect(prompts).toHaveLength(2)
+    expect(prompts[1]).toContain(
+      "Based only on the PR status-check work you just did",
+    )
+    expect(prompts[1]).toContain("READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED")
   })
 
-  it("rejects conflicting verdict markers and leaves checks unhandled", async () => {
+  it("uses one classification fallback when recovery omits the outcome", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith(
+              [
+                "READY_FOR_AGENT_RESULT: FAILED: ActionLint failed on GitHub 503",
+                "Reran the failed workflow; a replacement execution is queued.",
+                "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      _tag: "checks_triggered",
+      handledCheckIds: [expect.any(String)],
+      checkStartAnchorRecorded: false,
+    })
+    expect(prompts).toHaveLength(3)
+    expect(prompts[1]).toContain("focused recovery attempt")
+    expect(prompts[2]).toContain(
+      "Based only on the PR status-check work you just did",
+    )
+  })
+
+  it("uses one classification fallback when merge-conflict work omits the outcome", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      resolvePrMergeConflict(context).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            keymaxxer,
+            opencodeWith(
+              [
+                "rebased, verified, and pushed with lease",
+                "READY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({ _tag: "processed" })
+    expect(prompts).toHaveLength(2)
+    expect(prompts[1]).toContain(
+      "Based only on the PR merge-conflict resolution work you just did",
+    )
+  })
+
+  it("rejects malformed merge-conflict outcomes without a fallback turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.result(
+        resolvePrMergeConflict(context).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              db,
+              keymaxxer,
+              opencodeWith(
+                ["READY_FOR_AGENT_RESULT: NOT_A_REAL_OUTCOME"],
+                (prompt) => prompts.push(prompt),
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("Failure")
+    expect(prompts).toHaveLength(1)
+  })
+
+  it("rejects non-final merge-conflict outcomes without a fallback turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.result(
+        resolvePrMergeConflict(context).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              db,
+              keymaxxer,
+              opencodeWith(
+                [
+                  "READY_FOR_AGENT_RESULT: PROCESSED\nmore prose after the marker",
+                ],
+                (prompt) => prompts.push(prompt),
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("Failure")
+    expect(prompts).toHaveLength(1)
+  })
+
+  it("rejects conflicting merge-conflict outcomes without a fallback turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.result(
+        resolvePrMergeConflict(context).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              db,
+              keymaxxer,
+              opencodeWith(
+                [
+                  [
+                    "READY_FOR_AGENT_RESULT: PROCESSED",
+                    "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: approval required",
+                  ].join("\n"),
+                ],
+                (prompt) => prompts.push(prompt),
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("Failure")
+    expect(prompts).toHaveLength(1)
+  })
+
+  it("leaves checks unhandled after a missing outcome and failed fallback", async () => {
+    const prompts: string[] = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
@@ -1187,13 +1346,9 @@ describe("PR status check steps", () => {
               ],
             }),
             keymaxxer,
-            opencodeWith([
-              "fixed",
-              [
-                "READY_FOR_AGENT_RESULT: PROCESSED",
-                "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: approval required",
-              ].join("\n"),
-            ]),
+            opencodeWith(["fixed", "I forgot the marker"], (prompt) =>
+              prompts.push(prompt),
+            ),
             DatabaseTest,
           ),
         ),
@@ -1202,6 +1357,140 @@ describe("PR status check steps", () => {
 
     expect(result.investigation._tag).toBe("Failure")
     expect(result.observed.every((row) => row.handled_at === null)).toBe(true)
+    expect(prompts).toHaveLength(2)
+  })
+
+  it("rejects malformed outcome markers without a fallback turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        const investigation = yield* Effect.result(
+          investigatePrStatusChecks(context),
+        )
+        const sql = yield* SqlClient.SqlClient
+        const observed = (yield* sql.unsafe(
+          `SELECT handled_at FROM pr_status_check WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { handled_at: number | null }[]
+        return { investigation, observed }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith(
+              ["READY_FOR_AGENT_RESULT: NOT_A_REAL_OUTCOME"],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.investigation._tag).toBe("Failure")
+    expect(result.observed.every((row) => row.handled_at === null)).toBe(true)
+    expect(prompts).toHaveLength(1)
+  })
+
+  it("rejects non-final outcome markers without a fallback turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        const investigation = yield* Effect.result(
+          investigatePrStatusChecks(context),
+        )
+        const sql = yield* SqlClient.SqlClient
+        const observed = (yield* sql.unsafe(
+          `SELECT handled_at FROM pr_status_check WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { handled_at: number | null }[]
+        return { investigation, observed }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith(
+              [
+                "READY_FOR_AGENT_RESULT: PROCESSED\nmore prose after the marker",
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.investigation._tag).toBe("Failure")
+    expect(result.observed.every((row) => row.handled_at === null)).toBe(true)
+    expect(prompts).toHaveLength(1)
+  })
+
+  it("rejects conflicting verdict markers without a fallback turn", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        const investigation = yield* Effect.result(
+          investigatePrStatusChecks(context),
+        )
+        const sql = yield* SqlClient.SqlClient
+        const observed = (yield* sql.unsafe(
+          `SELECT handled_at FROM pr_status_check WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly { handled_at: number | null }[]
+        return { investigation, observed }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            opencodeWith(
+              [
+                [
+                  "READY_FOR_AGENT_RESULT: PROCESSED",
+                  "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: approval required",
+                ].join("\n"),
+              ],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.investigation._tag).toBe("Failure")
+    expect(result.observed.every((row) => row.handled_at === null)).toBe(true)
+    expect(prompts).toHaveLength(1)
   })
 
   it("parses structured RERUN_REVIEW verdicts with optional workflow name", () => {
@@ -1260,8 +1549,7 @@ describe("PR status check steps", () => {
             keymaxxer,
             opencodeWith(
               [
-                "Claude review skipped; PR Review is ordinary CI; no review evidence.",
-                "READY_FOR_AGENT_RESULT: PROCESSED",
+                "Claude review skipped; PR Review is ordinary CI; no review evidence.\nREADY_FOR_AGENT_RESULT: PROCESSED",
               ],
               (prompt) => prompts.push(prompt),
             ),
@@ -1300,15 +1588,12 @@ describe("PR status check steps", () => {
         },
       ],
     }
-    // Each investigate needs its own OpenCode script (work + verdict).
+    // Each investigate needs its own OpenCode script (combined work + outcome).
     const opencodeOutputs = Array.from(
       { length: AUTOMATED_REVIEW_RERUN_LIMIT + 1 },
       () =>
-        [
-          "terminal incomplete review",
-          `READY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId} Claude Code Review`,
-        ] as const,
-    ).flat()
+        `terminal incomplete review\nREADY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId} Claude Code Review`,
+    )
 
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -1470,8 +1755,7 @@ describe("PR status check steps", () => {
             ),
             keymaxxer,
             opencodeWith([
-              "need rerun",
-              "READY_FOR_AGENT_RESULT: RERUN_REVIEW: 99 Review Bot",
+              "need rerun\nREADY_FOR_AGENT_RESULT: RERUN_REVIEW: 99 Review Bot",
             ]),
             DatabaseTest,
           ),
@@ -1548,8 +1832,7 @@ describe("PR status check steps", () => {
             ),
             keymaxxer,
             opencodeWith([
-              "incomplete on new head",
-              `READY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId}`,
+              `incomplete on new head\nREADY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId}`,
             ]),
             DatabaseTest,
           ),
@@ -1604,8 +1887,7 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "Human completed the review; nothing left to address.",
-              "READY_FOR_AGENT_RESULT: PROCESSED",
+              "Human completed the review; nothing left to address.\nREADY_FOR_AGENT_RESULT: PROCESSED",
             ]),
             DatabaseTest,
           ),
@@ -1640,8 +1922,7 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "green-only no-op",
-              "READY_FOR_AGENT_RESULT: PROCESSED",
+              "green-only no-op\nREADY_FOR_AGENT_RESULT: PROCESSED",
             ]),
             DatabaseTest,
           ),
@@ -1689,8 +1970,7 @@ describe("PR status check steps", () => {
             }),
             keymaxxer,
             opencodeWith([
-              "Human finished the review; feedback addressed.",
-              "READY_FOR_AGENT_RESULT: PROCESSED",
+              "Human finished the review; feedback addressed.\nREADY_FOR_AGENT_RESULT: PROCESSED",
             ]),
             DatabaseTest,
           ),

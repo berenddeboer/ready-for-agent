@@ -56,6 +56,19 @@ const parseResult = (
     : { reason: needsHuman[1].trim().slice(0, 500) }
 }
 
+const hasResultLine = (output: string): boolean =>
+  output
+    .split("\n")
+    .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
+
+const mergeConflictOutcomeContractLines = (): readonly string[] => [
+  "You may include a concise work and verification summary before the result line.",
+  "End your final response with exactly one machine-readable result line:",
+  "READY_FOR_AGENT_RESULT: PROCESSED",
+  "or, only when the conflict could not be resolved and pushed autonomously or requires a human decision:",
+  "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
+]
+
 const workPrompt = (auth: AgentTurnGitHubAuth): string =>
   [
     "Resolve the merge conflict on the existing pull request for this worktree by rebasing its branch.",
@@ -63,23 +76,20 @@ const workPrompt = (auth: AgentTurnGitHubAuth): string =>
     "Incorporate every current remote commit from the pull-request branch into the local branch before rebasing onto the latest remote base branch. Do not drop another contributor's commits.",
     "Resolve the rebase conflicts, then run the appropriate verification for the repository.",
     "Push the rebased pull-request branch with --force-with-lease. Do not use an unconditional force push.",
-    "If the lease is rejected, refetch, incorporate the updated remote PR branch, rebase onto the current remote base again, verify, and retry the --force-with-lease push exactly once. If that second push cannot safely succeed, stop and report that human intervention is needed in the follow-up verdict turn.",
+    "If the lease is rejected, refetch, incorporate the updated remote PR branch, rebase onto the current remote base again, verify, and retry the --force-with-lease push exactly once. If that second push cannot safely succeed, stop and report human intervention is needed via the NEEDS_HUMAN outcome.",
     "Do not create or merge another pull request and do not do unrelated work.",
     agentTurnGitHubCredentialGuidance(
       auth,
       "GitHub CLI, API, fetch, or push access",
     ),
-    "When finished, stop. Do not print a READY_FOR_AGENT_RESULT line yet; a follow-up turn will ask for the verdict.",
+    ...mergeConflictOutcomeContractLines(),
   ].join("\n")
 
-const verdictPrompt = (): string =>
+const outcomeFallbackPrompt = (): string =>
   [
     "Based only on the PR merge-conflict resolution work you just did in this session, report the outcome.",
     "Do not make further code changes unless required to answer accurately.",
-    "Reply with exactly one machine-readable result line (and optional brief prose before it):",
-    "READY_FOR_AGENT_RESULT: PROCESSED",
-    "or, only when the conflict could not be resolved and pushed autonomously or requires a human decision:",
-    "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
+    ...mergeConflictOutcomeContractLines(),
   ].join("\n")
 
 export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
@@ -124,7 +134,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
     const timeout =
       context.maxDuration ??
       DEFAULT_LIFECYCLE_MAX_DURATIONS.resolve_pr_merge_conflict
-    yield* agentBackend
+    const work = yield* agentBackend
       .continueTurn({
         sessionId: context.sessionId,
         prompt: workPrompt(auth),
@@ -143,26 +153,29 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
             }),
         ),
       )
-    const verdict = yield* agentBackend
-      .continueTurn({
-        sessionId: context.sessionId,
-        prompt: verdictPrompt(),
-        cwd: context.worktreePath,
-        model: context.model,
-        thinkingLevel: context.thinkingLevel,
-        timeout,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ResolvePrMergeConflictOpenCodeError({
-              message:
-                "OpenCode failed while resolving PR merge conflict (verdict)",
-              cause,
-            }),
-        ),
-      )
-    const result = parseResult(verdict.assistantText)
+    let result = parseResult(work.assistantText)
+    if (result === null && !hasResultLine(work.assistantText)) {
+      const fallback = yield* agentBackend
+        .continueTurn({
+          sessionId: context.sessionId,
+          prompt: outcomeFallbackPrompt(),
+          cwd: context.worktreePath,
+          model: context.model,
+          thinkingLevel: context.thinkingLevel,
+          timeout,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ResolvePrMergeConflictOpenCodeError({
+                message:
+                  "OpenCode failed while resolving PR merge conflict (outcome fallback)",
+                cause,
+              }),
+          ),
+        )
+      result = parseResult(fallback.assistantText)
+    }
     if (result === null) {
       return yield* new ResolvePrMergeConflictOpenCodeError({
         message: "OpenCode did not report PROCESSED or NEEDS_HUMAN",
