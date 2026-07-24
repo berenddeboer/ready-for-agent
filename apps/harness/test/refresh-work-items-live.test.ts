@@ -43,6 +43,7 @@ describe("Repository Work Item live-query coordination", () => {
 
     let selectedWorkItemsFetches = 0
     let otherWorkItemsFetches = 0
+    let configFetches = 0
     let selectedWorkItems = [
       {
         id: "wi-before",
@@ -63,6 +64,15 @@ describe("Repository Work Item live-query coordination", () => {
         },
       }),
     }
+    let unfinishedWorkItemCount = 1
+    const configQuery = {
+      queryKey: ["config"] as const,
+      queryFn: async () => {
+        configFetches += 1
+        return { unfinishedWorkItemCount }
+      },
+    }
+    await queryClient.fetchQuery({ ...configQuery, staleTime: 0 })
 
     let releaseInvalidation: (() => void) | undefined
     const invalidation = new Promise<void>((resolve) => {
@@ -106,8 +116,10 @@ describe("Repository Work Item live-query coordination", () => {
         status: "RUNNING",
       },
     ]
+    unfinishedWorkItemCount = 0
     const fetchesBeforeInvalidation = {
       selectedWorkItems: selectedWorkItemsFetches,
+      config: configFetches,
     }
     releaseInvalidation?.()
 
@@ -126,6 +138,10 @@ describe("Repository Work Item live-query coordination", () => {
     expect(selectedWorkItemsFetches).toBeGreaterThan(
       fetchesBeforeInvalidation.selectedWorkItems,
     )
+    expect(queryClient.getQueryData(configQuery.queryKey)).toEqual({
+      unfinishedWorkItemCount: 0,
+    })
+    expect(configFetches).toBeGreaterThan(fetchesBeforeInvalidation.config)
     // Initial connection refetches both displayed Repositories, but the
     // selected invalidation does not refetch the other Repository again.
     expect(otherWorkItemsFetches).toBe(1)

@@ -5,6 +5,8 @@ export const committedPullRequestsCountQueryKeyPrefix = [
   "committed-pull-requests-count",
 ] as const
 
+const configQueryKey = ["config"] as const
+
 export type RepositoryWorkItemsLiveQueries = {
   workItems: (repositoryId: string) => {
     queryKey: readonly unknown[]
@@ -205,7 +207,11 @@ export const followRepositoryWorkItemsLive = async ({
     // awaiting aggregates would serialize one full count refresh per event and
     // defeat coalescing under bursty lifecycle notifications.
     scheduleCommittedPullRequestsCounts()
-    await refreshWorkItems(repositoryId)
+    await Promise.all([
+      refreshWorkItems(repositoryId),
+      // Harness Settings includes the global unfinished Work Item count.
+      refreshCachedQueries(configQueryKey),
+    ])
   }
 
   const refreshAll = async () => {
@@ -214,6 +220,7 @@ export const followRepositoryWorkItemsLive = async ({
     await Promise.all([
       ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
       refreshCommittedPullRequestsCounts(),
+      refreshCachedQueries(configQueryKey),
     ])
   }
 

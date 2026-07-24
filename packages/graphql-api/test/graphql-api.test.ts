@@ -2269,7 +2269,7 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("filters Working Work Items including retriable failures", async () => {
+  test("shows Working Work Items after their Issues leave the Issue store", async () => {
     const needsHuman = {
       ...workItem,
       id: makeWorkItemId(),
@@ -2340,7 +2340,7 @@ describe("GraphQL API", () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {
-        listIssues: () => Effect.succeed([issue]),
+        listIssues: () => Effect.succeed([]),
       },
       {},
       {},
@@ -2593,7 +2593,7 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("hides non-Completed terminal Work Items whose Issue is no longer Relevant", async () => {
+  test("keeps Working Work Items whose Issue is no longer Relevant", async () => {
     const needsHumanOrphan = {
       ...workItem,
       id: makeWorkItemId(),
@@ -2670,6 +2670,11 @@ describe("GraphQL API", () => {
     expect(await response.json()).toEqual({
       data: {
         workItems: [
+          {
+            id: needsHumanOrphan.id,
+            githubIssueNumber: 120,
+            state: "NEEDS_HUMAN",
+          },
           {
             id: unfinishedOrphan.id,
             githubIssueNumber: 121,
