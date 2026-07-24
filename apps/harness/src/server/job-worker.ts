@@ -420,7 +420,7 @@ const claimAndRunRefreshJob = (
  * Claim-and-fork lifecycle Step Runs so multiple Work Items can progress in
  * parallel. Concurrency is bounded from Config: enough fibers that OpenCode
  * can reach max concurrent sessions, plus headroom for non-OpenCode steps.
- * OpenCode spawn concurrency is capped separately at the Opencode boundary.
+ * Agent Turn concurrency is capped separately at the Agent Backend boundary.
  */
 const runLifecycleClaimLoop = (
   generation: number,
@@ -462,7 +462,7 @@ const runLifecycleClaimLoop = (
       const maxConcurrentStepRuns = yield* db.getConfig.pipe(
         Effect.map((config) => {
           const maxWorkItems = Math.max(1, config.maxConcurrentWorkItems)
-          const maxSessions = Math.max(1, config.maxConcurrentOpencodeSessions)
+          const maxSessions = Math.max(1, config.maxConcurrentAgentTurns)
           // Fiber budget so Worker Slot admission and non-OpenCode steps are not undercut.
           return Math.max(maxWorkItems, maxSessions * 2)
         }),

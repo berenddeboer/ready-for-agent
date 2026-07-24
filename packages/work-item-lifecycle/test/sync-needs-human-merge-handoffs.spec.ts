@@ -116,10 +116,10 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     const lifecycle = yield* WorkItemLifecycle
     yield* db.updateConfig({
       defaultModel: "opencode/deepseek-v4-flash-free",
-      defaultVariant: "low",
+      defaultThinkingLevel: "low",
       reviewModel: null,
-      reviewVariant: null,
-      maxConcurrentOpencodeSessions: 2,
+      reviewThinkingLevel: null,
+      maxConcurrentAgentTurns: 2,
       maxConcurrentWorkItems: 5,
     })
     const repository = yield* db.addRepository({
@@ -166,10 +166,10 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     const lifecycle = yield* WorkItemLifecycle
     yield* db.updateConfig({
       defaultModel: "opencode/deepseek-v4-flash-free",
-      defaultVariant: "low",
+      defaultThinkingLevel: "low",
       reviewModel: null,
-      reviewVariant: null,
-      maxConcurrentOpencodeSessions: 2,
+      reviewThinkingLevel: null,
+      maxConcurrentAgentTurns: 2,
       maxConcurrentWorkItems: 5,
     })
     const repository = yield* db.addRepository({

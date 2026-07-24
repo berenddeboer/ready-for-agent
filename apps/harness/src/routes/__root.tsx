@@ -36,10 +36,10 @@ const configQuery = {
     const result = await graphql.query({
       config: {
         defaultModel: true,
-        defaultVariant: true,
+        defaultThinkingLevel: true,
         reviewModel: true,
-        reviewVariant: true,
-        maxConcurrentOpencodeSessions: true,
+        reviewThinkingLevel: true,
+        maxConcurrentAgentTurns: true,
         maxConcurrentWorkItems: true,
       },
     })
@@ -47,9 +47,9 @@ const configQuery = {
   },
 }
 
-type OpencodeModelOption = {
+type AgentModelOption = {
   id: string
-  variants: readonly string[]
+  thinkingLevels: readonly string[]
 }
 
 const modelsQuery = {
@@ -58,18 +58,18 @@ const modelsQuery = {
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({
-      models: { id: true, variants: true },
+      models: { id: true, thinkingLevels: true },
     })
     return result.models
   },
 }
 
 const variantsForModel = (
-  models: readonly OpencodeModelOption[] | undefined,
+  models: readonly AgentModelOption[] | undefined,
   modelId: string,
 ): readonly string[] => {
   if (modelId.length === 0 || models === undefined) return []
-  return models.find((model) => model.id === modelId)?.variants ?? []
+  return models.find((model) => model.id === modelId)?.thinkingLevels ?? []
 }
 
 const formatVariantLabel = (variant: string): string =>
@@ -85,16 +85,13 @@ const isBuildModelConfigured = (
   config:
     | {
         defaultModel: string | null
-        defaultVariant: string | null
       }
     | null
     | undefined,
 ): boolean =>
   config != null &&
   config.defaultModel != null &&
-  config.defaultModel.length > 0 &&
-  config.defaultVariant != null &&
-  config.defaultVariant.length > 0
+  config.defaultModel.length > 0
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
@@ -167,10 +164,10 @@ function SettingsButton() {
   const config = useQuery(configQuery)
   const models = useQuery({ ...modelsQuery, enabled: dialogOpen })
   const [defaultModel, setDefaultModel] = useState("")
-  const [defaultVariant, setDefaultVariant] = useState("")
+  const [defaultThinkingLevel, setDefaultVariant] = useState("")
   const [reviewModel, setReviewModel] = useState("")
-  const [reviewVariant, setReviewVariant] = useState("")
-  const [maxConcurrentOpencodeSessions, setMaxConcurrentOpencodeSessions] =
+  const [reviewThinkingLevel, setReviewVariant] = useState("")
+  const [maxConcurrentAgentTurns, setMaxConcurrentOpencodeSessions] =
     useState("2")
   const [maxConcurrentWorkItems, setMaxConcurrentWorkItems] = useState("5")
   const buildConfigured = isBuildModelConfigured(config.data)
@@ -180,11 +177,11 @@ function SettingsButton() {
       return
     }
     setDefaultModel(config.data.defaultModel ?? "")
-    setDefaultVariant(config.data.defaultVariant ?? "")
+    setDefaultVariant(config.data.defaultThinkingLevel ?? "")
     setReviewModel(config.data.reviewModel ?? "")
-    setReviewVariant(config.data.reviewVariant ?? "")
+    setReviewVariant(config.data.reviewThinkingLevel ?? "")
     setMaxConcurrentOpencodeSessions(
-      String(config.data.maxConcurrentOpencodeSessions),
+      String(config.data.maxConcurrentAgentTurns),
     )
     setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
   }, [config.data, dialogOpen])
@@ -192,20 +189,20 @@ function SettingsButton() {
   const updateConfig = useMutation({
     mutationFn: (input: {
       defaultModel: string
-      defaultVariant: string
+      defaultThinkingLevel: string | null
       reviewModel: string | null
-      reviewVariant: string | null
-      maxConcurrentOpencodeSessions: number
+      reviewThinkingLevel: string | null
+      maxConcurrentAgentTurns: number
       maxConcurrentWorkItems: number
     }) =>
       graphql.mutation({
         updateConfig: {
           __args: { input },
           defaultModel: true,
-          defaultVariant: true,
+          defaultThinkingLevel: true,
           reviewModel: true,
-          reviewVariant: true,
-          maxConcurrentOpencodeSessions: true,
+          reviewThinkingLevel: true,
+          maxConcurrentAgentTurns: true,
           maxConcurrentWorkItems: true,
         },
       }),
@@ -226,11 +223,11 @@ function SettingsButton() {
     }
     if (config.data) {
       setDefaultModel(config.data.defaultModel ?? "")
-      setDefaultVariant(config.data.defaultVariant ?? "")
+      setDefaultVariant(config.data.defaultThinkingLevel ?? "")
       setReviewModel(config.data.reviewModel ?? "")
-      setReviewVariant(config.data.reviewVariant ?? "")
+      setReviewVariant(config.data.reviewThinkingLevel ?? "")
       setMaxConcurrentOpencodeSessions(
-        String(config.data.maxConcurrentOpencodeSessions),
+        String(config.data.maxConcurrentAgentTurns),
       )
       setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     }
@@ -250,35 +247,40 @@ function SettingsButton() {
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const parsedMaxSessions = Number(maxConcurrentOpencodeSessions)
+    const parsedMaxSessions = Number(maxConcurrentAgentTurns)
     const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
     updateConfig.mutate({
       defaultModel,
-      defaultVariant,
+      defaultThinkingLevel:
+        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
       reviewModel: reviewModel.trim() === "" ? null : reviewModel,
-      reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
-      maxConcurrentOpencodeSessions: parsedMaxSessions,
+      reviewThinkingLevel:
+        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
+      maxConcurrentAgentTurns: parsedMaxSessions,
       maxConcurrentWorkItems: parsedMaxWorkItems,
     })
   }
 
   const modelIds = (models.data ?? []).map((model) => model.id)
   const buildVariants = variantsForModel(models.data, defaultModel)
-  const reviewVariantSourceModel =
+  const reviewThinkingLevelSourceModel =
     reviewModel.length > 0 ? reviewModel : defaultModel
-  const reviewVariants = variantsForModel(models.data, reviewVariantSourceModel)
+  const reviewThinkingLevels = variantsForModel(
+    models.data,
+    reviewThinkingLevelSourceModel,
+  )
   const hasUnavailableBuildModel =
     defaultModel.length > 0 && !modelIds.includes(defaultModel)
   const hasUnavailableReviewModel =
     reviewModel.length > 0 && !modelIds.includes(reviewModel)
   const hasCustomBuildVariant =
-    defaultVariant.length > 0 &&
-    (hasUnavailableBuildModel || !buildVariants.includes(defaultVariant))
+    defaultThinkingLevel.length > 0 &&
+    (hasUnavailableBuildModel || !buildVariants.includes(defaultThinkingLevel))
   const hasCustomReviewVariant =
-    reviewVariant.length > 0 &&
+    reviewThinkingLevel.length > 0 &&
     (hasUnavailableReviewModel ||
       (reviewModel.length === 0 && hasUnavailableBuildModel) ||
-      !reviewVariants.includes(reviewVariant))
+      !reviewThinkingLevels.includes(reviewThinkingLevel))
   const showUnconfiguredGuidance = config.isSuccess && !buildConfigured
 
   return (
@@ -336,12 +338,11 @@ function SettingsButton() {
               Harness settings
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Defaults for agent sessions and OpenCode concurrency.
+              Defaults for agent sessions and Agent Turn concurrency.
             </p>
             {showUnconfiguredGuidance && (
               <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
-                Select a default build model and thinking level before the
-                harness can create work.
+                Select a default build model before the harness can create work.
               </p>
             )}
           </div>
@@ -386,7 +387,7 @@ function SettingsButton() {
                     )}
                     {hasUnavailableBuildModel && (
                       <option value={defaultModel}>
-                        {defaultModel} (not in OpenCode catalog)
+                        {defaultModel} (not in Agent Model catalog)
                       </option>
                     )}
                     {(models.data ?? []).map((model) => (
@@ -403,36 +404,33 @@ function SettingsButton() {
                 {defaultModel.length > 0 && hasUnavailableBuildModel ? (
                   <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
                     Build thinking level is unavailable — the selected model is
-                    not in the OpenCode catalog. Choose another build model.
+                    not in the Agent Model catalog. Choose another build model.
                   </p>
                 ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Build thinking level is unavailable — this model has no
-                    OpenCode variants.
+                    Thinking Levels.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Build thinking level
                     <select
                       className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      name="defaultVariant"
-                      value={defaultVariant}
+                      name="defaultThinkingLevel"
+                      value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
                       }
-                      required
-                      disabled={
-                        defaultModel.length === 0 || buildVariants.length === 0
-                      }
+                      disabled={defaultModel.length === 0}
                     >
-                      {(!buildConfigured || defaultVariant.length === 0) && (
-                        <option value="" disabled>
-                          Select a thinking level
-                        </option>
-                      )}
+                      <option value="">
+                        {buildVariants.length === 0
+                          ? "Model default (no Thinking Levels)"
+                          : "Model default"}
+                      </option>
                       {hasCustomBuildVariant && (
-                        <option value={defaultVariant}>
-                          {formatVariantLabel(defaultVariant)}
+                        <option value={defaultThinkingLevel}>
+                          {formatVariantLabel(defaultThinkingLevel)}
                         </option>
                       )}
                       {buildVariants.map((variant) => (
@@ -442,7 +440,7 @@ function SettingsButton() {
                       ))}
                     </select>
                     <span className="text-xs font-normal text-slate-500">
-                      OpenCode calls this the model variant. Options come from
+                      Optional Thinking Level for this model. Options come from
                       the selected model.
                     </span>
                   </label>
@@ -469,7 +467,7 @@ function SettingsButton() {
                     <option value="">Same as build model</option>
                     {hasUnavailableReviewModel && (
                       <option value={reviewModel}>
-                        {reviewModel} (not in OpenCode catalog)
+                        {reviewModel} (not in Agent Model catalog)
                       </option>
                     )}
                     {(models.data ?? []).map((model) => (
@@ -483,40 +481,40 @@ function SettingsButton() {
                   </span>
                 </label>
 
-                {reviewVariantSourceModel.length > 0 &&
+                {reviewThinkingLevelSourceModel.length > 0 &&
                 ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
                   (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
                   <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
                     Review thinking level is unavailable — the selected model is
-                    not in the OpenCode catalog. Choose another model or use the
-                    build model.
+                    not in the Agent Model catalog. Choose another model or use
+                    the build model.
                   </p>
-                ) : reviewVariantSourceModel.length > 0 &&
-                  reviewVariants.length === 0 ? (
+                ) : reviewThinkingLevelSourceModel.length > 0 &&
+                  reviewThinkingLevels.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Review thinking level is unavailable — this model has no
-                    OpenCode variants.
+                    Thinking Levels.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Review thinking level
                     <select
                       className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      name="reviewVariant"
-                      value={reviewVariant}
+                      name="reviewThinkingLevel"
+                      value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
-                        reviewVariantSourceModel.length === 0 ||
-                        reviewVariants.length === 0
+                        reviewThinkingLevelSourceModel.length === 0 ||
+                        reviewThinkingLevels.length === 0
                       }
                     >
                       <option value="">Same as build thinking level</option>
                       {hasCustomReviewVariant && (
-                        <option value={reviewVariant}>
-                          {formatVariantLabel(reviewVariant)}
+                        <option value={reviewThinkingLevel}>
+                          {formatVariantLabel(reviewThinkingLevel)}
                         </option>
                       )}
-                      {reviewVariants.map((variant) => (
+                      {reviewThinkingLevels.map((variant) => (
                         <option key={`review-${variant}`} value={variant}>
                           {formatVariantLabel(variant)}
                         </option>
@@ -526,15 +524,15 @@ function SettingsButton() {
                 )}
 
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Max concurrent OpenCode sessions
+                  Max concurrent Agent Turns
                   <input
                     className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    name="maxConcurrentOpencodeSessions"
+                    name="maxConcurrentAgentTurns"
                     type="number"
                     min={1}
                     step={1}
                     required
-                    value={maxConcurrentOpencodeSessions}
+                    value={maxConcurrentAgentTurns}
                     onChange={(event) =>
                       setMaxConcurrentOpencodeSessions(event.target.value)
                     }
@@ -598,9 +596,7 @@ function SettingsButton() {
                 models.isError ||
                 updateConfig.isPending ||
                 defaultModel.length === 0 ||
-                defaultVariant.length === 0 ||
-                hasUnavailableBuildModel ||
-                (defaultModel.length > 0 && buildVariants.length === 0)
+                hasUnavailableBuildModel
               }
             >
               {updateConfig.isPending ? "Saving..." : "Save settings"}

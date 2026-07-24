@@ -4,11 +4,11 @@ import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
 import {
-  Opencode,
-  OpencodeExitError,
-  OpencodeTimeoutError,
-  SessionIdNotFoundError,
-} from "@ready-for-agent/opencode"
+  AgentBackend,
+  AgentBackendExitError,
+  AgentBackendSessionIdMissingError,
+  AgentBackendTimeoutError,
+} from "@ready-for-agent/agent-backend"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CommitInvalidWorktreeContextError,
@@ -30,9 +30,9 @@ const baseContext = (
   repositoryId: "repo-test",
   githubIssueNumber: 91,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
@@ -41,41 +41,45 @@ const baseContext = (
 })
 
 const stubOpencode = (impl: {
-  readonly start?: (input: {
+  readonly startTurn?: (input: {
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
     readonly timeout?: Duration.Input
   }) => Effect.Effect<{ sessionId: string }, never>
-  readonly continue?: (input: {
+  readonly continueTurn?: (input: {
     readonly sessionId: string
     readonly prompt: string
     readonly cwd: string
     readonly model: string
-    readonly variant: string
+    readonly thinkingLevel: string
     readonly timeout?: Duration.Input
   }) => Effect.Effect<{ sessionId: string }, never>
 }) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: (input) =>
-        impl.start?.(input) ??
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: (input) =>
+        impl.startTurn?.(input) ??
         Effect.succeed({
           sessionId: "ses_start_should_not_run",
           assistantText: "",
         }),
-      continue: (input) =>
-        impl.continue?.(input) ??
+      continueTurn: (input) =>
+        impl.continueTurn?.(input) ??
         Effect.succeed({ sessionId: "ses_commit_default", assistantText: "" }),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
 const run = <A, E>(
-  effect: Effect.Effect<A, E, Opencode>,
-  opencodeLayer: Layer.Layer<Opencode, never, never> = stubOpencode({}),
+  effect: Effect.Effect<A, E, AgentBackend>,
+  opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(Effect.provide(opencodeLayer), Effect.provide(PlatformLayer)),
@@ -138,18 +142,18 @@ describe("commit", () => {
             sessionId: "ses_from_implement",
             githubIssueNumber: 2039,
             model: "opencode/commit-model",
-            variant: "max",
+            thinkingLevel: "max",
             reviewModel: "opencode/commit-model",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             maxDuration: Duration.minutes(10),
           }),
         ),
         stubOpencode({
-          start: () => {
+          startTurn: () => {
             started = true
             return Effect.succeed({ sessionId: "ses_wrong", assistantText: "" })
           },
-          continue: (input) => {
+          continueTurn: (input) => {
             continued = input
             return Effect.succeed({
               sessionId: "ses_from_implement",
@@ -164,7 +168,7 @@ describe("commit", () => {
       expect(continued!.sessionId).toBe("ses_from_implement")
       expect(continued!.cwd).toBe(root)
       expect(continued!.model).toBe("opencode/commit-model")
-      expect(continued!.variant).toBe("max")
+      expect(continued!.thinkingLevel).toBe("max")
       expect(Duration.toMillis(continued!.timeout!)).toBe(
         Duration.toMillis(Duration.minutes(10)),
       )
@@ -178,13 +182,19 @@ describe("commit", () => {
       const error = await run(
         commit(baseContext(root)).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            continue: () =>
-              Effect.fail(new OpencodeExitError({ exitCode: 2, cwd: root })),
-            listModels: () => Effect.succeed([]),
+            continueTurn: () =>
+              Effect.fail(
+                new AgentBackendExitError({ exitCode: 2, cwd: root }),
+              ),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -200,15 +210,19 @@ describe("commit", () => {
       const error = await run(
         commit(baseContext(root)).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            continue: () =>
+            continueTurn: () =>
               Effect.fail(
-                new OpencodeTimeoutError({ cwd: root, timeoutMs: 1_000 }),
+                new AgentBackendTimeoutError({ cwd: root, timeoutMs: 1_000 }),
               ),
-            listModels: () => Effect.succeed([]),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )
@@ -220,13 +234,17 @@ describe("commit", () => {
       const error = await run(
         commit(baseContext(root)).pipe(Effect.flip),
         Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
               Effect.succeed({ sessionId: "unused", assistantText: "" }),
-            continue: () =>
-              Effect.fail(new SessionIdNotFoundError({ cwd: root })),
-            listModels: () => Effect.succeed([]),
+            continueTurn: () =>
+              Effect.fail(new AgentBackendSessionIdMissingError({ cwd: root })),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       )

@@ -49,18 +49,18 @@ const configQuery = {
     const result = await graphql.query({
       config: {
         defaultModel: true,
-        defaultVariant: true,
+        defaultThinkingLevel: true,
         reviewModel: true,
-        reviewVariant: true,
+        reviewThinkingLevel: true,
       },
     })
     return result.config
   },
 }
 
-type OpencodeModelOption = {
+type AgentModelOption = {
   id: string
-  variants: readonly string[]
+  thinkingLevels: readonly string[]
 }
 
 const modelsQuery = {
@@ -69,7 +69,7 @@ const modelsQuery = {
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({
-      models: { id: true, variants: true },
+      models: { id: true, thinkingLevels: true },
     })
     return result.models
   },
@@ -130,11 +130,11 @@ const formatTokenCount = (value: number): string =>
   new Intl.NumberFormat(undefined).format(value)
 
 const variantsForModel = (
-  models: readonly OpencodeModelOption[] | undefined,
+  models: readonly AgentModelOption[] | undefined,
   modelId: string,
 ): readonly string[] => {
   if (modelId.length === 0 || models === undefined) return []
-  return models.find((model) => model.id === modelId)?.variants ?? []
+  return models.find((model) => model.id === modelId)?.thinkingLevels ?? []
 }
 
 const formatVariantLabel = (variant: string): string =>
@@ -158,9 +158,9 @@ const repositoriesQuery = {
         isBare: true,
         paused: true,
         defaultModel: true,
-        defaultVariant: true,
+        defaultThinkingLevel: true,
         reviewModel: true,
-        reviewVariant: true,
+        reviewThinkingLevel: true,
         autoMerge: true,
         includeAllIssueAuthors: true,
         issuesReconciledAt: true,
@@ -230,9 +230,9 @@ type Repository = {
   isBare: boolean
   paused: boolean
   defaultModel: string | null
-  defaultVariant: string | null
+  defaultThinkingLevel: string | null
   reviewModel: string | null
-  reviewVariant: string | null
+  reviewThinkingLevel: string | null
   autoMerge: boolean
   includeAllIssueAuthors: boolean
   issuesReconciledAt: string | null
@@ -800,12 +800,12 @@ function RepositoryCard({
   const [defaultModel, setDefaultModel] = useState(
     repository.defaultModel ?? "",
   )
-  const [defaultVariant, setDefaultVariant] = useState(
-    repository.defaultVariant ?? "",
+  const [defaultThinkingLevel, setDefaultVariant] = useState(
+    repository.defaultThinkingLevel ?? "",
   )
   const [reviewModel, setReviewModel] = useState(repository.reviewModel ?? "")
-  const [reviewVariant, setReviewVariant] = useState(
-    repository.reviewVariant ?? "",
+  const [reviewThinkingLevel, setReviewVariant] = useState(
+    repository.reviewThinkingLevel ?? "",
   )
   const [autoMerge, setAutoMerge] = useState(repository.autoMerge)
   const [includeAllIssueAuthors, setIncludeAllIssueAuthors] = useState(
@@ -820,9 +820,9 @@ function RepositoryCard({
       repositoryId: string
       paused: boolean
       defaultModel: string | null
-      defaultVariant: string | null
+      defaultThinkingLevel: string | null
       reviewModel: string | null
-      reviewVariant: string | null
+      reviewThinkingLevel: string | null
       autoMerge: boolean
       includeAllIssueAuthors: boolean
     }) => {
@@ -836,9 +836,9 @@ function RepositoryCard({
           isBare: true,
           paused: true,
           defaultModel: true,
-          defaultVariant: true,
+          defaultThinkingLevel: true,
           reviewModel: true,
-          reviewVariant: true,
+          reviewThinkingLevel: true,
           autoMerge: true,
           includeAllIssueAuthors: true,
           issuesReconciledAt: true,
@@ -865,9 +865,9 @@ function RepositoryCard({
     setSettingsOpen(true)
     setPaused(repository.paused)
     setDefaultModel(repository.defaultModel ?? "")
-    setDefaultVariant(repository.defaultVariant ?? "")
+    setDefaultVariant(repository.defaultThinkingLevel ?? "")
     setReviewModel(repository.reviewModel ?? "")
-    setReviewVariant(repository.reviewVariant ?? "")
+    setReviewVariant(repository.reviewThinkingLevel ?? "")
     setAutoMerge(repository.autoMerge)
     setIncludeAllIssueAuthors(repository.includeAllIssueAuthors)
     updateSettings.reset()
@@ -882,34 +882,40 @@ function RepositoryCard({
       repositoryId: repository.id,
       paused,
       defaultModel: defaultModel.trim() === "" ? null : defaultModel,
-      defaultVariant: defaultVariant.trim() === "" ? null : defaultVariant,
+      defaultThinkingLevel:
+        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
       reviewModel: reviewModel.trim() === "" ? null : reviewModel,
-      reviewVariant: reviewVariant.trim() === "" ? null : reviewVariant,
+      reviewThinkingLevel:
+        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
       autoMerge,
       includeAllIssueAuthors,
     })
   }
 
   const harnessDefaultModel = config.data?.defaultModel ?? "not configured"
-  const harnessDefaultVariant = config.data?.defaultVariant ?? "not configured"
+  const harnessDefaultVariant =
+    config.data?.defaultThinkingLevel ?? "not configured"
   const resolvedBuildModel = repository.defaultModel ?? harnessDefaultModel
   const resolvedBuildVariant =
-    repository.defaultVariant ?? harnessDefaultVariant
+    repository.defaultThinkingLevel ?? harnessDefaultVariant
   const harnessReviewModel =
     config.data?.reviewModel ?? `Build (${resolvedBuildModel})`
   const harnessReviewVariant =
-    config.data?.reviewVariant ?? `Build (${resolvedBuildVariant})`
+    config.data?.reviewThinkingLevel ?? `Build (${resolvedBuildVariant})`
   const modelIds = (models.data ?? []).map((model) => model.id)
   const buildVariantSourceModel =
     defaultModel.length > 0 ? defaultModel : (config.data?.defaultModel ?? "")
-  const reviewVariantSourceModel =
+  const reviewThinkingLevelSourceModel =
     reviewModel.length > 0
       ? reviewModel
       : defaultModel.length > 0
         ? defaultModel
         : (config.data?.reviewModel ?? config.data?.defaultModel ?? "")
   const buildVariants = variantsForModel(models.data, buildVariantSourceModel)
-  const reviewVariants = variantsForModel(models.data, reviewVariantSourceModel)
+  const reviewThinkingLevels = variantsForModel(
+    models.data,
+    reviewThinkingLevelSourceModel,
+  )
   const hasUnavailableBuildModel =
     defaultModel.length > 0 && !modelIds.includes(defaultModel)
   const hasUnavailableReviewModel =
@@ -917,15 +923,17 @@ function RepositoryCard({
   const buildVariantSourceUnavailable =
     buildVariantSourceModel.length > 0 &&
     !modelIds.includes(buildVariantSourceModel)
-  const reviewVariantSourceUnavailable =
-    reviewVariantSourceModel.length > 0 &&
-    !modelIds.includes(reviewVariantSourceModel)
+  const reviewThinkingLevelSourceUnavailable =
+    reviewThinkingLevelSourceModel.length > 0 &&
+    !modelIds.includes(reviewThinkingLevelSourceModel)
   const hasCustomBuildVariant =
-    defaultVariant.length > 0 &&
-    (buildVariantSourceUnavailable || !buildVariants.includes(defaultVariant))
+    defaultThinkingLevel.length > 0 &&
+    (buildVariantSourceUnavailable ||
+      !buildVariants.includes(defaultThinkingLevel))
   const hasCustomReviewVariant =
-    reviewVariant.length > 0 &&
-    (reviewVariantSourceUnavailable || !reviewVariants.includes(reviewVariant))
+    reviewThinkingLevel.length > 0 &&
+    (reviewThinkingLevelSourceUnavailable ||
+      !reviewThinkingLevels.includes(reviewThinkingLevel))
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -1332,7 +1340,7 @@ function RepositoryCard({
                     </option>
                     {hasUnavailableBuildModel && (
                       <option value={defaultModel}>
-                        {defaultModel} (not in OpenCode catalog)
+                        {defaultModel} (not in Agent Model catalog)
                       </option>
                     )}
                     {models.data.map((model) => (
@@ -1346,22 +1354,22 @@ function RepositoryCard({
                 buildVariantSourceUnavailable ? (
                   <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
                     Build thinking level override is unavailable — the selected
-                    model is not in the OpenCode catalog. Use harness default or
-                    pick another model.
+                    model is not in the Agent Model catalog. Use harness default
+                    or pick another model.
                   </p>
                 ) : buildVariantSourceModel.length > 0 &&
                   buildVariants.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Build thinking level override is unavailable — this model
-                    has no OpenCode variants. Use harness default or pick
-                    another model.
+                    has no Thinking Levels. Use harness default or pick another
+                    model.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Build thinking level
                     <select
                       className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      value={defaultVariant}
+                      value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
                       }
@@ -1374,8 +1382,8 @@ function RepositoryCard({
                         Harness default ({harnessDefaultVariant})
                       </option>
                       {hasCustomBuildVariant && (
-                        <option value={defaultVariant}>
-                          {formatVariantLabel(defaultVariant)}
+                        <option value={defaultThinkingLevel}>
+                          {formatVariantLabel(defaultThinkingLevel)}
                         </option>
                       )}
                       {buildVariants.map((variant) => (
@@ -1415,7 +1423,7 @@ function RepositoryCard({
                     </option>
                     {hasUnavailableReviewModel && (
                       <option value={reviewModel}>
-                        {reviewModel} (not in OpenCode catalog)
+                        {reviewModel} (not in Agent Model catalog)
                       </option>
                     )}
                     {models.data.map((model) => (
@@ -1425,41 +1433,41 @@ function RepositoryCard({
                     ))}
                   </select>
                 </label>
-                {reviewVariantSourceModel.length > 0 &&
-                reviewVariantSourceUnavailable ? (
+                {reviewThinkingLevelSourceModel.length > 0 &&
+                reviewThinkingLevelSourceUnavailable ? (
                   <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-950">
                     Review thinking level override is unavailable — the selected
-                    model is not in the OpenCode catalog. Use harness default or
-                    pick another model.
+                    model is not in the Agent Model catalog. Use harness default
+                    or pick another model.
                   </p>
-                ) : reviewVariantSourceModel.length > 0 &&
-                  reviewVariants.length === 0 ? (
+                ) : reviewThinkingLevelSourceModel.length > 0 &&
+                  reviewThinkingLevels.length === 0 ? (
                   <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
                     Review thinking level override is unavailable — this model
-                    has no OpenCode variants. Use harness default or pick
-                    another model.
+                    has no Thinking Levels. Use harness default or pick another
+                    model.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Review thinking level
                     <select
                       className="w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      value={reviewVariant}
+                      value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
-                        reviewVariantSourceModel.length > 0 &&
-                        reviewVariants.length === 0
+                        reviewThinkingLevelSourceModel.length > 0 &&
+                        reviewThinkingLevels.length === 0
                       }
                     >
                       <option value="">
                         Harness default ({harnessReviewVariant})
                       </option>
                       {hasCustomReviewVariant && (
-                        <option value={reviewVariant}>
-                          {formatVariantLabel(reviewVariant)}
+                        <option value={reviewThinkingLevel}>
+                          {formatVariantLabel(reviewThinkingLevel)}
                         </option>
                       )}
-                      {reviewVariants.map((variant) => (
+                      {reviewThinkingLevels.map((variant) => (
                         <option key={`review-${variant}`} value={variant}>
                           {formatVariantLabel(variant)}
                         </option>
@@ -1526,7 +1534,7 @@ function RepositoryCard({
               <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
                 {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
                 {" · "}
-                {repository.defaultVariant ??
+                {repository.defaultThinkingLevel ??
                   `Default (${harnessDefaultVariant})`}
               </dd>
             </div>
@@ -1537,7 +1545,7 @@ function RepositoryCard({
               <dd className="m-0 min-w-0 truncate font-mono text-slate-700">
                 {repository.reviewModel ?? `Default (${harnessReviewModel})`}
                 {" · "}
-                {repository.reviewVariant ??
+                {repository.reviewThinkingLevel ??
                   `Default (${harnessReviewVariant})`}
               </dd>
             </div>

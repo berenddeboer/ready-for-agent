@@ -1,5 +1,5 @@
 import { Effect, FileSystem } from "effect"
-import { Opencode } from "@ready-for-agent/opencode"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import {
   CommitInvalidWorktreeContextError,
   CommitOpenCodeError,
@@ -78,14 +78,14 @@ export const commit = (context: LifecycleStepContext) =>
     const sessionId = yield* resolveSessionId(context)
     const prompt = buildCommitPrompt(context.githubIssueNumber)
 
-    const opencode = yield* Opencode
-    yield* opencode
-      .continue({
+    const agentBackend = yield* AgentBackend
+    yield* agentBackend
+      .continueTurn({
         sessionId,
         prompt,
         cwd: worktreePath,
         model: context.model,
-        variant: context.variant,
+        thinkingLevel: context.thinkingLevel,
         timeout: context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.commit,
       })
       .pipe(

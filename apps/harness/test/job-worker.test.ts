@@ -7,6 +7,7 @@ import {
   ManagedRuntime,
   Option,
 } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DatabaseError,
@@ -33,7 +34,7 @@ import {
   KeymaxxerError,
   KeymaxxerService,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode, OpencodeSessionStore } from "@ready-for-agent/opencode"
+import { OpencodeSessionStore } from "@ready-for-agent/opencode"
 import {
   ClaimError,
   QueueService,
@@ -588,10 +589,10 @@ describe("Job worker", () => {
           }
         }),
     } satisfies IssueReconcilerShape)
-    const opencode = Layer.succeed(Opencode, {
-      start: () => Effect.die("not used"),
-      continue: () => Effect.die("not used"),
-      listModels: () => Effect.die("not used"),
+    const opencode = Layer.succeed(AgentBackend, {
+      startTurn: () => Effect.die("not used"),
+      continueTurn: () => Effect.die("not used"),
+      inspect: () => Effect.die("not used"),
     })
     const sessionStore = Layer.succeed(OpencodeSessionStore, {
       getSession: (id) =>

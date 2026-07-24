@@ -61,10 +61,10 @@ export class InvalidConfigInputError extends Schema.TaggedErrorClass<InvalidConf
   {
     field: Schema.Literals([
       "defaultModel",
-      "defaultVariant",
+      "defaultThinkingLevel",
       "reviewModel",
-      "reviewVariant",
-      "maxConcurrentOpencodeSessions",
+      "reviewThinkingLevel",
+      "maxConcurrentAgentTurns",
       "maxConcurrentWorkItems",
     ]),
     message: Schema.String,
@@ -76,9 +76,9 @@ export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<Inva
   {
     field: Schema.Literals([
       "defaultModel",
-      "defaultVariant",
+      "defaultThinkingLevel",
       "reviewModel",
-      "reviewVariant",
+      "reviewThinkingLevel",
     ]),
     message: Schema.String,
   },

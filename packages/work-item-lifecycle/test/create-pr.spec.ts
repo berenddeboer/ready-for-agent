@@ -3,6 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import type { DbService } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -18,7 +19,6 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CreatePrCredentialError,
@@ -41,9 +41,9 @@ const baseContext = (
   repositoryId: testRepositoryId,
   githubIssueNumber: 91,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
@@ -104,29 +104,33 @@ const stubGitHub = (
 
 const stubOpencode = (
   overrides: {
-    continue?: (input: {
+    continueTurn?: (input: {
       sessionId: string
       prompt: string
       cwd: string
       model: string
-      variant: string
+      thinkingLevel: string | null
       timeout?: Duration.Input
     }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
   } = {},
 ) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: () =>
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: () =>
         Effect.succeed({ sessionId: "ses_start_unused", assistantText: "" }),
-      continue:
-        overrides.continue ??
+      continueTurn:
+        overrides.continueTurn ??
         (() =>
           Effect.succeed({
             sessionId: "ses_implement_session",
             assistantText: "",
           })),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
@@ -134,11 +138,11 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    DbService | GitHubService | KeymaxxerService | Opencode
+    DbService | GitHubService | KeymaxxerService | AgentBackend
   >,
   layers: {
     keymaxxer?: Layer.Layer<KeymaxxerService>
-    opencode?: Layer.Layer<Opencode>
+    opencode?: Layer.Layer<AgentBackend>
     github?: Layer.Layer<GitHubService>
   } = {},
 ): Promise<A> =>
@@ -211,9 +215,9 @@ describe("createPr", () => {
             sessionId: "ses_from_implement",
             githubIssueNumber: 2039,
             model: "opencode/create-pr-model",
-            variant: "max",
+            thinkingLevel: "max",
             reviewModel: "opencode/create-pr-model",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             maxDuration: Duration.minutes(12),
           }),
         ),
@@ -225,7 +229,7 @@ describe("createPr", () => {
             },
           }),
           opencode: stubOpencode({
-            continue: (input) => {
+            continueTurn: (input) => {
               continueInput = input
               return Effect.succeed({
                 sessionId: input.sessionId,
@@ -249,7 +253,7 @@ describe("createPr", () => {
       expect(continueInput!.cwd).toBe(root)
       expect(continueInput!.sessionId).toBe("ses_from_implement")
       expect(continueInput!.model).toBe("opencode/create-pr-model")
-      expect(continueInput!.variant).toBe("max")
+      expect(continueInput!.thinkingLevel).toBe("max")
       expect(continueInput!.prompt).toContain("GitHub issue #2039")
       expect(continueInput!.prompt).toContain("Closes #2039")
       expect(continueInput!.prompt).toContain(
@@ -286,7 +290,7 @@ describe("createPr", () => {
           findSecret: () => Effect.die("must not inspect the vault"),
         }),
         opencode: stubOpencode({
-          continue: (input) => {
+          continueTurn: (input) => {
             prompt = input.prompt
             return Effect.succeed({
               sessionId: input.sessionId,
@@ -320,16 +324,20 @@ describe("createPr", () => {
     withTemp(async (root) => {
       const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {
         opencode: Layer.succeed(
-          Opencode,
-          Opencode.of({
-            start: () => Effect.die("unused"),
-            continue: () =>
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () => Effect.die("unused"),
+            continueTurn: () =>
               Effect.fail({
-                _tag: "OpencodeExitError",
+                _tag: "AgentBackendExitError",
                 exitCode: 2,
                 cwd: root,
               } as never),
-            listModels: () => Effect.succeed([]),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
           }),
         ),
       })

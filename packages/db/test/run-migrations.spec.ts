@@ -91,6 +91,7 @@ describe("runMigrations", () => {
           { name: "20260723051726_clever_hex" },
           { name: "20260723072032_free_shadow_king" },
           { name: "20260724001032_furry_wild_pack" },
+          { name: "20260724120000_agent_backend_vocabulary" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

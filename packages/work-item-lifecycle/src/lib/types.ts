@@ -85,9 +85,9 @@ export interface WorkItemRecord {
   readonly issueTitle: string | null
   readonly githubPullRequestNumber: number | null
   readonly model: string
-  readonly variant: string
+  readonly thinkingLevel: string | null
   readonly reviewModel: string
-  readonly reviewVariant: string
+  readonly reviewThinkingLevel: string | null
   readonly state: WorkItemState
   readonly stateReadyAt: Date
   readonly paused: boolean
@@ -118,9 +118,8 @@ export interface WorkItemRecord {
 export const WAITING_FOR_WORKER_SLOT_MESSAGE =
   "Waiting for a worker slot to become available"
 
-/** Operator-visible message while a running Step Run waits for an OpenCode session slot. */
-export const WAITING_FOR_OPENCODE_SESSION_MESSAGE =
-  "Waiting for an OpenCode session slot"
+/** Operator-visible message while a running Step Run waits for an Agent Turn slot. */
+export const WAITING_FOR_AGENT_TURN_MESSAGE = "Waiting for an Agent Turn slot"
 
 /** Operator-visible Review phase while the reviewing OpenCode pass runs. */
 export const REVIEW_REVIEWING_MESSAGE = "reviewing"
@@ -265,8 +264,8 @@ export const STEP_RUN_REASON = {
   abandoned: "abandoned",
   reset: "reset",
   paused: "paused",
-  /** Mid-run: Step Run is Running but blocked on maxConcurrentOpencodeSessions. */
-  waitingForOpencodeSession: "waiting_for_opencode_session",
+  /** Mid-run: Step Run is Running but blocked on maxConcurrentAgentTurns. */
+  waitingForAgentTurn: "waiting_for_agent_turn",
   /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */

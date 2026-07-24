@@ -16,12 +16,36 @@ const messageFromArgs = (args: ReadonlyArray<string>): string =>
   joinOpenCodeMessageArgs(messageTokensFromArgs(args))
 
 describe("buildRunArgs", () => {
+  it("omits --variant when thinkingLevel is null", () => {
+    expect(
+      buildRunArgs({
+        prompt: "fix the bug",
+        cwd: "/worktrees/repository",
+        model: "anthropic/claude-sonnet-4-5",
+        thinkingLevel: null,
+      }),
+    ).toEqual([
+      "run",
+      "--auto",
+      "--format",
+      "json",
+      "--dir",
+      "/worktrees/repository",
+      "-m",
+      "anthropic/claude-sonnet-4-5",
+      "--",
+      "fix",
+      "the",
+      "bug",
+    ])
+  })
+
   it("builds start args with auto, json, model, and tokenized prompt positionals", () => {
     const args = buildRunArgs({
       prompt: "fix the bug",
       cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
-      variant: "high",
+      thinkingLevel: "high",
     })
 
     expect(args).toEqual([
@@ -60,7 +84,7 @@ describe("buildRunArgs", () => {
       prompt,
       cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
-      variant: "high",
+      thinkingLevel: "high",
     })
 
     expect(args.slice(0, 10)).toEqual([
@@ -89,7 +113,7 @@ describe("buildRunArgs", () => {
         prompt,
         cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
-        variant: "high",
+        thinkingLevel: "high",
       })
 
       expect(shouldUsePromptStdin(prompt)).toBe(usesStdin)
@@ -104,7 +128,7 @@ describe("buildRunArgs", () => {
         prompt: "continue the work",
         cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
-        variant: "max",
+        thinkingLevel: "max",
         sessionId: "ses_abc",
       }),
     ).toEqual([
@@ -141,7 +165,7 @@ describe("buildRunArgs", () => {
       prompt,
       cwd: "/worktrees/repository",
       model: "anthropic/claude-sonnet-4-5",
-      variant: "high",
+      thinkingLevel: "high",
       sessionId: "ses_review",
       command: "/review",
     })
@@ -175,7 +199,7 @@ describe("buildRunArgs", () => {
       prompt: "use --ignore-missing safely",
       cwd: "/tmp",
       model: "m",
-      variant: "v",
+      thinkingLevel: "v",
       command: "/review",
     })
     expect(
@@ -200,7 +224,7 @@ describe("buildRunArgs", () => {
         prompt: "",
         cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
-        variant: "high",
+        thinkingLevel: "high",
         command: "/review",
       }),
     ).toEqual([
@@ -225,7 +249,7 @@ describe("buildRunArgs", () => {
         prompt: "   \n\t  ",
         cwd: "/worktrees/repository",
         model: "anthropic/claude-sonnet-4-5",
-        variant: "high",
+        thinkingLevel: "high",
       }),
     ).toEqual([
       "run",
@@ -253,7 +277,7 @@ describe("buildRunArgs", () => {
       prompt,
       cwd: "/worktrees/issue-434",
       model: "xai/grok-code-fast-1",
-      variant: "high",
+      thinkingLevel: "high",
     })
 
     const messageTokens = messageTokensFromArgs(args)

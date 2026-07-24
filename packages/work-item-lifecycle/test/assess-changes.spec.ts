@@ -3,7 +3,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Effect, Layer } from "effect"
-import { Opencode } from "@ready-for-agent/opencode"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   AssessChangesInvalidWorktreeContextError,
@@ -28,9 +28,9 @@ const baseContext = (
   repositoryId: "repo-test",
   githubIssueNumber: 283,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath,
   startingCommitOid: "placeholder",
   completionSummary: null,
@@ -84,20 +84,24 @@ const withTempGit = async (
 
 const opencodeLayer = (assistantText: string) =>
   Layer.succeed(
-    Opencode,
-    Opencode.of({
-      start: () => Effect.die("unused"),
-      continue: () =>
+    AgentBackend,
+    AgentBackend.of({
+      startTurn: () => Effect.die("unused"),
+      continueTurn: () =>
         Effect.succeed({
           sessionId: "ses_implement",
           assistantText,
         }),
-      listModels: () => Effect.succeed([]),
+      inspect: () =>
+        Effect.succeed({
+          backend: { id: "opencode" as const, label: "OpenCode" },
+          models: [],
+        }),
     }),
   )
 
-const runWithOpencode = <A, E>(
-  effect: Effect.Effect<A, E, Opencode>,
+const runWithAgentBackend = <A, E>(
+  effect: Effect.Effect<A, E, AgentBackend>,
   assistantText: string,
 ) =>
   Effect.runPromise(
@@ -236,7 +240,7 @@ describe("assessChanges", () => {
 
   it("confirms clean worktree NO_CHANGES via OpenCode", async () => {
     await withTempGit(async (root, startingOid) => {
-      const result = await runWithOpencode(
+      const result = await runWithAgentBackend(
         assessChanges(baseContext(root, { startingCommitOid: startingOid })),
         "Investigated without edits.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
       )
@@ -249,7 +253,7 @@ describe("assessChanges", () => {
 
   it("trusts clean worktree CHANGES classification from OpenCode", async () => {
     await withTempGit(async (root, startingOid) => {
-      const result = await runWithOpencode(
+      const result = await runWithAgentBackend(
         assessChanges(baseContext(root, { startingCommitOid: startingOid })),
         "READY_FOR_AGENT_RESULT: CHANGES",
       )
@@ -273,7 +277,7 @@ describe("assessChanges", () => {
 
   it("fails retryably on malformed OpenCode results", async () => {
     await withTempGit(async (root, startingOid) => {
-      const error = await runWithOpencode(
+      const error = await runWithAgentBackend(
         assessChanges(
           baseContext(root, { startingCommitOid: startingOid }),
         ).pipe(Effect.flip),

@@ -1,10 +1,11 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
+import { limitAgentTurns } from "./agent-turn-limiter.js"
 import { assessChanges } from "./assess-changes.js"
 import { closeIssue } from "./close-issue.js"
 import { commit } from "./commit.js"
@@ -16,7 +17,6 @@ import { installDependencies } from "./install-dependencies.js"
 import { LifecycleSteps } from "./lifecycle-steps.js"
 import { markPrReadyForReview } from "./mark-pr-ready-for-review.js"
 import { mergePr } from "./merge-pr.js"
-import { limitOpencodeSessions } from "./opencode-session-limiter.js"
 import {
   investigatePrStatusChecks,
   watchPrStatusChecks,
@@ -32,7 +32,7 @@ type StepServices =
   | FileSystem.FileSystem
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
-  | Opencode
+  | AgentBackend
   | GitHubService
   | SqlClient.SqlClient
 
@@ -50,10 +50,10 @@ export const LifecycleStepsLive = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const rawOpencode = yield* Opencode
+    const rawAgentBackend = yield* AgentBackend
     const github = yield* GitHubService
     const sql = yield* SqlClient.SqlClient
-    const opencode = yield* limitOpencodeSessions(rawOpencode, db, sql)
+    const agentBackend = yield* limitAgentTurns(rawAgentBackend, db, sql)
 
     const services = Layer.mergeAll(
       Layer.succeed(DbService, db),
@@ -61,7 +61,7 @@ export const LifecycleStepsLive = Layer.effect(
       Layer.succeed(FileSystem.FileSystem, fs),
       Layer.succeed(Path.Path, path),
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Layer.succeed(Opencode, opencode),
+      Layer.succeed(AgentBackend, agentBackend),
       Layer.succeed(GitHubService, github),
       Layer.succeed(SqlClient.SqlClient, sql),
     )

@@ -20,9 +20,9 @@ export const repository = snakeCase.table(
     isBare: integer({ mode: "boolean" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(true),
     defaultModel: text(),
-    defaultVariant: text(),
+    defaultThinkingLevel: text(),
     reviewModel: text(),
-    reviewVariant: text(),
+    reviewThinkingLevel: text(),
     autoMerge: integer({ mode: "boolean" }).notNull().default(false),
     includeAllIssueAuthors: integer({ mode: "boolean" })
       .notNull()
@@ -46,12 +46,10 @@ export const repository = snakeCase.table(
 export const config = snakeCase.table("config", {
   id: text().primaryKey().default("default"),
   defaultModel: text(),
-  defaultVariant: text(),
+  defaultThinkingLevel: text(),
   reviewModel: text(),
-  reviewVariant: text(),
-  maxConcurrentOpencodeSessions: integer({ mode: "number" })
-    .notNull()
-    .default(2),
+  reviewThinkingLevel: text(),
+  maxConcurrentAgentTurns: integer({ mode: "number" }).notNull().default(2),
   maxConcurrentWorkItems: integer({ mode: "number" }).notNull().default(5),
   createdAt: integer({ mode: "number" })
     .notNull()
@@ -203,9 +201,9 @@ export const workItem = snakeCase.table(
     issueTitle: text(),
     githubPullRequestNumber: integer(),
     model: text().notNull(),
-    variant: text().notNull(),
+    thinkingLevel: text(),
     reviewModel: text().notNull(),
-    reviewVariant: text().notNull(),
+    reviewThinkingLevel: text(),
     state: text({
       enum: [
         "create_worktree",

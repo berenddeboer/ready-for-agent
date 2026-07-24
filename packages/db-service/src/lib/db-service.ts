@@ -146,7 +146,7 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
   )
 
 const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
-             default_model, default_variant, review_model, review_variant, auto_merge,
+             default_model, default_thinking_level, review_model, review_thinking_level, auto_merge,
              include_all_issue_authors, issues_reconciled_at`
 
 const issueSelectColumns = `id, repository_id, github_issue_number, title, body, url, state,
@@ -343,8 +343,8 @@ export const DbServiceLive = Layer.effect(
         yield* sql
           .unsafe(
             `INSERT OR IGNORE INTO config (
-               id, default_model, default_variant, review_model, review_variant,
-               max_concurrent_opencode_sessions, max_concurrent_work_items,
+               id, default_model, default_thinking_level, review_model, review_thinking_level,
+               max_concurrent_agent_turns, max_concurrent_work_items,
                created_at, updated_at
              ) VALUES ('default', NULL, NULL, NULL, NULL, 2, 5, ?, ?)`,
             [now, now],
@@ -353,8 +353,8 @@ export const DbServiceLive = Layer.effect(
 
         const rows = yield* sql
           .unsafe(
-            `SELECT default_model, default_variant, review_model, review_variant,
-                    max_concurrent_opencode_sessions, max_concurrent_work_items
+            `SELECT default_model, default_thinking_level, review_model, review_thinking_level,
+                    max_concurrent_agent_turns, max_concurrent_work_items
              FROM config WHERE id = 'default'`,
           )
           .pipe(Effect.mapError(toDatabaseError))
@@ -367,10 +367,10 @@ export const DbServiceLive = Layer.effect(
         }
         return ConfigRecord.make({
           defaultModel: row.defaultModel,
-          defaultVariant: row.defaultVariant,
+          defaultThinkingLevel: row.defaultThinkingLevel,
           reviewModel: row.reviewModel,
-          reviewVariant: row.reviewVariant,
-          maxConcurrentOpencodeSessions: row.maxConcurrentOpencodeSessions,
+          reviewThinkingLevel: row.reviewThinkingLevel,
+          maxConcurrentAgentTurns: row.maxConcurrentAgentTurns,
           maxConcurrentWorkItems: row.maxConcurrentWorkItems,
         })
       },
@@ -386,29 +386,25 @@ export const DbServiceLive = Layer.effect(
           message: "defaultModel cannot be empty",
         })
       }
-      const defaultVariant = input.defaultVariant.trim()
-      if (defaultVariant.length === 0) {
-        return yield* new InvalidConfigInputError({
-          field: "defaultVariant",
-          message: "defaultVariant cannot be empty",
-        })
-      }
+      const defaultThinkingLevel = yield* normalizeOptionalConfigSetting(
+        input.defaultThinkingLevel,
+      )
       const reviewModel = yield* normalizeOptionalConfigSetting(
         input.reviewModel,
       )
-      const reviewVariant = yield* normalizeOptionalConfigSetting(
-        input.reviewVariant,
+      const reviewThinkingLevel = yield* normalizeOptionalConfigSetting(
+        input.reviewThinkingLevel,
       )
       if (
-        !Number.isSafeInteger(input.maxConcurrentOpencodeSessions) ||
-        input.maxConcurrentOpencodeSessions < 1
+        !Number.isSafeInteger(input.maxConcurrentAgentTurns) ||
+        input.maxConcurrentAgentTurns < 1
       ) {
         return yield* new InvalidConfigInputError({
-          field: "maxConcurrentOpencodeSessions",
-          message: "maxConcurrentOpencodeSessions must be a positive integer",
+          field: "maxConcurrentAgentTurns",
+          message: "maxConcurrentAgentTurns must be a positive integer",
         })
       }
-      const maxConcurrentOpencodeSessions = input.maxConcurrentOpencodeSessions
+      const maxConcurrentAgentTurns = input.maxConcurrentAgentTurns
       if (
         !Number.isSafeInteger(input.maxConcurrentWorkItems) ||
         input.maxConcurrentWorkItems < 1
@@ -424,26 +420,26 @@ export const DbServiceLive = Layer.effect(
       const rows = yield* sql
         .unsafe(
           `INSERT INTO config (
-               id, default_model, default_variant, review_model, review_variant,
-               max_concurrent_opencode_sessions, max_concurrent_work_items,
+               id, default_model, default_thinking_level, review_model, review_thinking_level,
+               max_concurrent_agent_turns, max_concurrent_work_items,
                created_at, updated_at
              ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT (id) DO UPDATE SET
                default_model = excluded.default_model,
-               default_variant = excluded.default_variant,
+               default_thinking_level = excluded.default_thinking_level,
                review_model = excluded.review_model,
-               review_variant = excluded.review_variant,
-               max_concurrent_opencode_sessions = excluded.max_concurrent_opencode_sessions,
+               review_thinking_level = excluded.review_thinking_level,
+               max_concurrent_agent_turns = excluded.max_concurrent_agent_turns,
                max_concurrent_work_items = excluded.max_concurrent_work_items,
                updated_at = excluded.updated_at
-             RETURNING default_model, default_variant, review_model, review_variant,
-                       max_concurrent_opencode_sessions, max_concurrent_work_items`,
+             RETURNING default_model, default_thinking_level, review_model, review_thinking_level,
+                       max_concurrent_agent_turns, max_concurrent_work_items`,
           [
             defaultModel,
-            defaultVariant,
+            defaultThinkingLevel,
             reviewModel,
-            reviewVariant,
-            maxConcurrentOpencodeSessions,
+            reviewThinkingLevel,
+            maxConcurrentAgentTurns,
             maxConcurrentWorkItems,
             now,
             now,
@@ -459,10 +455,10 @@ export const DbServiceLive = Layer.effect(
       }
       return ConfigRecord.make({
         defaultModel: row.defaultModel,
-        defaultVariant: row.defaultVariant,
+        defaultThinkingLevel: row.defaultThinkingLevel,
         reviewModel: row.reviewModel,
-        reviewVariant: row.reviewVariant,
-        maxConcurrentOpencodeSessions: row.maxConcurrentOpencodeSessions,
+        reviewThinkingLevel: row.reviewThinkingLevel,
+        maxConcurrentAgentTurns: row.maxConcurrentAgentTurns,
         maxConcurrentWorkItems: row.maxConcurrentWorkItems,
       })
     })
@@ -504,7 +500,7 @@ export const DbServiceLive = Layer.effect(
         .unsafe(
           `INSERT INTO repository (
                id, github_owner, github_repo, local_path, is_bare, paused,
-               default_model, default_variant, review_model, review_variant,
+               default_model, default_thinking_level, review_model, review_thinking_level,
                auto_merge, include_all_issue_authors, created_at, updated_at
              ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
@@ -557,20 +553,22 @@ export const DbServiceLive = Layer.effect(
       "DbService.updateRepositorySettings",
     )(function* (input: UpdateRepositorySettingsInput) {
       const defaultModel = yield* normalizeOptionalSetting(input.defaultModel)
-      const defaultVariant = yield* normalizeOptionalSetting(
-        input.defaultVariant,
+      const defaultThinkingLevel = yield* normalizeOptionalSetting(
+        input.defaultThinkingLevel,
       )
       const reviewModel = yield* normalizeOptionalSetting(input.reviewModel)
-      const reviewVariant = yield* normalizeOptionalSetting(input.reviewVariant)
+      const reviewThinkingLevel = yield* normalizeOptionalSetting(
+        input.reviewThinkingLevel,
+      )
       const now = yield* Clock.currentTimeMillis
       const result = yield* sql
         .unsafe(
           `UPDATE repository
              SET paused = ?,
                  default_model = ?,
-                 default_variant = ?,
+                 default_thinking_level = ?,
                  review_model = ?,
-                 review_variant = ?,
+                 review_thinking_level = ?,
                  auto_merge = ?,
                  include_all_issue_authors = ?,
                  updated_at = ?
@@ -579,9 +577,9 @@ export const DbServiceLive = Layer.effect(
           [
             input.paused,
             defaultModel,
-            defaultVariant,
+            defaultThinkingLevel,
             reviewModel,
-            reviewVariant,
+            reviewThinkingLevel,
             input.autoMerge,
             input.includeAllIssueAuthors,
             now,

@@ -115,10 +115,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -259,10 +259,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -373,10 +373,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -526,10 +526,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -681,10 +681,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -801,10 +801,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -926,10 +926,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
@@ -1092,10 +1092,10 @@ describe("Assess Changes lifecycle routes", () => {
 
           yield* db.updateConfig({
             defaultModel: "opencode/test",
-            defaultVariant: "low",
+            defaultThinkingLevel: "low",
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 

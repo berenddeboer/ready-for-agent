@@ -1,16 +1,16 @@
 import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { SqlClient } from "effect/unstable/sql"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import {
   CurrentStepRun,
-  limitOpencodeSessions,
-} from "../src/lib/opencode-session-limiter.js"
+  limitAgentTurns,
+} from "../src/lib/agent-turn-limiter.js"
 import {
   REVIEW_PRE_COMMIT_MESSAGE,
   STEP_RUN_REASON,
-  WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+  WAITING_FOR_AGENT_TURN_MESSAGE,
 } from "../src/lib/types.js"
 import { describe, expect, it } from "bun:test"
 
@@ -24,7 +24,7 @@ const startInput = {
   prompt: "implement",
   cwd: "/tmp/worktree",
   model: "test/model",
-  variant: "low",
+  thinkingLevel: "low",
 }
 
 const seedRunningStepRun = (input: {
@@ -44,8 +44,8 @@ const seedRunningStepRun = (input: {
     )
     yield* sql.unsafe(
       `INSERT INTO work_item (
-         id, repository_id, github_issue_number, model, variant,
-         review_model, review_variant, state, state_ready_at, worktree_path,
+         id, repository_id, github_issue_number, model, thinking_level,
+         review_model, review_thinking_level, state, state_ready_at, worktree_path,
          session_id, failure_code, failure_message, created_at, updated_at
        ) VALUES (?, ?, 1, 'm', 'v', 'm', 'v', 'implement', ?,
          '/tmp/worktree', NULL, NULL, NULL, ?, ?)`,
@@ -61,7 +61,7 @@ const seedRunningStepRun = (input: {
     )
   })
 
-describe("limitOpencodeSessions", () => {
+describe("limitAgentTurns", () => {
   it("caps concurrent start/continue to Config max and queues the rest", () =>
     runTest(
       Effect.gen(function* () {
@@ -69,10 +69,10 @@ describe("limitOpencodeSessions", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultVariant: "low",
+          defaultThinkingLevel: "low",
           reviewModel: null,
-          reviewVariant: null,
-          maxConcurrentOpencodeSessions: 2,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
           maxConcurrentWorkItems: 5,
         })
 
@@ -96,17 +96,25 @@ describe("limitOpencodeSessions", () => {
             return { sessionId: "ses_test", assistantText: "" }
           })
 
-        const inner = Opencode.of({
-          start: () => gatedRun(),
-          continue: () => gatedRun(),
-          listModels: () => Effect.succeed([]),
+        const inner = AgentBackend.of({
+          startTurn: () => gatedRun(),
+          continueTurn: () => gatedRun(),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
         })
-        const limited = yield* limitOpencodeSessions(inner, db, sql)
+        const limited = yield* limitAgentTurns(inner, db, sql)
 
-        const first = yield* limited.start(startInput).pipe(Effect.forkChild)
-        const second = yield* limited.start(startInput).pipe(Effect.forkChild)
+        const first = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
+        const second = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
         const third = yield* limited
-          .continue({
+          .continueTurn({
             ...startInput,
             sessionId: "ses_existing",
           })
@@ -131,55 +139,60 @@ describe("limitOpencodeSessions", () => {
       }),
     ))
 
-  it("does not count listModels toward the OpenCode session limit", () =>
+  it("does not count inspect toward the Agent Turn limit", () =>
     runTest(
       Effect.gen(function* () {
         const db = yield* DbService
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultVariant: "low",
+          defaultThinkingLevel: "low",
           reviewModel: null,
-          reviewVariant: null,
-          maxConcurrentOpencodeSessions: 1,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 1,
           maxConcurrentWorkItems: 5,
         })
 
         const releaseStart = yield* Deferred.make<void>()
-        const listModelsStarted = yield* Deferred.make<void>()
+        const inspectStarted = yield* Deferred.make<void>()
         let startActive = false
-        let listModelsWhileStartActive = false
+        let inspectWhileStartActive = false
 
-        const inner = Opencode.of({
-          start: () =>
+        const inner = AgentBackend.of({
+          startTurn: () =>
             Effect.gen(function* () {
               startActive = true
               yield* Deferred.await(releaseStart)
               startActive = false
               return { sessionId: "ses_test", assistantText: "" }
             }),
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({ sessionId: "ses_test", assistantText: "" }),
-          listModels: () =>
+          inspect: () =>
             Effect.gen(function* () {
-              listModelsWhileStartActive = startActive
-              yield* Deferred.succeed(listModelsStarted, undefined)
-              return [{ id: "model-a", variants: ["low"] }]
+              inspectWhileStartActive = startActive
+              yield* Deferred.succeed(inspectStarted, undefined)
+              return {
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [{ id: "model-a", thinkingLevels: ["low"] }],
+              }
             }),
         })
-        const limited = yield* limitOpencodeSessions(inner, db, sql)
+        const limited = yield* limitAgentTurns(inner, db, sql)
 
         const startFiber = yield* limited
-          .start(startInput)
+          .startTurn(startInput)
           .pipe(Effect.forkChild)
         yield* Effect.sleep("20 millis")
-        const models = yield* limited.listModels({ cwd: "/tmp" })
-        yield* Deferred.await(listModelsStarted)
+        const models = yield* limited.inspect({ cwd: "/tmp" })
+        yield* Deferred.await(inspectStarted)
         yield* Deferred.succeed(releaseStart, undefined)
         yield* Fiber.join(startFiber)
 
-        expect(models).toEqual([{ id: "model-a", variants: ["low"] }])
-        expect(listModelsWhileStartActive).toBe(true)
+        expect(models.models).toEqual([
+          { id: "model-a", thinkingLevels: ["low"] },
+        ])
+        expect(inspectWhileStartActive).toBe(true)
       }),
     ))
 
@@ -190,10 +203,10 @@ describe("limitOpencodeSessions", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultVariant: "low",
+          defaultThinkingLevel: "low",
           reviewModel: null,
-          reviewVariant: null,
-          maxConcurrentOpencodeSessions: 1,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 1,
           maxConcurrentWorkItems: 5,
         })
 
@@ -202,8 +215,8 @@ describe("limitOpencodeSessions", () => {
         const secondStarted = yield* Deferred.make<void>()
         let starts = 0
 
-        const inner = Opencode.of({
-          start: () =>
+        const inner = AgentBackend.of({
+          startTurn: () =>
             Effect.gen(function* () {
               starts += 1
               if (starts === 1) {
@@ -214,25 +227,33 @@ describe("limitOpencodeSessions", () => {
               }
               return { sessionId: `ses_${starts}`, assistantText: "" }
             }),
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
-          listModels: () => Effect.succeed([]),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
         })
-        const limited = yield* limitOpencodeSessions(inner, db, sql)
+        const limited = yield* limitAgentTurns(inner, db, sql)
 
-        const first = yield* limited.start(startInput).pipe(Effect.forkChild)
+        const first = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
         yield* Deferred.await(firstStarted)
 
-        const second = yield* limited.start(startInput).pipe(Effect.forkChild)
+        const second = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
         yield* Effect.sleep("50 millis")
         expect(starts).toBe(1)
 
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultVariant: "low",
+          defaultThinkingLevel: "low",
           reviewModel: null,
-          reviewVariant: null,
-          maxConcurrentOpencodeSessions: 2,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
           maxConcurrentWorkItems: 5,
         })
         yield* Deferred.await(secondStarted)
@@ -251,10 +272,10 @@ describe("limitOpencodeSessions", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultVariant: "low",
+          defaultThinkingLevel: "low",
           reviewModel: null,
-          reviewVariant: null,
-          maxConcurrentOpencodeSessions: 1,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 1,
           maxConcurrentWorkItems: 5,
         })
 
@@ -272,8 +293,8 @@ describe("limitOpencodeSessions", () => {
         const secondStarted = yield* Deferred.make<void>()
         let starts = 0
 
-        const inner = Opencode.of({
-          start: () =>
+        const inner = AgentBackend.of({
+          startTurn: () =>
             Effect.gen(function* () {
               starts += 1
               if (starts === 1) {
@@ -284,16 +305,22 @@ describe("limitOpencodeSessions", () => {
               }
               return { sessionId: `ses_${starts}`, assistantText: "" }
             }),
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
-          listModels: () => Effect.succeed([]),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
         })
-        const limited = yield* limitOpencodeSessions(inner, db, sql)
+        const limited = yield* limitAgentTurns(inner, db, sql)
 
-        const first = yield* limited.start(startInput).pipe(Effect.forkChild)
+        const first = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
         yield* Deferred.await(firstStarted)
 
-        const second = yield* limited.start(startInput).pipe(
+        const second = yield* limited.startTurn(startInput).pipe(
           Effect.provideService(CurrentStepRun, {
             stepRunId,
             repositoryId,
@@ -318,8 +345,8 @@ describe("limitOpencodeSessions", () => {
         }[]
         expect(waitingRows[0]).toMatchObject({
           status: "running",
-          reason_code: STEP_RUN_REASON.waitingForOpencodeSession,
-          reason_message: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+          reason_code: STEP_RUN_REASON.waitingForAgentTurn,
+          reason_message: WAITING_FOR_AGENT_TURN_MESSAGE,
           session_wait_ms: 0,
         })
         expect(waitingRows[0]!.session_wait_started_at).toBeTypeOf("number")
@@ -359,10 +386,10 @@ describe("limitOpencodeSessions", () => {
         const sql = yield* SqlClient.SqlClient
         yield* db.updateConfig({
           defaultModel: "opencode/deepseek-v4-flash-free",
-          defaultVariant: "low",
+          defaultThinkingLevel: "low",
           reviewModel: null,
-          reviewVariant: null,
-          maxConcurrentOpencodeSessions: 1,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 1,
           maxConcurrentWorkItems: 5,
         })
 
@@ -391,8 +418,8 @@ describe("limitOpencodeSessions", () => {
         const secondStarted = yield* Deferred.make<void>()
         let starts = 0
 
-        const inner = Opencode.of({
-          start: () =>
+        const inner = AgentBackend.of({
+          startTurn: () =>
             Effect.gen(function* () {
               starts += 1
               if (starts === 1) {
@@ -403,16 +430,22 @@ describe("limitOpencodeSessions", () => {
               }
               return { sessionId: `ses_${starts}`, assistantText: "" }
             }),
-          continue: () =>
+          continueTurn: () =>
             Effect.succeed({ sessionId: "ses_x", assistantText: "" }),
-          listModels: () => Effect.succeed([]),
+          inspect: () =>
+            Effect.succeed({
+              backend: { id: "opencode" as const, label: "OpenCode" },
+              models: [],
+            }),
         })
-        const limited = yield* limitOpencodeSessions(inner, db, sql)
+        const limited = yield* limitAgentTurns(inner, db, sql)
 
-        const first = yield* limited.start(startInput).pipe(Effect.forkChild)
+        const first = yield* limited
+          .startTurn(startInput)
+          .pipe(Effect.forkChild)
         yield* Deferred.await(firstStarted)
 
-        const second = yield* limited.start(startInput).pipe(
+        const second = yield* limited.startTurn(startInput).pipe(
           Effect.provideService(CurrentStepRun, {
             stepRunId,
             repositoryId,
@@ -431,8 +464,8 @@ describe("limitOpencodeSessions", () => {
           readonly reason_message: string | null
         }[]
         expect(waitingRows[0]).toEqual({
-          reason_code: STEP_RUN_REASON.waitingForOpencodeSession,
-          reason_message: WAITING_FOR_OPENCODE_SESSION_MESSAGE,
+          reason_code: STEP_RUN_REASON.waitingForAgentTurn,
+          reason_message: WAITING_FOR_AGENT_TURN_MESSAGE,
         })
 
         yield* Deferred.succeed(releaseFirst, undefined)

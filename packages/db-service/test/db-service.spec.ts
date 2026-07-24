@@ -49,36 +49,36 @@ describe("DbService", () => {
           const db = yield* DbService
           expect(yield* db.getConfig).toEqual({
             defaultModel: null,
-            defaultVariant: null,
+            defaultThinkingLevel: null,
             reviewModel: null,
-            reviewVariant: null,
-            maxConcurrentOpencodeSessions: 2,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
             maxConcurrentWorkItems: 5,
           })
 
           expect(
             yield* db.updateConfig({
               defaultModel: "  anthropic/claude-sonnet-4-5  ",
-              defaultVariant: "  high  ",
+              defaultThinkingLevel: "  high  ",
               reviewModel: "  anthropic/claude-opus-4-6  ",
-              reviewVariant: "  max  ",
-              maxConcurrentOpencodeSessions: 4,
+              reviewThinkingLevel: "  max  ",
+              maxConcurrentAgentTurns: 4,
               maxConcurrentWorkItems: 5,
             }),
           ).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
-            maxConcurrentOpencodeSessions: 4,
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 4,
             maxConcurrentWorkItems: 5,
           })
           expect(yield* db.getConfig).toEqual({
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
-            maxConcurrentOpencodeSessions: 4,
+            reviewThinkingLevel: "max",
+            maxConcurrentAgentTurns: 4,
             maxConcurrentWorkItems: 5,
           })
         }),
@@ -91,10 +91,10 @@ describe("DbService", () => {
           const error = yield* Effect.flip(
             db.updateConfig({
               defaultModel: " ",
-              defaultVariant: "high",
+              defaultThinkingLevel: "high",
               reviewModel: null,
-              reviewVariant: null,
-              maxConcurrentOpencodeSessions: 2,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
               maxConcurrentWorkItems: 5,
             }),
           )
@@ -110,16 +110,16 @@ describe("DbService", () => {
             const error = yield* Effect.flip(
               db.updateConfig({
                 defaultModel: "anthropic/claude-sonnet-4-5",
-                defaultVariant: "high",
+                defaultThinkingLevel: "high",
                 reviewModel: null,
-                reviewVariant: null,
-                maxConcurrentOpencodeSessions: value,
+                reviewThinkingLevel: null,
+                maxConcurrentAgentTurns: value,
                 maxConcurrentWorkItems: 5,
               }),
             )
             expect(error).toBeInstanceOf(InvalidConfigInputError)
             expect(error).toMatchObject({
-              field: "maxConcurrentOpencodeSessions",
+              field: "maxConcurrentAgentTurns",
             })
           }
         }),
@@ -133,10 +133,10 @@ describe("DbService", () => {
             const error = yield* Effect.flip(
               db.updateConfig({
                 defaultModel: "anthropic/claude-sonnet-4-5",
-                defaultVariant: "high",
+                defaultThinkingLevel: "high",
                 reviewModel: null,
-                reviewVariant: null,
-                maxConcurrentOpencodeSessions: 2,
+                reviewThinkingLevel: null,
+                maxConcurrentAgentTurns: 2,
                 maxConcurrentWorkItems: value,
               }),
             )
@@ -181,9 +181,9 @@ describe("DbService", () => {
           expect(repo.isBare).toBe(true)
           expect(repo.paused).toBe(true)
           expect(repo.defaultModel).toBeNull()
-          expect(repo.defaultVariant).toBeNull()
+          expect(repo.defaultThinkingLevel).toBeNull()
           expect(repo.reviewModel).toBeNull()
-          expect(repo.reviewVariant).toBeNull()
+          expect(repo.reviewThinkingLevel).toBeNull()
           expect(repo.autoMerge).toBe(false)
           expect(repo.includeAllIssueAuthors).toBe(false)
           expect(repo.issuesReconciledAt).toBeNull()
@@ -293,9 +293,9 @@ describe("DbService", () => {
             repositoryId: repo.id,
             paused: false,
             defaultModel: "  anthropic/claude-sonnet-4-5  ",
-            defaultVariant: "  high  ",
+            defaultThinkingLevel: "  high  ",
             reviewModel: "  anthropic/claude-opus-4-6  ",
-            reviewVariant: "  max  ",
+            reviewThinkingLevel: "  max  ",
             autoMerge: true,
             includeAllIssueAuthors: true,
           })
@@ -304,9 +304,9 @@ describe("DbService", () => {
             ...repo,
             paused: false,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: true,
           })
@@ -323,9 +323,9 @@ describe("DbService", () => {
             repositoryId: repo.id,
             paused: true,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             autoMerge: false,
             includeAllIssueAuthors: false,
           })
@@ -334,17 +334,17 @@ describe("DbService", () => {
             repositoryId: repo.id,
             paused: true,
             defaultModel: " ",
-            defaultVariant: null,
+            defaultThinkingLevel: null,
             reviewModel: " ",
-            reviewVariant: null,
+            reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
           })
 
           expect(cleared.defaultModel).toBeNull()
-          expect(cleared.defaultVariant).toBeNull()
+          expect(cleared.defaultThinkingLevel).toBeNull()
           expect(cleared.reviewModel).toBeNull()
-          expect(cleared.reviewVariant).toBeNull()
+          expect(cleared.reviewThinkingLevel).toBeNull()
         }),
       ))
 
@@ -357,9 +357,9 @@ describe("DbService", () => {
               repositoryId: "repo-01J00000000000000000000000",
               paused: false,
               defaultModel: null,
-              defaultVariant: null,
+              defaultThinkingLevel: null,
               reviewModel: null,
-              reviewVariant: null,
+              reviewThinkingLevel: null,
               autoMerge: false,
               includeAllIssueAuthors: false,
             }),
@@ -379,9 +379,9 @@ describe("DbService", () => {
             repositoryId: repo.id,
             paused: true,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: false,
           })
@@ -392,9 +392,9 @@ describe("DbService", () => {
             ...repo,
             paused: false,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: false,
           })
@@ -411,9 +411,9 @@ describe("DbService", () => {
             repositoryId: repo.id,
             paused: false,
             defaultModel: "anthropic/claude-sonnet-4-5",
-            defaultVariant: "high",
+            defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
-            reviewVariant: "max",
+            reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: false,
           })
@@ -568,8 +568,8 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant,
-               review_model, review_variant, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, model, thinking_level,
+               review_model, review_thinking_level, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 42, 'model', 'low', 'model', 'low', 'create_worktree',
                ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -608,8 +608,8 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, model, variant,
-               review_model, review_variant, state, state_ready_at, worktree_path,
+               id, repository_id, github_issue_number, model, thinking_level,
+               review_model, review_thinking_level, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 42, 'model', 'low', 'model', 'low', 'create_worktree',
                ?, NULL, NULL, NULL, NULL, ?, ?)`,

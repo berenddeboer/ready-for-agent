@@ -8,12 +8,11 @@ import {
 } from "effect"
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
+import { AgentBackend, type AgentModel } from "@ready-for-agent/agent-backend"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
-  Opencode,
-  type OpencodeModel,
   type OpencodeSession,
   OpencodeSessionStore,
   type SessionAvailability,
@@ -79,10 +78,10 @@ type RepositoryCredentialArgs = {
 type UpdateConfigArgs = {
   input: {
     defaultModel: string
-    defaultVariant: string
+    defaultThinkingLevel?: string | null
     reviewModel?: string | null
-    reviewVariant?: string | null
-    maxConcurrentOpencodeSessions: number
+    reviewThinkingLevel?: string | null
+    maxConcurrentAgentTurns: number
     maxConcurrentWorkItems: number
   }
 }
@@ -92,9 +91,9 @@ type UpdateRepositorySettingsArgs = {
     repositoryId: string
     paused: boolean
     defaultModel: string | null
-    defaultVariant: string | null
+    defaultThinkingLevel: string | null
     reviewModel: string | null
-    reviewVariant: string | null
+    reviewThinkingLevel: string | null
     autoMerge: boolean
     includeAllIssueAuthors: boolean
   }
@@ -169,7 +168,7 @@ type ResetWorkItemArgs = WorkItemArgs
 export type GraphqlServices =
   | DbService
   | KeymaxxerService
-  | Opencode
+  | AgentBackend
   | OpencodeSessionStore
   | QueueService
   | WorkItemLifecycle
@@ -206,7 +205,7 @@ export const createGraphqlApi = (
   const commandExists = options.commandExists ?? commandExistsOnPath
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
   const modelsCache = Effect.runSync(
-    Ref.make<ReadonlyArray<OpencodeModel> | null>(null),
+    Ref.make<ReadonlyArray<AgentModel> | null>(null),
   )
   const modelsLock = Effect.runSync(Semaphore.make(1))
 
@@ -231,11 +230,12 @@ export const createGraphqlApi = (
         if (again !== null) {
           return again
         }
-        const opencode = yield* Opencode
-        const models = yield* opencode.listModels({
+        const backend = yield* AgentBackend
+        const inspected = yield* backend.inspect({
           cwd: opencodeCwd,
           timeout: "30 seconds",
         })
+        const models = inspected.models
         yield* Ref.set(modelsCache, models)
         return models
       }),
@@ -467,11 +467,10 @@ export const createGraphqlApi = (
                 const db = yield* DbService
                 const updated = yield* db.updateConfig({
                   defaultModel: args.input.defaultModel,
-                  defaultVariant: args.input.defaultVariant,
+                  defaultThinkingLevel: args.input.defaultThinkingLevel ?? null,
                   reviewModel: args.input.reviewModel ?? null,
-                  reviewVariant: args.input.reviewVariant ?? null,
-                  maxConcurrentOpencodeSessions:
-                    args.input.maxConcurrentOpencodeSessions,
+                  reviewThinkingLevel: args.input.reviewThinkingLevel ?? null,
+                  maxConcurrentAgentTurns: args.input.maxConcurrentAgentTurns,
                   maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
                 })
                 const lifecycle = yield* WorkItemLifecycle
@@ -497,9 +496,9 @@ export const createGraphqlApi = (
                   repositoryId: args.input.repositoryId,
                   paused: args.input.paused,
                   defaultModel: args.input.defaultModel ?? null,
-                  defaultVariant: args.input.defaultVariant ?? null,
+                  defaultThinkingLevel: args.input.defaultThinkingLevel ?? null,
                   reviewModel: args.input.reviewModel ?? null,
-                  reviewVariant: args.input.reviewVariant ?? null,
+                  reviewThinkingLevel: args.input.reviewThinkingLevel ?? null,
                   autoMerge: args.input.autoMerge,
                   includeAllIssueAuthors: args.input.includeAllIssueAuthors,
                 })

@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import { AgentBackend } from "@ready-for-agent/agent-backend"
 import {
   makeRepositoryRecord,
   stubDbServiceLayer,
@@ -7,7 +8,6 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
-import { Opencode } from "@ready-for-agent/opencode"
 import {
   type LifecycleStepContext,
   decidePrMerge,
@@ -27,9 +27,9 @@ const context: LifecycleStepContext = {
   repositoryId: repository.id,
   githubIssueNumber: 42,
   model: "opencode/test-model",
-  variant: "high",
+  thinkingLevel: "high",
   reviewModel: "opencode/test-model",
-  reviewVariant: "high",
+  reviewThinkingLevel: "high",
   worktreePath: "/tmp/worktree",
   startingCommitOid: null,
   completionSummary: null,
@@ -86,11 +86,11 @@ describe("decidePrMerge", () => {
   it("continues the Implement Session and returns OpenCode's merge decision", async () => {
     let prompt = ""
     let sessionId = ""
-    const opencode = Layer.succeed(
-      Opencode,
-      Opencode.of({
-        start: () => Effect.die("unused"),
-        continue: (input) => {
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: (input) => {
           prompt = input.prompt
           sessionId = input.sessionId
           return Effect.succeed({
@@ -98,13 +98,17 @@ describe("decidePrMerge", () => {
             assistantText: "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
           })
         },
-        listModels: () => Effect.succeed([]),
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
       }),
     )
 
     const result = await Effect.runPromise(
       decidePrMerge(context).pipe(
-        Effect.provide(Layer.mergeAll(db, keymaxxer, opencode)),
+        Effect.provide(Layer.mergeAll(db, keymaxxer, agentBackend)),
       ),
     )
 
@@ -117,23 +121,27 @@ describe("decidePrMerge", () => {
   })
 
   it("returns a human intervention reason when risk is high", async () => {
-    const opencode = Layer.succeed(
-      Opencode,
-      Opencode.of({
-        start: () => Effect.die("unused"),
-        continue: () =>
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: () =>
           Effect.succeed({
             sessionId: "ses_implement",
             assistantText:
               "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: Migrates production data",
           }),
-        listModels: () => Effect.succeed([]),
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
       }),
     )
 
     const result = await Effect.runPromise(
       decidePrMerge(context).pipe(
-        Effect.provide(Layer.mergeAll(db, keymaxxer, opencode)),
+        Effect.provide(Layer.mergeAll(db, keymaxxer, agentBackend)),
       ),
     )
 
@@ -148,21 +156,25 @@ describe("decidePrMerge", () => {
       listRepositories: Effect.succeed([{ ...repository, autoMerge: false }]),
     })
     let continued = false
-    const opencode = Layer.succeed(
-      Opencode,
-      Opencode.of({
-        start: () => Effect.die("unused"),
-        continue: () => {
+    const agentBackend = Layer.succeed(
+      AgentBackend,
+      AgentBackend.of({
+        startTurn: () => Effect.die("unused"),
+        continueTurn: () => {
           continued = true
           return Effect.die("should not run")
         },
-        listModels: () => Effect.succeed([]),
+        inspect: () =>
+          Effect.succeed({
+            backend: { id: "opencode" as const, label: "OpenCode" },
+            models: [],
+          }),
       }),
     )
 
     const result = await Effect.runPromise(
       decidePrMerge(context).pipe(
-        Effect.provide(Layer.mergeAll(pausedRepoDb, keymaxxer, opencode)),
+        Effect.provide(Layer.mergeAll(pausedRepoDb, keymaxxer, agentBackend)),
       ),
     )
 
