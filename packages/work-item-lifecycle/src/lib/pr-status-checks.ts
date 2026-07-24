@@ -8,7 +8,11 @@ import {
   type PrStatusCheckDiagnostic,
   type TerminalPrStatusCheck,
 } from "@ready-for-agent/github-service"
-import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  AgentTurnGitHubCredentialMissingError,
+  agentTurnGitHubCredentialGuidance,
+  resolveAgentTurnGitHubAuth,
+} from "./agent-turn-github-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 import { workItemBranchName } from "./worktree-names.js"
@@ -574,19 +578,19 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         handledCheckIds: [],
       } satisfies PrStatusCheckInvestigationResult
     }
-    const keymaxxer = yield* KeymaxxerService
-    const tokenName =
-      keymaxxer.enabled === false
-        ? undefined
-        : yield* keymaxxer.findSecret({
-            provider: "github",
-            account: `${repository.githubOwner}/${repository.githubRepo}`,
-          })
-    if (tokenName === null) {
-      return yield* new PrStatusChecksContextError({
-        message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
-      })
-    }
+    const auth = yield* resolveAgentTurnGitHubAuth({
+      githubOwner: repository.githubOwner,
+      githubRepo: repository.githubRepo,
+    }).pipe(
+      Effect.mapError((cause) => {
+        if (cause instanceof AgentTurnGitHubCredentialMissingError) {
+          return new PrStatusChecksContextError({ message: cause.message })
+        }
+        return new PrStatusChecksContextError({
+          message: "Failed to resolve the repository GitHub credential",
+        })
+      }),
+    )
     const redChecks = unhandled.filter((check) => check.outcome === "red")
     let diagnostics: readonly PrStatusCheckDiagnostic[] = []
     if (redChecks.length > 0) {
@@ -621,11 +625,10 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         sessionId,
         prompt: [
           buildInvestigationWorkPrompt(unhandled, diagnostics),
-          ...(tokenName === undefined
-            ? []
-            : [
-                `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI, API, commit, or push access; never put secret values in the environment.`,
-              ]),
+          agentTurnGitHubCredentialGuidance(
+            auth,
+            "GitHub CLI, API, commit, or push access",
+          ),
         ].join("\n"),
         cwd: worktreePath,
         model: context.model,

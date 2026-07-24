@@ -6,9 +6,8 @@ Issues live in GitHub Issues for berenddeboer/ready-for-agent (via `gh`). See `d
 
 ### Credentials
 
-Keymaxxer is used by the Ready for Agent harness. Interactive coding agents do
-not need to use Keymaxxer themselves; use normally authenticated tools such as
-`gh` and `git` directly.
+Use `gh` and `git` with the logged-in user's existing credentials (normal `gh`
+configuration or ambient GitHub token environment variables).
 
 Fine-grained GitHub PATs cannot call the Checks API (including GraphQL
 `statusCheckRollup.contexts`). That 403 is expected: the harness falls back to

@@ -3,7 +3,10 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Layer } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import {
+  type ActiveAgentBackend,
+  AgentBackend,
+} from "@ready-for-agent/agent-backend"
 import type { DbService } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
@@ -28,6 +31,8 @@ import {
   CreatePrWorktreeContextMissingError,
   createPr,
   makeWorkItemId,
+  stubActiveAgentBackendLayer,
+  stubGrokActiveAgentBackendLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -138,12 +143,17 @@ const run = <A, E>(
   effect: Effect.Effect<
     A,
     E,
-    DbService | GitHubService | KeymaxxerService | AgentBackend
+    | DbService
+    | GitHubService
+    | KeymaxxerService
+    | AgentBackend
+    | ActiveAgentBackend
   >,
   layers: {
     keymaxxer?: Layer.Layer<KeymaxxerService>
     opencode?: Layer.Layer<AgentBackend>
     github?: Layer.Layer<GitHubService>
+    activeBackend?: Layer.Layer<ActiveAgentBackend>
   } = {},
 ): Promise<A> =>
   Effect.runPromise(
@@ -154,6 +164,7 @@ const run = <A, E>(
           layers.github ?? stubGitHub(),
           layers.keymaxxer ?? stubKeymaxxer(),
           layers.opencode ?? stubOpencode(),
+          layers.activeBackend ?? stubActiveAgentBackendLayer(),
         ),
       ),
       Effect.provide(PlatformLayer),
@@ -281,7 +292,7 @@ describe("createPr", () => {
       )
     }))
 
-  it("uses a generic prompt when Keymaxxer is disabled", () =>
+  it("uses ambient gh guidance when Keymaxxer is disabled on a capable backend", () =>
     withTemp(async (root) => {
       let prompt = ""
       const pullRequestNumber = await run(createPr(baseContext(root)), {
@@ -289,6 +300,66 @@ describe("createPr", () => {
           enabled: false,
           findSecret: () => Effect.die("must not inspect the vault"),
         }),
+        opencode: stubOpencode({
+          continueTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      })
+
+      expect(pullRequestNumber).toBe(321)
+      expect(prompt.toLowerCase()).not.toContain("keymaxxer")
+      expect(prompt).not.toContain("keymaxxer_run")
+      expect(prompt).toContain(
+        "Use the gh CLI with the existing ambient authentication",
+      )
+    }))
+
+  it("uses ambient gh guidance when the backend lacks KeymaxxerMcp even if the vault is enabled", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      let findSecretCalled = false
+      const pullRequestNumber = await run(createPr(baseContext(root)), {
+        keymaxxer: stubKeymaxxer({
+          findSecret: () => {
+            findSecretCalled = true
+            return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
+          },
+        }),
+        activeBackend: stubGrokActiveAgentBackendLayer,
+        opencode: stubOpencode({
+          continueTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: "",
+            })
+          },
+        }),
+      })
+
+      expect(pullRequestNumber).toBe(321)
+      expect(findSecretCalled).toBe(false)
+      expect(prompt.toLowerCase()).not.toContain("keymaxxer")
+      expect(prompt).not.toContain("keymaxxer_run")
+      expect(prompt).not.toContain("GITHUB_TOKEN_ACME_WIDGETS")
+      expect(prompt).toContain(
+        "Use the gh CLI with the existing ambient authentication",
+      )
+    }))
+
+  it("does not fail Agent Turns for a missing vault credential when KeymaxxerMcp is unavailable", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      const pullRequestNumber = await run(createPr(baseContext(root)), {
+        keymaxxer: stubKeymaxxer({
+          findSecret: () => Effect.succeed(null),
+        }),
+        activeBackend: stubGrokActiveAgentBackendLayer,
         opencode: stubOpencode({
           continueTurn: (input) => {
             prompt = input.prompt

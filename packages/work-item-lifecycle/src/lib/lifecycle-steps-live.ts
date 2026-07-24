@@ -1,7 +1,10 @@
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import {
+  ActiveAgentBackend,
+  AgentBackend,
+} from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -33,14 +36,16 @@ type StepServices =
   | Path.Path
   | ChildProcessSpawner.ChildProcessSpawner
   | AgentBackend
+  | ActiveAgentBackend
   | GitHubService
   | SqlClient.SqlClient
 
 /**
  * Production LifecycleSteps: Create Worktree through local cleanup, including
  * Assess Changes (git then optional OpenCode confirm) and Close Issue for
- * No-Change Outcomes. Captures platform, database, Keymaxxer, GitHub, and
- * OpenCode services so handlers remain `Effect<A, E>` with no requirements.
+ * No-Change Outcomes. Captures platform, database, Keymaxxer, GitHub, Active
+ * Agent Backend, and Agent Backend services so handlers remain `Effect<A, E>`
+ * with no requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,
@@ -51,6 +56,7 @@ export const LifecycleStepsLive = Layer.effect(
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const rawAgentBackend = yield* AgentBackend
+    const activeAgentBackend = yield* ActiveAgentBackend
     const github = yield* GitHubService
     const sql = yield* SqlClient.SqlClient
     const agentBackend = yield* limitAgentTurns(rawAgentBackend, db, sql)
@@ -62,6 +68,7 @@ export const LifecycleStepsLive = Layer.effect(
       Layer.succeed(Path.Path, path),
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Layer.succeed(AgentBackend, agentBackend),
+      Layer.succeed(ActiveAgentBackend, activeAgentBackend),
       Layer.succeed(GitHubService, github),
       Layer.succeed(SqlClient.SqlClient, sql),
     )

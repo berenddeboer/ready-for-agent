@@ -1,7 +1,11 @@
 import { Effect, Schema } from "effect"
 import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
-import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  AgentTurnGitHubCredentialMissingError,
+  agentTurnGitHubCredentialGuidance,
+  resolveAgentTurnGitHubAuth,
+} from "./agent-turn-github-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
@@ -97,28 +101,24 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
         reason: "Auto-merge is disabled for this repository",
       }
     }
-    const keymaxxer = yield* KeymaxxerService
-    const tokenName =
-      keymaxxer.enabled === false
-        ? undefined
-        : yield* keymaxxer.findSecret({
-            provider: "github",
-            account: `${repository.githubOwner}/${repository.githubRepo}`,
-          })
-    if (tokenName === null) {
-      return yield* new DecidePrMergeContextError({
-        message: `No GitHub credential is configured for ${repository.githubOwner}/${repository.githubRepo}`,
-      })
-    }
+    const auth = yield* resolveAgentTurnGitHubAuth({
+      githubOwner: repository.githubOwner,
+      githubRepo: repository.githubRepo,
+    }).pipe(
+      Effect.mapError((cause) => {
+        if (cause instanceof AgentTurnGitHubCredentialMissingError) {
+          return new DecidePrMergeContextError({ message: cause.message })
+        }
+        return new DecidePrMergeContextError({
+          message: "Failed to resolve the repository GitHub credential",
+        })
+      }),
+    )
     const prompt = [
       "Assess whether this pull request is low enough risk for an automated agent (clanker) to merge, or whether a human must merge it.",
       "Base the decision on risk: blast radius, security or auth changes, data migrations, irreversible operations, ambiguous requirements, incomplete verification, or anything that needs human judgment.",
       "Inspect the PR and its checks if needed. Do not merge the pull request.",
-      ...(tokenName === undefined
-        ? []
-        : [
-            `Use Keymaxxer secret ${tokenName} via keymaxxer_run for any GitHub CLI or API access; never put secret values in the environment.`,
-          ]),
+      agentTurnGitHubCredentialGuidance(auth, "GitHub CLI or API access"),
       "End your final response with exactly one machine-readable result line:",
       "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
       "or, only when a human must merge:",
