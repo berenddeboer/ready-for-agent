@@ -276,7 +276,7 @@ An Implementable Issue with no unfinished Work Item, including no Needs Human Wo
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
-The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. In the PR completion loop, Watch prioritizes merge conflicts and Status Check Handoffs, sends a settled draft through Mark PR Ready for Review, and sends a settled ready PR past its Check-Start Deadline to Decide PR Merge.
+The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. In the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs, defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles; it sends a settled draft through Mark PR Ready for Review, and sends a settled ready PR past its Check-Start Deadline to Decide PR Merge.
 _Avoid_: Last completed step, phase
 
 **Merge Revalidation Outcome**:
@@ -308,7 +308,7 @@ Feedback published by a recognized automated reviewer for a PR Status Check, tre
 _Avoid_: Eventually consistent review comment, pending comment
 
 **Status Check Handoff**:
-A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks, including available red-check diagnostics and relevant Automated Review Output. It is handled as processed when no replacement is expected, as a Checks Triggered Outcome when an action should create new executions, or as an explicit failure or human handoff; terminal review output never creates a waiting outcome.
+A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks, including available red-check diagnostics and relevant Automated Review Output. Terminal green executions accumulate while GitHub still reports an actual pending execution; Watch hands them off only after the aggregate settles, so staggered greens produce one investigation. Unhandled red executions and merge conflicts still hand off immediately. It is handled as processed when no replacement is expected, as a Checks Triggered Outcome when an action should create new executions, or as an explicit failure or human handoff; terminal review output never creates a waiting outcome.
 _Avoid_: Check classification, one prompt per check
 
 **Checks Triggered Outcome**:

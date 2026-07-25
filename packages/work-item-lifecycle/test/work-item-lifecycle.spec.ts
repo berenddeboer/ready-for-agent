@@ -3409,9 +3409,11 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("batches unhandled green results while aggregate is pending and waits for handoff before Mark PR Ready", () => {
+    it("defers green handoffs while aggregate is pending and investigates once after settle", () => {
+      // Mirrors staggered green completion: Watch keeps polling while pending,
+      // then one settled handoff, then success after investigation.
       const watchStatuses = [
-        watchResult("handoff_needed"),
+        watchResult("pending"),
         watchResult("pending"),
         watchResult("handoff_needed"),
         watchResult("succeeded"),
@@ -3449,47 +3451,36 @@ describe("WorkItemLifecycle", () => {
           }
           yield* forgetCreatePrDraftProvenance(created.id)
 
-          const firstHandoff = yield* claimAndRunPending
-          expect(firstHandoff._tag).toBe("processed")
-          if (firstHandoff._tag === "processed") {
-            expect(firstHandoff.workItem.state).toBe(
-              "investigate_pr_status_checks",
-            )
+          const firstPending = yield* claimAndRunPending
+          expect(firstPending._tag).toBe("processed")
+          if (firstPending._tag === "processed") {
+            expect(firstPending.workItem.state).toBe("watch_pr_status_checks")
+          }
+          expect(investigations).toBe(0)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const secondPending = yield* claimAndRunPending
+          expect(secondPending._tag).toBe("processed")
+          if (secondPending._tag === "processed") {
+            expect(secondPending.workItem.state).toBe("watch_pr_status_checks")
+          }
+          expect(investigations).toBe(0)
+
+          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+          const handoff = yield* claimAndRunPending
+          expect(handoff._tag).toBe("processed")
+          if (handoff._tag === "processed") {
+            expect(handoff.workItem.state).toBe("investigate_pr_status_checks")
           }
 
-          const afterFirstInvestigate = yield* claimAndRunPending
-          expect(afterFirstInvestigate._tag).toBe("processed")
-          if (afterFirstInvestigate._tag === "processed") {
-            expect(afterFirstInvestigate.workItem.state).toBe(
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.state).toBe(
               "watch_pr_status_checks",
             )
           }
           expect(investigations).toBe(1)
-
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const stillPending = yield* claimAndRunPending
-          expect(stillPending._tag).toBe("processed")
-          if (stillPending._tag === "processed") {
-            expect(stillPending.workItem.state).toBe("watch_pr_status_checks")
-          }
-
-          yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
-          const secondHandoff = yield* claimAndRunPending
-          expect(secondHandoff._tag).toBe("processed")
-          if (secondHandoff._tag === "processed") {
-            expect(secondHandoff.workItem.state).toBe(
-              "investigate_pr_status_checks",
-            )
-          }
-
-          const afterSecondInvestigate = yield* claimAndRunPending
-          expect(afterSecondInvestigate._tag).toBe("processed")
-          if (afterSecondInvestigate._tag === "processed") {
-            expect(afterSecondInvestigate.workItem.state).toBe(
-              "watch_pr_status_checks",
-            )
-          }
-          expect(investigations).toBe(2)
 
           yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
           const ready = yield* claimAndRunPending
@@ -3497,6 +3488,7 @@ describe("WorkItemLifecycle", () => {
           if (ready._tag === "processed") {
             expect(ready.workItem.state).toBe("decide_pr_merge")
           }
+          expect(investigations).toBe(1)
         }),
       )
     })

@@ -265,6 +265,16 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
       } satisfies PrStatusCheckResult
     }
     if (unhandled.length > 0) {
+      const hasUnhandledRed = unhandled.some((check) => check.outcome === "red")
+      // Terminals are already recorded; defer green-only Status Check Handoffs
+      // while rollup is still pending. Red recovery stays immediate so a
+      // failure is not masked by later checks, and includes accumulated greens.
+      if (status._tag === "pending" && !hasUnhandledRed) {
+        return {
+          _tag: "pending",
+          ...evidence,
+        } satisfies PrStatusCheckResult
+      }
       return {
         _tag: "handoff_needed",
         ...evidence,
