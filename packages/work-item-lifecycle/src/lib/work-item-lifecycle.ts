@@ -615,6 +615,12 @@ export interface WorkItemLifecycleShape {
     fromMs: number,
     toMs: number,
   ) => Effect.Effect<number, ListWorkItemsError>
+  /**
+   * Advance after a confirmed Work Item PR outcome from Refresh.
+   * `merged` supersedes any unfinished step (including Needs Human) that owns
+   * a Work Item PR: interrupt/cancel active Step Runs, then local cleanup.
+   * `closed_unmerged` remains limited to merge-related Needs Human handoffs.
+   */
   readonly continueAfterHumanPrOutcome: (
     workItemId: string,
     outcome: HumanPrOutcome,
@@ -684,6 +690,8 @@ export const makeWorkItemLifecycleLive = (
         }
       >()
       const resettingWorkItems = new Set<string>()
+      /** Work Items being advanced to local cleanup because their PR merged. */
+      const mergeSupersedingWorkItems = new Set<string>()
 
       if (!queue.queueInTransaction) {
         return yield* new NonTransactionalQueueError({
@@ -1792,8 +1800,6 @@ export const makeWorkItemLifecycleLive = (
           const now = yield* Clock.currentTimeMillis
           const { stepRun, workItem, output, revalidation } = input
           const transition = output.transition
-          const nextStep =
-            transition?.nextState ?? nextOperationalStep(stepRun.step)
           const worktreePath =
             output.worktreePath === undefined
               ? workItem.worktree_path
@@ -1810,6 +1816,18 @@ export const makeWorkItemLifecycleLive = (
           const githubPullRequestNumber =
             output.githubPullRequestNumber ??
             workItem.github_pull_request_number
+
+          // A merged Work Item PR often closes the Issue. Do not Failed the Work
+          // Item for issue_not_open / issue_not_found when a PR is already owned,
+          // but also do not Complete without Refresh confirming the PR is merged
+          // (operator may have closed the Issue while the PR is still open).
+          const deferIssueRevalidationForOwnedPr =
+            !revalidation.ok &&
+            githubPullRequestNumber !== null &&
+            (revalidation.failureCode === "issue_not_found" ||
+              revalidation.failureCode === "issue_not_open")
+          const nextStep =
+            transition?.nextState ?? nextOperationalStep(stepRun.step)
 
           yield* sql
             .withTransaction(
@@ -1877,7 +1895,33 @@ export const makeWorkItemLifecycleLive = (
                   )
                 }
 
-                if (!revalidation.ok) {
+                if (deferIssueRevalidationForOwnedPr) {
+                  // Park: Step Run succeeded; keep current operational state and
+                  // release the slot. Refresh's confirmed-merge path advances.
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                   SET failure_code = NULL,
+                       failure_message = NULL,
+                       worktree_path = ?,
+                       starting_commit_oid = ?,
+                       completion_summary = ?,
+                       session_id = ?,
+                       github_pull_request_number = ?,
+                       holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                    [
+                      worktreePath,
+                      startingCommitOid,
+                      completionSummary,
+                      sessionId,
+                      githubPullRequestNumber,
+                      now,
+                      workItem.id,
+                    ],
+                  )
+                } else if (!revalidation.ok) {
                   yield* sql.unsafe(
                     `UPDATE work_item
                    SET state = 'failed',
@@ -2483,6 +2527,7 @@ export const makeWorkItemLifecycleLive = (
           Effect.sync(() => {
             if (
               resettingWorkItems.has(workItem.id) ||
+              mergeSupersedingWorkItems.has(workItem.id) ||
               activeStepExecutions.has(stepRunId)
             ) {
               return false
@@ -3421,6 +3466,48 @@ export const makeWorkItemLifecycleLive = (
         return abandoned
       })
 
+      const mapContinueAfterHumanPrOutcomeTransactionError = (
+        error: unknown,
+      ): Effect.Effect<never, ContinueAfterHumanPrOutcomeError> => {
+        if (
+          error instanceof NeedsHumanHandoffNotEligibleError ||
+          error instanceof WorkItemNotFoundError ||
+          error instanceof WorkItemLifecycleDatabaseError ||
+          error instanceof EnqueueError ||
+          error instanceof InvalidQueueNameError
+        ) {
+          return Effect.fail(error)
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "_tag" in error &&
+          ((error as { _tag: string })._tag === "AcknowledgeError" ||
+            (error as { _tag: string })._tag === "JobNotFoundError")
+        ) {
+          return Effect.fail(
+            new WorkItemLifecycleDatabaseError({
+              message: `Failed to acknowledge superseded Step Run jobs after merge: ${String(error)}`,
+              cause: error,
+            }),
+          )
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "_tag" in error &&
+          (error as { _tag: string })._tag === "SqlError"
+        ) {
+          return Effect.fail(toDatabaseError(error as SqlError))
+        }
+        return Effect.fail(
+          new WorkItemLifecycleDatabaseError({
+            message: `Unexpected failure resuming after human merge: ${String(error)}`,
+            cause: error,
+          }),
+        )
+      }
+
       const continueAfterHumanPrOutcome = Effect.fn(
         "WorkItemLifecycle.continueAfterHumanPrOutcome",
       )(function* (workItemId: string, outcome: HumanPrOutcome) {
@@ -3429,16 +3516,15 @@ export const makeWorkItemLifecycleLive = (
           return yield* new WorkItemNotFoundError({ workItemId })
         }
 
-        const latestStep = yield* loadLatestStep(workItemId)
-        if (!isMergeNeedsHumanHandoff(workItem, latestStep)) {
-          return yield* new NeedsHumanHandoffNotEligibleError({
-            workItemId,
-            reason:
-              "Work Item is not a merge-related Needs Human handoff with a Work Item PR",
-          })
-        }
-
         if (outcome === "closed_unmerged") {
+          const latestStep = yield* loadLatestStep(workItemId)
+          if (!isMergeNeedsHumanHandoff(workItem, latestStep)) {
+            return yield* new NeedsHumanHandoffNotEligibleError({
+              workItemId,
+              reason:
+                "Work Item is not a merge-related Needs Human handoff with a Work Item PR",
+            })
+          }
           return yield* abandon(workItemId).pipe(
             Effect.mapError((error): ContinueAfterHumanPrOutcomeError => {
               if (
@@ -3456,82 +3542,240 @@ export const makeWorkItemLifecycleLive = (
           )
         }
 
-        const now = yield* Clock.currentTimeMillis
+        // Merged: supersede any unfinished Work Item that owns a Work Item PR.
+        if (
+          workItem.state === "complete" ||
+          workItem.state === "failed" ||
+          workItem.state === "abandoned"
+        ) {
+          return yield* new NeedsHumanHandoffNotEligibleError({
+            workItemId,
+            reason: "Work Item is already terminal",
+          })
+        }
+        if (workItem.github_pull_request_number === null) {
+          return yield* new NeedsHumanHandoffNotEligibleError({
+            workItemId,
+            reason: "Work Item has no Work Item PR",
+          })
+        }
+        if (workItem.state === "local_cleanup") {
+          return yield* getWorkItem(workItemId)
+        }
 
-        yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const updated = (yield* sql.unsafe(
-                `UPDATE work_item
-                 SET state = 'local_cleanup',
-                     state_ready_at = ?,
-                     failure_code = NULL,
-                     failure_message = NULL,
-                     updated_at = ?
-                 WHERE id = ?
-                   AND state = 'needs_human'
-                 RETURNING id`,
-                [now, now, workItemId],
-              )) as readonly { readonly id: string }[]
+        yield* Effect.sync(() => mergeSupersedingWorkItems.add(workItemId))
 
-              if (!updated[0]) {
-                return yield* new NeedsHumanHandoffNotEligibleError({
-                  workItemId,
-                  reason: "Work Item is no longer Needs Human",
-                })
-              }
+        return yield* Effect.gen(function* () {
+          // Snapshot active Step Runs before interrupt so we can label them
+          // pr_merged even when in-process interrupt finishes them first.
+          const supersedingStepRuns = (yield* sql
+            .unsafe(
+              `SELECT id, status, queue_job_id FROM step_run
+               WHERE work_item_id = ?
+                 AND status IN ('queued', 'running')`,
+              [workItemId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly id: string
+            readonly status: string
+            readonly queue_job_id: string | null
+          }[]
 
-              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
-              if (!acquired) {
-                return
-              }
-
-              yield* enqueueStepRunForWorkItem(workItemId, "local_cleanup", now)
-            }),
+          const activeExecutions = [...activeStepExecutions.values()].filter(
+            (execution) => execution.workItemId === workItemId,
           )
-          .pipe(
-            Effect.catch(
-              (
-                error,
-              ): Effect.Effect<never, ContinueAfterHumanPrOutcomeError> => {
-                if (
-                  error instanceof NeedsHumanHandoffNotEligibleError ||
-                  error instanceof WorkItemLifecycleDatabaseError ||
-                  error instanceof EnqueueError ||
-                  error instanceof InvalidQueueNameError
-                ) {
-                  return Effect.fail(error)
+          yield* Effect.forEach(
+            activeExecutions,
+            ({ cancel }) => Deferred.succeed(cancel, undefined),
+            { discard: true },
+          )
+          yield* Effect.forEach(
+            activeExecutions,
+            ({ finished }) => Deferred.await(finished),
+            { discard: true },
+          )
+
+          const now = yield* Clock.currentTimeMillis
+
+          yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const current = yield* loadWorkItemRow(workItemId)
+                if (!current) {
+                  return yield* new WorkItemNotFoundError({ workItemId })
                 }
                 if (
-                  typeof error === "object" &&
-                  error !== null &&
-                  "_tag" in error &&
-                  (error as { _tag: string })._tag === "SqlError"
+                  current.state === "complete" ||
+                  current.state === "failed" ||
+                  current.state === "abandoned"
                 ) {
-                  return Effect.fail(toDatabaseError(error as SqlError))
+                  return yield* new NeedsHumanHandoffNotEligibleError({
+                    workItemId,
+                    reason: "Work Item is already terminal",
+                  })
                 }
-                return Effect.fail(
-                  new WorkItemLifecycleDatabaseError({
-                    message: `Unexpected failure resuming after human merge: ${String(error)}`,
-                    cause: error,
-                  }),
+                if (current.github_pull_request_number === null) {
+                  return yield* new NeedsHumanHandoffNotEligibleError({
+                    workItemId,
+                    reason: "Work Item has no Work Item PR",
+                  })
+                }
+                if (current.state === "local_cleanup") {
+                  return
+                }
+
+                for (const active of supersedingStepRuns) {
+                  // Label by id from the pre-interrupt snapshot. A snapshotted
+                  // queued row may become interrupted if it started before
+                  // cancel landed; never overwrite a terminal Effect outcome.
+                  yield* sql.unsafe(
+                    `UPDATE step_run
+                     SET status = CASE
+                           WHEN status IN ('queued', 'cancelled') THEN 'cancelled'
+                           ELSE 'interrupted'
+                         END,
+                         finished_at = COALESCE(finished_at, ?),
+                         reason_code = ?,
+                         reason_message = CASE
+                           WHEN status IN ('queued', 'cancelled')
+                             THEN ?
+                           ELSE ?
+                         END,
+                         updated_at = ?
+                     WHERE id = ?
+                       AND status IN (
+                         'queued',
+                         'running',
+                         'interrupted',
+                         'cancelled'
+                       )`,
+                    [
+                      now,
+                      STEP_RUN_REASON.prMerged,
+                      "Work Item PR was merged before the Step Run started",
+                      "Work Item PR was merged; Step Run superseded",
+                      now,
+                      active.id,
+                    ],
+                  )
+
+                  if (active.queue_job_id !== null) {
+                    yield* queue
+                      .acknowledge(active.queue_job_id)
+                      .pipe(
+                        Effect.catchTag("JobNotFoundError", () => Effect.void),
+                      )
+                  }
+                }
+
+                // Catch any Step Run that became active after the snapshot.
+                yield* sql.unsafe(
+                  `UPDATE step_run
+                   SET status = 'interrupted',
+                       finished_at = COALESCE(finished_at, ?),
+                       reason_code = ?,
+                       reason_message = ?,
+                       updated_at = ?
+                   WHERE work_item_id = ? AND status = 'running'`,
+                  [
+                    now,
+                    STEP_RUN_REASON.prMerged,
+                    "Work Item PR was merged; Step Run superseded",
+                    now,
+                    workItemId,
+                  ],
                 )
-              },
+                const lateQueued = (yield* sql.unsafe(
+                  `UPDATE step_run
+                   SET status = 'cancelled',
+                       finished_at = ?,
+                       reason_code = ?,
+                       reason_message = ?,
+                       updated_at = ?
+                   WHERE work_item_id = ? AND status = 'queued'
+                   RETURNING queue_job_id`,
+                  [
+                    now,
+                    STEP_RUN_REASON.prMerged,
+                    "Work Item PR was merged before the Step Run started",
+                    now,
+                    workItemId,
+                  ],
+                )) as readonly { readonly queue_job_id: string | null }[]
+                for (const cancelled of lateQueued) {
+                  if (cancelled.queue_job_id !== null) {
+                    yield* queue
+                      .acknowledge(cancelled.queue_job_id)
+                      .pipe(
+                        Effect.catchTag("JobNotFoundError", () => Effect.void),
+                      )
+                  }
+                }
+
+                const updated = (yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = 'local_cleanup',
+                       state_ready_at = ?,
+                       paused = 0,
+                       failure_code = NULL,
+                       failure_message = NULL,
+                       updated_at = ?
+                   WHERE id = ?
+                     AND state NOT IN ('complete', 'failed', 'abandoned', 'local_cleanup')
+                   RETURNING id`,
+                  [now, now, workItemId],
+                )) as readonly { readonly id: string }[]
+
+                if (!updated[0]) {
+                  return yield* new NeedsHumanHandoffNotEligibleError({
+                    workItemId,
+                    reason:
+                      "Work Item is no longer eligible for merge cleanup advance",
+                  })
+                }
+
+                const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+                if (!acquired) {
+                  return
+                }
+
+                const stillActive = (yield* sql.unsafe(
+                  `SELECT id FROM step_run
+                   WHERE work_item_id = ?
+                     AND status IN ('queued', 'running')
+                   LIMIT 1`,
+                  [workItemId],
+                )) as readonly { readonly id: string }[]
+                if (stillActive[0]) {
+                  return
+                }
+
+                yield* enqueueStepRunForWorkItem(
+                  workItemId,
+                  "local_cleanup",
+                  now,
+                )
+              }),
+            )
+            .pipe(Effect.catch(mapContinueAfterHumanPrOutcomeTransactionError))
+
+          const resumed = yield* getWorkItem(workItemId).pipe(
+            Effect.catchTag(
+              "WorkItemNotFoundError",
+              (error) =>
+                new WorkItemLifecycleDatabaseError({
+                  message: `Work Item missing after human merge resume: ${error.workItemId}`,
+                  cause: error,
+                }),
             ),
           )
-
-        const resumed = yield* getWorkItem(workItemId).pipe(
-          Effect.catchTag(
-            "WorkItemNotFoundError",
-            (error) =>
-              new WorkItemLifecycleDatabaseError({
-                message: `Work Item missing after human merge resume: ${error.workItemId}`,
-                cause: error,
-              }),
+          yield* notifyWorkItemsChanged(resumed.repositoryId)
+          return resumed
+        }).pipe(
+          Effect.ensuring(
+            Effect.sync(() => mergeSupersedingWorkItems.delete(workItemId)),
           ),
         )
-        yield* notifyWorkItemsChanged(resumed.repositoryId)
-        return resumed
       })
 
       const reset = Effect.fn("WorkItemLifecycle.reset")(function* (

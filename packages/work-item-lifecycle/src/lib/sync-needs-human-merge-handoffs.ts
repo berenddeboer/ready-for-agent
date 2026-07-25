@@ -5,9 +5,10 @@ import { WorkItemLifecycle } from "./work-item-lifecycle.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 /**
- * After Issue reconciliation, resume merge-related Needs Human handoffs when
- * the Work Item PR was merged (local cleanup) or closed unmerged (Abandon).
- * GitHub lookup failures are skipped so Refresh still succeeds.
+ * After Issue reconciliation, advance Work Items whose Work Item PR was merged
+ * (any unfinished operational step or Needs Human with a Work Item PR) to local
+ * cleanup, and Abandon merge-related Needs Human when the PR was closed
+ * unmerged. GitHub lookup failures are skipped so Refresh still succeeds.
  */
 export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
   Effect.gen(function* () {
@@ -24,20 +25,25 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
     let advanced = 0
 
     for (const workItem of workItems) {
-      if (workItem.state !== "needs_human") {
-        continue
-      }
       if (workItem.githubPullRequestNumber === null) {
         continue
       }
-      const latest = workItem.stepRuns.at(-1)
+      // Already past merge outcome handling.
       if (
-        latest === undefined ||
-        (latest.step !== "decide_pr_merge" && latest.step !== "merge_pr") ||
-        latest.status !== "succeeded"
+        workItem.state === "complete" ||
+        workItem.state === "failed" ||
+        workItem.state === "abandoned" ||
+        workItem.state === "local_cleanup"
       ) {
         continue
       }
+
+      const latest = workItem.stepRuns.at(-1)
+      const isMergeNeedsHuman =
+        workItem.state === "needs_human" &&
+        latest !== undefined &&
+        (latest.step === "decide_pr_merge" || latest.step === "merge_pr") &&
+        latest.status === "succeeded"
 
       const headRefName = workItemBranchName({
         githubOwner: repository.githubOwner,
@@ -57,7 +63,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         .pipe(
           Effect.catch((error) =>
             Effect.logWarning(
-              "Skipping Needs Human merge handoff: PR lifecycle lookup failed",
+              "Skipping Work Item PR merge outcome: PR lifecycle lookup failed",
               {
                 workItemId: workItem.id,
                 repositoryId,
@@ -77,13 +83,10 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
           .pipe(
             Effect.as(true),
             Effect.catch((error) =>
-              Effect.logWarning(
-                "Failed to resume Needs Human after human merge",
-                {
-                  workItemId: workItem.id,
-                  error: String(error),
-                },
-              ).pipe(Effect.as(false)),
+              Effect.logWarning("Failed to advance Work Item after merged PR", {
+                workItemId: workItem.id,
+                error: String(error),
+              }).pipe(Effect.as(false)),
             ),
           )
         if (didAdvance) {
@@ -92,7 +95,8 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         continue
       }
 
-      if (status._tag === "closed") {
+      // Closed-unmerged outside merge-related Needs Human is out of scope.
+      if (status._tag === "closed" && isMergeNeedsHuman) {
         const didAdvance = yield* lifecycle
           .continueAfterHumanPrOutcome(workItem.id, "closed_unmerged")
           .pipe(
