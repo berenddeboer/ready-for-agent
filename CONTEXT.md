@@ -291,6 +291,10 @@ _Avoid_: Last PR Change (when a ready transition, rerun, or restart is newer), W
 The instant 90 seconds after the latest Check-Start Anchor, before which neither an absence of checks nor an all-terminal observed set proves startup is complete. At or after the deadline, the harness assumes every check has started, while checks already pending are still watched until they finish.
 _Avoid_: No-check grace, Watch residence time, check completion timeout
 
+**Ready-Phase Status Check Round**:
+The fresh PR Status Check observation period after a pull request known to the harness as draft becomes ready for review. It protects repositories whose ready-for-review transition can start additional checks. A Repository may omit this round when its settled, non-failing draft-phase checks are sufficient evidence, allowing Mark PR Ready for Review to advance directly to Decide PR Merge. This omission does not shorten startup deadlines after PR creation, a head push, a check restart, or an automated-review rerun, and it never ignores an observed pending check or bypasses a known aggregate failure.
+_Avoid_: Second CI run, duplicate checks, post-draft delay
+
 **Automated Review Output**:
 Feedback published by a recognized automated reviewer for a PR Status Check, treated as fully published once that check is terminal. No comment means no feedback, while present but visibly incomplete output indicates a failed review eligible for bounded whole-review reruns.
 _Avoid_: Eventually consistent review comment, pending comment
