@@ -6994,6 +6994,7 @@ describe("WorkItemLifecycle", () => {
             workItemId: created.id,
             repositoryId: repository.id,
             githubIssueNumber: issue.githubIssueNumber,
+            agentBackend: "opencode",
             model: "",
             thinkingLevel: null,
             reviewModel: "",

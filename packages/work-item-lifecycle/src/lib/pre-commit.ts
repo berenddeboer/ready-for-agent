@@ -1,7 +1,7 @@
 import { dirname } from "node:path"
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   PreCommitInvalidWorktreeContextError,
@@ -147,8 +147,7 @@ const askOpencodeToFix = (
           Effect.mapError(
             (cause) =>
               new PreCommitOpenCodeError({
-                message:
-                  "OpenCode failed to fix pre-commit validation failures",
+                message: `${agentBackendLabel(context.agentBackend)} failed to fix pre-commit validation failures`,
                 worktreePath,
                 sessionId,
                 cause,

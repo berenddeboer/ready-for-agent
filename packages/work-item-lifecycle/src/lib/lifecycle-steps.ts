@@ -56,6 +56,11 @@ export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
   readonly githubIssueNumber: number
+  /**
+   * Work Item captured Agent Backend id (provenance for Agent Turns and
+   * operator-visible failure copy).
+   */
+  readonly agentBackend: string
   readonly model: string
   readonly thinkingLevel: string | null
   readonly reviewModel: string

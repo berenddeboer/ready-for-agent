@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import {
   AssessChangesInvalidWorktreeContextError,
   AssessChangesOpenCodeError,
@@ -71,7 +71,7 @@ const resolveSessionId = (context: LifecycleStepContext) => {
       new AssessChangesSessionMissingError({
         workItemId: context.workItemId,
         message:
-          "Assess Changes requires the Implement OpenCode Session when the worktree appears unchanged",
+          "Assess Changes requires a Session ID persisted by a successful Implement Step Run when the worktree appears unchanged",
       }),
     )
   }
@@ -206,8 +206,8 @@ const confirmNoObservableChange = (
               workItemId: context.workItemId,
               message:
                 cause instanceof Error && cause.message.trim() !== ""
-                  ? `OpenCode failed while confirming Assess Changes: ${cause.message}`
-                  : "OpenCode failed while confirming Assess Changes",
+                  ? `${agentBackendLabel(context.agentBackend)} failed while confirming Assess Changes: ${cause.message}`
+                  : `${agentBackendLabel(context.agentBackend)} failed while confirming Assess Changes`,
               cause,
             }),
         ),
@@ -217,8 +217,7 @@ const confirmNoObservableChange = (
     if (parsed === null) {
       return yield* new AssessChangesResultError({
         workItemId: context.workItemId,
-        message:
-          "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: CHANGES or NO_CHANGES with a non-blank summary when required",
+        message: `${agentBackendLabel(context.agentBackend)} did not report a unique final READY_FOR_AGENT_RESULT: CHANGES or NO_CHANGES with a non-blank summary when required`,
       })
     }
     return parsed

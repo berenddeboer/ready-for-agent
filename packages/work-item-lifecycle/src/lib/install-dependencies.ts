@@ -1,6 +1,6 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import {
   type InstallCommand,
   type InstallPlan,
@@ -145,7 +145,7 @@ const runOpencodeFallback = (
         Effect.mapError(
           (cause) =>
             new InstallDependenciesFallbackError({
-              message: "OpenCode fallback failed to install dependencies",
+              message: `${agentBackendLabel(context.agentBackend)} fallback failed to install dependencies`,
               worktreePath,
               cause,
             }),

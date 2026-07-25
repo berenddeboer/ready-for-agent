@@ -20,6 +20,7 @@ const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
   githubIssueNumber: 79,
+  agentBackend: "opencode",
   model: "opencode/test-model",
   thinkingLevel: "high",
   reviewModel: "opencode/test-model",

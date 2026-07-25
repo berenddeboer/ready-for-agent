@@ -17,6 +17,7 @@ import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
+  agentBackendLabel,
   isAgentDependentLifecycleStep,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
@@ -1949,7 +1950,7 @@ export const makeWorkItemLifecycleLive = (
                     [
                       now,
                       transition?.reason ??
-                        "OpenCode requested human intervention",
+                        `${agentBackendLabel(workItem.agent_backend)} requested human intervention`,
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
@@ -2683,6 +2684,7 @@ export const makeWorkItemLifecycleLive = (
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
                 githubIssueNumber: workItem.github_issue_number,
+                agentBackend: workItem.agent_backend,
                 model: selection.model,
                 thinkingLevel: selection.thinkingLevel,
                 reviewModel: selection.reviewModel,
@@ -3143,6 +3145,7 @@ export const makeWorkItemLifecycleLive = (
         workItemId: row.id as WorkItemId,
         repositoryId: row.repository_id,
         githubIssueNumber: row.github_issue_number,
+        agentBackend: row.agent_backend,
         model: models.model,
         thinkingLevel: models.thinkingLevel,
         reviewModel: models.reviewModel,

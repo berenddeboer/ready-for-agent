@@ -1,7 +1,7 @@
 import { Clock, Effect, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import { ulid } from "ulidx"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   GitHubService,
@@ -118,7 +118,8 @@ const resolveContext = (context: LifecycleStepContext) =>
     }
     if (context.sessionId === null || context.sessionId.trim() === "") {
       return yield* new PrStatusChecksContextError({
-        message: "PR status checks require the Implement OpenCode Session",
+        message:
+          "PR status checks require a Session ID persisted by a successful Implement Step Run",
       })
     }
     const db = yield* DbService
@@ -648,8 +649,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
     const timeout =
       context.maxDuration ??
       DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks
-    const missingOutcomeMessage =
-      "OpenCode did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN"
+    const missingOutcomeMessage = `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN`
 
     const continueInvestigationTurn = (
       prompt: string,
@@ -671,7 +671,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           Effect.mapError(
             (cause) =>
               new PrStatusChecksOpenCodeError({
-                message: `OpenCode failed while investigating PR status checks (${phase})`,
+                message: `${agentBackendLabel(context.agentBackend)} failed while investigating PR status checks (${phase})`,
                 cause,
               }),
           ),

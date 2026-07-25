@@ -1,5 +1,5 @@
 import { Effect, FileSystem } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import {
@@ -164,7 +164,7 @@ export const createPr = (context: LifecycleStepContext) =>
         Effect.mapError(
           (cause) =>
             new CreatePrOpenCodeError({
-              message: "OpenCode failed to create a pull request",
+              message: `${agentBackendLabel(context.agentBackend)} failed to create a pull request`,
               worktreePath,
               sessionId,
               cause,

@@ -1,5 +1,6 @@
 import {
   AGENT_BACKEND_IDS,
+  agentBackendLabel,
   capabilitySupported,
   defaultAgentBackendId,
   getBuiltInAgentBackend,
@@ -21,6 +22,12 @@ describe("Agent Backend registry", () => {
     expect(
       getBuiltInAgentBackend(AGENT_BACKEND_IDS.grok)?.descriptor.label,
     ).toBe("Grok Build")
+  })
+
+  it("maps backend ids to operator-visible labels for failure copy", () => {
+    expect(agentBackendLabel(AGENT_BACKEND_IDS.opencode)).toBe("OpenCode")
+    expect(agentBackendLabel(AGENT_BACKEND_IDS.grok)).toBe("Grok Build")
+    expect(agentBackendLabel("unknown-backend")).toBe("unknown-backend")
   })
 
   it("declares typed capabilities for OpenCode and Grok Build", () => {

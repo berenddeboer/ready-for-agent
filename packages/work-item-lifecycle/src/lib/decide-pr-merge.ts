@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   AgentTurnGitHubCredentialMissingError,
@@ -38,7 +38,8 @@ const resolveContext = (context: LifecycleStepContext) =>
     }
     if (context.sessionId === null || context.sessionId.trim() === "") {
       return yield* new DecidePrMergeContextError({
-        message: "Decide PR merge requires the Implement OpenCode Session",
+        message:
+          "Decide PR merge requires a Session ID persisted by a successful Implement Step Run",
       })
     }
     const db = yield* DbService
@@ -146,8 +147,8 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
             new DecidePrMergeOpenCodeError({
               message:
                 cause instanceof Error && cause.message.trim() !== ""
-                  ? `OpenCode failed while deciding PR merge risk: ${cause.message}`
-                  : "OpenCode failed while deciding PR merge risk",
+                  ? `${agentBackendLabel(context.agentBackend)} failed while deciding PR merge risk: ${cause.message}`
+                  : `${agentBackendLabel(context.agentBackend)} failed while deciding PR merge risk`,
               cause,
             }),
         ),
@@ -155,7 +156,7 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
     const decision = parseDecidePrMergeResult(result.assistantText)
     if (decision === null) {
       return yield* new DecidePrMergeOpenCodeError({
-        message: "OpenCode did not report CLANKER_MERGE or NEEDS_HUMAN",
+        message: `${agentBackendLabel(context.agentBackend)} did not report CLANKER_MERGE or NEEDS_HUMAN`,
       })
     }
     return decision

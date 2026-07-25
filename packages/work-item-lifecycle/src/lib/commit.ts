@@ -1,5 +1,5 @@
 import { Effect, FileSystem } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import {
   CommitInvalidWorktreeContextError,
   CommitOpenCodeError,
@@ -92,7 +92,7 @@ export const commit = (context: LifecycleStepContext) =>
         Effect.mapError(
           (cause) =>
             new CommitOpenCodeError({
-              message: "OpenCode failed to commit the Work Item changes",
+              message: `${agentBackendLabel(context.agentBackend)} failed to commit the Work Item changes`,
               worktreePath,
               sessionId,
               cause,
