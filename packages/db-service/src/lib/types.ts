@@ -35,6 +35,10 @@ export const RepositoryRecord = Schema.Struct({
   localPath: Schema.String,
   isBare: Schema.Boolean,
   paused: Schema.Boolean,
+  /**
+   * Optional Agent Backend override. Null means inherit harness default.
+   */
+  selectedAgentBackend: Schema.NullOr(Schema.String),
   defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
@@ -48,6 +52,12 @@ export type RepositoryRecord = typeof RepositoryRecord.Type
 export const UpdateRepositorySettingsInput = Schema.Struct({
   repositoryId: Schema.String,
   paused: Schema.Boolean,
+  /**
+   * Null clears the override (inherit harness default). Omitted leaves the
+   * stored override unchanged so callers that do not yet send the field
+   * (GraphQL until #467) do not wipe it.
+   */
+  selectedAgentBackend: Schema.optionalKey(Schema.NullOr(Schema.String)),
   defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
@@ -155,6 +165,7 @@ export const RepositorySqlRow = Schema.Struct({
   localPath: Schema.String,
   isBare: SqlBoolean,
   paused: SqlBoolean,
+  selectedAgentBackend: Schema.NullOr(Schema.String),
   defaultModel: Schema.NullOr(Schema.String),
   defaultThinkingLevel: Schema.NullOr(Schema.String),
   reviewModel: Schema.NullOr(Schema.String),
@@ -169,6 +180,7 @@ export const RepositorySqlRow = Schema.Struct({
     githubRepo: "github_repo",
     localPath: "local_path",
     isBare: "is_bare",
+    selectedAgentBackend: "selected_agent_backend",
     defaultModel: "default_model",
     defaultThinkingLevel: "default_thinking_level",
     reviewModel: "review_model",

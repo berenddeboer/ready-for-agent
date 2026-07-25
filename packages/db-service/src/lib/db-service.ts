@@ -9,7 +9,7 @@ import {
   InvalidConfigInputError,
   InvalidIssueInputError,
   InvalidRepositoryInputError,
-  type InvalidRepositorySettingsError,
+  InvalidRepositorySettingsError,
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
   RepositoryHasRunningStepError,
@@ -157,6 +157,43 @@ const normalizeOptionalConfigSetting = (
   return Effect.succeed(trimmed)
 }
 
+/**
+ * Unfinished Work Items block backend changes (includes Needs Human, paused,
+ * Waiting for Worker Slot). Terminal complete/failed/abandoned do not.
+ */
+const isUnfinishedStateSql = (column = "state") =>
+  `${column} NOT IN ('complete', 'failed', 'abandoned')`
+
+/**
+ * Normalize a Repository Agent Backend override. Empty/whitespace → null
+ * (inherit). Non-null must be a selectable built-in backend id.
+ */
+const normalizeRepositoryAgentBackendOverride = (
+  value: string | null,
+): Effect.Effect<string | null, InvalidRepositorySettingsError> => {
+  if (value === null) {
+    return Effect.succeed(null)
+  }
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return Effect.succeed(null)
+  }
+  if (!isSelectableAgentBackendId(trimmed)) {
+    return Effect.fail(
+      new InvalidRepositorySettingsError({
+        field: "selectedAgentBackend",
+        message: `Unknown Agent Backend: ${trimmed}`,
+      }),
+    )
+  }
+  return Effect.succeed(trimmed)
+}
+
+const effectiveAgentBackend = (
+  repositoryOverride: string | null,
+  harnessDefault: string,
+): string => repositoryOverride ?? harnessDefault
+
 const toDatabaseError = (error: SqlError) =>
   new DatabaseError({
     message: `Database error: ${formatSqlError(error)}`,
@@ -195,8 +232,8 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
   )
 
 const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
-             default_model, default_thinking_level, review_model, review_thinking_level,
-             backend_model_prefs, auto_merge,
+             selected_agent_backend, default_model, default_thinking_level,
+             review_model, review_thinking_level, backend_model_prefs, auto_merge,
              include_all_issue_authors, issues_reconciled_at`
 
 const issueSelectColumns = `id, repository_id, github_issue_number, title, body, url, state,
@@ -211,6 +248,7 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
     localPath: row.localPath,
     isBare: row.isBare,
     paused: row.paused,
+    selectedAgentBackend: row.selectedAgentBackend,
     defaultModel: row.defaultModel,
     defaultThinkingLevel: row.defaultThinkingLevel,
     reviewModel: row.reviewModel,
@@ -268,8 +306,10 @@ export interface DbServiceShape {
     InvalidConfigInputError | AgentBackendChangeBlockedError | DatabaseError
   >
   /**
-   * Work Items that block Agent Backend change: anything not terminal
-   * complete/failed/abandoned (includes Needs Human and waiting/in-progress).
+   * Fleet-wide unfinished Work Item total (not terminal complete/failed/
+   * abandoned; includes Needs Human, paused, and Waiting for Worker Slot).
+   * Visibility/UI only — backend-change gates use scoped blocking counts
+   * (inheriting repos for harness default; one repository for override).
    */
   readonly countUnfinishedWorkItems: Effect.Effect<number, DatabaseError>
   readonly addRepository: (
@@ -285,7 +325,10 @@ export interface DbServiceShape {
     input: UpdateRepositorySettingsInput,
   ) => Effect.Effect<
     RepositoryRecord,
-    InvalidRepositorySettingsError | RepositoryNotFoundError | DatabaseError
+    | InvalidRepositorySettingsError
+    | AgentBackendChangeBlockedError
+    | RepositoryNotFoundError
+    | DatabaseError
   >
   readonly pauseRepository: (
     repositoryId: string,
@@ -438,19 +481,67 @@ export const DbServiceLive = Layer.effect(
         maxConcurrentWorkItems: row.maxConcurrentWorkItems,
       })
 
+    const readCount = (rows: readonly { readonly count: number }[]): number => {
+      const count = rows[0]?.count
+      return typeof count === "number" && Number.isFinite(count) ? count : 0
+    }
+
+    /** Fleet-wide unfinished total (visibility; not the global backend gate). */
     const countUnfinishedWorkItems: Effect.Effect<number, DatabaseError> =
       Effect.gen(function* () {
         const rows = (yield* sql
           .unsafe(
             `SELECT COUNT(*) AS count FROM work_item
-             WHERE state NOT IN ('complete', 'failed', 'abandoned')`,
+             WHERE ${isUnfinishedStateSql()}`,
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly {
           readonly count: number
         }[]
-        const count = rows[0]?.count
-        return typeof count === "number" && Number.isFinite(count) ? count : 0
+        return readCount(rows)
       }).pipe(Effect.withSpan("DbService.countUnfinishedWorkItems"))
+
+    /**
+     * Unfinished Work Items on Repositories that inherit the harness default
+     * (override is null). These alone block changing the global default.
+     */
+    const countBlockingUnfinishedForGlobalDefault = (): Effect.Effect<
+      number,
+      DatabaseError
+    > =>
+      Effect.gen(function* () {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT COUNT(*) AS count
+             FROM work_item wi
+             INNER JOIN repository r ON r.id = wi.repository_id
+             WHERE ${isUnfinishedStateSql("wi.state")}
+               AND r.selected_agent_backend IS NULL`,
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly count: number
+        }[]
+        return readCount(rows)
+      })
+
+    /**
+     * Unfinished Work Items on one Repository (blocks that repo's override change).
+     */
+    const countBlockingUnfinishedForRepository = (
+      repositoryId: string,
+    ): Effect.Effect<number, DatabaseError> =>
+      Effect.gen(function* () {
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT COUNT(*) AS count FROM work_item
+             WHERE repository_id = ?
+               AND ${isUnfinishedStateSql()}`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly count: number
+        }[]
+        return readCount(rows)
+      })
 
     const readConfigRow = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
@@ -496,13 +587,19 @@ export const DbServiceLive = Layer.effect(
       },
     )
 
-    const projectRepositoryFlatColumns = (
+    /**
+     * Re-project flat model columns from backendModelPrefs for repositories
+     * that inherit the harness default (selected_agent_backend IS NULL). Explicit
+     * overrides keep their own effective backend projection.
+     */
+    const projectInheritingRepositoryFlatColumns = (
       now: number,
-      backendId: string,
+      harnessDefaultBackendId: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const rows = (yield* sql.unsafe(
-          `SELECT id, backend_model_prefs AS backendModelPrefs FROM repository`,
+          `SELECT id, backend_model_prefs AS backendModelPrefs FROM repository
+           WHERE selected_agent_backend IS NULL`,
         )) as readonly {
           readonly id: string
           readonly backendModelPrefs: string
@@ -510,7 +607,7 @@ export const DbServiceLive = Layer.effect(
         for (const row of rows) {
           const prefs = prefsForBackend(
             parseBackendModelPrefsMap(row.backendModelPrefs ?? "{}"),
-            backendId,
+            harnessDefaultBackendId,
           )
           yield* sql.unsafe(
             `UPDATE repository SET
@@ -608,26 +705,17 @@ export const DbServiceLive = Layer.effect(
             const changing =
               selectedAgentBackend !== latest.selectedAgentBackend
             if (changing) {
-              const unfinishedRows = (yield* sql
-                .unsafe(
-                  `SELECT COUNT(*) AS count FROM work_item
-                   WHERE state NOT IN ('complete', 'failed', 'abandoned')`,
-                )
-                .pipe(Effect.mapError(toDatabaseError))) as readonly {
-                readonly count: number
-              }[]
-              const unfinished = unfinishedRows[0]?.count
-              const count =
-                typeof unfinished === "number" && Number.isFinite(unfinished)
-                  ? unfinished
-                  : 0
+              // Gate on inheriting repos only. Explicit-override WIP does not
+              // block the harness default change.
+              const count = yield* countBlockingUnfinishedForGlobalDefault()
               if (count > 0) {
                 return yield* new AgentBackendChangeBlockedError({
-                  message: `Cannot change Agent Backend while ${count} Work Item(s) are unfinished`,
+                  message: `Cannot change default Agent Backend while ${count} Work Item(s) are unfinished on Repositories that inherit the default`,
                   unfinishedWorkItemCount: count,
+                  scope: "global",
                 })
               }
-              yield* projectRepositoryFlatColumns(
+              yield* projectInheritingRepositoryFlatColumns(
                 now,
                 selectedAgentBackend,
               ).pipe(Effect.mapError(toDatabaseError))
@@ -761,10 +849,11 @@ export const DbServiceLive = Layer.effect(
         .unsafe(
           `INSERT INTO repository (
                id, github_owner, github_repo, local_path, is_bare, paused,
+               selected_agent_backend,
                default_model, default_thinking_level, review_model, review_thinking_level,
                backend_model_prefs,
                auto_merge, include_all_issue_authors, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
           [
             id,
@@ -822,19 +911,26 @@ export const DbServiceLive = Layer.effect(
       const reviewThinkingLevel = yield* normalizeOptionalSetting(
         input.reviewThinkingLevel,
       )
+      // undefined = leave override unchanged; null/string = set/clear after validate.
+      const requestedOverride =
+        input.selectedAgentBackend === undefined
+          ? undefined
+          : yield* normalizeRepositoryAgentBackendOverride(
+              input.selectedAgentBackend,
+            )
       const now = yield* Clock.currentTimeMillis
       const result = yield* sql
         .withTransaction(
           Effect.gen(function* () {
-            // Re-read Active backend selection and repo prefs inside the txn so a
-            // concurrent config backend switch cannot mis-key prefs / flat columns.
+            // Re-read harness default and repo row inside the txn so concurrent
+            // config switches cannot mis-key prefs / flat columns.
             const configRows = yield* sql
               .unsafe(
                 `SELECT selected_agent_backend AS selectedAgentBackend
                  FROM config WHERE id = 'default'`,
               )
               .pipe(Effect.mapError(toDatabaseError))
-            const selectedAgentBackend =
+            const harnessDefault =
               (
                 configRows[0] as
                   | { readonly selectedAgentBackend: string }
@@ -842,33 +938,65 @@ export const DbServiceLive = Layer.effect(
               )?.selectedAgentBackend ?? "opencode"
             const existingRows = yield* sql
               .unsafe(
-                `SELECT backend_model_prefs AS backendModelPrefs
+                `SELECT selected_agent_backend AS selectedAgentBackend,
+                        backend_model_prefs AS backendModelPrefs
                  FROM repository WHERE id = ?`,
                 [input.repositoryId],
               )
               .pipe(Effect.mapError(toDatabaseError))
             const existing = existingRows[0] as
-              | { readonly backendModelPrefs: string }
+              | {
+                  readonly selectedAgentBackend: string | null
+                  readonly backendModelPrefs: string
+                }
               | undefined
             if (!existing) {
               return yield* new RepositoryNotFoundError({
                 repositoryId: input.repositoryId,
               })
             }
+            const previousOverride = existing.selectedAgentBackend ?? null
+            const nextOverride =
+              requestedOverride === undefined
+                ? previousOverride
+                : requestedOverride
+            const overrideChanging = nextOverride !== previousOverride
+            if (overrideChanging) {
+              const count = yield* countBlockingUnfinishedForRepository(
+                input.repositoryId,
+              )
+              if (count > 0) {
+                return yield* new AgentBackendChangeBlockedError({
+                  message: `Cannot change Repository Agent Backend while ${count} Work Item(s) are unfinished on this Repository`,
+                  unfinishedWorkItemCount: count,
+                  scope: "repository",
+                  repositoryId: input.repositoryId,
+                })
+              }
+            }
+            const effectiveBackend = effectiveAgentBackend(
+              nextOverride,
+              harnessDefault,
+            )
             const prefsMap = parseBackendModelPrefsMap(
               existing.backendModelPrefs ?? "{}",
             )
-            prefsMap[selectedAgentBackend] = {
+            // Model settings write to the effective backend's map entry.
+            prefsMap[effectiveBackend] = {
               defaultModel,
               defaultThinkingLevel,
               reviewModel,
               reviewThinkingLevel,
             }
+            // When only the override changes, flat columns should still reflect
+            // the (possibly empty) prefs for the new effective backend — which
+            // we just wrote from this request's model fields.
             const backendModelPrefs = serializeBackendModelPrefsMap(prefsMap)
             return yield* sql
               .unsafe(
                 `UPDATE repository
              SET paused = ?,
+                 selected_agent_backend = ?,
                  default_model = ?,
                  default_thinking_level = ?,
                  review_model = ?,
@@ -881,6 +1009,7 @@ export const DbServiceLive = Layer.effect(
              RETURNING ${repositorySelectColumns}`,
                 [
                   input.paused,
+                  nextOverride,
                   defaultModel,
                   defaultThinkingLevel,
                   reviewModel,
@@ -905,9 +1034,15 @@ export const DbServiceLive = Layer.effect(
               const tag = (error as { _tag: string })._tag
               if (
                 tag === "RepositoryNotFoundError" ||
-                tag === "DatabaseError"
+                tag === "DatabaseError" ||
+                tag === "AgentBackendChangeBlockedError" ||
+                tag === "InvalidRepositorySettingsError"
               ) {
-                return error as RepositoryNotFoundError | DatabaseError
+                return error as
+                  | RepositoryNotFoundError
+                  | DatabaseError
+                  | AgentBackendChangeBlockedError
+                  | InvalidRepositorySettingsError
               }
             }
             return toDatabaseError(error as SqlError)

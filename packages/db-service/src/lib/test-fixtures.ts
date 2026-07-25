@@ -18,6 +18,7 @@ export const makeRepositoryRecord = (
   localPath: "/repos/acme/widgets",
   isBare: true,
   paused: false,
+  selectedAgentBackend: null,
   defaultModel: null,
   defaultThinkingLevel: null,
   reviewModel: null,
