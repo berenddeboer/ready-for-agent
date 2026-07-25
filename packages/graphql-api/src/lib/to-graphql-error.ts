@@ -10,6 +10,7 @@ type TaggedError = {
   readonly state?: string
   readonly blockerCount?: number
   readonly reason?: string
+  readonly operation?: string
   readonly githubOwner?: string
   readonly githubRepo?: string
   readonly localPath?: string
@@ -60,7 +61,7 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       )
     case "ParentIssueError":
       return gql(
-        `Issue #${error.githubIssueNumber} has child issues and cannot be implemented directly`,
+        `Issue #${error.githubIssueNumber} has child issues and must target a leaf Issue`,
         "ISSUE_IS_PARENT",
       )
     case "IssueBlockedError":
@@ -68,11 +69,27 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Issue #${error.githubIssueNumber} is blocked by ${error.blockerCount} issue(s)`,
         "ISSUE_BLOCKED",
       )
+    case "IssueNotBlockedError":
+      return gql(
+        `Issue #${error.githubIssueNumber} is not blocked and cannot be Queued; use Implement Now instead`,
+        "ISSUE_NOT_BLOCKED",
+      )
     case "UnfinishedWorkItemExistsError":
       return gql(
         `Issue #${error.githubIssueNumber} already has an unfinished Work Item`,
         "UNFINISHED_WORK_ITEM_EXISTS",
         { workItemId: error.workItemId },
+      )
+    case "WorkItemWaitingForBlockersError":
+      return gql(
+        `Work Item ${error.workItemId} is Waiting for blockers and cannot ${
+          error.operation ?? "be started"
+        }`,
+        "WORK_ITEM_WAITING_FOR_BLOCKERS",
+        {
+          workItemId: error.workItemId,
+          operation: error.operation,
+        },
       )
     case "BuildModelNotConfiguredError":
       return gql(

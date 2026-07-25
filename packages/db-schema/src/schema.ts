@@ -259,6 +259,11 @@ export const workItem = snakeCase.table(
      */
     waitingSince: integer({ mode: "number" }),
     /**
+     * Whether this Work Item is Waiting for blockers (Queue hold). Distinct from
+     * Waiting for Worker Slot (`waitingSince`) and from Step Run Queued.
+     */
+    waitingForBlockers: integer({ mode: "boolean" }).notNull().default(false),
+    /**
      * Whether this Work Item currently occupies a Worker Slot (Admitted).
      */
     holdsWorkerSlot: integer({ mode: "boolean" }).notNull().default(false),

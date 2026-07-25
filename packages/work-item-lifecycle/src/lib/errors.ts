@@ -44,12 +44,30 @@ export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError
   },
 ) {}
 
+/** Queue requires listed blockers; Implement Now requires none. */
+export class IssueNotBlockedError extends Schema.TaggedErrorClass<IssueNotBlockedError>()(
+  "IssueNotBlockedError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+  },
+) {}
+
 export class UnfinishedWorkItemExistsError extends Schema.TaggedErrorClass<UnfinishedWorkItemExistsError>()(
   "UnfinishedWorkItemExistsError",
   {
     repositoryId: Schema.String,
     githubIssueNumber: Schema.Finite,
     workItemId: Schema.String,
+  },
+) {}
+
+/** Pause/Start/force-start are not allowed while Waiting for blockers. */
+export class WorkItemWaitingForBlockersError extends Schema.TaggedErrorClass<WorkItemWaitingForBlockersError>()(
+  "WorkItemWaitingForBlockersError",
+  {
+    workItemId: Schema.String,
+    operation: Schema.String,
   },
 ) {}
 

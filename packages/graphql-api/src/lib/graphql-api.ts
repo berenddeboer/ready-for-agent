@@ -587,8 +587,30 @@ export const createGraphqlApi = (
             workItemStatus(workItem).toUpperCase(),
           statusLabel: (workItem: WorkItemRecord) =>
             statusLabel(workItemStatus(workItem)),
-          statusMessage: (workItem: WorkItemRecord) =>
-            workItemStatusMessage(workItem),
+          statusMessage: async (workItem: WorkItemRecord) => {
+            if (
+              isTerminalWorkItemState(workItem.state) ||
+              !workItem.waitingForBlockers
+            ) {
+              return workItemStatusMessage(workItem)
+            }
+            return runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const issues = yield* db.listIssues(workItem.repositoryId)
+                const issue = issues.find(
+                  (candidate) =>
+                    candidate.githubIssueNumber === workItem.githubIssueNumber,
+                )
+                return workItemStatusMessage(workItem, {
+                  blockerIssueNumbers:
+                    issue?.blockedBy.map(
+                      (blocker) => blocker.githubIssueNumber,
+                    ) ?? [],
+                })
+              }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
+            )
+          },
           paused: (workItem: WorkItemRecord) => workItem.paused,
           canRetry: (workItem: WorkItemRecord) => {
             const latestStatus = latestStepRun(workItem)?.status
@@ -596,6 +618,7 @@ export const createGraphqlApi = (
               isRetryableFailedWorkItem(workItem)
             return (
               workItem.waitingSince == null &&
+              !workItem.waitingForBlockers &&
               !workItem.paused &&
               (recoverableStatusCheckFailure ||
                 isRetryableNeedsHumanWorkItem(workItem) ||
@@ -1039,6 +1062,16 @@ export const createGraphqlApi = (
                   args.githubIssueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementLocally")),
+            ),
+          queue: async (_parent: unknown, args: ImplementNowArgs) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.queue(
+                  args.repositoryId,
+                  args.githubIssueNumber,
+                )
+              }).pipe(Effect.withSpan("graphql-api.queue")),
             ),
           retryWorkItem: async (_parent: unknown, args: WorkItemArgs) =>
             runGraphql(

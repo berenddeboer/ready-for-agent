@@ -48,6 +48,7 @@ import {
   AgentBackendUnavailableError,
   type BuildModelNotConfiguredError,
   IssueBlockedError,
+  IssueNotBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
   NeedsHumanHandoffNotEligibleError,
@@ -61,6 +62,7 @@ import {
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
   WorkItemTerminalError,
+  WorkItemWaitingForBlockersError,
 } from "./errors.js"
 import {
   type LifecycleStepContext,
@@ -256,6 +258,7 @@ type WorkItemRow = {
   readonly state_ready_at: number
   readonly paused: boolean | number
   readonly waiting_since: number | null
+  readonly waiting_for_blockers: boolean | number
   readonly holds_worker_slot: boolean | number
   readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
@@ -341,6 +344,7 @@ const toWorkItemRecord = (
     row.waiting_since === null || row.waiting_since === undefined
       ? null
       : new Date(row.waiting_since),
+  waitingForBlockers: Boolean(row.waiting_for_blockers),
   holdsWorkerSlot: Boolean(row.holds_worker_slot),
   pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
@@ -356,7 +360,7 @@ const toWorkItemRecord = (
 })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend,
-                   state, state_ready_at, paused, waiting_since, holds_worker_slot,
+                   state, state_ready_at, paused, waiting_since, waiting_for_blockers, holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
@@ -488,6 +492,18 @@ export type ImplementNowError =
   | EnqueueError
   | InvalidQueueNameError
 
+export type QueueError =
+  | IssueNotFoundError
+  | IssueNotOpenError
+  | ParentIssueError
+  | IssueNotBlockedError
+  | UnfinishedWorkItemExistsError
+  | BuildModelNotConfiguredError
+  | AgentBackendUnavailableError
+  | WorkItemLifecycleDatabaseError
+  | RepositoryNotFoundError
+  | DatabaseError
+
 export type GetWorkItemError =
   | WorkItemNotFoundError
   | WorkItemLifecycleDatabaseError
@@ -543,6 +559,7 @@ export type ResetError =
 export type PauseError =
   | WorkItemNotFoundError
   | WorkItemTerminalError
+  | WorkItemWaitingForBlockersError
   | WorkItemLifecycleDatabaseError
   | AcknowledgeError
   | JobNotFoundError
@@ -550,6 +567,7 @@ export type PauseError =
 export type StartError =
   | WorkItemNotFoundError
   | WorkItemTerminalError
+  | WorkItemWaitingForBlockersError
   | WorkItemLifecycleDatabaseError
   | EnqueueError
   | InvalidQueueNameError
@@ -588,6 +606,14 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     githubIssueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  /**
+   * Queue a Relevant open leaf Issue that has listed blockers: creates a Work
+   * Item in Waiting for blockers (no Worker Slot, no Step Run).
+   */
+  readonly queue: (
+    repositoryId: string,
+    githubIssueNumber: number,
+  ) => Effect.Effect<WorkItemRecord, QueueError>
   readonly runStep: (
     stepRunId: string,
   ) => Effect.Effect<RunStepResult, RunStepError>
@@ -2049,6 +2075,7 @@ export const makeWorkItemLifecycleLive = (
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
+                        waiting_for_blockers = 0,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -2076,6 +2103,7 @@ export const makeWorkItemLifecycleLive = (
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
+                        waiting_for_blockers = 0,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -2103,6 +2131,7 @@ export const makeWorkItemLifecycleLive = (
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
+                        waiting_for_blockers = 0,
                         updated_at = ?
                    WHERE id = ?`,
                     [
@@ -2323,6 +2352,7 @@ export const makeWorkItemLifecycleLive = (
                        failure_message = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
+                       waiting_for_blockers = 0,
                        updated_at = ?
                    WHERE id = ?`,
                     [
@@ -3011,6 +3041,13 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
+        if (workItem.waiting_for_blockers) {
+          return yield* new WorkItemWaitingForBlockersError({
+            workItemId,
+            operation: "pause",
+          })
+        }
+
         if (workItem.paused) {
           return yield* getWorkItem(workItemId)
         }
@@ -3164,6 +3201,13 @@ export const makeWorkItemLifecycleLive = (
           return yield* new WorkItemTerminalError({
             workItemId,
             state: workItem.state,
+          })
+        }
+
+        if (workItem.waiting_for_blockers) {
+          return yield* new WorkItemWaitingForBlockersError({
+            workItemId,
+            operation: "start",
           })
         }
 
@@ -3431,6 +3475,7 @@ export const makeWorkItemLifecycleLive = (
                       worktree_path = NULL,
                       holds_worker_slot = 0,
                       waiting_since = NULL,
+                      waiting_for_blockers = 0,
                       updated_at = ?
                   WHERE id = ?
                     AND state = 'needs_human'
@@ -3445,6 +3490,7 @@ export const makeWorkItemLifecycleLive = (
                       state_ready_at = ?,
                       holds_worker_slot = 0,
                       waiting_since = NULL,
+                      waiting_for_blockers = 0,
                       updated_at = ?
                   WHERE id = ?
                     AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
@@ -4412,10 +4458,10 @@ export const makeWorkItemLifecycleLive = (
                       `INSERT INTO work_item (
                  id, repository_id, github_issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
-                  waiting_since, holds_worker_slot,
+                  waiting_since, waiting_for_blockers, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                       [
                         workItemId,
                         repositoryId,
@@ -4508,12 +4554,177 @@ export const makeWorkItemLifecycleLive = (
         },
       )
 
+      const queueIssue = Effect.fn("WorkItemLifecycle.queue")(function* (
+        repositoryId: string,
+        githubIssueNumber: number,
+      ) {
+        const issues = yield* db.listIssues(repositoryId)
+        const issue = issues.find(
+          (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+        )
+
+        if (!issue) {
+          return yield* new IssueNotFoundError({
+            repositoryId,
+            githubIssueNumber,
+          })
+        }
+
+        if (issue.state !== "OPEN") {
+          return yield* new IssueNotOpenError({
+            repositoryId,
+            githubIssueNumber,
+            state: issue.state,
+          })
+        }
+
+        if (issue.hasChildren) {
+          return yield* new ParentIssueError({
+            repositoryId,
+            githubIssueNumber,
+          })
+        }
+
+        if (issue.blockedBy.length === 0) {
+          return yield* new IssueNotBlockedError({
+            repositoryId,
+            githubIssueNumber,
+          })
+        }
+
+        const existing = yield* listWorkItemsForIssue(
+          repositoryId,
+          githubIssueNumber,
+        )
+        const unfinished = existing.find(
+          (item) =>
+            item.state !== "complete" &&
+            item.state !== "failed" &&
+            item.state !== "abandoned",
+        )
+        if (unfinished) {
+          return yield* unfinishedWorkItemExistsError(
+            repositoryId,
+            githubIssueNumber,
+            unfinished.id,
+          )
+        }
+
+        const createdId = yield* activeAgentBackend.withConfigCoordination(
+          Effect.gen(function* () {
+            const harnessConfig = yield* db.getConfig
+            const repositories = yield* db.listRepositories
+            const repository = repositories.find(
+              ({ id }) => id === repositoryId,
+            )
+            const rawCaptureBackendId =
+              repository?.selectedAgentBackend ??
+              harnessConfig.selectedAgentBackend
+            if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
+              return yield* new AgentBackendUnavailableError({
+                message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+                reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+              })
+            }
+            const captureBackendId = rawCaptureBackendId
+            yield* activeAgentBackend
+              .requireAgentTurnsAllowed(captureBackendId)
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new AgentBackendUnavailableError({
+                      message: error.message,
+                      reason: error.reason,
+                    }),
+                ),
+              )
+            yield* resolveModelsForBackend(repositoryId, captureBackendId)
+            const activeRegistration =
+              yield* activeAgentBackend.getRegistration(captureBackendId)
+            const agentBackendId = activeRegistration.descriptor.id
+            const workItemId = makeWorkItemId()
+            const now = yield* Clock.currentTimeMillis
+            const step: OperationalLifecycleStep = "create_worktree"
+
+            return yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  yield* sql.unsafe(
+                    `INSERT INTO work_item (
+                 id, repository_id, github_issue_number, agent_backend,
+                  issue_title, state, state_ready_at, paused,
+                  waiting_since, waiting_for_blockers, holds_worker_slot,
+                  pause_before_step, worktree_path, session_id, failure_code,
+                  failure_message, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+                    [
+                      workItemId,
+                      repositoryId,
+                      githubIssueNumber,
+                      agentBackendId,
+                      issue.title,
+                      step,
+                      now,
+                      now,
+                      now,
+                    ],
+                  )
+
+                  return workItemId
+                }),
+              )
+              .pipe(
+                Effect.catch((error): Effect.Effect<never, QueueError> => {
+                  if (error instanceof WorkItemLifecycleDatabaseError) {
+                    return Effect.fail(error)
+                  }
+                  if (
+                    typeof error === "object" &&
+                    error !== null &&
+                    "_tag" in error &&
+                    (error as { _tag: string })._tag === "SqlError"
+                  ) {
+                    const sqlError = error as SqlError
+                    if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
+                      return unfinishedWorkItemExistsError(
+                        repositoryId,
+                        githubIssueNumber,
+                      )
+                    }
+                    return Effect.fail(toDatabaseError(sqlError))
+                  }
+                  return Effect.fail(
+                    new WorkItemLifecycleDatabaseError({
+                      message: `Unexpected transaction failure: ${String(error)}`,
+                      cause: error,
+                    }),
+                  )
+                }),
+              )
+          }),
+        )
+
+        const created = yield* getWorkItem(createdId).pipe(
+          Effect.catchTag(
+            "WorkItemNotFoundError",
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Work Item missing after queue: ${error.workItemId}`,
+                cause: error,
+              }),
+          ),
+        )
+        yield* notifyWorkItemsChanged(created.repositoryId)
+        return created
+      })
+
       return WorkItemLifecycle.of({
         maxDurations,
         recoverOrphanedStepRuns,
         interruptRunningStepRunsFromPriorWorker,
         implementNow,
         implementLocally,
+        queue: queueIssue,
         runStep,
         retry,
         pause,

@@ -322,6 +322,11 @@ enum WorkItemStatus {
   NEEDS_HUMAN
   NEEDS_HUMAN_REVIEW
   WAITING_FOR_WORKER_SLOT
+  """
+  Work Item created by Queue while its Issue still has listed blockers.
+  Distinct from Waiting for Worker Slot and from Step Run / Agent Turn Queued.
+  """
+  WAITING_FOR_BLOCKERS
 }
 
 enum LifecyclePhase {
@@ -438,6 +443,11 @@ type Mutation {
   Create a Work Item that runs local steps through Review, then pauses before Commit.
   """
   implementLocally(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
+  """
+  Queue a Relevant open leaf Issue that has listed blockers: creates a Work Item
+  in Waiting for blockers (no Worker Slot, no Step Run).
+  """
+  queue(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   startWorkItem(workItemId: ID!): WorkItem!

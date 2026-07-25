@@ -114,6 +114,7 @@ const workItem = {
   stateReadyAt: new Date("2026-07-14T08:00:00.000Z"),
   paused: false,
   waitingSince: null,
+  waitingForBlockers: false,
   holdsWorkerSlot: true,
   pauseBeforeStep: null,
   worktreePath: null,
@@ -221,6 +222,7 @@ const makeRuntime = (
     },
     implementNow: unused,
     implementLocally: unused,
+    queue: unused,
     recoverOrphanedStepRuns: Effect.succeed(0),
     interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
     runStep: unused,
@@ -3394,6 +3396,246 @@ describe("GraphQL API", () => {
       },
     })
     expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("queues a blocked Issue Work Item", async () => {
+    let receivedArgs: readonly [string, number] | undefined
+    const held = {
+      ...workItem,
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      waitingSince: null,
+      stepRuns: [],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {
+        queue: (repositoryId, githubIssueNumber) => {
+          receivedArgs = [repositoryId, githubIssueNumber]
+          return Effect.succeed(held)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation Queue($repositoryId: ID!, $githubIssueNumber: Int!) {
+          queue(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id state status statusLabel statusMessage canRetry isTerminal
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        queue: {
+          id: workItem.id,
+          state: "CREATE_WORKTREE",
+          status: "WAITING_FOR_BLOCKERS",
+          statusLabel: "Waiting for blockers",
+          statusMessage: "Queued — waiting for #17",
+          canRetry: false,
+          isTerminal: false,
+        },
+      },
+    })
+    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("surfaces Queue errors for unblocked Issues and unfinished Work Items", async () => {
+    const { IssueNotBlockedError, UnfinishedWorkItemExistsError } =
+      await import("@ready-for-agent/work-item-lifecycle")
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        queue: () =>
+          Effect.fail(
+            new IssueNotBlockedError({
+              repositoryId: repository.id,
+              githubIssueNumber: issue.githubIssueNumber,
+            }),
+          ),
+      },
+    )
+    const notBlocked = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation Queue($repositoryId: ID!, $githubIssueNumber: Int!) {
+          queue(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+    expect(await notBlocked.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          extensions: expect.objectContaining({
+            code: "ISSUE_NOT_BLOCKED",
+          }),
+        }),
+      ],
+    })
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        queue: () =>
+          Effect.fail(
+            new UnfinishedWorkItemExistsError({
+              repositoryId: repository.id,
+              githubIssueNumber: issue.githubIssueNumber,
+              workItemId: workItem.id,
+            }),
+          ),
+      },
+    )
+    const unfinished = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation Queue($repositoryId: ID!, $githubIssueNumber: Int!) {
+          queue(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+    expect(await unfinished.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          extensions: expect.objectContaining({
+            code: "UNFINISHED_WORK_ITEM_EXISTS",
+            workItemId: workItem.id,
+          }),
+        }),
+      ],
+    })
+  })
+
+  test("projects Waiting for blockers status and blocker copy", async () => {
+    const held = {
+      ...workItem,
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      waitingSince: null,
+      stepRuns: [],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listIssues: () => Effect.succeed([issue]),
+      },
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([held]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            status statusLabel statusMessage canRetry isTerminal paused
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            status: "WAITING_FOR_BLOCKERS",
+            statusLabel: "Waiting for blockers",
+            statusMessage: "Queued — waiting for #17",
+            canRetry: false,
+            isTerminal: false,
+            paused: false,
+            lifecycleLabels: [],
+          },
+        ],
+      },
+    })
+  })
+
+  test("prefers terminal state over a stale waitingForBlockers flag", async () => {
+    const abandonedHeld = {
+      ...workItem,
+      state: "abandoned",
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      waitingSince: null,
+      failureMessage: null,
+      stepRuns: [],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([abandonedHeld]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            state status statusLabel statusMessage isTerminal
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "ABANDONED",
+            status: "ABANDONED",
+            statusLabel: "Abandoned",
+            statusMessage: null,
+            isTerminal: true,
+          },
+        ],
+      },
+    })
   })
 
   test("retries a failed Work Item", async () => {

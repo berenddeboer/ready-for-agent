@@ -335,6 +335,7 @@ type WorkItemStatus =
   | "NEEDS_HUMAN"
   | "NEEDS_HUMAN_REVIEW"
   | "WAITING_FOR_WORKER_SLOT"
+  | "WAITING_FOR_BLOCKERS"
 
 type WorkItem = {
   id: string
@@ -2290,7 +2291,10 @@ function RepositoryIssueRow({
   workItems: readonly WorkItem[]
   workItemsLoading: boolean
 }) {
-  const isActionable = issue.state === "OPEN" && issue.blockedBy.length === 0
+  const isActionable =
+    issue.state === "OPEN" && !issue.hasChildren && issue.blockedBy.length === 0
+  const isQueueable =
+    issue.state === "OPEN" && !issue.hasChildren && issue.blockedBy.length > 0
   const [menuOpen, setMenuOpen] = useState(false)
   const queryClient = useQueryClient()
   const query = workItemsQuery(issue.repositoryId)
@@ -2303,6 +2307,7 @@ function RepositoryIssueRow({
     (!latestWorkItem.isTerminal || latestWorkItem.canRetry)
   const canImplement =
     isActionable && !workItemsLoading && !hasUnfinishedWorkItem
+  const canQueue = isQueueable && !workItemsLoading && !hasUnfinishedWorkItem
   const onImplementSuccess = (workItem: WorkItem) => {
     queryClient.setQueryData<readonly WorkItem[]>(query.queryKey, (current) => [
       ...(current ?? []),
@@ -2339,7 +2344,23 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
-  const implementPending = implementNow.isPending || implementLocally.isPending
+  const queueIssue = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        queue: {
+          __args: {
+            repositoryId: issue.repositoryId,
+            githubIssueNumber: issue.githubIssueNumber,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.queue
+    },
+    onSuccess: onImplementSuccess,
+  })
+  const implementPending =
+    implementNow.isPending || implementLocally.isPending || queueIssue.isPending
 
   useEffect(() => {
     if (!menuOpen) return
@@ -2390,7 +2411,7 @@ function RepositoryIssueRow({
               Blocked
             </span>
           )}
-          {canImplement && (
+          {(canImplement || canQueue) && (
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
@@ -2416,34 +2437,58 @@ function RepositoryIssueRow({
                   role="menu"
                   className="absolute top-full right-0 z-10 mt-1 min-w-44 border border-rule-2 bg-panel py-1 shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
                 >
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
-                    disabled={implementPending}
-                    onClick={() => {
-                      setMenuOpen(false)
-                      implementLocally.reset()
-                      implementNow.mutate()
-                    }}
-                  >
-                    {implementNow.isPending ? "Starting..." : "Implement now"}
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
-                    disabled={implementPending}
-                    onClick={() => {
-                      setMenuOpen(false)
-                      implementNow.reset()
-                      implementLocally.mutate()
-                    }}
-                  >
-                    {implementLocally.isPending
-                      ? "Starting..."
-                      : "Implement locally"}
-                  </button>
+                  {canImplement && (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                        disabled={implementPending}
+                        onClick={() => {
+                          setMenuOpen(false)
+                          implementLocally.reset()
+                          queueIssue.reset()
+                          implementNow.mutate()
+                        }}
+                      >
+                        {implementNow.isPending
+                          ? "Starting..."
+                          : "Implement now"}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                        disabled={implementPending}
+                        onClick={() => {
+                          setMenuOpen(false)
+                          implementNow.reset()
+                          queueIssue.reset()
+                          implementLocally.mutate()
+                        }}
+                      >
+                        {implementLocally.isPending
+                          ? "Starting..."
+                          : "Implement locally"}
+                      </button>
+                    </>
+                  )}
+                  {canQueue && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                      disabled={implementPending}
+                      onClick={() => {
+                        setMenuOpen(false)
+                        implementNow.reset()
+                        implementLocally.reset()
+                        queueIssue.mutate()
+                      }}
+                    >
+                      {queueIssue.isPending ? "Queueing..." : "Queue"}
+                    </button>
+                  )}
                 </div>
               )}
             </span>
@@ -2469,9 +2514,13 @@ function RepositoryIssueRow({
           )}
         />
       )}
-      {(implementNow.isError || implementLocally.isError) && (
+      {(implementNow.isError ||
+        implementLocally.isError ||
+        queueIssue.isError) && (
         <p className="mt-1.5 mb-0 pl-11 text-xs text-oxblood-deep" role="alert">
-          Could not start implementation. Refresh the issues and try again.
+          {queueIssue.isError
+            ? "Could not queue issue. Refresh the issues and try again."
+            : "Could not start implementation. Refresh the issues and try again."}
         </p>
       )}
       {issue.blockedBy.length > 0 && (
@@ -3108,7 +3157,7 @@ function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
     onSuccess: updateWorkItem,
   })
 
-  if (workItem.isTerminal) {
+  if (workItem.isTerminal || workItem.status === "WAITING_FOR_BLOCKERS") {
     return null
   }
 
@@ -3319,7 +3368,8 @@ function WorkItemLifecycleStatus({
       {workItem.statusMessage !== null && (
         <p
           className={`mt-1.5 mb-0 text-xs ${
-            status === "WAITING_FOR_WORKER_SLOT"
+            status === "WAITING_FOR_WORKER_SLOT" ||
+            status === "WAITING_FOR_BLOCKERS"
               ? "text-violet-800"
               : "text-oxblood-deep"
           }`}

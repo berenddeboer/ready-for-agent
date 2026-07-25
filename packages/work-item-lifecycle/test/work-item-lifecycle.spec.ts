@@ -35,6 +35,7 @@ import {
   CommitOpenCodeError,
   CreatePrOpenCodeError,
   IssueBlockedError,
+  IssueNotBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
   type LifecycleStepContext,
@@ -56,6 +57,7 @@ import {
   WorkItemLifecycleLive,
   WorkItemNotFoundError,
   WorkItemTerminalError,
+  WorkItemWaitingForBlockersError,
   filterWorkItemsByListKind,
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
@@ -8238,6 +8240,291 @@ describe("WorkItemLifecycle", () => {
           expect(after.holdsWorkerSlot).toBe(true)
           expect(after.waitingSince).toBeNull()
           expect(after.stepRuns).toHaveLength(1)
+        }),
+      ))
+  })
+
+  describe("queue", () => {
+    const seedBlockedIssue = Effect.gen(function* () {
+      const db = yield* DbService
+      yield* seedHarnessBuildModel
+      const repository = yield* db.addRepository({
+        ...sampleRepository,
+        localPath: "/repos/acme/widgets-blocked.git",
+        githubRepo: "widgets-blocked",
+      })
+      const issue = yield* db.storeIssue({
+        repositoryId: repository.id,
+        githubIssueNumber: 77,
+        ...sampleIssueFields,
+        title: "Blocked leaf",
+        url: "https://github.com/acme/widgets/issues/77",
+        blockedBy: [
+          {
+            githubIssueNumber: 12,
+            githubIssueUrl: "https://github.com/acme/widgets/issues/12",
+          },
+          {
+            githubIssueNumber: 15,
+            githubIssueUrl: "https://github.com/acme/widgets/issues/15",
+          },
+        ],
+      })
+      return { repository, issue }
+    })
+
+    it("creates a Waiting for blockers Work Item with no Worker Slot or Step Run", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const created = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          expect(created.waitingForBlockers).toBe(true)
+          expect(created.holdsWorkerSlot).toBe(false)
+          expect(created.waitingSince).toBeNull()
+          expect(created.stepRuns).toHaveLength(0)
+          expect(created.state).toBe("create_worktree")
+          expect(created.pauseBeforeStep).toBeNull()
+          expect(created.paused).toBe(false)
+
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(job)).toBe(true)
+
+          const working = filterWorkItemsByListKind([created], "working")
+          expect(working).toHaveLength(1)
+        }),
+      ))
+
+    it("rejects Queue for an Actionable (unblocked) Issue", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+
+          const error = yield* Effect.flip(
+            lifecycle.queue(repository.id, issue.githubIssueNumber),
+          )
+
+          expect(error).toBeInstanceOf(IssueNotBlockedError)
+        }),
+      ))
+
+    it("rejects Queue when an unfinished Work Item already exists", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const first = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const error = yield* Effect.flip(
+            lifecycle.queue(repository.id, issue.githubIssueNumber),
+          )
+
+          expect(error).toBeInstanceOf(UnfinishedWorkItemExistsError)
+          if (error instanceof UnfinishedWorkItemExistsError) {
+            expect(error.workItemId).toBe(first.id)
+          }
+
+          // Held Queue also blocks Implement Locally / Now uniqueness once
+          // blockers clear; while still blocked Implement Now fails as blocked.
+          expect(first.waitingForBlockers).toBe(true)
+        }),
+      ))
+
+    it("rejects Queue for missing, closed, and parent Issues", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-queue-rejects.git",
+            githubRepo: "widgets-queue-rejects",
+          })
+
+          const missing = yield* Effect.flip(
+            lifecycle.queue(repository.id, 999),
+          )
+          expect(missing).toBeInstanceOf(IssueNotFoundError)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 8,
+            ...sampleIssueFields,
+            state: "CLOSED",
+            url: "https://github.com/acme/widgets/issues/8",
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const closed = yield* Effect.flip(lifecycle.queue(repository.id, 8))
+          expect(closed).toBeInstanceOf(IssueNotOpenError)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 9,
+            ...sampleIssueFields,
+            title: "Parent",
+            url: "https://github.com/acme/widgets/issues/9",
+            hasChildren: true,
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const parent = yield* Effect.flip(lifecycle.queue(repository.id, 9))
+          expect(parent).toBeInstanceOf(ParentIssueError)
+        }),
+      ))
+
+    it("rejects Pause and Start while Waiting for blockers", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const created = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          const pauseError = yield* Effect.flip(lifecycle.pause(created.id))
+          expect(pauseError).toBeInstanceOf(WorkItemWaitingForBlockersError)
+
+          const startError = yield* Effect.flip(lifecycle.start(created.id))
+          expect(startError).toBeInstanceOf(WorkItemWaitingForBlockersError)
+
+          const stillHeld = yield* lifecycle.getWorkItem(created.id)
+          expect(stillHeld.waitingForBlockers).toBe(true)
+          expect(stillHeld.paused).toBe(false)
+          expect(stillHeld.stepRuns).toHaveLength(0)
+        }),
+      ))
+
+    it("Reset deletes a held Work Item and frees the Issue for Queue again", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const created = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          const deletedId = yield* lifecycle.reset(created.id)
+          expect(deletedId).toBe(created.id)
+
+          const missing = yield* Effect.flip(lifecycle.getWorkItem(created.id))
+          expect(missing).toBeInstanceOf(WorkItemNotFoundError)
+
+          const listed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(listed).toHaveLength(0)
+
+          const again = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(again.id).not.toBe(created.id)
+          expect(again.waitingForBlockers).toBe(true)
+        }),
+      ))
+
+    it("Abandon clears Waiting for blockers on a held Work Item", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const created = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(created.waitingForBlockers).toBe(true)
+
+          const abandoned = yield* lifecycle.abandon(created.id)
+          expect(abandoned.state).toBe("abandoned")
+          expect(abandoned.waitingForBlockers).toBe(false)
+          expect(abandoned.holdsWorkerSlot).toBe(false)
+          expect(abandoned.waitingSince).toBeNull()
+        }),
+      ))
+
+    it("does not occupy a Worker Slot or block admission of other work", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const config = yield* db.getConfig
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 1,
+          })
+
+          const blockedRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-held.git",
+            githubRepo: "widgets-held",
+          })
+          yield* db.storeIssue({
+            repositoryId: blockedRepo.id,
+            githubIssueNumber: 88,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/88",
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const held = yield* lifecycle.queue(blockedRepo.id, 88)
+          expect(held.holdsWorkerSlot).toBe(false)
+
+          const actionableRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-admit.git",
+            githubRepo: "widgets-admit",
+          })
+          yield* db.storeIssue({
+            repositoryId: actionableRepo.id,
+            githubIssueNumber: 89,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/89",
+          })
+          const admitted = yield* lifecycle.implementNow(actionableRepo.id, 89)
+          expect(admitted.holdsWorkerSlot).toBe(true)
+          expect(admitted.waitingSince).toBeNull()
+          expect(admitted.stepRuns).toHaveLength(1)
+
+          const stillHeld = yield* lifecycle.getWorkItem(held.id)
+          expect(stillHeld.waitingForBlockers).toBe(true)
+          expect(stillHeld.holdsWorkerSlot).toBe(false)
+          expect(stillHeld.stepRuns).toHaveLength(0)
         }),
       ))
   })
