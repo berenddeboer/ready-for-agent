@@ -22,6 +22,7 @@ const repository = makeRepositoryRecord({
   localPath: "/repos/widgets",
   autoMerge: true,
   includeAllIssueAuthors: false,
+  waitForReadyForReviewChecks: true,
 })
 
 const context: LifecycleStepContext = {

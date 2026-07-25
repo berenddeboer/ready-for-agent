@@ -236,6 +236,12 @@ type Repository {
   reviewThinkingLevel: String
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!
+  """
+  When true (default), a known draft-to-ready transition starts a Ready-Phase
+  Status Check Round. When false, settled non-failing draft-phase checks may
+  advance to Decide PR Merge without that 90-second startup wait.
+  """
+  waitForReadyForReviewChecks: Boolean!
   issuesReconciledAt: String
   """
   Unfinished Work Items on this Repository. Changing selectedAgentBackend is
@@ -415,6 +421,11 @@ input UpdateRepositorySettingsInput {
   reviewThinkingLevel: String
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!
+  """
+  Wait for checks to start after ready for review (Ready-Phase Status Check Round).
+  Defaults to true. Disable only when the ready transition cannot start relevant workflows.
+  """
+  waitForReadyForReviewChecks: Boolean!
 }
 
 type Mutation {

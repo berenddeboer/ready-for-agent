@@ -375,6 +375,20 @@ const PR_STATUS_CHECKS_POLL_DELAY = Duration.seconds(30)
 /** Catch-up window after the latest Check-Start Anchor before startup is complete. */
 export const CHECK_START_DEADLINE_MS = 90_000
 
+/**
+ * Settled non-failing PR Status Check outcomes that may skip a Ready-Phase
+ * Status Check Round when waitForReadyForReviewChecks is disabled.
+ */
+const isSettledNonFailingPrStatus = (tag: string): boolean =>
+  tag === "succeeded" || tag === "no_checks" || tag === "expected"
+
+/**
+ * SQLite may return 0/1 or boolean. Missing/null defaults to wait (safe).
+ */
+const decodeWaitForReadyForReviewChecks = (
+  waitForReady: number | boolean | null | undefined,
+): boolean => !(waitForReady === 0 || waitForReady === false)
+
 /** Accept finite GitHub instants, including slight clock-skew futures. */
 const validInstantMs = (value: Date | null): number | null => {
   if (value === null) {
@@ -1262,6 +1276,25 @@ export const makeWorkItemLifecycleLive = (
           return Number(rows[0]?.count ?? 0)
         })
 
+      /**
+       * Live Repository waitForReadyForReviewChecks policy. Missing row → true.
+       */
+      const loadWaitForReadyForReviewChecks = (
+        repositoryId: string,
+      ): Effect.Effect<boolean, WorkItemLifecycleDatabaseError> =>
+        Effect.gen(function* () {
+          const rows = (yield* sql
+            .unsafe(
+              `SELECT wait_for_ready_for_review_checks AS wait_for_ready
+               FROM repository WHERE id = ?`,
+              [repositoryId],
+            )
+            .pipe(Effect.mapError(toDatabaseError))) as readonly {
+            readonly wait_for_ready: number | boolean | null
+          }[]
+          return decodeWaitForReadyForReviewChecks(rows[0]?.wait_for_ready)
+        })
+
       const runHandler = (
         step: OperationalLifecycleStep,
         context: LifecycleStepContext,
@@ -1377,6 +1410,10 @@ export const makeWorkItemLifecycleLive = (
               Effect.flatMap((status) =>
                 Effect.gen(function* () {
                   const now = yield* Clock.currentTimeMillis
+                  const waitForReadyForReviewChecks =
+                    yield* loadWaitForReadyForReviewChecks(
+                      workItem.repository_id,
+                    )
                   const rawHeadSha =
                     "headSha" in status ? (status.headSha ?? null) : null
                   const headSha =
@@ -1451,14 +1488,23 @@ export const makeWorkItemLifecycleLive = (
                     }
                   }
 
-                  // External draft→ready is a Check-Start Anchor (ready-phase window).
+                  // External draft→ready is a Check-Start Anchor by default.
+                  // When waitForReadyForReviewChecks is disabled, only a failed
+                  // aggregate forces a Ready-Phase round (recovery may start);
+                  // settled non-failing may Decide immediately, and pending
+                  // continues without a new ready-phase anchor (matches Mark Ready).
                   const previouslyDraft =
                     workItem.check_start_last_observed_is_draft === 1
-                  if (
-                    previouslyDraft &&
-                    !isDraft &&
-                    observedIsDraft === false
-                  ) {
+                  const knownDraftToReady =
+                    previouslyDraft && !isDraft && observedIsDraft === false
+                  const skipReadyPhaseStartupWait =
+                    !waitForReadyForReviewChecks &&
+                    knownDraftToReady &&
+                    isSettledNonFailingPrStatus(status._tag)
+                  const forceReadyPhaseAnchor =
+                    knownDraftToReady &&
+                    (waitForReadyForReviewChecks || status._tag === "failed")
+                  if (forceReadyPhaseAnchor) {
                     if (anchorAt === null || now > anchorAt) {
                       anchorAt = now
                     }
@@ -1583,6 +1629,14 @@ export const makeWorkItemLifecycleLive = (
                         },
                       }
                     }
+                    // Known draft→ready with opt-out: reuse settled draft evidence.
+                    if (skipReadyPhaseStartupWait) {
+                      return {
+                        transition: {
+                          nextState: "decide_pr_merge" as const,
+                        },
+                      }
+                    }
                     // Ready phase waits for the Check-Start Deadline, then Decide.
                     if (!pastDeadline) {
                       return {
@@ -1659,15 +1713,75 @@ export const makeWorkItemLifecycleLive = (
             )
           case "mark_pr_ready_for_review":
             return steps.markPrReadyForReview(context).pipe(
-              Effect.as({
-                // Fresh ready-phase Check-Start Anchor; return to Watch so
-                // ready_for_review workflows get the full catch-up window.
-                refreshCheckStartAnchor: true,
-                checkStartLastObservedIsDraft: 0,
-                transition: {
-                  nextState: "watch_pr_status_checks" as const,
-                },
-              }),
+              Effect.flatMap(() =>
+                Effect.gen(function* () {
+                  const waitForReadyForReviewChecks =
+                    yield* loadWaitForReadyForReviewChecks(
+                      workItem.repository_id,
+                    )
+
+                  if (waitForReadyForReviewChecks) {
+                    return {
+                      // Fresh ready-phase Check-Start Anchor; return to Watch so
+                      // ready_for_review workflows get the full catch-up window.
+                      refreshCheckStartAnchor: true,
+                      checkStartLastObservedIsDraft: 0 as const,
+                      transition: {
+                        nextState: "watch_pr_status_checks" as const,
+                      },
+                    }
+                  }
+
+                  // Setting disabled: re-observe after ready. Only skip the
+                  // Ready-Phase round when checks are settled and non-failing.
+                  const status = yield* steps.watchPrStatusChecks(context)
+                  if (status._tag === "conflict") {
+                    return {
+                      handledCheckIds: status.retiredCheckIds,
+                      checkStartLastObservedIsDraft: 0 as const,
+                      transition: {
+                        nextState: "resolve_pr_merge_conflict" as const,
+                      },
+                    }
+                  }
+                  if (status._tag === "handoff_needed") {
+                    return {
+                      checkStartLastObservedIsDraft: 0 as const,
+                      transition: {
+                        nextState: "investigate_pr_status_checks" as const,
+                      },
+                    }
+                  }
+                  if (status._tag === "closed") {
+                    return {
+                      checkStartLastObservedIsDraft: 0 as const,
+                      transition: {
+                        nextState: "needs_human" as const,
+                        reason:
+                          "The pull request was closed before its status checks succeeded",
+                      },
+                    }
+                  }
+                  if (isSettledNonFailingPrStatus(status._tag)) {
+                    return {
+                      checkStartLastObservedIsDraft: 0 as const,
+                      transition: {
+                        nextState: "decide_pr_merge" as const,
+                      },
+                    }
+                  }
+                  // Failed aggregate forces a Ready-Phase round so recovery may
+                  // start. Pending is not short-cut to Decide and continues
+                  // watching without a new ready-phase anchor.
+                  return {
+                    refreshCheckStartAnchor: status._tag === "failed",
+                    checkStartLastObservedIsDraft: 0 as const,
+                    transition: {
+                      nextState: "watch_pr_status_checks" as const,
+                    },
+                  }
+                }),
+              ),
             )
           case "decide_pr_merge":
             return steps.decidePrMerge(context).pipe(

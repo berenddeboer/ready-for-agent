@@ -37,6 +37,14 @@ export const repository = snakeCase.table(
     includeAllIssueAuthors: integer({ mode: "boolean" })
       .notNull()
       .default(false),
+    /**
+     * When true (default), a known draft-to-ready transition starts a Ready-Phase
+     * Status Check Round (90s Check-Start Deadline). When false, settled
+     * non-failing draft-phase checks may advance to Decide PR Merge without that wait.
+     */
+    waitForReadyForReviewChecks: integer({ mode: "boolean" })
+      .notNull()
+      .default(true),
     issuesReconciledAt: integer({ mode: "number" }),
     createdAt: integer({ mode: "number" })
       .notNull()

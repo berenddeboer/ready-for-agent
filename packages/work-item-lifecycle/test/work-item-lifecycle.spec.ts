@@ -330,6 +330,7 @@ describe("WorkItemLifecycle", () => {
             reviewThinkingLevel: null,
             autoMerge: repository.autoMerge,
             includeAllIssueAuthors: repository.includeAllIssueAuthors,
+            waitForReadyForReviewChecks: repository.waitForReadyForReviewChecks,
           })
 
           const workItem = yield* lifecycle.implementNow(
@@ -2281,6 +2282,533 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("with waitForReadyForReviewChecks disabled, Mark Ready advances directly to Decide after settled non-failing draft evidence", () => {
+      let prIsDraft = true
+      let markReadyCalls = 0
+      let watchCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => {
+          watchCalls += 1
+          return Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(0),
+            headSha: "shortcut-head",
+            headPushedAt: new Date(0),
+            isDraft: prIsDraft,
+          })
+        },
+        markPrReadyForReview: () => {
+          markReadyCalls += 1
+          prIsDraft = false
+          return Effect.void
+        },
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const db = yield* DbService
+              const { repository, issue } = yield* seedActionableIssue
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: false,
+              })
+              yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* TestClock.adjust(1_000)
+              const afterDraftWatch = yield* claimAndRunPending
+              expect(afterDraftWatch._tag).toBe("processed")
+              if (afterDraftWatch._tag === "processed") {
+                expect(afterDraftWatch.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+
+              const markReadyAt = 2_000_000
+              yield* TestClock.setTime(markReadyAt)
+              const afterMarkReady = yield* claimAndRunPending
+              expect(afterMarkReady._tag).toBe("processed")
+              if (afterMarkReady._tag === "processed") {
+                expect(afterMarkReady.workItem.state).toBe("decide_pr_merge")
+              }
+              expect(markReadyCalls).toBe(1)
+              // Draft watch + post-mark re-observe; no ready-phase Watch loop.
+              expect(watchCalls).toBe(2)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("with waitForReadyForReviewChecks disabled, failed draft evidence still forces a Ready-Phase Status Check Round", () => {
+      let prIsDraft = true
+      let watchPhase: "draft_failed" | "ready_failed" = "draft_failed"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => {
+          if (watchPhase === "draft_failed") {
+            return Effect.succeed({
+              _tag: "failed" as const,
+              createdAt: new Date(0),
+              headSha: "failed-draft-head",
+              headPushedAt: new Date(0),
+              isDraft: true,
+            })
+          }
+          return Effect.succeed({
+            _tag: "failed" as const,
+            createdAt: new Date(0),
+            headSha: "failed-draft-head",
+            headPushedAt: new Date(0),
+            isDraft: prIsDraft,
+          })
+        },
+        markPrReadyForReview: () => {
+          prIsDraft = false
+          watchPhase = "ready_failed"
+          return Effect.void
+        },
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const db = yield* DbService
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: false,
+              })
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* TestClock.adjust(1_000)
+              const afterDraftWatch = yield* claimAndRunPending
+              expect(afterDraftWatch._tag).toBe("processed")
+              if (afterDraftWatch._tag === "processed") {
+                expect(afterDraftWatch.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+
+              const markReadyAt = 2_000_000
+              yield* TestClock.setTime(markReadyAt)
+              const afterMarkReady = yield* claimAndRunPending
+              expect(afterMarkReady._tag).toBe("processed")
+              if (afterMarkReady._tag === "processed") {
+                expect(afterMarkReady.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              const anchors = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly { readonly check_start_anchor_at: number | null }[]
+              expect(anchors[0]?.check_start_anchor_at).toBe(markReadyAt)
+
+              // Still in ready-phase wait before the deadline.
+              yield* TestClock.setTime(markReadyAt + 89_999)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const stillWatching = yield* claimAndRunPending
+              expect(stillWatching._tag).toBe("processed")
+              if (stillWatching._tag === "processed") {
+                expect(stillWatching.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("with waitForReadyForReviewChecks disabled, external draft-to-ready advances to Decide when settled non-failing", () => {
+      let phase: "draft_pending" | "ready_succeeded" = "draft_pending"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () => {
+          if (phase === "draft_pending") {
+            return Effect.succeed({
+              _tag: "pending" as const,
+              createdAt: new Date(1_000_000),
+              headSha: "external-shortcut-head",
+              headPushedAt: new Date(1_000_000),
+              isDraft: true,
+            })
+          }
+          return Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(1_000_000),
+            headSha: "external-shortcut-head",
+            headPushedAt: new Date(1_000_000),
+            isDraft: false,
+          })
+        },
+        markPrReadyForReview: () =>
+          Effect.die("Mark PR Ready must not run for external ready"),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const db = yield* DbService
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: false,
+              })
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              // Observe draft (pending) so known draft→ready evidence exists.
+              yield* TestClock.setTime(1_008_000)
+              const draftPoll = yield* claimAndRunPending
+              expect(draftPoll._tag).toBe("processed")
+              if (draftPoll._tag === "processed") {
+                expect(draftPoll.workItem.state).toBe("watch_pr_status_checks")
+              }
+              const before = (yield* sql.unsafe(
+                `SELECT check_start_last_observed_is_draft, check_start_anchor_at
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_last_observed_is_draft: number | null
+                readonly check_start_anchor_at: number | null
+              }[]
+              expect(before[0]?.check_start_last_observed_is_draft).toBe(1)
+              const anchorBeforeReady = before[0]?.check_start_anchor_at
+
+              phase = "ready_succeeded"
+              yield* TestClock.setTime(1_050_000)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const afterExternalReady = yield* claimAndRunPending
+              expect(afterExternalReady._tag).toBe("processed")
+              if (afterExternalReady._tag === "processed") {
+                expect(afterExternalReady.workItem.state).toBe(
+                  "decide_pr_merge",
+                )
+              }
+
+              const after = (yield* sql.unsafe(
+                `SELECT check_start_last_observed_is_draft, check_start_anchor_at
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_last_observed_is_draft: number | null
+                readonly check_start_anchor_at: number | null
+              }[]
+              expect(after[0]?.check_start_last_observed_is_draft).toBe(0)
+              // No ready-phase anchor bump to observation time when shortcut applies.
+              expect(after[0]?.check_start_anchor_at).toBe(anchorBeforeReady)
+              expect(after[0]?.check_start_anchor_at).not.toBe(1_050_000)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("with waitForReadyForReviewChecks disabled, external ready with pending checks continues watching without a ready-phase anchor bump", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "pending" as const,
+            createdAt: new Date(1_000_000),
+            headSha: "external-pending-head",
+            headPushedAt: new Date(1_000_000),
+            isDraft: false,
+          }),
+        markPrReadyForReview: () =>
+          Effect.die("Mark PR Ready must not run while checks are pending"),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const db = yield* DbService
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: false,
+              })
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+
+              const draftAnchorAt = 1_000_000
+              yield* sql.unsafe(
+                `UPDATE work_item
+                 SET check_start_last_observed_is_draft = 1,
+                     check_start_anchor_at = ?
+                 WHERE id = ?`,
+                [draftAnchorAt, created.id],
+              )
+
+              const readyObservedAt = 1_050_000
+              yield* TestClock.setTime(readyObservedAt)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const afterExternalReady = yield* claimAndRunPending
+              expect(afterExternalReady._tag).toBe("processed")
+              if (afterExternalReady._tag === "processed") {
+                expect(afterExternalReady.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              const after = (yield* sql.unsafe(
+                `SELECT check_start_anchor_at, check_start_last_observed_is_draft
+                 FROM work_item WHERE id = ?`,
+                [created.id],
+              )) as readonly {
+                readonly check_start_anchor_at: number | null
+                readonly check_start_last_observed_is_draft: number | null
+              }[]
+              expect(after[0]?.check_start_last_observed_is_draft).toBe(0)
+              // Pending under opt-out must not start a ready-phase window.
+              expect(after[0]?.check_start_anchor_at).toBe(draftAnchorAt)
+              expect(after[0]?.check_start_anchor_at).not.toBe(readyObservedAt)
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("with waitForReadyForReviewChecks disabled, first-observed-ready still waits for the Check-Start Deadline", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(1_000_000),
+            headSha: "first-ready-head",
+            headPushedAt: new Date(1_000_000),
+            isDraft: false,
+          }),
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const db = yield* DbService
+              const sql = yield* SqlClient.SqlClient
+              const { repository, issue } = yield* seedActionableIssue
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: false,
+              })
+              const created = yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* forgetCreatePrDraftProvenance(created.id)
+
+              // First observation as ready: still before the Last PR Change deadline.
+              yield* TestClock.adjust(1_000)
+              const stillWaiting = yield* claimAndRunPending
+              expect(stillWaiting._tag).toBe("processed")
+              if (stillWaiting._tag === "processed") {
+                expect(stillWaiting.workItem.state).toBe(
+                  "watch_pr_status_checks",
+                )
+              }
+
+              yield* TestClock.setTime(1_000_000 + CHECK_START_DEADLINE_MS)
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+              const decided = yield* claimAndRunPending
+              expect(decided._tag).toBe("processed")
+              if (decided._tag === "processed") {
+                expect(decided.workItem.state).toBe("decide_pr_merge")
+              }
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
+    it("live waitForReadyForReviewChecks change applies on the next Mark Ready decision without rewinding Decide", () => {
+      let prIsDraft = true
+      let markReadyCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "succeeded" as const,
+            createdAt: new Date(0),
+            headSha: "live-setting-head",
+            headPushedAt: new Date(0),
+            isDraft: prIsDraft,
+          }),
+        markPrReadyForReview: () => {
+          markReadyCalls += 1
+          prIsDraft = false
+          return Effect.void
+        },
+      }
+
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.provide(
+            Effect.gen(function* () {
+              yield* TestClock.setTime(1_000_000)
+              const lifecycle = yield* WorkItemLifecycle
+              const db = yield* DbService
+              const { repository, issue } = yield* seedActionableIssue
+              // Default true: reach Mark Ready under the safe policy.
+              yield* lifecycle.implementNow(
+                repository.id,
+                issue.githubIssueNumber,
+              )
+
+              for (let index = 0; index < 8; index += 1) {
+                yield* TestClock.adjust(1_000)
+                yield* claimAndRunPending
+              }
+              yield* TestClock.adjust(1_000)
+              const atMarkReady = yield* claimAndRunPending
+              expect(atMarkReady._tag).toBe("processed")
+              if (atMarkReady._tag === "processed") {
+                expect(atMarkReady.workItem.state).toBe(
+                  "mark_pr_ready_for_review",
+                )
+              }
+
+              // Flip live before Mark Ready runs.
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: false,
+              })
+
+              yield* TestClock.setTime(2_000_000)
+              const afterMarkReady = yield* claimAndRunPending
+              expect(afterMarkReady._tag).toBe("processed")
+              if (afterMarkReady._tag === "processed") {
+                expect(afterMarkReady.workItem.state).toBe("decide_pr_merge")
+              }
+              expect(markReadyCalls).toBe(1)
+
+              // Re-enabling the wait must not rewind an already selected Decide.
+              yield* db.updateRepositorySettings({
+                repositoryId: repository.id,
+                paused: repository.paused,
+                defaultModel: repository.defaultModel,
+                defaultThinkingLevel: repository.defaultThinkingLevel,
+                reviewModel: repository.reviewModel,
+                reviewThinkingLevel: repository.reviewThinkingLevel,
+                autoMerge: repository.autoMerge,
+                includeAllIssueAuthors: repository.includeAllIssueAuthors,
+                waitForReadyForReviewChecks: true,
+              })
+              const stillDecide = yield* lifecycle.getWorkItem(
+                afterMarkReady._tag === "processed"
+                  ? afterMarkReady.workItem.id
+                  : "missing",
+              )
+              expect(stillDecide.state).toBe("decide_pr_merge")
+            }),
+            makeTestLayer(steps).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
     it("creates a durable ready-phase anchor on first external draft-to-ready observation", async () => {
       const root = await mkdtemp(join(tmpdir(), "rfa-draft-ready-restart-"))
       const dbPath = join(root, "restart.db")
@@ -4031,6 +4559,7 @@ describe("WorkItemLifecycle", () => {
             reviewThinkingLevel: null,
             autoMerge: repository.autoMerge,
             includeAllIssueAuthors: repository.includeAllIssueAuthors,
+            waitForReadyForReviewChecks: repository.waitForReadyForReviewChecks,
           })
 
           yield* claimAndRunPending

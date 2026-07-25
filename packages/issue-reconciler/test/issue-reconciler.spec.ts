@@ -25,6 +25,7 @@ import { describe, expect, it } from "bun:test"
 const repository = makeRepositoryRecord({
   id: "repo-1",
   includeAllIssueAuthors: true,
+  waitForReadyForReviewChecks: true,
 })
 
 const remoteIssue = (
@@ -677,6 +678,7 @@ describe("IssueReconciler", () => {
     const scoped = makeRepositoryRecord({
       id: "repo-1",
       includeAllIssueAuthors: false,
+      waitForReadyForReviewChecks: true,
     })
     const db = makeDbFixture({
       issues: [
@@ -792,6 +794,7 @@ describe("IssueReconciler", () => {
     const scoped = makeRepositoryRecord({
       id: "repo-1",
       includeAllIssueAuthors: false,
+      waitForReadyForReviewChecks: true,
     })
     const db = makeDbFixture({ issues: [localIssue(1, { issueAuthor: "op" })] })
     const identityError = new GitHubRequestError({

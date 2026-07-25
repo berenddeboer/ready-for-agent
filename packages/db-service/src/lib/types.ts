@@ -45,6 +45,7 @@ export const RepositoryRecord = Schema.Struct({
   reviewThinkingLevel: Schema.NullOr(Schema.String),
   autoMerge: Schema.Boolean,
   includeAllIssueAuthors: Schema.Boolean,
+  waitForReadyForReviewChecks: Schema.Boolean,
   issuesReconciledAt: Schema.NullOr(Schema.Date),
 })
 export type RepositoryRecord = typeof RepositoryRecord.Type
@@ -64,6 +65,7 @@ export const UpdateRepositorySettingsInput = Schema.Struct({
   reviewThinkingLevel: Schema.NullOr(Schema.String),
   autoMerge: Schema.Boolean,
   includeAllIssueAuthors: Schema.Boolean,
+  waitForReadyForReviewChecks: Schema.Boolean,
 })
 export type UpdateRepositorySettingsInput =
   typeof UpdateRepositorySettingsInput.Type
@@ -173,6 +175,7 @@ export const RepositorySqlRow = Schema.Struct({
   backendModelPrefs: Schema.String,
   autoMerge: SqlBoolean,
   includeAllIssueAuthors: SqlBoolean,
+  waitForReadyForReviewChecks: SqlBoolean,
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
 }).pipe(
   Schema.encodeKeys({
@@ -188,6 +191,7 @@ export const RepositorySqlRow = Schema.Struct({
     backendModelPrefs: "backend_model_prefs",
     autoMerge: "auto_merge",
     includeAllIssueAuthors: "include_all_issue_authors",
+    waitForReadyForReviewChecks: "wait_for_ready_for_review_checks",
     issuesReconciledAt: "issues_reconciled_at",
   }),
 )

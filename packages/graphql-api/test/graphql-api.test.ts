@@ -178,6 +178,7 @@ const makeRuntime = (
         reviewThinkingLevel: input.reviewThinkingLevel,
         autoMerge: input.autoMerge,
         includeAllIssueAuthors: input.includeAllIssueAuthors,
+        waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
       }),
     listRepositories: Effect.succeed([repository]),
     listSelectedOrInUseBackendIds: Effect.succeed([
@@ -608,6 +609,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel
             autoMerge
             includeAllIssueAuthors
+            waitForReadyForReviewChecks
             issuesReconciledAt
           }
         }`,
@@ -629,6 +631,7 @@ describe("GraphQL API", () => {
             defaultThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
             issuesReconciledAt: null,
           },
         ],
@@ -1138,6 +1141,7 @@ describe("GraphQL API", () => {
             reviewThinkingLevel: input.reviewThinkingLevel,
             autoMerge: input.autoMerge,
             includeAllIssueAuthors: input.includeAllIssueAuthors,
+            waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
           })
         },
         listSelectedOrInUseBackendIds: Effect.succeed(["opencode", "grok"]),
@@ -1168,6 +1172,7 @@ describe("GraphQL API", () => {
             reviewThinkingLevel
             autoMerge
             includeAllIssueAuthors
+            waitForReadyForReviewChecks
           }
         }`,
         variables: {
@@ -1181,6 +1186,7 @@ describe("GraphQL API", () => {
             reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: true,
+            waitForReadyForReviewChecks: false,
           },
         },
       }),
@@ -1197,6 +1203,7 @@ describe("GraphQL API", () => {
           reviewThinkingLevel: "max",
           autoMerge: true,
           includeAllIssueAuthors: true,
+          waitForReadyForReviewChecks: false,
         },
       },
     })
@@ -1224,6 +1231,7 @@ describe("GraphQL API", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           },
         },
       }),
@@ -1256,6 +1264,7 @@ describe("GraphQL API", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           },
         },
       }),
@@ -1474,6 +1483,7 @@ describe("GraphQL API", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           },
         },
       }),

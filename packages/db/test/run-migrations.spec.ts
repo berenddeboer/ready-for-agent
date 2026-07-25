@@ -96,6 +96,7 @@ describe("runMigrations", () => {
           { name: "20260724190000_work_item_turn_time_models" },
           { name: "20260725120000_backend_model_prefs" },
           { name: "20260725180000_repository_agent_backend_override" },
+          { name: "20260725210211_wait_for_ready_for_review_checks" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -585,6 +586,52 @@ describe("runMigrations", () => {
         expect(rows).toEqual([
           { id: "repo-1", selected_agent_backend: null },
           { id: "repo-2", selected_agent_backend: null },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds wait_for_ready_for_review_checks defaulting to true for existing repositories", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260725210211_wait_for_ready_for_review_checks/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE repository (
+             id text PRIMARY KEY,
+             github_owner text NOT NULL,
+             github_repo text NOT NULL
+           )`,
+        )
+        yield* sql.unsafe(
+          `INSERT INTO repository (id, github_owner, github_repo) VALUES
+             ('repo-1', 'acme', 'widgets'),
+             ('repo-2', 'acme', 'api')`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const rows = yield* sql.unsafe(
+          `SELECT id, wait_for_ready_for_review_checks
+           FROM repository
+           ORDER BY id`,
+        )
+        expect(rows).toEqual([
+          { id: "repo-1", wait_for_ready_for_review_checks: 1 },
+          { id: "repo-2", wait_for_ready_for_review_checks: 1 },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

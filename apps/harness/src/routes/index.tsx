@@ -193,6 +193,7 @@ const repositoriesQuery = {
         reviewThinkingLevel: true,
         autoMerge: true,
         includeAllIssueAuthors: true,
+        waitForReadyForReviewChecks: true,
         issuesReconciledAt: true,
         blockingUnfinishedWorkItemCount: true,
       },
@@ -268,6 +269,7 @@ type Repository = {
   reviewThinkingLevel: string | null
   autoMerge: boolean
   includeAllIssueAuthors: boolean
+  waitForReadyForReviewChecks: boolean
   issuesReconciledAt: string | null
   blockingUnfinishedWorkItemCount: number
   credential: RepositoryCredential
@@ -849,6 +851,8 @@ function RepositoryCard({
   const [includeAllIssueAuthors, setIncludeAllIssueAuthors] = useState(
     repository.includeAllIssueAuthors,
   )
+  const [waitForReadyForReviewChecks, setWaitForReadyForReviewChecks] =
+    useState(repository.waitForReadyForReviewChecks)
   const [previewModels, setPreviewModels] = useState<
     readonly AgentModelOption[] | null
   >(null)
@@ -885,6 +889,7 @@ function RepositoryCard({
       reviewThinkingLevel: string | null
       autoMerge: boolean
       includeAllIssueAuthors: boolean
+      waitForReadyForReviewChecks: boolean
     }) => {
       const result = await graphql.mutation({
         updateRepositorySettings: {
@@ -903,6 +908,7 @@ function RepositoryCard({
           reviewThinkingLevel: true,
           autoMerge: true,
           includeAllIssueAuthors: true,
+          waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,
           blockingUnfinishedWorkItemCount: true,
         },
@@ -1015,6 +1021,7 @@ function RepositoryCard({
     setReviewVariant(repository.reviewThinkingLevel ?? "")
     setAutoMerge(repository.autoMerge)
     setIncludeAllIssueAuthors(repository.includeAllIssueAuthors)
+    setWaitForReadyForReviewChecks(repository.waitForReadyForReviewChecks)
     setPreviewModels(null)
     setPreviewError(null)
     // Override catalogs load via preview; start pending so model fields stay
@@ -1055,6 +1062,7 @@ function RepositoryCard({
         reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
       autoMerge,
       includeAllIssueAuthors,
+      waitForReadyForReviewChecks,
     })
   }
 
@@ -1628,6 +1636,25 @@ function RepositoryCard({
                 Relevant Issues from every author after Refresh
               </span>
             </label>
+            <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+              <span className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-oxblood"
+                  checked={waitForReadyForReviewChecks}
+                  onChange={(event) =>
+                    setWaitForReadyForReviewChecks(event.target.checked)
+                  }
+                />
+                Wait for checks to start after ready for review
+              </span>
+              <span className="font-normal text-ink-faint">
+                When enabled, waits up to 90 seconds after ready for review for
+                new checks to start. Disable only when becoming ready cannot
+                start relevant workflows; then settled draft-phase checks may
+                advance without that startup wait.
+              </span>
+            </label>
 
             <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
               Agent Backend
@@ -2014,6 +2041,16 @@ function RepositoryCard({
               </dt>
               <dd className="m-0 font-mono text-ink-2">
                 {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                Wait for ready checks:
+              </dt>
+              <dd className="m-0 font-mono text-ink-2">
+                {repository.waitForReadyForReviewChecks
+                  ? "Enabled"
+                  : "Disabled"}
               </dd>
             </div>
           </dl>

@@ -234,7 +234,8 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
 const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
              selected_agent_backend, default_model, default_thinking_level,
              review_model, review_thinking_level, backend_model_prefs, auto_merge,
-             include_all_issue_authors, issues_reconciled_at`
+             include_all_issue_authors, wait_for_ready_for_review_checks,
+             issues_reconciled_at`
 
 const issueSelectColumns = `id, repository_id, github_issue_number, title, body, url, state,
                 github_created_at, issue_author, parent_github_issue_number,
@@ -255,6 +256,7 @@ const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
     reviewThinkingLevel: row.reviewThinkingLevel,
     autoMerge: row.autoMerge,
     includeAllIssueAuthors: row.includeAllIssueAuthors,
+    waitForReadyForReviewChecks: row.waitForReadyForReviewChecks,
     issuesReconciledAt: row.issuesReconciledAt,
   })
 
@@ -949,8 +951,9 @@ export const DbServiceLive = Layer.effect(
                selected_agent_backend,
                default_model, default_thinking_level, review_model, review_thinking_level,
                backend_model_prefs,
-               auto_merge, include_all_issue_authors, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?)
+               auto_merge, include_all_issue_authors, wait_for_ready_for_review_checks,
+               created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
           [
             id,
@@ -961,6 +964,7 @@ export const DbServiceLive = Layer.effect(
             true,
             false,
             false,
+            true,
             now,
             now,
           ],
@@ -1101,6 +1105,7 @@ export const DbServiceLive = Layer.effect(
                  backend_model_prefs = ?,
                  auto_merge = ?,
                  include_all_issue_authors = ?,
+                 wait_for_ready_for_review_checks = ?,
                  updated_at = ?
              WHERE id = ?
              RETURNING ${repositorySelectColumns}`,
@@ -1114,6 +1119,7 @@ export const DbServiceLive = Layer.effect(
                   backendModelPrefs,
                   input.autoMerge,
                   input.includeAllIssueAuthors,
+                  input.waitForReadyForReviewChecks,
                   now,
                   input.repositoryId,
                 ],

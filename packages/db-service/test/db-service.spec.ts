@@ -129,6 +129,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           const switched = yield* db.updateConfig({
@@ -256,6 +257,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           const now = Date.now()
           // Unfinished only on the explicit-override repository.
@@ -314,6 +316,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           const now = Date.now()
           yield* sql.unsafe(
@@ -547,6 +550,7 @@ describe("DbService", () => {
           expect(repo.reviewThinkingLevel).toBeNull()
           expect(repo.autoMerge).toBe(false)
           expect(repo.includeAllIssueAuthors).toBe(false)
+          expect(repo.waitForReadyForReviewChecks).toBe(true)
           expect(repo.issuesReconciledAt).toBeNull()
         }),
       ))
@@ -644,11 +648,12 @@ describe("DbService", () => {
   })
 
   describe("updateRepositorySettings", () => {
-    it("updates pause, model override, auto-merge, and include-all issue authors", () =>
+    it("updates pause, model override, auto-merge, include-all authors, and ready-check wait", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
           const repo = yield* db.addRepository(sampleInput)
+          expect(repo.waitForReadyForReviewChecks).toBe(true)
 
           const updated = yield* db.updateRepositorySettings({
             repositoryId: repo.id,
@@ -659,6 +664,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "  max  ",
             autoMerge: true,
             includeAllIssueAuthors: true,
+            waitForReadyForReviewChecks: false,
           })
 
           expect(updated).toEqual({
@@ -671,6 +677,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: true,
+            waitForReadyForReviewChecks: false,
           })
           expect(yield* db.listRepositories).toEqual([updated])
         }),
@@ -693,6 +700,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(withOverride.selectedAgentBackend).toBe("grok")
           expect(withOverride.defaultModel).toBe("grok-code")
@@ -707,6 +715,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(cleared.selectedAgentBackend).toBeNull()
 
@@ -721,6 +730,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           const preserved = yield* db.updateRepositorySettings({
             repositoryId: repo.id,
@@ -731,6 +741,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(preserved.selectedAgentBackend).toBe("grok")
           expect(preserved.paused).toBe(false)
@@ -753,6 +764,7 @@ describe("DbService", () => {
               reviewThinkingLevel: null,
               autoMerge: false,
               includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
             }),
           )
           expect(error).toMatchObject({
@@ -805,6 +817,7 @@ describe("DbService", () => {
               reviewThinkingLevel: null,
               autoMerge: false,
               includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
             }),
           )
           expect(error).toMatchObject({
@@ -825,6 +838,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(otherUpdated.selectedAgentBackend).toBe("grok")
 
@@ -839,6 +853,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(sameOverride.paused).toBe(false)
           expect(sameOverride.selectedAgentBackend).toBeNull()
@@ -871,6 +886,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           // Override to grok: write prefs for effective grok.
@@ -884,6 +900,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(grokSettings.selectedAgentBackend).toBe("grok")
           expect(grokSettings.defaultModel).toBe("grok-code")
@@ -932,6 +949,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(inherited.selectedAgentBackend).toBeNull()
           expect(inherited.defaultModel).toBe("openai/opencode-model-v2")
@@ -986,6 +1004,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           yield* db.updateRepositorySettings({
             repositoryId: overridden.id,
@@ -997,6 +1016,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           yield* db.updateConfig({
@@ -1040,6 +1060,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           const cleared = yield* db.updateRepositorySettings({
@@ -1051,6 +1072,7 @@ describe("DbService", () => {
             reviewThinkingLevel: null,
             autoMerge: false,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           expect(cleared.defaultModel).toBeNull()
@@ -1074,6 +1096,7 @@ describe("DbService", () => {
               reviewThinkingLevel: null,
               autoMerge: false,
               includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
             }),
           )
           expect(error).toBeInstanceOf(RepositoryNotFoundError)
@@ -1096,6 +1119,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           const unpaused = yield* db.unpauseRepository(repo.id)
@@ -1109,6 +1133,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
           expect(yield* db.listRepositories).toEqual([unpaused])
         }),
@@ -1128,6 +1153,7 @@ describe("DbService", () => {
             reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
           })
 
           const paused = yield* db.pauseRepository(repo.id)
