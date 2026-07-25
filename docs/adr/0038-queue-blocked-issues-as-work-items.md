@@ -1,0 +1,5 @@
+# Queue blocked Issues as Work Items held for blockers
+
+Operators need to walk away after nominating blocked leaf Issues for later implementation. **Queue** creates a real **Work Item** immediately (not a separate intent record) for a Relevant open leaf that has blockers and no unfinished Work Item. The Work Item is **Waiting for blockers**: no Worker Slot, no Step Run, no force-start past blockers. When Issue reconciliation finds the Issue **Implementable**, the hold lifts and admission/lifecycle proceed as **Implement Now** (full remote path), FIFO with other Worker Slot waiters by creation time — including while the Repository is Paused. Invalid Issues (closed, not Relevant, not a leaf) fail the Work Item terminally; still-blocked valid leaves wait without timeout. Cancel with **Reset**. Mid-flight Work Items that gain blockers still fail terminally; that path is unchanged.
+
+Rejected alternatives: a lighter non–Work Item bookmark (would duplicate unfinished-work and Working-list semantics); allowing create-and-run while blocked (revalidation already forbids it); auto-picking Actionable Issues (full autonomy — out of scope; Queue is explicit intent only).
