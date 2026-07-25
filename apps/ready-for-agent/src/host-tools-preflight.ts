@@ -50,7 +50,19 @@ const optionalTools: ReadonlyArray<HostTool> = [
 ]
 
 export type HostToolsPreflightOptions = {
-  /** Active/selected Agent Backend id; defaults to OpenCode. */
+  /**
+   * Selected Agent Backend ids that cold-start preflight must cover
+   * (harness default ∪ Repository overrides). Unknown ids are ignored.
+   * Combined with {@link selectedAgentBackendId} when both are set; if neither
+   * yields a selectable id, OpenCode is required.
+   */
+  readonly selectedAgentBackendIds?: ReadonlyArray<string>
+  /**
+   * Single selected backend id (legacy convenience). Prefer
+   * {@link selectedAgentBackendIds} when multiple backends may be selected.
+   * Merged into the required set when present (including when the plural list
+   * is empty).
+   */
   readonly selectedAgentBackendId?: string
 }
 
@@ -62,27 +74,42 @@ export type HostToolsPreflightResult =
       readonly message: string
     }
 
-const resolveRequiredAgentBackendBinary = (
-  selectedAgentBackendId?: string,
-): { readonly name: string; readonly installHint: string } => {
-  const id =
-    selectedAgentBackendId !== undefined &&
-    isSelectableAgentBackendId(selectedAgentBackendId)
-      ? selectedAgentBackendId
-      : defaultAgentBackendId
-  return BACKEND_HOST_TOOLS[id]
+const resolveRequiredAgentBackendIds = (
+  options: HostToolsPreflightOptions,
+): ReadonlyArray<AgentBackendId> => {
+  const raw = [
+    ...(options.selectedAgentBackendIds ?? []),
+    ...(options.selectedAgentBackendId !== undefined
+      ? [options.selectedAgentBackendId]
+      : []),
+  ]
+
+  const seen = new Set<AgentBackendId>()
+  const resolved: AgentBackendId[] = []
+  for (const value of raw) {
+    if (!isSelectableAgentBackendId(value) || seen.has(value)) {
+      continue
+    }
+    seen.add(value)
+    resolved.push(value)
+  }
+
+  return resolved.length > 0 ? resolved : [defaultAgentBackendId]
 }
+
+const resolveRequiredAgentBackendBinaries = (
+  options: HostToolsPreflightOptions,
+): ReadonlyArray<{ readonly name: string; readonly installHint: string }> =>
+  resolveRequiredAgentBackendIds(options).map((id) => BACKEND_HOST_TOOLS[id])
 
 export const checkHostTools = (
   commandExists: (command: string) => boolean,
   options: HostToolsPreflightOptions = {},
 ): HostToolsPreflightResult => {
-  const backendTool = resolveRequiredAgentBackendBinary(
-    options.selectedAgentBackendId,
-  )
+  const backendTools = resolveRequiredAgentBackendBinaries(options)
   const hostTools: ReadonlyArray<HostTool> = [
     ...alwaysRequiredTools,
-    { ...backendTool, required: true },
+    ...backendTools.map((tool) => ({ ...tool, required: true as const })),
     ...optionalTools,
   ]
 
@@ -94,19 +121,21 @@ export const checkHostTools = (
     return { ok: true }
   }
 
-  const backendLabel =
-    getBuiltInAgentBackend(
-      options.selectedAgentBackendId !== undefined &&
-        isSelectableAgentBackendId(options.selectedAgentBackendId)
-        ? options.selectedAgentBackendId
-        : defaultAgentBackendId,
-    )?.descriptor.label ?? "the selected Agent Backend"
+  const backendIds = resolveRequiredAgentBackendIds(options)
+  const backendLabels = backendIds.map(
+    (id) => getBuiltInAgentBackend(id)?.descriptor.label ?? id,
+  )
+  const backendSummary =
+    backendLabels.length === 1
+      ? backendLabels[0]
+      : backendLabels.slice(0, -1).join(", ") +
+        ` and ${backendLabels[backendLabels.length - 1]}`
 
   const lines = [
     "Required host tools are missing from PATH:",
     ...missingRequired.map((tool) => `  - ${tool.name}: ${tool.installHint}`),
     "",
-    `Only the selected Agent Backend executable (${backendLabel}) is required alongside git and gh.`,
+    `Only selected Agent Backend executable(s) (${backendSummary}) are required alongside git and gh.`,
     "Install the tools above, then run ready-for-agent again.",
     "Keymaxxer is optional and does not block start.",
   ]
