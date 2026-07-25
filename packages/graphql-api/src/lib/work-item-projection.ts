@@ -9,6 +9,7 @@ import {
   type StepRunRecord,
   WAITING_FOR_WORKER_SLOT_MESSAGE,
   type WorkItemRecord,
+  formatWaitingForBlockersMessage,
   isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 
@@ -57,6 +58,7 @@ export type WorkItemStatus =
   | "needs_human"
   | "needs_human_review"
   | "waiting_for_worker_slot"
+  | "waiting_for_blockers"
 
 type LifecyclePhase =
   | Exclude<
@@ -117,8 +119,10 @@ const stepRunDisplayStatus = (stepRun: StepRunRecord): WorkItemStatus =>
   isWaitingForAgentTurn(stepRun) ? "queued" : stepRun.status
 
 export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
-  if (workItem.waitingSince != null) return "waiting_for_worker_slot"
+  // Terminal state always wins over hold/slot flags (flags may lag a terminal UPDATE).
   if (isTerminalWorkItemState(workItem.state)) return workItem.state
+  if (workItem.waitingForBlockers) return "waiting_for_blockers"
+  if (workItem.waitingSince != null) return "waiting_for_worker_slot"
   if (workItem.paused) return "needs_human_review"
   const latest = latestStepRun(workItem)
   if (latest === undefined) return "queued"
@@ -140,7 +144,16 @@ const isRedundantReviewInProgressMessage = (stepRun: StepRunRecord): boolean =>
 
 export const workItemStatusMessage = (
   workItem: WorkItemRecord,
+  options?: {
+    readonly blockerIssueNumbers?: readonly number[]
+  },
 ): string | null => {
+  if (isTerminalWorkItemState(workItem.state)) {
+    return workItem.failureMessage
+  }
+  if (workItem.waitingForBlockers) {
+    return formatWaitingForBlockersMessage(options?.blockerIssueNumbers ?? [])
+  }
   if (workItem.waitingSince != null) {
     return WAITING_FOR_WORKER_SLOT_MESSAGE
   }

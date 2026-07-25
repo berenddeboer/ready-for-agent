@@ -96,6 +96,11 @@ export interface WorkItemRecord {
    * When set, the Work Item is Waiting for Worker Slot (FIFO by this timestamp).
    */
   readonly waitingSince: Date | null
+  /**
+   * When true, the Work Item is Waiting for blockers (Queue hold). No Worker
+   * Slot, no Step Run, and Pause/Start are rejected until the hold lifts.
+   */
+  readonly waitingForBlockers: boolean
   /** Whether this Work Item currently occupies a Worker Slot (Admitted). */
   readonly holdsWorkerSlot: boolean
   /** When set, advancement into this step auto-pauses (no Step Run enqueued). */
@@ -118,6 +123,20 @@ export interface WorkItemRecord {
 /** Operator-visible message while Waiting for Worker Slot. */
 export const WAITING_FOR_WORKER_SLOT_MESSAGE =
   "Waiting for a worker slot to become available"
+
+/**
+ * Operator-facing copy for Waiting for blockers.
+ * Lists live blocker numbers when provided; otherwise a generic hold message.
+ */
+export const formatWaitingForBlockersMessage = (
+  blockerIssueNumbers: readonly number[] = [],
+): string => {
+  if (blockerIssueNumbers.length === 0) {
+    return "Queued — waiting for blockers"
+  }
+  const listed = blockerIssueNumbers.map((n) => `#${n}`).join(", ")
+  return `Queued — waiting for ${listed}`
+}
 
 /** Operator-visible message while a running Step Run waits for an Agent Turn slot. */
 export const WAITING_FOR_AGENT_TURN_MESSAGE = "Waiting for an Agent Turn slot"

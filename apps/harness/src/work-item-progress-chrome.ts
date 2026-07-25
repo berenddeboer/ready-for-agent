@@ -20,7 +20,8 @@ export function statusBadgeClassNameForStatus(status: string): string {
           ? "border-rule-2 bg-paper-2 text-ink-faint"
           : status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"
             ? "border-sepia/40 bg-amber-wash text-sepia"
-            : status === "WAITING_FOR_WORKER_SLOT"
+            : status === "WAITING_FOR_WORKER_SLOT" ||
+                status === "WAITING_FOR_BLOCKERS"
               ? "border-violet-300 bg-violet-wash text-violet-800"
               : "border-oxblood/30 bg-oxblood-wash text-oxblood"
   return `${statusBadgeBaseClassName} ${tone}`

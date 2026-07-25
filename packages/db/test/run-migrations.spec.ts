@@ -97,6 +97,7 @@ describe("runMigrations", () => {
           { name: "20260725120000_backend_model_prefs" },
           { name: "20260725180000_repository_agent_backend_override" },
           { name: "20260725210211_wait_for_ready_for_review_checks" },
+          { name: "20260726090000_waiting_for_blockers" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
