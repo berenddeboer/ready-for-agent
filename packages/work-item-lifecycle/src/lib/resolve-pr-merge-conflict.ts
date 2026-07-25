@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   type AgentTurnGitHubAuth,
@@ -103,7 +103,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
     if (context.sessionId === null || context.sessionId.trim() === "") {
       return yield* new ResolvePrMergeConflictContextError({
         message:
-          "Resolve PR Merge Conflict requires the Implement OpenCode Session",
+          "Resolve PR Merge Conflict requires a Session ID persisted by a successful Implement Step Run",
       })
     }
     const db = yield* DbService
@@ -151,8 +151,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
         Effect.mapError(
           (cause) =>
             new ResolvePrMergeConflictOpenCodeError({
-              message:
-                "OpenCode failed while resolving PR merge conflict (work)",
+              message: `${agentBackendLabel(context.agentBackend)} failed while resolving PR merge conflict (work)`,
               cause,
             }),
         ),
@@ -172,8 +171,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
           Effect.mapError(
             (cause) =>
               new ResolvePrMergeConflictOpenCodeError({
-                message:
-                  "OpenCode failed while resolving PR merge conflict (outcome fallback)",
+                message: `${agentBackendLabel(context.agentBackend)} failed while resolving PR merge conflict (outcome fallback)`,
                 cause,
               }),
           ),
@@ -182,7 +180,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
     }
     if (result === null) {
       return yield* new ResolvePrMergeConflictOpenCodeError({
-        message: "OpenCode did not report PROCESSED or NEEDS_HUMAN",
+        message: `${agentBackendLabel(context.agentBackend)} did not report PROCESSED or NEEDS_HUMAN`,
       })
     }
     return result === "processed"

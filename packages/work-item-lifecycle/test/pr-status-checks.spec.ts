@@ -1,6 +1,9 @@
 import { Effect, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import {
+  AgentBackend,
+  AgentBackendExitError,
+} from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   makeRepositoryRecord,
@@ -44,6 +47,7 @@ const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
   repositoryId: repository.id,
   githubIssueNumber: 42,
+  agentBackend: "opencode",
   model: "opencode/test-model",
   thinkingLevel: "high",
   reviewModel: "opencode/test-model",
@@ -730,6 +734,62 @@ describe("PR status check steps", () => {
       expect(String(result.failure)).toContain(
         "No autonomous recovery action remains",
       )
+    }
+  })
+
+  it("names Grok Build in investigate failure copy when that backend is captured", async () => {
+    const grokContext: LifecycleStepContext = {
+      ...context,
+      agentBackend: "grok",
+    }
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(grokContext)
+        return yield* Effect.result(investigatePrStatusChecks(grokContext))
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "failed",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+              ],
+            }),
+            keymaxxer,
+            Layer.succeed(
+              AgentBackend,
+              AgentBackend.of({
+                startTurn: () => Effect.die("unused"),
+                continueTurn: () =>
+                  Effect.fail(
+                    new AgentBackendExitError({
+                      exitCode: 1,
+                      cwd: "/tmp/worktree",
+                    }),
+                  ),
+                inspect: () =>
+                  Effect.succeed({
+                    backend: { id: "grok" as const, label: "Grok Build" },
+                    models: [],
+                  }),
+              }),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("Failure")
+    if (result._tag === "Failure") {
+      const message = String(result.failure)
+      expect(message).toContain(
+        "Grok Build failed while investigating PR status checks (work)",
+      )
+      expect(message).not.toContain("OpenCode failed")
     }
   })
 

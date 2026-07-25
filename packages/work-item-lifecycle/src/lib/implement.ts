@@ -1,6 +1,6 @@
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   ImplementInvalidWorktreeContextError,
@@ -34,7 +34,7 @@ const persistSessionIdMidRun = (
     }
   }).pipe(
     Effect.catch((error) =>
-      Effect.logWarning("Failed to persist OpenCode session id mid-implement", {
+      Effect.logWarning("Failed to persist Agent session id mid-implement", {
         workItemId,
         sessionId,
         error,
@@ -206,7 +206,7 @@ export const implement = (context: LifecycleStepContext) =>
       Effect.mapError(
         (cause) =>
           new ImplementOpenCodeError({
-            message: "OpenCode failed to implement the Work Item issue",
+            message: `${agentBackendLabel(context.agentBackend)} failed to implement the Work Item issue`,
             worktreePath,
             cause,
           }),
@@ -215,7 +215,7 @@ export const implement = (context: LifecycleStepContext) =>
 
     if (result.sessionId.trim() === "") {
       return yield* new ImplementOpenCodeError({
-        message: "OpenCode completed without returning a Session ID",
+        message: `${agentBackendLabel(context.agentBackend)} completed without returning a Session ID`,
         worktreePath,
       })
     }

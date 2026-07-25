@@ -1,6 +1,6 @@
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
@@ -494,7 +494,7 @@ export const review = (context: LifecycleStepContext) =>
           Effect.mapError(
             (cause) =>
               new ReviewOpenCodeError({
-                message: "OpenCode failed to review the Work Item",
+                message: `${agentBackendLabel(context.agentBackend)} failed to review the Work Item`,
                 worktreePath,
                 sessionId,
                 cause,
@@ -517,7 +517,7 @@ export const review = (context: LifecycleStepContext) =>
             Effect.mapError(
               (cause) =>
                 new ReviewOpenCodeError({
-                  message: "OpenCode failed to report the Review verdict",
+                  message: `${agentBackendLabel(context.agentBackend)} failed to report the Review verdict`,
                   worktreePath,
                   sessionId,
                   cause,
@@ -530,8 +530,7 @@ export const review = (context: LifecycleStepContext) =>
       if (reviewingParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message:
-            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>",
+          message: `${agentBackendLabel(context.agentBackend)} did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>`,
         })
       }
 
@@ -563,7 +562,7 @@ export const review = (context: LifecycleStepContext) =>
           Effect.mapError(
             (cause) =>
               new ReviewOpenCodeError({
-                message: "OpenCode failed while applying Review Findings",
+                message: `${agentBackendLabel(context.agentBackend)} failed while applying Review Findings`,
                 worktreePath,
                 sessionId,
                 cause,
@@ -575,8 +574,7 @@ export const review = (context: LifecycleStepContext) =>
       if (applyParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message:
-            "OpenCode did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>",
+          message: `${agentBackendLabel(context.agentBackend)} did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>`,
         })
       }
 
@@ -645,7 +643,7 @@ export const review = (context: LifecycleStepContext) =>
             Effect.mapError(
               (cause) =>
                 new ReviewOpenCodeError({
-                  message: "OpenCode failed during Review Rerun Assessment",
+                  message: `${agentBackendLabel(context.agentBackend)} failed during Review Rerun Assessment`,
                   worktreePath,
                   sessionId,
                   cause,

@@ -50,6 +50,14 @@ export const getBuiltInAgentBackend = (
 export const isSelectableAgentBackendId = (id: string): id is AgentBackendId =>
   getBuiltInAgentBackend(id) !== undefined
 
+/**
+ * Operator-visible Agent Backend name for failure copy and UI provenance.
+ * Known built-in ids use their registry label (e.g. "Grok Build"); unknown
+ * ids fall back to the raw id so copy still names something concrete.
+ */
+export const agentBackendLabel = (backendId: string): string =>
+  getBuiltInAgentBackend(backendId)?.descriptor.label ?? backendId
+
 export const defaultAgentBackendId = AGENT_BACKEND_IDS.opencode
 
 export const capabilitySupported = (

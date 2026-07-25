@@ -29,6 +29,7 @@ const baseContext = (
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
   githubIssueNumber: 91,
+  agentBackend: "opencode",
   model: "opencode/test-model",
   thinkingLevel: "high",
   reviewModel: "opencode/test-model",
@@ -141,6 +142,7 @@ describe("commit", () => {
           baseContext(root, {
             sessionId: "ses_from_implement",
             githubIssueNumber: 2039,
+            agentBackend: "opencode",
             model: "opencode/commit-model",
             thinkingLevel: "max",
             reviewModel: "opencode/commit-model",

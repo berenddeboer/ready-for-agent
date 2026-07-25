@@ -28,6 +28,7 @@ const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
   repositoryId: repository.id,
   githubIssueNumber: 42,
+  agentBackend: "opencode",
   model: "opencode/test-model",
   thinkingLevel: "high",
   reviewModel: "opencode/test-model",
