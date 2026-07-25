@@ -6,6 +6,8 @@ export const committedPullRequestsCountQueryKeyPrefix = [
 ] as const
 
 const configQueryKey = ["config"] as const
+/** Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) lives here. */
+const repositoriesQueryKey = ["repositories"] as const
 
 export type RepositoryWorkItemsLiveQueries = {
   workItems: (repositoryId: string) => {
@@ -21,7 +23,8 @@ export type RepositoryWorkItemsLiveQueries = {
  *
  * Refetches only the affected repository's workItems query on each event, and
  * also refetches active committed-pull-requests dashboard counts (global across
- * repositories) so the top strip stays live without polling.
+ * repositories) so the top strip stays live without polling. Refetches config
+ * and repositories so unfinished / scoped backend-change gates stay current.
  *
  * Per-event Work Item handling does not await count refresh, so the serial SSE
  * loop can process the next notification while a coalesced trailing count
@@ -211,6 +214,8 @@ export const followRepositoryWorkItemsLive = async ({
       refreshWorkItems(repositoryId),
       // Harness Settings includes the global unfinished Work Item count.
       refreshCachedQueries(configQueryKey),
+      // Repository settings backend gate uses per-repo blocking counts.
+      refreshCachedQueries(repositoriesQueryKey),
     ])
   }
 
@@ -221,6 +226,7 @@ export const followRepositoryWorkItemsLive = async ({
       ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
       refreshCommittedPullRequestsCounts(),
       refreshCachedQueries(configQueryKey),
+      refreshCachedQueries(repositoriesQueryKey),
     ])
   }
 
