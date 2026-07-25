@@ -202,11 +202,23 @@ describe("PR status check steps", () => {
     })
   })
 
-  it("hands off unhandled green results while the aggregate is still pending", async () => {
-    const status = await Effect.runPromise(
+  it("defers unhandled green results while the aggregate is still pending", async () => {
+    const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
-        return yield* watchPrStatusChecks(context)
+        const status = yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, outcome, handled_at
+           FROM pr_status_check
+           WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly outcome: string
+          readonly handled_at: number | null
+        }[]
+        return { status, rows }
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -224,7 +236,251 @@ describe("PR status check steps", () => {
       ),
     )
 
-    expect(status._tag).toBe("handoff_needed")
+    expect(result.status._tag).toBe("pending")
+    expect(result.rows).toEqual([
+      {
+        external_id: "checkrun:1",
+        outcome: "green",
+        handled_at: null,
+      },
+    ])
+  })
+
+  it("hands off unhandled red results immediately while the aggregate is still pending", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const status = yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, outcome, handled_at
+           FROM pr_status_check
+           WHERE work_item_id = ?
+           ORDER BY external_id`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly outcome: string
+          readonly handled_at: number | null
+        }[]
+        return { status, rows }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith({
+              _tag: "pending",
+              ...mergeable,
+              terminalChecks: [
+                { externalId: "checkrun:1", name: "lint", outcome: "red" },
+                { externalId: "checkrun:2", name: "review", outcome: "green" },
+              ],
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.status._tag).toBe("handoff_needed")
+    // Immediate red handoff still carries accumulated unhandled greens.
+    expect(result.rows).toEqual([
+      {
+        external_id: "checkrun:1",
+        outcome: "red",
+        handled_at: null,
+      },
+      {
+        external_id: "checkrun:2",
+        outcome: "green",
+        handled_at: null,
+      },
+    ])
+  })
+
+  it("hands off previously deferred greens when a red appears before the aggregate settles", async () => {
+    const statuses: PullRequestCheckStatus[] = [
+      {
+        _tag: "pending",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:lint", name: "lint", outcome: "green" },
+        ],
+      },
+      {
+        _tag: "pending",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:lint", name: "lint", outcome: "green" },
+          { externalId: "checkrun:unit", name: "unit", outcome: "red" },
+        ],
+      },
+    ]
+    let index = 0
+    const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+      listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed(statuses[index++] ?? statuses[1]!),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
+      markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+      rerunWorkflowRun: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
+    } satisfies GitHubServiceShape)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const first = yield* watchPrStatusChecks(context)
+        const second = yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, outcome, handled_at
+           FROM pr_status_check
+           WHERE work_item_id = ?
+           ORDER BY external_id`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly outcome: string
+          readonly handled_at: number | null
+        }[]
+        return { first, second, rows }
+      }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
+    )
+
+    expect(result.first._tag).toBe("pending")
+    expect(result.second._tag).toBe("handoff_needed")
+    expect(result.rows).toEqual([
+      {
+        external_id: "checkrun:lint",
+        outcome: "green",
+        handled_at: null,
+      },
+      {
+        external_id: "checkrun:unit",
+        outcome: "red",
+        handled_at: null,
+      },
+    ])
+  })
+
+  it("batches staggered green results into one handoff after the aggregate settles", async () => {
+    const statuses: PullRequestCheckStatus[] = [
+      {
+        _tag: "pending",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:lint", name: "lint", outcome: "green" },
+        ],
+      },
+      {
+        _tag: "pending",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:lint", name: "lint", outcome: "green" },
+          {
+            externalId: "checkrun:claude-review",
+            name: "claude-review",
+            outcome: "green",
+          },
+        ],
+      },
+      {
+        _tag: "succeeded",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:lint", name: "lint", outcome: "green" },
+          {
+            externalId: "checkrun:claude-review",
+            name: "claude-review",
+            outcome: "green",
+          },
+          { externalId: "checkrun:main", name: "main", outcome: "green" },
+        ],
+      },
+    ]
+    let index = 0
+    const github = Layer.succeed(GitHubService, {
+      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+      listReadyIssues: () => Effect.succeed([]),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed(statuses[index++] ?? statuses[2]!),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
+      markPullRequestReadyForReview: () => Effect.void,
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+      rerunWorkflowRun: () => Effect.void,
+      ensureIssueCompletedWithSummary: () => Effect.void,
+    } satisfies GitHubServiceShape)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        const first = yield* watchPrStatusChecks(context)
+        const second = yield* watchPrStatusChecks(context)
+        const third = yield* watchPrStatusChecks(context)
+        const investigation = yield* investigatePrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, name, outcome, handled_at
+           FROM pr_status_check
+           WHERE work_item_id = ?
+           ORDER BY external_id`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly name: string
+          readonly outcome: string
+          readonly handled_at: number | null
+        }[]
+        return { first, second, third, investigation, rows }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            github,
+            keymaxxer,
+            opencodeWith(["READY_FOR_AGENT_RESULT: PROCESSED"]),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result.first._tag).toBe("pending")
+    expect(result.second._tag).toBe("pending")
+    expect(result.third._tag).toBe("handoff_needed")
+    expect(result.investigation._tag).toBe("processed")
+    if (result.investigation._tag === "processed") {
+      expect(result.investigation.handledCheckIds).toHaveLength(3)
+    }
+    expect(result.rows).toEqual([
+      {
+        external_id: "checkrun:claude-review",
+        name: "claude-review",
+        outcome: "green",
+        handled_at: null,
+      },
+      {
+        external_id: "checkrun:lint",
+        name: "lint",
+        outcome: "green",
+        handled_at: null,
+      },
+      {
+        external_id: "checkrun:main",
+        name: "main",
+        outcome: "green",
+        handled_at: null,
+      },
+    ])
   })
 
   it("prioritizes a merge conflict and identifies every completed unhandled check for retirement", async () => {
@@ -291,6 +547,13 @@ describe("PR status check steps", () => {
         ...mergeable,
         terminalChecks: [],
       },
+      {
+        _tag: "succeeded",
+        ...mergeable,
+        terminalChecks: [
+          { externalId: "checkrun:1", name: "review", outcome: "green" },
+        ],
+      },
     ]
     let index = 0
     const github = Layer.succeed(GitHubService, {
@@ -298,7 +561,7 @@ describe("PR status check steps", () => {
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
       getPullRequestCheckStatus: () =>
-        Effect.succeed(statuses[index++] ?? statuses[1]!),
+        Effect.succeed(statuses[index++] ?? statuses[2]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
@@ -312,13 +575,26 @@ describe("PR status check steps", () => {
       Effect.gen(function* () {
         yield* seedWorkItem
         const unknown = yield* watchPrStatusChecks(context)
-        const known = yield* watchPrStatusChecks(context)
-        return { unknown, known }
+        const stillPending = yield* watchPrStatusChecks(context)
+        const settled = yield* watchPrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, handled_at FROM pr_status_check WHERE work_item_id = ?`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly handled_at: number | null
+        }[]
+        return { unknown, stillPending, settled, rows }
       }).pipe(Effect.provide(Layer.mergeAll(db, github, DatabaseTest))),
     )
 
     expect(result.unknown._tag).toBe("pending")
-    expect(result.known._tag).toBe("handoff_needed")
+    expect(result.stillPending._tag).toBe("pending")
+    expect(result.settled._tag).toBe("handoff_needed")
+    expect(result.rows).toEqual([
+      { external_id: "checkrun:1", handled_at: null },
+    ])
   })
 
   it("does not re-hand off already handled checks and reports aggregate success", async () => {
