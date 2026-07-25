@@ -7,8 +7,12 @@ import {
   type AgentBackendRegistration,
   type AgentBackendRuntimeStatus,
   type AgentBackendStatus,
+  type AgentTurnResult,
+  type ContinueTurnInput,
   type SessionTelemetry,
+  type StartTurnInput,
   getBuiltInAgentBackend,
+  isSelectableAgentBackendId,
   toAgentBackendStatus,
   unsupportedSessionTelemetry,
 } from "@ready-for-agent/agent-backend"
@@ -44,51 +48,108 @@ const readyStatus = (
 export const stubActiveAgentBackendLayer = (
   overrides: Partial<{
     readonly registration: AgentBackendRegistration
+    /** Additional Active registrations (for multi-backend routing tests). */
+    readonly registrations: ReadonlyArray<AgentBackendRegistration>
     readonly getStatus: Effect.Effect<AgentBackendStatus>
     readonly requireAgentTurnsAllowed: Effect.Effect<
       void,
       AgentBackendBlockedError
     >
+    /**
+     * Per-backend require override. When set, consulted before the singular
+     * {@link requireAgentTurnsAllowed} Effect.
+     */
+    readonly requireAgentTurnsAllowedFor: (
+      backendId: AgentBackendId,
+    ) => Effect.Effect<void, AgentBackendBlockedError>
+    readonly startTurn: (
+      backendId: AgentBackendId,
+      input: StartTurnInput,
+    ) => Effect.Effect<AgentTurnResult, never>
+    readonly continueTurn: (
+      backendId: AgentBackendId,
+      input: ContinueTurnInput,
+    ) => Effect.Effect<AgentTurnResult, never>
   }> = {},
 ): Layer.Layer<ActiveAgentBackend> => {
   const registration = overrides.registration ?? opencode
-  const ready = runtimeStatus(registration)
+  const allRegistrations = [
+    registration,
+    ...(overrides.registrations ?? []).filter(
+      (entry) => entry.descriptor.id !== registration.descriptor.id,
+    ),
+  ]
+  const byId = new Map<AgentBackendId, AgentBackendRegistration>(
+    allRegistrations.map((entry) => [entry.descriptor.id, entry] as const),
+  )
+  const readyFor = (entry: AgentBackendRegistration) => runtimeStatus(entry)
+  const allReady = allRegistrations.map(readyFor)
   const legacyStatus =
     overrides.getStatus ?? Effect.succeed(readyStatus(registration))
   const requireAllowed = overrides.requireAgentTurnsAllowed ?? Effect.void
+  const requireFor =
+    overrides.requireAgentTurnsAllowedFor ??
+    ((_backendId: AgentBackendId) => requireAllowed)
+  const registrationFor = (backendId: string): AgentBackendRegistration => {
+    const entry = byId.get(backendId as AgentBackendId)
+    if (entry !== undefined) {
+      return entry
+    }
+    // Prefer real built-ins over silently returning the primary registration,
+    // so multi-backend tests cannot green-pass with the wrong descriptor.
+    if (isSelectableAgentBackendId(backendId)) {
+      const builtIn = getBuiltInAgentBackend(backendId)
+      if (builtIn !== undefined) {
+        return builtIn
+      }
+    }
+    throw new Error(
+      `stub ActiveAgentBackend: unknown Agent Backend id: ${backendId}`,
+    )
+  }
 
   return Layer.succeed(
     ActiveAgentBackend,
     ActiveAgentBackend.of({
-      listStatuses: Effect.succeed([ready]),
-      getBackendStatus: (backendId: AgentBackendId) =>
-        Effect.succeed(backendId === registration.descriptor.id ? ready : null),
+      listStatuses: Effect.succeed(allReady),
+      getBackendStatus: (backendId: AgentBackendId) => {
+        const entry = byId.get(backendId)
+        return Effect.succeed(entry === undefined ? null : readyFor(entry))
+      },
       getStatus: legacyStatus,
-      setSelectedOrInUse: () => Effect.succeed([ready]),
-      activate: () => Effect.succeed(ready),
+      setSelectedOrInUse: () => Effect.succeed(allReady),
+      activate: (backendId) =>
+        Effect.succeed(readyFor(registrationFor(backendId))),
       drop: () => Effect.void,
-      recheck: () => Effect.succeed(ready),
-      requireAgentTurnsAllowed: (_backendId) => requireAllowed,
-      preview: () =>
+      recheck: (backendId) =>
+        Effect.succeed(readyFor(registrationFor(backendId))),
+      requireAgentTurnsAllowed: (backendId) => requireFor(backendId),
+      preview: (backendId) =>
         Effect.succeed({
-          backend: registration.descriptor,
+          backend: registrationFor(backendId).descriptor,
           kind: "ready" as const,
           reason: null,
           models: [],
         }),
       withConfigCoordination: (effect) => effect,
-      getRegistration: () => Effect.succeed(registration),
+      getRegistration: (backendId) =>
+        Effect.succeed(registrationFor(backendId)),
       getActiveRegistration: Effect.succeed(registration),
-      startTurn: () => Effect.die("stub ActiveAgentBackend.startTurn unused"),
-      continueTurn: () =>
-        Effect.die("stub ActiveAgentBackend.continueTurn unused"),
+      startTurn: (backendId, input) =>
+        overrides.startTurn !== undefined
+          ? overrides.startTurn(backendId, input)
+          : Effect.die("stub ActiveAgentBackend.startTurn unused"),
+      continueTurn: (backendId, input) =>
+        overrides.continueTurn !== undefined
+          ? overrides.continueTurn(backendId, input)
+          : Effect.die("stub ActiveAgentBackend.continueTurn unused"),
       inspectBackend: () =>
         Effect.die("stub ActiveAgentBackend.inspectBackend unused"),
       getSessionTelemetry: (input) =>
         Effect.succeed(
           unsupportedSessionTelemetry(
             input.sessionId ?? "",
-            registration.descriptor,
+            registrationFor(input.backendId).descriptor,
           ) satisfies SessionTelemetry,
         ),
     }),
