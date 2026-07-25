@@ -240,31 +240,39 @@ One unit of harness capacity reserved by an Admitted Work Item. Only Admitted Wo
 _Avoid_: OpenCode session limit, fiber budget, queue concurrency, concurrent Step Runs
 
 **Admitted Work Item**:
-An unfinished Work Item that has been granted a Worker Slot and may run Lifecycle Steps. A Work Item becomes Admitted when created while a Worker Slot is free, or when it is the next waiter and a slot frees, or when Retry or Start successfully re-acquires a free slot. A Worker Slot is released when the Work Item becomes terminal (Complete, Failed, Abandoned), Needs Human, paused (after any running Step Run finishes), or when a Step Run fails non-terminally (operator may Retry). A failed non-terminal Work Item does not auto-enter the wait queue; only Retry (or Start after Pause) attempts re-admission. Start or Retry when no slot is free leaves the Work Item Waiting for Worker Slot until re-admitted FIFO.
+An unfinished Work Item that has been granted a Worker Slot and may run Lifecycle Steps. A Work Item becomes Admitted when created while a Worker Slot is free and it is not Waiting for blockers, or when it leaves Waiting for blockers or is the next waiter and a slot frees, or when Retry or Start successfully re-acquires a free slot. A Worker Slot is released when the Work Item becomes terminal (Complete, Failed, Abandoned), Needs Human, paused (after any running Step Run finishes), or when a Step Run fails non-terminally (operator may Retry). A failed non-terminal Work Item does not auto-enter the wait queue; only Retry (or Start after Pause) attempts re-admission. Start or Retry when no slot is free leaves the Work Item Waiting for Worker Slot until re-admitted FIFO.
 _Avoid_: Running Work Item (admission is not the same as a running Step Run), active Work Item
 
+**Waiting for blockers**:
+The state of an unfinished Work Item created by Queue while its Issue still has listed blockers. It does not occupy a Worker Slot, has no Step Run and no lifecycle job, and cannot be force-started past blockers. When Issue reconciliation finds the Issue Implementable, the Work Item leaves this state and follows normal Worker Slot admission (FIFO with other waiters by time entered the admission wait; creation time if never admitted). If reconciliation finds the Issue no longer a valid open leaf candidate (closed, not Relevant, not a leaf, and so on), the Work Item fails terminally with that reason; remaining blocked while still a valid open leaf is not a failure. Operator-facing copy may read as queued waiting for the blocking Issues; the status is not the Step Run or Agent Turn **Queued** stamp.
+_Avoid_: Queued (alone), Waiting for Worker Slot, blocked Issue (the Issue is blocked; this is the Work Item hold)
+
 **Waiting for Worker Slot**:
-The state of an unfinished, non-paused Work Item that has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission.
-_Avoid_: Queued Step Run, paused, Not Implemented
+The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission.
+_Avoid_: Queued Step Run, paused, Not Implemented, Waiting for blockers
 
 **Implement Now**:
-An explicit operator request that creates a Work Item for a Leaf Issue. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`).
-_Avoid_: Auto-implement, enqueue Issue
+An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`). Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable.
+_Avoid_: Auto-implement, enqueue Issue, Queue
+
+**Queue**:
+An explicit operator request that creates a Work Item for a Relevant, open Leaf Issue that has listed blockers and no unfinished Work Item — the Issue would be Actionable except for blockers. The new Work Item is Waiting for blockers rather than Admitted. When the hold lifts, lifecycle and admission behave as if the operator had chosen Implement Now at that moment (full remote path, not Implement Locally), including when the Repository is Paused; backend or model problems after the hold lifts are handled like a post-create Implement Now failure, not by staying Waiting for blockers. Same hard blocks as Implement Now for the Repository's effective Agent Backend Unavailable and unresolved build Agent Model at request time. Not offered on Actionable Issues or outside the Issue store.
+_Avoid_: Implement Now, enqueue Issue, schedule, defer
 
 **Implement Locally**:
-An explicit operator request that creates a Work Item for a Leaf Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle.
-_Avoid_: Local-only mode, dry run, Implement Now without PR
+An explicit operator request that creates a Work Item for an Actionable Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle. Queue has no Locally variant.
+_Avoid_: Local-only mode, dry run, Implement Now without PR, Queue
 
 **Not Implemented**:
 The derived status of an Issue for which no Work Item has ever been created. It is not a persisted Work Item lifecycle state.
 _Avoid_: Pending, queued
 
 **Implementable Issue**:
-A current, open Leaf Issue with no listed blockers. A Work Item revalidates this predicate before every lifecycle advancement and fails terminally if the predicate no longer holds.
+A current, open Leaf Issue with no listed blockers. A Work Item that is not Waiting for blockers revalidates this predicate before every lifecycle advancement and fails terminally if the predicate no longer holds. A Work Item Waiting for blockers instead remains held while blockers persist and only seeks admission once the predicate holds.
 _Avoid_: Ready-labeled Issue, Relevant Issue, Leaf Issue
 
 **Actionable Issue**:
-An Implementable Issue with no unfinished Work Item, including no Needs Human Work Item or retryable persisted status-check failure for that Issue. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability.
+An Implementable Issue with no unfinished Work Item, including no Needs Human Work Item or retryable persisted status-check failure for that Issue. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability. An open Leaf Issue that fails only the blockers part of Implementable may receive Queue when it has no unfinished Work Item.
 _Avoid_: Not Implemented Issue, Ready-labeled Issue
 
 **Lifecycle Step**:
@@ -320,11 +328,11 @@ An explicit operator request to create a new Step Run for a Work Item whose prev
 _Avoid_: Queue redelivery, resume
 
 **Pause Work Item**:
-An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing or terminal Work Items. A paused Work Item remains unfinished and still blocks Implement Now for that Issue. Distinct from Repository Paused.
-_Avoid_: Suspend, hold, Abandon, Repository Paused
+An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing, terminal, or Waiting for blockers Work Items (the hold already means do not run; cancel with Reset). A paused Work Item remains unfinished and still blocks Implement Now and Queue for that Issue. Distinct from Repository Paused.
+_Avoid_: Suspend, hold, Abandon, Repository Paused, Waiting for blockers
 
 **Start Work Item**:
-An explicit operator request that clears a Work Item's paused flag and attempts to re-acquire a Worker Slot. If a Step Run is still running (Pause has not yet released the slot), only the paused flag is cleared so normal advancement resumes when that Step Run finishes. If no Step Run is running and a Worker Slot is free, the Work Item is re-Admitted and a new Step Run for the current Lifecycle Step is enqueued once when the latest run does not require Retry. If no Worker Slot is free and no Step Run is running, the Work Item becomes Waiting for Worker Slot and no Step Run is enqueued until re-admission. Start is idempotent when not paused and is rejected for missing or terminal Work Items.
+An explicit operator request that clears a Work Item's paused flag and attempts to re-acquire a Worker Slot. If a Step Run is still running (Pause has not yet released the slot), only the paused flag is cleared so normal advancement resumes when that Step Run finishes. If no Step Run is running and a Worker Slot is free, the Work Item is re-Admitted and a new Step Run for the current Lifecycle Step is enqueued once when the latest run does not require Retry. If no Worker Slot is free and no Step Run is running, the Work Item becomes Waiting for Worker Slot and no Step Run is enqueued until re-admission. Start is idempotent when not paused and is rejected for missing, terminal, or Waiting for blockers Work Items (blockers cannot be bypassed; the hold lifts only when the Issue is Implementable).
 _Avoid_: Resume, unpause, Retry
 
 **Abandon**:
@@ -332,7 +340,7 @@ A transition that moves a Work Item with no running Step Run to the terminal Aba
 _Avoid_: Delete, cancel
 
 **Reset**:
-An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused or Waiting for Worker Slot and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause).
+An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent.
 _Avoid_: Abandon, Retry, cancel
 
 **Failed Work Item**:
