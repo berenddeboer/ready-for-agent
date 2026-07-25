@@ -3434,12 +3434,7 @@ describe("GraphQL API", () => {
     runtime = makeRuntime(
       {},
       {
-        findSecret: ({ account, provider }) =>
-          Effect.succeed(
-            provider === "github" && account === "acme/widgets"
-              ? "GITHUB_TOKEN_ACME_WIDGETS"
-              : null,
-          ),
+        findSecret: () => Effect.die("must not inspect the vault on accept"),
       },
       {
         enqueue: (queueName, payload, options) =>
@@ -3528,6 +3523,45 @@ describe("GraphQL API", () => {
     expect(enqueued).toBe(true)
   })
 
+  test("bounds repositoryCredentials wait when Keymaxxer never resolves", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {
+        findSecrets: () => Effect.never,
+      },
+    )
+
+    const started = Date.now()
+    const response = await createGraphqlApi(runtime, {
+      keymaxxerMetadataTimeout: Duration.millis(50),
+    }).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials {
+            repositoryId
+            configured
+          }
+        }`,
+      }),
+    )
+    const elapsedMs = Date.now() - started
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: expect.stringMatching(
+            /Keymaxxer did not respond in time|vault unlock|secret-use approval/i,
+          ),
+          extensions: { code: "KEYMAXXER_ERROR" },
+        }),
+      ],
+    })
+    expect(elapsedMs).toBeLessThan(2_000)
+  })
+
   test("rejects refresh for an unknown repository without enqueueing", async () => {
     let enqueued = false
     await runtime.dispose()
@@ -3562,18 +3596,29 @@ describe("GraphQL API", () => {
     expect(enqueued).toBe(false)
   })
 
-  test("rejects refresh when the Repository has no GitHub credential", async () => {
+  test("accepts a Refresh Job without inspecting Keymaxxer credentials", async () => {
+    const jobId = makeJobId()
     let enqueued = false
+    let vaultInspected = false
     await runtime.dispose()
     runtime = makeRuntime(
       {},
       {
-        findSecret: () => Effect.succeed(null),
+        findSecret: () =>
+          Effect.sync(() => {
+            vaultInspected = true
+            return null
+          }),
+        findSecrets: () =>
+          Effect.sync(() => {
+            vaultInspected = true
+            return []
+          }),
       },
       {
         enqueue: () => {
           enqueued = true
-          return Effect.succeed(makeJobId())
+          return Effect.succeed(jobId)
         },
       },
     )
@@ -3591,24 +3636,22 @@ describe("GraphQL API", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
-      data: null,
-      errors: [
-        expect.objectContaining({
-          message: expect.stringMatching(/credential|token|configured/i),
-          extensions: { code: "REPOSITORY_CREDENTIAL_ERROR" },
-        }),
-      ],
+      data: {
+        refreshRepository: {
+          id: jobId,
+          repositoryId: repository.id,
+        },
+      },
     })
-    expect(enqueued).toBe(false)
+    expect(enqueued).toBe(true)
+    expect(vaultInspected).toBe(false)
   })
 
   test("reports enqueue failure without accepting a Refresh Job", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {},
-      {
-        findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
-      },
+      {},
       {
         enqueue: () =>
           Effect.fail(

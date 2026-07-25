@@ -130,6 +130,11 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "Repository credential error",
         "REPOSITORY_CREDENTIAL_ERROR",
       )
+    case "KeymaxxerError":
+      return gql(
+        error.message ?? "Keymaxxer operation failed",
+        "KEYMAXXER_ERROR",
+      )
     case "RepositoryAlreadyExistsError":
       return gql(
         `Repository ${error.githubOwner}/${error.githubRepo} already exists`,
