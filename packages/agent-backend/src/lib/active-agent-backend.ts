@@ -351,12 +351,31 @@ export const ActiveAgentBackendLive = (
       const seedIds = (() => {
         const fromList = options.initialBackendIds ?? []
         if (fromList.length > 0) {
-          return [...new Set(fromList.map(normalizeBackendId))]
+          const ids = [...new Set(fromList.map(normalizeBackendId))]
+          // Ensure Config's selected backend is in the Active set even if the
+          // selected-or-in-use list was incomplete, so proxy can target it.
+          if (options.selectedBackendId !== undefined) {
+            const preferred = normalizeBackendId(options.selectedBackendId)
+            if (!ids.includes(preferred)) {
+              ids.unshift(preferred)
+            }
+          }
+          return ids
         }
         const single = options.selectedBackendId ?? defaultAgentBackendId
         return [normalizeBackendId(single)]
       })()
-      const proxyBackendId = seedIds[0] ?? defaultAgentBackendId
+      // Prefer Config's selected backend as the process-wide proxy when it is
+      // Active; do not use list order alone (product-default-first lists would
+      // otherwise steal the proxy from a non-default harness selection).
+      const preferredProxy =
+        options.selectedBackendId !== undefined
+          ? normalizeBackendId(options.selectedBackendId)
+          : undefined
+      const proxyBackendId =
+        preferredProxy !== undefined && seedIds.includes(preferredProxy)
+          ? preferredProxy
+          : (seedIds[0] ?? defaultAgentBackendId)
 
       const initialEntries = new Map<string, ActiveEntry>()
       for (const id of seedIds) {

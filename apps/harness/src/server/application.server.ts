@@ -19,6 +19,7 @@ import {
   type AgentBackendId,
   type ResolveAgentBackendRuntime,
   SessionTelemetryProvider,
+  isSelectableAgentBackendId,
   resolveActiveRegistration,
   unsupportedSessionTelemetry,
 } from "@ready-for-agent/agent-backend"
@@ -142,20 +143,48 @@ export const createApplication = async (
     Layer.provideMerge(databaseLayer),
   )
 
-  const selectedBackendId = await Effect.runPromise(
+  // Seed Active with the full selected-or-in-use set (harness default ∪
+  // repository overrides ∪ unfinished Work Item captures). Also pass Config's
+  // selected backend as selectedBackendId so the process-wide proxy follows
+  // the harness default even when other backends are also Active.
+  // GraphQL Save paths re-sync via setSelectedOrInUse after settings changes.
+  const bootBackends = await Effect.runPromise(
     Effect.gen(function* () {
       const db = yield* DbService
-      const harnessConfig = yield* db.getConfig
-      return harnessConfig.selectedAgentBackend
+      const [config, selectedOrInUse] = yield* Effect.all([
+        db.getConfig,
+        db.listSelectedOrInUseBackendIds,
+      ])
+      return {
+        selectedAgentBackend: config.selectedAgentBackend,
+        selectedOrInUse,
+      }
     }).pipe(Effect.provide(databaseLayer)),
   )
-    .then((id) => id as AgentBackendId)
-    .catch(() => AGENT_BACKEND_IDS.opencode)
+    .then(({ selectedAgentBackend, selectedOrInUse }) => {
+      const selectable = selectedOrInUse.filter((id): id is AgentBackendId =>
+        isSelectableAgentBackendId(id),
+      )
+      const selectedBackendId = isSelectableAgentBackendId(selectedAgentBackend)
+        ? (selectedAgentBackend as AgentBackendId)
+        : AGENT_BACKEND_IDS.opencode
+      return {
+        selectedBackendId,
+        initialBackendIds:
+          selectable.length > 0
+            ? selectable
+            : ([selectedBackendId] as AgentBackendId[]),
+      }
+    })
+    .catch(() => ({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      initialBackendIds: [AGENT_BACKEND_IDS.opencode] as AgentBackendId[],
+    }))
 
   const resolveRuntime = makeResolveRuntime(platformLayer, sidecarUrl)
-  const activeRegistration = resolveActiveRegistration(selectedBackendId)
   const activeLayer = ActiveAgentBackendLive({
-    selectedBackendId: activeRegistration.descriptor.id,
+    initialBackendIds: bootBackends.initialBackendIds,
+    selectedBackendId: bootBackends.selectedBackendId,
     resolveRuntime,
   })
 

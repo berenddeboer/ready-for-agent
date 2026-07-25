@@ -168,6 +168,10 @@ const makeRuntime = (
       Effect.succeed({
         ...repository,
         paused: input.paused,
+        selectedAgentBackend:
+          input.selectedAgentBackend === undefined
+            ? repository.selectedAgentBackend
+            : input.selectedAgentBackend,
         defaultModel: input.defaultModel,
         defaultThinkingLevel: input.defaultThinkingLevel,
         reviewModel: input.reviewModel,
@@ -176,6 +180,9 @@ const makeRuntime = (
         includeAllIssueAuthors: input.includeAllIssueAuthors,
       }),
     listRepositories: Effect.succeed([repository]),
+    listSelectedOrInUseBackendIds: Effect.succeed([
+      config.selectedAgentBackend,
+    ]),
     ...dbOverrides,
   })
   const keymaxxer: KeymaxxerServiceShape = {
@@ -964,13 +971,27 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("updateConfig activates when selected differs from proxy or is not Active", async () => {
+  test("updateConfig syncs selected-or-in-use and moves proxy when default changes", async () => {
+    const setSelectedCalls: string[][] = []
     const activated: string[] = []
     let proxyBackendId: AgentBackendId = "opencode"
+    let selectedIds: AgentBackendId[] = ["opencode"]
     const activeIds = new Set<AgentBackendId>(["opencode"])
 
     const activateRuntime = makeRuntime(
-      {},
+      {
+        updateConfig: (input) =>
+          Effect.succeed({
+            selectedAgentBackend: input.selectedAgentBackend,
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+          }),
+        listSelectedOrInUseBackendIds: Effect.sync(() => selectedIds),
+      },
       {},
       {},
       {},
@@ -986,6 +1007,20 @@ describe("GraphQL API", () => {
             readyRuntimeStatus(defaultModels, proxyBackendId),
           ),
         ),
+        setSelectedOrInUse: (backendIds) => {
+          setSelectedCalls.push([...backendIds])
+          for (const id of backendIds) {
+            activeIds.add(id)
+          }
+          for (const id of [...activeIds]) {
+            if (!backendIds.includes(id)) {
+              activeIds.delete(id)
+            }
+          }
+          return Effect.succeed(
+            backendIds.map((id) => readyRuntimeStatus(defaultModels, id)),
+          )
+        },
         activate: (backendId) => {
           activated.push(backendId)
           activeIds.add(backendId)
@@ -995,6 +1030,7 @@ describe("GraphQL API", () => {
       },
     )
 
+    selectedIds = ["grok"]
     const switchResponse = await createGraphqlApi(activateRuntime).fetch(
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
@@ -1016,10 +1052,13 @@ describe("GraphQL API", () => {
     expect(await switchResponse.json()).toEqual({
       data: { updateConfig: { selectedAgentBackend: "grok" } },
     })
+    expect(setSelectedCalls).toEqual([["grok"]])
     expect(activated).toEqual(["grok"])
 
     // Switch back to still-Active prior backend must activate to move proxy.
+    setSelectedCalls.length = 0
     activated.length = 0
+    selectedIds = ["opencode", "grok"]
     const switchBack = await createGraphqlApi(activateRuntime).fetch(
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
@@ -1041,10 +1080,14 @@ describe("GraphQL API", () => {
     expect(await switchBack.json()).toEqual({
       data: { updateConfig: { selectedAgentBackend: "opencode" } },
     })
+    expect(setSelectedCalls).toEqual([["opencode", "grok"]])
     expect(activated).toEqual(["opencode"])
 
-    // Same-backend save with proxy already correct skips activate.
+    // Same-backend save with proxy already correct skips activate (setSelected
+    // still runs; registry same-backend members skip re-inspect).
+    setSelectedCalls.length = 0
     activated.length = 0
+    selectedIds = ["opencode", "grok"]
     const sameBackend = await createGraphqlApi(activateRuntime).fetch(
       graphqlRequest({
         query: `mutation UpdateConfig($input: UpdateConfigInput!) {
@@ -1066,16 +1109,59 @@ describe("GraphQL API", () => {
     expect(await sameBackend.json()).toEqual({
       data: { updateConfig: { selectedAgentBackend: "opencode" } },
     })
+    expect(setSelectedCalls).toEqual([["opencode", "grok"]])
     expect(activated).toEqual([])
   })
 
-  test("updates repository settings", async () => {
-    const response = await createGraphqlApi(runtime).fetch(
+  test("updates repository settings including backend override set and clear", async () => {
+    const settingsCalls: Array<{
+      selectedAgentBackend?: string | null
+    }> = []
+    const setSelectedCalls: string[][] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        updateRepositorySettings: (input) => {
+          settingsCalls.push({
+            selectedAgentBackend: input.selectedAgentBackend,
+          })
+          return Effect.succeed({
+            ...repository,
+            paused: input.paused,
+            selectedAgentBackend:
+              input.selectedAgentBackend === undefined
+                ? repository.selectedAgentBackend
+                : input.selectedAgentBackend,
+            defaultModel: input.defaultModel,
+            defaultThinkingLevel: input.defaultThinkingLevel,
+            reviewModel: input.reviewModel,
+            reviewThinkingLevel: input.reviewThinkingLevel,
+            autoMerge: input.autoMerge,
+            includeAllIssueAuthors: input.includeAllIssueAuthors,
+          })
+        },
+        listSelectedOrInUseBackendIds: Effect.succeed(["opencode", "grok"]),
+      },
+      {},
+      {},
+      {},
+      {
+        setSelectedOrInUse: (backendIds) => {
+          setSelectedCalls.push([...backendIds])
+          return Effect.succeed(
+            backendIds.map((id) => readyRuntimeStatus(defaultModels, id)),
+          )
+        },
+      },
+    )
+
+    const setOverride = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
           updateRepositorySettings(input: $input) {
             id
             paused
+            selectedAgentBackend
             defaultModel
             defaultThinkingLevel
             reviewModel
@@ -1088,6 +1174,7 @@ describe("GraphQL API", () => {
           input: {
             repositoryId: repository.id,
             paused: false,
+            selectedAgentBackend: "grok",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
@@ -1098,11 +1185,12 @@ describe("GraphQL API", () => {
         },
       }),
     )
-    expect(await response.json()).toEqual({
+    expect(await setOverride.json()).toEqual({
       data: {
         updateRepositorySettings: {
           id: repository.id,
           paused: false,
+          selectedAgentBackend: "grok",
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultThinkingLevel: "high",
           reviewModel: "anthropic/claude-opus-4-6",
@@ -1111,6 +1199,381 @@ describe("GraphQL API", () => {
           includeAllIssueAuthors: true,
         },
       },
+    })
+    expect(settingsCalls[0]).toEqual({ selectedAgentBackend: "grok" })
+    expect(setSelectedCalls).toEqual([["opencode", "grok"]])
+
+    // Clear override (null) inherits harness default.
+    settingsCalls.length = 0
+    setSelectedCalls.length = 0
+    const clearOverride = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            selectedAgentBackend
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          },
+        },
+      }),
+    )
+    expect(await clearOverride.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          selectedAgentBackend: null,
+        },
+      },
+    })
+    expect(settingsCalls[0]).toEqual({ selectedAgentBackend: null })
+
+    // Omit selectedAgentBackend leaves override unchanged (undefined to DbService).
+    settingsCalls.length = 0
+    const omitOverride = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            selectedAgentBackend
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          },
+        },
+      }),
+    )
+    expect(await omitOverride.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          selectedAgentBackend: null,
+        },
+      },
+    })
+    expect(settingsCalls[0]).toEqual({ selectedAgentBackend: undefined })
+  })
+
+  test("exposes scoped gate counts on Config and Repository", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime({
+      countUnfinishedWorkItems: Effect.succeed(3),
+      countBlockingUnfinishedForGlobalDefault: Effect.succeed(1),
+      countBlockingUnfinishedForRepository: (repositoryId) =>
+        Effect.succeed(repositoryId === repository.id ? 2 : 0),
+      listRepositories: Effect.succeed([
+        makeRepositoryRecord({
+          id: repository.id,
+          selectedAgentBackend: "grok",
+        }),
+      ]),
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query GateCounts {
+          config {
+            unfinishedWorkItemCount
+            blockingUnfinishedWorkItemCount
+          }
+          repositories {
+            id
+            selectedAgentBackend
+            effectiveAgentBackend
+            blockingUnfinishedWorkItemCount
+          }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        config: {
+          unfinishedWorkItemCount: 3,
+          blockingUnfinishedWorkItemCount: 1,
+        },
+        repositories: [
+          {
+            id: repository.id,
+            selectedAgentBackend: "grok",
+            effectiveAgentBackend: "grok",
+            blockingUnfinishedWorkItemCount: 2,
+          },
+        ],
+      },
+    })
+  })
+
+  test("lists multi-backend status and rechecks by backend id", async () => {
+    const rechecked: string[] = []
+    const opencodeStatus = readyRuntimeStatus(defaultModels, "opencode")
+    const grokStatus = readyRuntimeStatus(
+      [{ id: "grok-code", thinkingLevels: [] }],
+      "grok",
+    )
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listStatuses: Effect.succeed([opencodeStatus, grokStatus]),
+        recheck: (backendId) => {
+          rechecked.push(backendId)
+          return Effect.succeed(
+            backendId === "grok" ? grokStatus : opencodeStatus,
+          )
+        },
+      },
+    )
+
+    const listResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          agentBackendStatuses {
+            backend { id label }
+            kind
+            reason
+            models { id }
+          }
+        }`,
+      }),
+    )
+    expect(await listResponse.json()).toEqual({
+      data: {
+        agentBackendStatuses: [
+          {
+            backend: { id: "opencode", label: "OpenCode" },
+            kind: "READY",
+            reason: null,
+            models: defaultModels.map((m) => ({ id: m.id })),
+          },
+          {
+            backend: { id: "grok", label: "grok" },
+            kind: "READY",
+            reason: null,
+            models: [{ id: "grok-code" }],
+          },
+        ],
+      },
+    })
+
+    const recheckResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          recheckAgentBackend(backendId: "grok") {
+            backend { id }
+            kind
+            models { id }
+          }
+        }`,
+      }),
+    )
+    expect(await recheckResponse.json()).toEqual({
+      data: {
+        recheckAgentBackend: {
+          backend: { id: "grok" },
+          kind: "READY",
+          models: [{ id: "grok-code" }],
+        },
+      },
+    })
+    expect(rechecked).toEqual(["grok"])
+  })
+
+  test("rejects invalid backend id on recheck and surfaces repository settings rejection", async () => {
+    const { InvalidRepositorySettingsError } = await import(
+      "@ready-for-agent/db-service"
+    )
+    await runtime.dispose()
+    runtime = makeRuntime({
+      updateRepositorySettings: () =>
+        Effect.fail(
+          new InvalidRepositorySettingsError({
+            field: "selectedAgentBackend",
+            message: "Unknown Agent Backend: not-a-backend",
+          }),
+        ),
+    })
+
+    const invalidRecheck = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          recheckAgentBackend(backendId: "not-a-backend") {
+            backend { id }
+            kind
+            reason
+            models { id }
+          }
+        }`,
+      }),
+    )
+    expect(await invalidRecheck.json()).toEqual({
+      data: {
+        recheckAgentBackend: {
+          backend: { id: "not-a-backend" },
+          kind: "UNAVAILABLE",
+          reason: "Unknown Agent Backend: not-a-backend",
+          models: [],
+        },
+      },
+    })
+
+    const whitespaceRecheck = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          recheckAgentBackend(backendId: "   ") {
+            backend { id }
+            kind
+            reason
+            models { id }
+          }
+        }`,
+      }),
+    )
+    expect(await whitespaceRecheck.json()).toEqual({
+      data: {
+        recheckAgentBackend: {
+          backend: { id: "   " },
+          kind: "UNAVAILABLE",
+          reason: "Unknown Agent Backend:    ",
+          models: [],
+        },
+      },
+    })
+
+    const invalidSettings = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            repositoryId: repository.id,
+            paused: false,
+            selectedAgentBackend: "not-a-backend",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          },
+        },
+      }),
+    )
+    expect(await invalidSettings.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Unknown Agent Backend: not-a-backend",
+          extensions: expect.objectContaining({
+            code: "INVALID_REPOSITORY_SETTINGS",
+            field: "selectedAgentBackend",
+          }),
+        }),
+      ],
+    })
+  })
+
+  test("surfaces Implement Now errors for unavailable backend and missing build model", async () => {
+    const { AgentBackendUnavailableError, BuildModelNotConfiguredError } =
+      await import("@ready-for-agent/work-item-lifecycle")
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementNow: () =>
+          Effect.fail(
+            new AgentBackendUnavailableError({
+              message: "Agent Backend is unavailable",
+              reason: "CLI missing",
+            }),
+          ),
+      },
+    )
+    const unavailable = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+    expect(await unavailable.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Agent Backend is unavailable",
+          extensions: expect.objectContaining({
+            code: "AGENT_BACKEND_UNAVAILABLE",
+            reason: "CLI missing",
+          }),
+        }),
+      ],
+    })
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementNow: () =>
+          Effect.fail(
+            new BuildModelNotConfiguredError({
+              message: "Select a default build model first",
+            }),
+          ),
+      },
+    )
+    const missingModel = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+    expect(await missingModel.json()).toEqual({
+      data: null,
+      errors: [
+        expect.objectContaining({
+          message: "Select a default build model first",
+          extensions: expect.objectContaining({
+            code: "BUILD_MODEL_NOT_CONFIGURED",
+          }),
+        }),
+      ],
     })
   })
 

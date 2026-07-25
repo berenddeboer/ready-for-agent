@@ -319,17 +319,17 @@ describe("DbService", () => {
           yield* sql.unsafe(
             `INSERT INTO work_item (
                id, repository_id, github_issue_number, state, state_ready_at,
-               worktree_path, session_id, failure_code, failure_message,
-               created_at, updated_at
-             ) VALUES (?, ?, 1, 'needs_human', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+               agent_backend, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'needs_human', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
             ["wi-inheriting-block", inheriting.id, now, now, now],
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
                id, repository_id, github_issue_number, state, state_ready_at,
-               worktree_path, session_id, failure_code, failure_message,
-               created_at, updated_at
-             ) VALUES (?, ?, 2, 'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+               agent_backend, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 2, 'implement', ?, 'grok', NULL, NULL, NULL, NULL, ?, ?)`,
             ["wi-override-wip", overridden.id, now, now, now],
           )
 
@@ -351,6 +351,73 @@ describe("DbService", () => {
             scope: "global",
           })
           expect(yield* db.countUnfinishedWorkItems).toBe(2)
+          expect(yield* db.countBlockingUnfinishedForGlobalDefault).toBe(1)
+          expect(
+            yield* db.countBlockingUnfinishedForRepository(overridden.id),
+          ).toBe(1)
+          // Harness default (opencode) ∪ repository override (grok). Captures
+          // match those same ids in this fixture.
+          expect(yield* db.listSelectedOrInUseBackendIds).toEqual([
+            "opencode",
+            "grok",
+          ])
+        }),
+      ))
+
+    it("includes unfinished Work Item captured backends that are not selected", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          // Config default remains opencode; no repository overrides.
+          const repository = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+          // Capture-only: unfinished WI on grok while nothing selects grok.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               agent_backend, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'implement', ?, 'grok', NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-capture-only-grok", repository.id, now, now, now],
+          )
+          // Harness default first, then remaining sorted.
+          expect(yield* db.listSelectedOrInUseBackendIds).toEqual([
+            "opencode",
+            "grok",
+          ])
+        }),
+      ))
+
+    it("orders listSelectedOrInUse with harness default first when default is not opencode", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          yield* db.updateConfig({
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          const repository = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+          // Unfinished capture keeps opencode selected-or-in-use.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               agent_backend, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'implement', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-capture-opencode", repository.id, now, now, now],
+          )
+          expect(yield* db.listSelectedOrInUseBackendIds).toEqual([
+            "grok",
+            "opencode",
+          ])
         }),
       ))
 
