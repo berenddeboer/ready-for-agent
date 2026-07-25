@@ -2,9 +2,12 @@ import { Duration, Effect, Layer, ManagedRuntime, Stream } from "effect"
 import {
   ActiveAgentBackend,
   type ActiveAgentBackendShape,
+  type AgentBackendId,
+  type AgentBackendRuntimeStatus,
   type AgentBackendStatus,
   type SessionTelemetry,
   missingSessionTelemetry,
+  toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import { DbService, type DbServiceShape } from "@ready-for-agent/db-service"
 import {
@@ -63,15 +66,22 @@ const defaultModels = [
   },
 ] as const
 
-const readyStatus = (
-  models: AgentBackendStatus["models"] = defaultModels,
-): AgentBackendStatus => ({
-  selectedBackend: { id: "opencode", label: "OpenCode" },
-  activeBackend: { id: "opencode", label: "OpenCode" },
+const readyRuntimeStatus = (
+  models: AgentBackendRuntimeStatus["models"] = defaultModels,
+  backendId: AgentBackendId = "opencode",
+): AgentBackendRuntimeStatus => ({
+  backend: {
+    id: backendId,
+    label: backendId === "opencode" ? "OpenCode" : backendId,
+  },
   kind: "ready",
   reason: null,
   models,
 })
+
+const readyStatus = (
+  models: AgentBackendStatus["models"] = defaultModels,
+): AgentBackendStatus => toAgentBackendStatus(readyRuntimeStatus(models))
 
 const issue = {
   id: "issue-test",
@@ -220,11 +230,19 @@ const makeRuntime = (
     admitWaitingWorkItems: Effect.succeed(0),
     ...lifecycleOverrides,
   }
+  const readyRuntime = readyRuntimeStatus()
   const activeBackend: ActiveAgentBackendShape = {
+    listStatuses: Effect.succeed([readyRuntime]),
+    getBackendStatus: (backendId) =>
+      Effect.succeed(
+        backendId === readyRuntime.backend.id ? readyRuntime : null,
+      ),
     getStatus: Effect.succeed(readyStatus()),
-    recheck: () => Effect.succeed(readyStatus()),
-    requireAgentTurnsAllowed: Effect.void,
-    activate: () => Effect.succeed(readyStatus()),
+    setSelectedOrInUse: () => Effect.succeed([readyRuntime]),
+    recheck: () => Effect.succeed(readyRuntime),
+    requireAgentTurnsAllowed: () => Effect.void,
+    activate: () => Effect.succeed(readyRuntime),
+    drop: () => Effect.void,
     preview: () =>
       Effect.succeed({
         backend: { id: "opencode", label: "OpenCode" },
@@ -233,6 +251,14 @@ const makeRuntime = (
         models: readyStatus().models,
       }),
     withConfigCoordination: (effect) => effect,
+    getRegistration: () =>
+      Effect.succeed({
+        descriptor: { id: "opencode", label: "OpenCode" },
+        capabilities: [
+          { _tag: "SessionTelemetry", supported: true },
+          { _tag: "KeymaxxerMcp", supported: true },
+        ],
+      }),
     getActiveRegistration: Effect.succeed({
       descriptor: { id: "opencode", label: "OpenCode" },
       capabilities: [
@@ -240,6 +266,9 @@ const makeRuntime = (
         { _tag: "KeymaxxerMcp", supported: true },
       ],
     }),
+    startTurn: () => Effect.die("unused"),
+    continueTurn: () => Effect.die("unused"),
+    inspectBackend: () => Effect.die("unused"),
     getSessionTelemetry: (input) =>
       Effect.succeed(
         missingSessionTelemetry(input.sessionId ?? "", {
@@ -935,24 +964,33 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("updateConfig activates only when Active differs from committed backend", async () => {
+  test("updateConfig activates when selected differs from proxy or is not Active", async () => {
     const activated: string[] = []
+    let proxyBackendId: AgentBackendId = "opencode"
+    const activeIds = new Set<AgentBackendId>(["opencode"])
+
     const activateRuntime = makeRuntime(
       {},
       {},
       {},
       {},
       {
-        getStatus: Effect.succeed(readyStatus()),
+        getBackendStatus: (backendId) =>
+          Effect.succeed(
+            activeIds.has(backendId)
+              ? readyRuntimeStatus(defaultModels, backendId)
+              : null,
+          ),
+        getStatus: Effect.sync(() =>
+          toAgentBackendStatus(
+            readyRuntimeStatus(defaultModels, proxyBackendId),
+          ),
+        ),
         activate: (backendId) => {
           activated.push(backendId)
-          return Effect.succeed({
-            selectedBackend: { id: backendId, label: backendId },
-            activeBackend: { id: backendId, label: backendId },
-            kind: "ready",
-            reason: null,
-            models: defaultModels,
-          })
+          activeIds.add(backendId)
+          proxyBackendId = backendId
+          return Effect.succeed(readyRuntimeStatus(defaultModels, backendId))
         },
       },
     )
@@ -980,7 +1018,32 @@ describe("GraphQL API", () => {
     })
     expect(activated).toEqual(["grok"])
 
-    // Same-backend save skips activate (no full inspect on every Save).
+    // Switch back to still-Active prior backend must activate to move proxy.
+    activated.length = 0
+    const switchBack = await createGraphqlApi(activateRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { selectedAgentBackend }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await switchBack.json()).toEqual({
+      data: { updateConfig: { selectedAgentBackend: "opencode" } },
+    })
+    expect(activated).toEqual(["opencode"])
+
+    // Same-backend save with proxy already correct skips activate.
     activated.length = 0
     const sameBackend = await createGraphqlApi(activateRuntime).fetch(
       graphqlRequest({
@@ -1119,10 +1182,11 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        getStatus: Effect.sync(() => {
-          statusCount += 1
-          return readyStatus()
-        }),
+        getBackendStatus: () =>
+          Effect.sync(() => {
+            statusCount += 1
+            return readyRuntimeStatus()
+          }),
       },
     )
 

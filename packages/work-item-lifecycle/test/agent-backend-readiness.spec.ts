@@ -1,8 +1,10 @@
 import { Effect, Layer } from "effect"
 import {
   ActiveAgentBackend,
+  type AgentBackendRuntimeStatus,
   type AgentBackendStatus,
   AgentBackendUnavailableError,
+  toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
@@ -50,13 +52,15 @@ const successfulSteps: LifecycleStepsShape = {
   removeWorktree: () => Effect.void,
 }
 
-const statusUnavailable = (): AgentBackendStatus => ({
-  selectedBackend: { id: "opencode", label: "OpenCode" },
-  activeBackend: { id: "opencode", label: "OpenCode" },
+const runtimeUnavailable = (): AgentBackendRuntimeStatus => ({
+  backend: { id: "opencode", label: "OpenCode" },
   kind: "unavailable",
   reason: "opencode binary not found",
   models: [],
 })
+
+const statusUnavailable = (): AgentBackendStatus =>
+  toAgentBackendStatus(runtimeUnavailable())
 
 describe("Agent Backend readiness gates", () => {
   it("rejects Implement Now while unavailable", async () => {
@@ -125,10 +129,14 @@ describe("Agent Backend readiness gates", () => {
         Layer.succeed(
           ActiveAgentBackend,
           ActiveAgentBackend.of({
+            listStatuses: Effect.succeed([runtimeUnavailable()]),
+            getBackendStatus: () => Effect.succeed(runtimeUnavailable()),
             getStatus: Effect.succeed(statusUnavailable()),
-            recheck: () => Effect.succeed(statusUnavailable()),
-            requireAgentTurnsAllowed: Effect.void,
-            activate: () => Effect.succeed(statusUnavailable()),
+            setSelectedOrInUse: () => Effect.succeed([runtimeUnavailable()]),
+            recheck: () => Effect.succeed(runtimeUnavailable()),
+            requireAgentTurnsAllowed: () => Effect.void,
+            activate: () => Effect.succeed(runtimeUnavailable()),
+            drop: () => Effect.void,
             preview: () =>
               Effect.succeed({
                 backend: { id: "opencode", label: "OpenCode" },
@@ -137,6 +145,14 @@ describe("Agent Backend readiness gates", () => {
                 models: [],
               }),
             withConfigCoordination: (effect) => effect,
+            getRegistration: () =>
+              Effect.succeed({
+                descriptor: { id: "opencode", label: "OpenCode" },
+                capabilities: [
+                  { _tag: "SessionTelemetry", supported: true },
+                  { _tag: "KeymaxxerMcp", supported: true },
+                ],
+              }),
             getActiveRegistration: Effect.succeed({
               descriptor: { id: "opencode", label: "OpenCode" },
               capabilities: [
@@ -144,6 +160,9 @@ describe("Agent Backend readiness gates", () => {
                 { _tag: "KeymaxxerMcp", supported: true },
               ],
             }),
+            startTurn: () => Effect.die("unused"),
+            continueTurn: () => Effect.die("unused"),
+            inspectBackend: () => Effect.die("unused"),
             getSessionTelemetry: () => Effect.die("unused"),
           }),
         ),

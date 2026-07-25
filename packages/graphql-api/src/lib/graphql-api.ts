@@ -3,12 +3,14 @@ import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
 import {
   ActiveAgentBackend,
+  type AgentBackendId,
   type AgentBackendStatus,
   type SessionTelemetry,
   type SessionTelemetryAvailability,
   getBuiltInAgentBackend,
   isSelectableAgentBackendId,
   listBuiltInAgentBackends,
+  toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
@@ -262,8 +264,18 @@ export const createGraphqlApi = (
 
   const listModels = Effect.fn("graphql-api.models")(function* () {
     const active = yield* ActiveAgentBackend
-    const status = yield* active.getStatus
-    return status.models
+    const db = yield* DbService
+    const config = yield* db.getConfig
+    if (isSelectableAgentBackendId(config.selectedAgentBackend)) {
+      const status = yield* active.getBackendStatus(
+        config.selectedAgentBackend as AgentBackendId,
+      )
+      if (status !== null) {
+        return status.models
+      }
+    }
+    // Fall back to proxy status when default is not yet Active.
+    return (yield* active.getStatus).models
   })
 
   const yoga = createYoga({
@@ -324,6 +336,18 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const active = yield* ActiveAgentBackend
+                const db = yield* DbService
+                const config = yield* db.getConfig
+                if (isSelectableAgentBackendId(config.selectedAgentBackend)) {
+                  const runtime = yield* active.getBackendStatus(
+                    config.selectedAgentBackend as AgentBackendId,
+                  )
+                  if (runtime !== null) {
+                    return toGraphqlAgentBackendStatus(
+                      toAgentBackendStatus(runtime),
+                    )
+                  }
+                }
                 return toGraphqlAgentBackendStatus(yield* active.getStatus)
               }).pipe(Effect.withSpan("graphql-api.agentBackendStatus")),
             ),
@@ -573,11 +597,20 @@ export const createGraphqlApi = (
                     ) {
                       return next
                     }
-                    const status = yield* active.getStatus
-                    // Only hot-activate when Active differs from committed Config.
-                    // Same-backend Saves skip full inspect (Recheck remains explicit).
-                    if (status.activeBackend.id !== next.selectedAgentBackend) {
-                      yield* active.activate(next.selectedAgentBackend, {
+                    const backendId =
+                      next.selectedAgentBackend as AgentBackendId
+                    const status = yield* active.getBackendStatus(backendId)
+                    // Process-wide proxy tracks Config selected backend until
+                    // #466 routes turns by captured Work Item backend. Multi
+                    // Active means the selected id may already be Active while
+                    // the proxy still points at a prior selection (A→B→A).
+                    // activate skips re-inspect when already Active.
+                    const proxyStatus = yield* active.getStatus
+                    if (
+                      status === null ||
+                      proxyStatus.activeBackend.id !== backendId
+                    ) {
+                      yield* active.activate(backendId, {
                         cwd: agentBackendCwd,
                         timeout: "30 seconds",
                       })
@@ -603,10 +636,22 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const active = yield* ActiveAgentBackend
-                const status = yield* active.recheck({
-                  cwd: agentBackendCwd,
-                  timeout: "30 seconds",
-                })
+                const db = yield* DbService
+                const config = yield* db.getConfig
+                const backendId = isSelectableAgentBackendId(
+                  config.selectedAgentBackend,
+                )
+                  ? (config.selectedAgentBackend as AgentBackendId)
+                  : undefined
+                const status =
+                  backendId === undefined
+                    ? yield* active.getStatus
+                    : toAgentBackendStatus(
+                        yield* active.recheck(backendId, {
+                          cwd: agentBackendCwd,
+                          timeout: "30 seconds",
+                        }),
+                      )
                 return toGraphqlAgentBackendStatus(status)
               }).pipe(Effect.withSpan("graphql-api.recheckAgentBackend")),
             ),

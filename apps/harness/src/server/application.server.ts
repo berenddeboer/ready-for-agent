@@ -204,10 +204,14 @@ export const createApplication = async (
         yield* keymaxxer.initialize
         // Startup inspection: failure must not terminate the Harness.
         const active = yield* ActiveAgentBackend
-        yield* active.recheck({
-          cwd: toolCwd,
-          timeout: "30 seconds",
-        })
+        // Startup inspect for every initial Active backend (selected-or-in-use).
+        const statuses = yield* active.listStatuses
+        for (const status of statuses) {
+          yield* active.recheck(status.backend.id, {
+            cwd: toolCwd,
+            timeout: "30 seconds",
+          })
+        }
       }),
     )
   } catch (error) {

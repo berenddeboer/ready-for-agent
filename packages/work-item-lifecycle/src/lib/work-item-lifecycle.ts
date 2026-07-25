@@ -16,6 +16,7 @@ import { SqlClient } from "effect/unstable/sql"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import {
   ActiveAgentBackend,
+  type AgentBackendId,
   isAgentDependentLifecycleStep,
 } from "@ready-for-agent/agent-backend"
 import {
@@ -2581,10 +2582,15 @@ export const makeWorkItemLifecycleLive = (
               yield* notifyWorkItemsChanged(workItem.repository_id)
 
               if (isAgentDependentLifecycleStep(stepRun.step)) {
-                const readiness = yield* activeAgentBackend.getStatus
-                if (readiness.kind === "unavailable") {
+                const readiness = yield* activeAgentBackend.getBackendStatus(
+                  workItem.agent_backend as AgentBackendId,
+                )
+                if (readiness === null || readiness.kind === "unavailable") {
                   const reasonMessage =
-                    readiness.reason ?? "Agent Backend is unavailable"
+                    readiness?.reason ??
+                    (readiness === null
+                      ? "Agent Backend is not Active"
+                      : "Agent Backend is unavailable")
                   const failed = yield* completeFailedStep({
                     stepRun: afterStart,
                     workItem,
@@ -3976,20 +3982,28 @@ export const makeWorkItemLifecycleLive = (
           // runs inside the same section so it matches the backend that is stamped.
           const createdId = yield* activeAgentBackend.withConfigCoordination(
             Effect.gen(function* () {
-              yield* activeAgentBackend.requireAgentTurnsAllowed.pipe(
-                Effect.mapError(
-                  (error) =>
-                    new AgentBackendUnavailableError({
-                      message: error.message,
-                      reason: error.reason,
-                    }),
-                ),
-              )
+              // Capture harness default until lifecycle resolves effective
+              // backend (override ?? default) in #466.
+              const harnessConfig = yield* db.getConfig
+              const captureBackendId = harnessConfig.selectedAgentBackend
+              yield* activeAgentBackend
+                .requireAgentTurnsAllowed(captureBackendId as AgentBackendId)
+                .pipe(
+                  Effect.mapError(
+                    (error) =>
+                      new AgentBackendUnavailableError({
+                        message: error.message,
+                        reason: error.reason,
+                      }),
+                  ),
+                )
               // Models are not stored on the Work Item; resolve against the
               // Active backend / prefs after coordination has locked the switch.
               yield* resolveModelsForRepository(repositoryId)
               const activeRegistration =
-                yield* activeAgentBackend.getActiveRegistration
+                yield* activeAgentBackend.getRegistration(
+                  captureBackendId as AgentBackendId,
+                )
               const agentBackendId = activeRegistration.descriptor.id
               const workItemId = makeWorkItemId()
               const now = yield* Clock.currentTimeMillis
