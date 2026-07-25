@@ -1,6 +1,6 @@
 # Select one Agent Backend per Harness instance
 
-Status: accepted (restart boundary superseded by ADR 0035)
+Status: superseded by ADR 0037
 
 Harness Config selects one Agent Backend for the instance, defaulting existing and fresh configurations to OpenCode. Repositories and Work Items cannot select backends; changing the selection is rejected while any Work Item is unfinished. Startup or activation inspection failure leaves the UI and guaranteed Agent-free Lifecycle Steps available in Agent Backend Unavailable rather than exiting or silently falling back; steps that may invoke an agent conditionally do not start. An explicit Recheck Agent Backend action refreshes readiness and the model catalog.
 
@@ -9,3 +9,5 @@ Every Work Item captures the Active Agent Backend as provenance. Build and revie
 ## Consequences
 
 One Active Agent Backend per running Harness; captured backend provenance is visible on Work Item detail and completed-history/session views, but does not imply per-Work-Item routing. Model settings changes take effect on the next Agent Turn of an existing Work Item without recreating it. How a backend change activates when the fleet is idle is defined in ADR 0035 (hot-activate, preview catalog, per-backend remembered model prefs).
+
+Superseded: Repositories may select an Agent Backend (or inherit the harness default), multiple backends may be Active concurrently, and idle gates are scoped. See ADR 0037.
