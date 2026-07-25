@@ -56,8 +56,9 @@ const configQuery = {
         maxConcurrentAgentTurns: true,
         maxConcurrentWorkItems: true,
         // Keep selection aligned with Harness Settings so shared cache never
-        // drops unfinishedWorkItemCount (backend-change idle gate).
+        // drops unfinished / scoped gate fields.
         unfinishedWorkItemCount: true,
+        blockingUnfinishedWorkItemCount: true,
       },
     })
     return result.config
@@ -67,6 +68,11 @@ const configQuery = {
 type AgentModelOption = {
   id: string
   thinkingLevels: readonly string[]
+}
+
+type AgentBackendInfo = {
+  id: string
+  label: string
 }
 
 const modelsQuery = {
@@ -80,6 +86,21 @@ const modelsQuery = {
     return result.models
   },
 }
+
+const agentBackendsQuery = {
+  queryKey: ["agentBackends"],
+  staleTime: Number.POSITIVE_INFINITY,
+  gcTime: Number.POSITIVE_INFINITY,
+  queryFn: async () => {
+    const result = await graphql.query({
+      agentBackends: { id: true, label: true },
+    })
+    return result.agentBackends
+  },
+}
+
+/** Empty select value means inherit the harness default (null override). */
+const HARNESS_DEFAULT_BACKEND_VALUE = ""
 
 const sessionQuery = (workItemId: string) => ({
   queryKey: ["session", workItemId] as const,
@@ -164,6 +185,8 @@ const repositoriesQuery = {
         localPath: true,
         isBare: true,
         paused: true,
+        selectedAgentBackend: true,
+        effectiveAgentBackend: true,
         defaultModel: true,
         defaultThinkingLevel: true,
         reviewModel: true,
@@ -171,6 +194,7 @@ const repositoriesQuery = {
         autoMerge: true,
         includeAllIssueAuthors: true,
         issuesReconciledAt: true,
+        blockingUnfinishedWorkItemCount: true,
       },
       repositoryCredentials: {
         repositoryId: true,
@@ -236,6 +260,8 @@ type Repository = {
   localPath: string
   isBare: boolean
   paused: boolean
+  selectedAgentBackend: string | null
+  effectiveAgentBackend: string
   defaultModel: string | null
   defaultThinkingLevel: string | null
   reviewModel: string | null
@@ -243,6 +269,7 @@ type Repository = {
   autoMerge: boolean
   includeAllIssueAuthors: boolean
   issuesReconciledAt: string | null
+  blockingUnfinishedWorkItemCount: number
   credential: RepositoryCredential
 }
 
@@ -799,7 +826,15 @@ function RepositoryCard({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const config = useQuery({ ...configQuery, enabled: settingsOpen })
   const models = useQuery({ ...modelsQuery, enabled: settingsOpen })
+  const agentBackends = useQuery({
+    ...agentBackendsQuery,
+    enabled: settingsOpen,
+  })
   const [paused, setPaused] = useState(repository.paused)
+  // null override = inherit harness default; select value is "" for inherit.
+  const [selectedAgentBackend, setSelectedAgentBackend] = useState<
+    string | null
+  >(repository.selectedAgentBackend)
   const [defaultModel, setDefaultModel] = useState(
     repository.defaultModel ?? "",
   )
@@ -814,6 +849,27 @@ function RepositoryCard({
   const [includeAllIssueAuthors, setIncludeAllIssueAuthors] = useState(
     repository.includeAllIssueAuthors,
   )
+  const [previewModels, setPreviewModels] = useState<
+    readonly AgentModelOption[] | null
+  >(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewPending, setPreviewPending] = useState(false)
+  const [harnessPrefsForDraft, setHarnessPrefsForDraft] = useState<{
+    defaultModel: string | null
+    defaultThinkingLevel: string | null
+    reviewModel: string | null
+    reviewThinkingLevel: string | null
+  } | null>(null)
+  const previewGenerationRef = useRef(0)
+  // Dialog-session stash so switching backends and back restores form fields.
+  // Server map for non-projected backends needs repositoryModelPrefs (not in API).
+  type DraftModelPrefs = {
+    defaultModel: string | null
+    defaultThinkingLevel: string | null
+    reviewModel: string | null
+    reviewThinkingLevel: string | null
+  }
+  const draftPrefsByBackendRef = useRef<Record<string, DraftModelPrefs>>({})
   const jobsQuery = workItemsQuery(repository.id)
   const { data: workItems = [], isLoading: workItemsLoading } =
     useQuery(jobsQuery)
@@ -822,6 +878,7 @@ function RepositoryCard({
     mutationFn: async (input: {
       repositoryId: string
       paused: boolean
+      selectedAgentBackend: string | null
       defaultModel: string | null
       defaultThinkingLevel: string | null
       reviewModel: string | null
@@ -838,6 +895,8 @@ function RepositoryCard({
           localPath: true,
           isBare: true,
           paused: true,
+          selectedAgentBackend: true,
+          effectiveAgentBackend: true,
           defaultModel: true,
           defaultThinkingLevel: true,
           reviewModel: true,
@@ -845,6 +904,7 @@ function RepositoryCard({
           autoMerge: true,
           includeAllIssueAuthors: true,
           issuesReconciledAt: true,
+          blockingUnfinishedWorkItemCount: true,
         },
       })
       return result.updateRepositorySettings
@@ -859,23 +919,125 @@ function RepositoryCard({
               : candidate,
           ),
       )
+      // Override changes can expand/shrink the Active Agent Backend set.
+      void queryClient.invalidateQueries({
+        queryKey: ["agentBackendStatus"],
+      })
       settingsDialogRef.current?.close()
       setSettingsOpen(false)
     },
   })
 
+  const applyRepoModelPrefs = (prefs: DraftModelPrefs) => {
+    setDefaultModel(prefs.defaultModel ?? "")
+    setDefaultVariant(prefs.defaultThinkingLevel ?? "")
+    setReviewModel(prefs.reviewModel ?? "")
+    setReviewVariant(prefs.reviewThinkingLevel ?? "")
+  }
+
+  const currentDraftModelPrefs = (): DraftModelPrefs => ({
+    defaultModel: defaultModel.trim() === "" ? null : defaultModel,
+    defaultThinkingLevel:
+      defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
+    reviewModel: reviewModel.trim() === "" ? null : reviewModel,
+    reviewThinkingLevel:
+      reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
+  })
+
+  const draftEffectiveBackend = (
+    override: string | null,
+    harnessDefault: string,
+  ): string => override ?? harnessDefault
+
+  const applyAgentBackendSelection = (nextSelectValue: string) => {
+    const nextOverride =
+      nextSelectValue === HARNESS_DEFAULT_BACKEND_VALUE ? null : nextSelectValue
+    const harnessDefault = config.data?.selectedAgentBackend ?? "opencode"
+    const previousEffective = draftEffectiveBackend(
+      selectedAgentBackend,
+      harnessDefault,
+    )
+    const nextEffective = draftEffectiveBackend(nextOverride, harnessDefault)
+    const savedEffective = repository.effectiveAgentBackend
+
+    // Stash form fields for the backend we are leaving so switching back in
+    // this dialog session restores them (harness Settings does this via prefs).
+    draftPrefsByBackendRef.current[previousEffective] = currentDraftModelPrefs()
+
+    setSelectedAgentBackend(nextOverride)
+
+    // Clear catalog/pending synchronously (before useEffect) so Save cannot
+    // validate against the previous override's catalog for a render frame.
+    // Bump generation so any in-flight preview is ignored when the effect runs.
+    previewGenerationRef.current += 1
+    if (nextEffective === harnessDefault) {
+      setPreviewPending(false)
+      setPreviewError(null)
+      setPreviewModels(null)
+      setHarnessPrefsForDraft(null)
+    } else {
+      setPreviewPending(true)
+      setPreviewError(null)
+      setPreviewModels(null)
+      setHarnessPrefsForDraft(null)
+    }
+
+    const stashed = draftPrefsByBackendRef.current[nextEffective]
+    if (stashed !== undefined) {
+      applyRepoModelPrefs(stashed)
+    } else if (nextEffective === savedEffective) {
+      applyRepoModelPrefs({
+        defaultModel: repository.defaultModel,
+        defaultThinkingLevel: repository.defaultThinkingLevel,
+        reviewModel: repository.reviewModel,
+        reviewThinkingLevel: repository.reviewThinkingLevel,
+      })
+    } else {
+      // No session stash and no projected flat columns for this effective
+      // backend — empty means inherit harness until the operator picks models.
+      applyRepoModelPrefs({
+        defaultModel: null,
+        defaultThinkingLevel: null,
+        reviewModel: null,
+        reviewThinkingLevel: null,
+      })
+    }
+  }
+
   const openSettings = () => {
     setSettingsOpen(true)
+    previewGenerationRef.current += 1
     setPaused(repository.paused)
+    setSelectedAgentBackend(repository.selectedAgentBackend)
     setDefaultModel(repository.defaultModel ?? "")
     setDefaultVariant(repository.defaultThinkingLevel ?? "")
     setReviewModel(repository.reviewModel ?? "")
     setReviewVariant(repository.reviewThinkingLevel ?? "")
     setAutoMerge(repository.autoMerge)
     setIncludeAllIssueAuthors(repository.includeAllIssueAuthors)
+    setPreviewModels(null)
+    setPreviewError(null)
+    // Override catalogs load via preview; start pending so model fields stay
+    // disabled until the effect loads the correct catalog.
+    setPreviewPending(repository.selectedAgentBackend !== null)
+    setHarnessPrefsForDraft(null)
+    // Seed session stash with the saved effective projection.
+    draftPrefsByBackendRef.current = {
+      [repository.effectiveAgentBackend]: {
+        defaultModel: repository.defaultModel,
+        defaultThinkingLevel: repository.defaultThinkingLevel,
+        reviewModel: repository.reviewModel,
+        reviewThinkingLevel: repository.reviewThinkingLevel,
+      },
+    }
     updateSettings.reset()
+    // Fresh gate counts for backend change (work-item live also refreshes this).
+    void queryClient.invalidateQueries({
+      queryKey: repositoriesQuery.queryKey,
+    })
     if (config.isError) void config.refetch()
     if (models.isError) void models.refetch()
+    if (agentBackends.isError) void agentBackends.refetch()
     settingsDialogRef.current?.showModal()
   }
 
@@ -884,6 +1046,7 @@ function RepositoryCard({
     updateSettings.mutate({
       repositoryId: repository.id,
       paused,
+      selectedAgentBackend,
       defaultModel: defaultModel.trim() === "" ? null : defaultModel,
       defaultThinkingLevel:
         defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
@@ -895,28 +1058,176 @@ function RepositoryCard({
     })
   }
 
-  const harnessDefaultModel = config.data?.defaultModel ?? "not configured"
-  const harnessDefaultVariant =
-    config.data?.defaultThinkingLevel ?? "not configured"
-  const resolvedBuildModel = repository.defaultModel ?? harnessDefaultModel
+  const harnessDefaultBackendId =
+    config.data?.selectedAgentBackend ?? "opencode"
+  const harnessDefaultBackendLabel =
+    (agentBackends.data ?? []).find(
+      (backend: AgentBackendInfo) => backend.id === harnessDefaultBackendId,
+    )?.label ?? harnessDefaultBackendId
+  const draftEffective = draftEffectiveBackend(
+    selectedAgentBackend,
+    harnessDefaultBackendId,
+  )
+  const savedEffective = repository.effectiveAgentBackend
+  const backendDraftChanging = draftEffective !== savedEffective
+  const backendChangeBlocked = repository.blockingUnfinishedWorkItemCount > 0
+
+  // Override / draft backends cannot use the harness-default models query.
+  // Depend only on selectedAgentBackend (not whole config.data) so live config
+  // refetches that only update unfinished counts do not thrash preview.
+  const harnessDefaultBackendFromConfig =
+    config.data?.selectedAgentBackend ?? null
+  useEffect(() => {
+    if (!settingsOpen || harnessDefaultBackendFromConfig === null) {
+      return
+    }
+    const harnessDefault = harnessDefaultBackendFromConfig
+    const effective = selectedAgentBackend ?? harnessDefault
+    if (effective === harnessDefault) {
+      setHarnessPrefsForDraft(null)
+      setPreviewModels(null)
+      setPreviewError(null)
+      setPreviewPending(false)
+      return
+    }
+    const generation = ++previewGenerationRef.current
+    setPreviewPending(true)
+    setPreviewError(null)
+    // Drop previous backend's harness prefs / catalog so inherit labels do not
+    // briefly show the wrong backend while the new preview loads.
+    setHarnessPrefsForDraft(null)
+    setPreviewModels(null)
+    void (async () => {
+      try {
+        const [prefsResult, previewResult] = await Promise.all([
+          graphql.query({
+            harnessModelPrefs: {
+              __args: { backendId: effective },
+              defaultModel: true,
+              defaultThinkingLevel: true,
+              reviewModel: true,
+              reviewThinkingLevel: true,
+            },
+          }),
+          graphql.query({
+            previewAgentBackend: {
+              __args: { backendId: effective },
+              backend: { id: true, label: true },
+              kind: true,
+              reason: true,
+              models: { id: true, thinkingLevels: true },
+            },
+          }),
+        ])
+        if (generation !== previewGenerationRef.current) {
+          return
+        }
+        setHarnessPrefsForDraft(prefsResult.harnessModelPrefs)
+        const preview = previewResult.previewAgentBackend
+        if (preview.kind === "READY") {
+          setPreviewModels(preview.models)
+          setPreviewError(null)
+        } else {
+          setPreviewModels([])
+          setPreviewError(
+            preview.reason ??
+              "Could not load model catalog for the selected Agent Backend",
+          )
+        }
+      } catch (error) {
+        if (generation !== previewGenerationRef.current) {
+          return
+        }
+        setPreviewModels([])
+        setPreviewError(
+          error instanceof Error
+            ? error.message
+            : "Could not preview the selected Agent Backend",
+        )
+      } finally {
+        if (generation === previewGenerationRef.current) {
+          setPreviewPending(false)
+        }
+      }
+    })()
+  }, [settingsOpen, harnessDefaultBackendFromConfig, selectedAgentBackend])
+
+  const inheritHarnessBuildModel = (): string => {
+    if (harnessPrefsForDraft !== null) {
+      return harnessPrefsForDraft.defaultModel ?? "not configured"
+    }
+    if (draftEffective === harnessDefaultBackendId) {
+      return config.data?.defaultModel ?? "not configured"
+    }
+    return "not configured"
+  }
+  const inheritHarnessBuildVariant = (): string => {
+    if (harnessPrefsForDraft !== null) {
+      return harnessPrefsForDraft.defaultThinkingLevel ?? "not configured"
+    }
+    if (draftEffective === harnessDefaultBackendId) {
+      return config.data?.defaultThinkingLevel ?? "not configured"
+    }
+    return "not configured"
+  }
+  const harnessDefaultModel = inheritHarnessBuildModel()
+  const harnessDefaultVariant = inheritHarnessBuildVariant()
+  const resolvedBuildModel =
+    defaultModel.length > 0 ? defaultModel : harnessDefaultModel
   const resolvedBuildVariant =
-    repository.defaultThinkingLevel ?? harnessDefaultVariant
-  const harnessReviewModel =
-    config.data?.reviewModel ?? `Build (${resolvedBuildModel})`
-  const harnessReviewVariant =
-    config.data?.reviewThinkingLevel ?? `Build (${resolvedBuildVariant})`
-  const modelIds = (models.data ?? []).map((model) => model.id)
+    defaultThinkingLevel.length > 0
+      ? defaultThinkingLevel
+      : harnessDefaultVariant
+  const inheritHarnessReviewModel = (): string => {
+    if (harnessPrefsForDraft !== null) {
+      return harnessPrefsForDraft.reviewModel ?? `Build (${resolvedBuildModel})`
+    }
+    if (draftEffective === harnessDefaultBackendId) {
+      return config.data?.reviewModel ?? `Build (${resolvedBuildModel})`
+    }
+    return `Build (${resolvedBuildModel})`
+  }
+  const inheritHarnessReviewVariant = (): string => {
+    if (harnessPrefsForDraft !== null) {
+      return (
+        harnessPrefsForDraft.reviewThinkingLevel ??
+        `Build (${resolvedBuildVariant})`
+      )
+    }
+    if (draftEffective === harnessDefaultBackendId) {
+      return (
+        config.data?.reviewThinkingLevel ?? `Build (${resolvedBuildVariant})`
+      )
+    }
+    return `Build (${resolvedBuildVariant})`
+  }
+  const harnessReviewModel = inheritHarnessReviewModel()
+  const harnessReviewVariant = inheritHarnessReviewVariant()
+
+  // Global models query catalogs only the harness default backend. Effective
+  // override catalogs (saved or draft) come from Preview.
+  const usesPreviewCatalog = draftEffective !== harnessDefaultBackendId
+  const catalogModels: readonly AgentModelOption[] | undefined =
+    usesPreviewCatalog ? (previewModels ?? undefined) : models.data
+  const modelIds = (catalogModels ?? []).map((model) => model.id)
+  const harnessBuildForSource =
+    harnessDefaultModel !== "not configured" ? harnessDefaultModel : ""
+  const harnessReviewForSource = !harnessReviewModel.startsWith("Build (")
+    ? harnessReviewModel
+    : ""
   const buildVariantSourceModel =
-    defaultModel.length > 0 ? defaultModel : (config.data?.defaultModel ?? "")
+    defaultModel.length > 0 ? defaultModel : harnessBuildForSource
   const reviewThinkingLevelSourceModel =
     reviewModel.length > 0
       ? reviewModel
       : defaultModel.length > 0
         ? defaultModel
-        : (config.data?.reviewModel ?? config.data?.defaultModel ?? "")
-  const buildVariants = variantsForModel(models.data, buildVariantSourceModel)
+        : harnessReviewForSource.length > 0
+          ? harnessReviewForSource
+          : harnessBuildForSource
+  const buildVariants = variantsForModel(catalogModels, buildVariantSourceModel)
   const reviewThinkingLevels = variantsForModel(
-    models.data,
+    catalogModels,
     reviewThinkingLevelSourceModel,
   )
   const hasUnavailableBuildModel =
@@ -937,6 +1248,23 @@ function RepositoryCard({
     reviewThinkingLevel.length > 0 &&
     (reviewThinkingLevelSourceUnavailable ||
       !reviewThinkingLevels.includes(reviewThinkingLevel))
+  const modelsDisabled =
+    usesPreviewCatalog && (previewPending || previewError !== null)
+  const modelsLoading =
+    settingsOpen &&
+    (usesPreviewCatalog
+      ? previewPending || config.isPending
+      : models.isPending || config.isPending || agentBackends.isPending)
+  // Only enforce "model not in catalog" when a catalog actually loaded.
+  // Failed/pending override preview leaves modelIds empty and must not block
+  // non-model saves for the current effective backend.
+  const catalogReadyForModelValidation = usesPreviewCatalog
+    ? !previewPending && previewError === null && previewModels !== null
+    : !models.isPending && !models.isError && models.data !== undefined
+  const blockSaveForUnavailableBuildModel =
+    catalogReadyForModelValidation &&
+    defaultModel.length > 0 &&
+    hasUnavailableBuildModel
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -954,6 +1282,10 @@ function RepositoryCard({
       queryClient.removeQueries({ queryKey: ["issues", repositoryId] })
       await queryClient.invalidateQueries({
         queryKey: repositoriesQuery.queryKey,
+      })
+      // Dropping a repo may shrink selected-or-in-use Active backends.
+      void queryClient.invalidateQueries({
+        queryKey: ["agentBackendStatus"],
       })
     },
   })
@@ -1253,7 +1585,8 @@ function RepositoryCard({
             </h2>
             <p className="mt-1.5 text-sm text-ink-soft">
               Overrides apply on the next Agent Turn. Empty model fields use
-              harness defaults.
+              harness defaults for this Repository&apos;s effective Agent
+              Backend.
             </p>
           </div>
           <div className="grid gap-5 px-6 py-5">
@@ -1295,9 +1628,70 @@ function RepositoryCard({
                 Relevant Issues from every author after Refresh
               </span>
             </label>
-            {models.isPending ? (
+
+            <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+              Agent Backend
+              <select
+                className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
+                name="selectedAgentBackend"
+                value={selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE}
+                disabled={
+                  backendChangeBlocked ||
+                  updateSettings.isPending ||
+                  agentBackends.isPending
+                }
+                onChange={(event) => {
+                  applyAgentBackendSelection(event.target.value)
+                }}
+              >
+                <option value={HARNESS_DEFAULT_BACKEND_VALUE}>
+                  Harness default ({harnessDefaultBackendLabel})
+                </option>
+                {selectedAgentBackend !== null &&
+                  !(agentBackends.data ?? []).some(
+                    (backend) => backend.id === selectedAgentBackend,
+                  ) && (
+                    <option value={selectedAgentBackend}>
+                      {selectedAgentBackend}
+                    </option>
+                  )}
+                {(agentBackends.data ?? []).map((backend) => (
+                  <option key={backend.id} value={backend.id}>
+                    {backend.label}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs font-normal text-ink-faint">
+                {backendChangeBlocked
+                  ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
+                      repository.blockingUnfinishedWorkItemCount === 1
+                        ? ""
+                        : "s"
+                    } on this Repository — finish or abandon them before changing Agent Backend.`
+                  : "Harness default inherits the global selection. Override activates on Save when the effective backend changes. Model fields in this dialog are stashed per backend while open; empty means inherit harness for that effective backend."}
+              </span>
+            </label>
+
+            {agentBackends.isError && (
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                Agent Backends list could not be loaded. You can still inherit
+                the harness default; override options may be incomplete.
+              </p>
+            )}
+
+            {usesPreviewCatalog && previewError !== null && (
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                Preview failed: {previewError}. Model fields stay disabled until
+                preview succeeds.
+                {backendDraftChanging
+                  ? " Changing the effective backend cannot be saved until preview succeeds."
+                  : " Non-model settings can still be saved."}
+              </p>
+            )}
+
+            {modelsLoading ? (
               <p className="text-sm text-ink-soft">Loading models...</p>
-            ) : models.isError ? (
+            ) : !usesPreviewCatalog && models.isError ? (
               <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
                 Models could not be loaded.
               </p>
@@ -1306,17 +1700,16 @@ function RepositoryCard({
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Build model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     value={defaultModel}
+                    disabled={modelsDisabled}
                     onChange={(event) => {
                       const nextModel = event.target.value
                       setDefaultModel(nextModel)
                       const sourceModel =
-                        nextModel.length > 0
-                          ? nextModel
-                          : (config.data?.defaultModel ?? "")
+                        nextModel.length > 0 ? nextModel : harnessBuildForSource
                       const nextVariants = variantsForModel(
-                        models.data,
+                        catalogModels,
                         sourceModel,
                       )
                       setDefaultVariant((current) =>
@@ -1326,13 +1719,13 @@ function RepositoryCard({
                         const reviewSource =
                           nextModel.length > 0
                             ? nextModel
-                            : (config.data?.reviewModel ??
-                              config.data?.defaultModel ??
-                              "")
+                            : harnessReviewForSource.length > 0
+                              ? harnessReviewForSource
+                              : harnessBuildForSource
                         setReviewVariant((current) =>
                           reconcileVariantForModel(
                             current,
-                            variantsForModel(models.data, reviewSource),
+                            variantsForModel(catalogModels, reviewSource),
                           ),
                         )
                       }
@@ -1346,7 +1739,7 @@ function RepositoryCard({
                         {defaultModel} (not in Agent Model catalog)
                       </option>
                     )}
-                    {models.data.map((model) => (
+                    {(catalogModels ?? []).map((model) => (
                       <option key={model.id} value={model.id}>
                         {model.id}
                       </option>
@@ -1371,14 +1764,15 @@ function RepositoryCard({
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Build thinking level
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
                       }
                       disabled={
-                        buildVariantSourceModel.length > 0 &&
-                        buildVariants.length === 0
+                        modelsDisabled ||
+                        (buildVariantSourceModel.length > 0 &&
+                          buildVariants.length === 0)
                       }
                     >
                       <option value="">
@@ -1400,8 +1794,9 @@ function RepositoryCard({
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                   Review model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     value={reviewModel}
+                    disabled={modelsDisabled}
                     onChange={(event) => {
                       const nextModel = event.target.value
                       setReviewModel(nextModel)
@@ -1410,13 +1805,13 @@ function RepositoryCard({
                           ? nextModel
                           : defaultModel.length > 0
                             ? defaultModel
-                            : (config.data?.reviewModel ??
-                              config.data?.defaultModel ??
-                              "")
+                            : harnessReviewForSource.length > 0
+                              ? harnessReviewForSource
+                              : harnessBuildForSource
                       setReviewVariant((current) =>
                         reconcileVariantForModel(
                           current,
-                          variantsForModel(models.data, sourceModel),
+                          variantsForModel(catalogModels, sourceModel),
                         ),
                       )
                     }}
@@ -1429,7 +1824,7 @@ function RepositoryCard({
                         {reviewModel} (not in Agent Model catalog)
                       </option>
                     )}
-                    {models.data.map((model) => (
+                    {(catalogModels ?? []).map((model) => (
                       <option key={`review-${model.id}`} value={model.id}>
                         {model.id}
                       </option>
@@ -1454,12 +1849,13 @@ function RepositoryCard({
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
                     Review thinking level
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
-                        reviewThinkingLevelSourceModel.length > 0 &&
-                        reviewThinkingLevels.length === 0
+                        modelsDisabled ||
+                        (reviewThinkingLevelSourceModel.length > 0 &&
+                          reviewThinkingLevels.length === 0)
                       }
                     >
                       <option value="">
@@ -1482,7 +1878,9 @@ function RepositoryCard({
             )}
             {updateSettings.isError && (
               <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                Settings could not be saved. Try again.
+                {updateSettings.error instanceof Error
+                  ? updateSettings.error.message
+                  : "Settings could not be saved. Try again."}
               </p>
             )}
           </div>
@@ -1501,7 +1899,19 @@ function RepositoryCard({
             <button
               type="submit"
               className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-paper uppercase hover:bg-oxblood-deep disabled:cursor-wait disabled:opacity-60"
-              disabled={updateSettings.isPending}
+              disabled={
+                updateSettings.isPending ||
+                (backendChangeBlocked &&
+                  selectedAgentBackend !== repository.selectedAgentBackend) ||
+                (backendDraftChanging && modelsLoading) ||
+                (backendDraftChanging &&
+                  usesPreviewCatalog &&
+                  !catalogReadyForModelValidation) ||
+                (backendDraftChanging &&
+                  usesPreviewCatalog &&
+                  previewError !== null) ||
+                blockSaveForUnavailableBuildModel
+              }
             >
               {updateSettings.isPending ? "Saving..." : "Save"}
             </button>
@@ -1532,13 +1942,32 @@ function RepositoryCard({
             </div>
             <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
               <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                Agent Backend:
+              </dt>
+              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
+                {repository.selectedAgentBackend === null
+                  ? `Harness default (${repository.effectiveAgentBackend})`
+                  : repository.effectiveAgentBackend}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
+              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
                 Build model:
               </dt>
               <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
-                {repository.defaultModel ?? `Default (${harnessDefaultModel})`}
+                {repository.defaultModel ??
+                  (repository.selectedAgentBackend === null
+                    ? `Default (${
+                        config.data?.defaultModel ?? "not configured"
+                      })`
+                    : "Harness default")}
                 {" · "}
                 {repository.defaultThinkingLevel ??
-                  `Default (${harnessDefaultVariant})`}
+                  (repository.selectedAgentBackend === null
+                    ? `Default (${
+                        config.data?.defaultThinkingLevel ?? "not configured"
+                      })`
+                    : "Harness default")}
               </dd>
             </div>
             <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
@@ -1546,10 +1975,29 @@ function RepositoryCard({
                 Review model:
               </dt>
               <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
-                {repository.reviewModel ?? `Default (${harnessReviewModel})`}
+                {repository.reviewModel ??
+                  (repository.selectedAgentBackend === null
+                    ? `Default (${
+                        config.data?.reviewModel ??
+                        `Build (${
+                          repository.defaultModel ??
+                          config.data?.defaultModel ??
+                          "not configured"
+                        })`
+                      })`
+                    : "Harness default")}
                 {" · "}
                 {repository.reviewThinkingLevel ??
-                  `Default (${harnessReviewVariant})`}
+                  (repository.selectedAgentBackend === null
+                    ? `Default (${
+                        config.data?.reviewThinkingLevel ??
+                        `Build (${
+                          repository.defaultThinkingLevel ??
+                          config.data?.defaultThinkingLevel ??
+                          "not configured"
+                        })`
+                      })`
+                    : "Harness default")}
               </dd>
             </div>
             <div className="flex min-w-0 items-baseline gap-1.5 text-xs">

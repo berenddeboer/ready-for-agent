@@ -43,23 +43,30 @@ const configQuery = {
         maxConcurrentAgentTurns: true,
         maxConcurrentWorkItems: true,
         unfinishedWorkItemCount: true,
+        // Scoped gate for changing the harness default (inheriting repos only).
+        blockingUnfinishedWorkItemCount: true,
       },
     })
     return result.config
   },
 }
 
+const agentBackendStatusSelection = {
+  backend: { id: true, label: true },
+  selectedBackend: { id: true, label: true },
+  activeBackend: { id: true, label: true },
+  kind: true,
+  reason: true,
+  models: { id: true, thinkingLevels: true },
+} as const
+
 const agentBackendStatusQuery = {
   queryKey: ["agentBackendStatus"],
   queryFn: async () => {
     const result = await graphql.query({
-      agentBackendStatus: {
-        selectedBackend: { id: true, label: true },
-        activeBackend: { id: true, label: true },
-        kind: true,
-        reason: true,
-        models: { id: true, thinkingLevels: true },
-      },
+      agentBackendStatuses: agentBackendStatusSelection,
+      // Legacy singular surface for the harness default (derived server-side).
+      agentBackendStatus: agentBackendStatusSelection,
       agentBackends: { id: true, label: true },
     })
     return result
@@ -69,6 +76,15 @@ const agentBackendStatusQuery = {
 type AgentModelOption = {
   id: string
   thinkingLevels: readonly string[]
+}
+
+type AgentBackendStatusRow = {
+  backend: { id: string; label: string }
+  selectedBackend: { id: string; label: string }
+  activeBackend: { id: string; label: string }
+  kind: "READY" | "UNAVAILABLE"
+  reason: string | null
+  models: readonly AgentModelOption[]
 }
 
 const modelsQuery = {
@@ -207,15 +223,33 @@ function SettingsButton() {
   const [previewPending, setPreviewPending] = useState(false)
   const previewGenerationRef = useRef(0)
   const buildConfigured = isBuildModelConfigured(config.data)
+  const statuses: readonly AgentBackendStatusRow[] =
+    backendStatus.data?.agentBackendStatuses ?? []
   const status = backendStatus.data?.agentBackendStatus
-  const backendKind = status?.kind
+  const defaultBackendId = config.data?.selectedAgentBackend ?? "opencode"
+  const defaultStatus =
+    statuses.find((row) => row.backend.id === defaultBackendId) ?? status
+  const unavailableStatuses = statuses.filter(
+    (row) => row.kind === "UNAVAILABLE",
+  )
+  const backendKind = defaultStatus?.kind
+  const blockingUnfinishedWorkItemCount =
+    config.data?.blockingUnfinishedWorkItemCount ?? 0
   const unfinishedWorkItemCount = config.data?.unfinishedWorkItemCount ?? 0
-  const backendChangeBlocked = unfinishedWorkItemCount > 0
+  const backendChangeBlocked = blockingUnfinishedWorkItemCount > 0
+  // Hydrate editable form fields once per dialog-open session. Live WI refresh
+  // refetches config (counts) often; re-applying full config.data would wipe drafts.
+  const formHydratedForOpenRef = useRef(false)
 
   useEffect(() => {
-    if (!dialogOpen || !config.data) {
+    if (!dialogOpen) {
+      formHydratedForOpenRef.current = false
       return
     }
+    if (!config.data || formHydratedForOpenRef.current) {
+      return
+    }
+    formHydratedForOpenRef.current = true
     setSelectedAgentBackend(config.data.selectedAgentBackend)
     setDefaultModel(config.data.defaultModel ?? "")
     setDefaultVariant(config.data.defaultThinkingLevel ?? "")
@@ -229,7 +263,7 @@ function SettingsButton() {
     setPreviewModels(null)
     setPreviewError(null)
     setPreviewPending(false)
-  }, [config.data, dialogOpen])
+  }, [dialogOpen, config.data])
 
   const updateConfig = useMutation({
     mutationFn: (input: {
@@ -252,6 +286,7 @@ function SettingsButton() {
           maxConcurrentAgentTurns: true,
           maxConcurrentWorkItems: true,
           unfinishedWorkItemCount: true,
+          blockingUnfinishedWorkItemCount: true,
         },
       }),
     onSuccess: ({ updateConfig: updatedConfig }) => {
@@ -260,37 +295,112 @@ function SettingsButton() {
         queryKey: agentBackendStatusQuery.queryKey,
       })
       void queryClient.invalidateQueries({ queryKey: modelsQuery.queryKey })
+      // effectiveAgentBackend / blocking counts on Repository cards depend on
+      // the harness default; refresh so inheriting repos do not stay stale.
+      void queryClient.invalidateQueries({ queryKey: ["repositories"] })
       dialogRef.current?.close()
       setDialogOpen(false)
     },
   })
 
+  const [recheckingBackendId, setRecheckingBackendId] = useState<string | null>(
+    null,
+  )
+  const [recheckAllPending, setRecheckAllPending] = useState(false)
+  const [recheckAllFailures, setRecheckAllFailures] = useState<
+    readonly string[]
+  >([])
+
   const recheckBackend = useMutation({
-    mutationFn: () =>
-      graphql.mutation({
-        recheckAgentBackend: {
-          selectedBackend: { id: true, label: true },
-          activeBackend: { id: true, label: true },
-          kind: true,
-          reason: true,
-          models: { id: true, thinkingLevels: true },
-        },
-      }),
-    onSuccess: ({ recheckAgentBackend }) => {
-      queryClient.setQueryData(agentBackendStatusQuery.queryKey, (current) =>
-        current === undefined
-          ? {
-              agentBackendStatus: recheckAgentBackend,
+    mutationFn: async (backendId: string) => {
+      setRecheckingBackendId(backendId)
+      try {
+        const result = await graphql.mutation({
+          recheckAgentBackend: {
+            __args: { backendId },
+            ...agentBackendStatusSelection,
+          },
+        })
+        return { backendId, status: result.recheckAgentBackend }
+      } finally {
+        setRecheckingBackendId(null)
+      }
+    },
+    onSuccess: ({ backendId, status: rechecked }) => {
+      type BackendStatusQueryData = {
+        agentBackendStatuses: readonly AgentBackendStatusRow[]
+        agentBackendStatus: AgentBackendStatusRow
+        agentBackends: readonly { id: string; label: string }[]
+      }
+      queryClient.setQueryData<BackendStatusQueryData>(
+        agentBackendStatusQuery.queryKey,
+        (current) => {
+          if (current == null) {
+            return {
+              agentBackendStatuses: [rechecked],
+              agentBackendStatus: rechecked,
               agentBackends: [],
             }
-          : {
-              ...current,
-              agentBackendStatus: recheckAgentBackend,
-            },
+          }
+          const priorStatuses = current.agentBackendStatuses ?? []
+          const nextStatuses = priorStatuses.some(
+            (row) => row.backend.id === backendId,
+          )
+            ? priorStatuses.map((row) =>
+                row.backend.id === backendId ? rechecked : row,
+              )
+            : [...priorStatuses, rechecked]
+          const nextDefault =
+            backendId ===
+            (config.data?.selectedAgentBackend ?? defaultBackendId)
+              ? rechecked
+              : (current.agentBackendStatus ?? rechecked)
+          return {
+            ...current,
+            agentBackendStatuses: nextStatuses,
+            agentBackendStatus: nextDefault,
+          }
+        },
       )
-      void queryClient.invalidateQueries({ queryKey: modelsQuery.queryKey })
+      // Global models query is the harness-default catalog only.
+      if (
+        backendId === (config.data?.selectedAgentBackend ?? defaultBackendId)
+      ) {
+        void queryClient.invalidateQueries({ queryKey: modelsQuery.queryKey })
+      }
     },
   })
+
+  const backendLabelForId = (backendId: string): string =>
+    statuses.find((row) => row.backend.id === backendId)?.backend.label ??
+    (backendStatus.data?.agentBackends ?? []).find(
+      (backend) => backend.id === backendId,
+    )?.label ??
+    backendId
+
+  const recheckAllBackends = async () => {
+    const ids =
+      statuses.length > 0
+        ? statuses.map((row) => row.backend.id)
+        : [defaultBackendId]
+    setRecheckAllPending(true)
+    setRecheckAllFailures([])
+    recheckBackend.reset()
+    const failedLabels: string[] = []
+    try {
+      // Continue after individual failures so other Active backends still refresh.
+      for (const backendId of ids) {
+        try {
+          await recheckBackend.mutateAsync(backendId)
+        } catch {
+          failedLabels.push(backendLabelForId(backendId))
+        }
+      }
+    } finally {
+      setRecheckAllPending(false)
+      setRecheckAllFailures(failedLabels)
+    }
+  }
 
   const applyModelPrefs = (prefs: {
     defaultModel: string | null
@@ -381,6 +491,8 @@ function SettingsButton() {
 
   const openSettings = () => {
     setDialogOpen(true)
+    // Allow one hydrate for this open (effect or inline below).
+    formHydratedForOpenRef.current = false
     // Discard any in-flight preview from a previous dialog session.
     previewGenerationRef.current += 1
     if (config.isError) {
@@ -393,6 +505,7 @@ function SettingsButton() {
       void backendStatus.refetch()
     }
     if (config.data) {
+      formHydratedForOpenRef.current = true
       setSelectedAgentBackend(config.data.selectedAgentBackend)
       applyModelPrefs({
         defaultModel: config.data.defaultModel,
@@ -408,6 +521,7 @@ function SettingsButton() {
     setPreviewModels(null)
     setPreviewError(null)
     setPreviewPending(false)
+    setRecheckAllFailures([])
     updateConfig.reset()
     recheckBackend.reset()
     dialogRef.current?.showModal()
@@ -428,6 +542,11 @@ function SettingsButton() {
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    // Live gate can flip while a draft backend change is staged; select may
+    // already be disabled — still block submit (incl. Enter).
+    if (backendChangeBlocked && selectedAgentBackend !== savedAgentBackend) {
+      return
+    }
     const parsedMaxSessions = Number(maxConcurrentAgentTurns)
     const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
     updateConfig.mutate({
@@ -466,8 +585,20 @@ function SettingsButton() {
     (hasUnavailableReviewModel ||
       (reviewModel.length === 0 && hasUnavailableBuildModel) ||
       !reviewThinkingLevels.includes(reviewThinkingLevel))
+  // First-run banner is about the harness default build model only; fully
+  // configured Repository overrides are not hard-blocked by this guidance.
   const showUnconfiguredGuidance = config.isSuccess && !buildConfigured
-  const showBackendBanner = config.isSuccess && backendKind === "UNAVAILABLE"
+  const showBackendBanner =
+    config.isSuccess &&
+    (backendKind === "UNAVAILABLE" || unavailableStatuses.length > 0)
+  const bannerUnavailableReason =
+    unavailableStatuses.length === 1
+      ? `${unavailableStatuses[0]?.backend.label ?? "Agent Backend"}: ${
+          unavailableStatuses[0]?.reason ?? "unavailable"
+        }`
+      : unavailableStatuses.length > 1
+        ? `${unavailableStatuses.length} Agent Backends are unavailable`
+        : (defaultStatus?.reason ?? "Agent Backend is unavailable")
   const modelsDisabled =
     backendChanging && (previewPending || previewError !== null)
   const modelsLoading =
@@ -475,6 +606,10 @@ function SettingsButton() {
     (backendChanging
       ? previewPending
       : models.isPending || backendStatus.isPending)
+  const recheckBusy =
+    recheckBackend.isPending ||
+    recheckAllPending ||
+    recheckingBackendId !== null
 
   return (
     <>
@@ -483,7 +618,7 @@ function SettingsButton() {
           className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
           role="status"
         >
-          <span>{status?.reason ?? "Agent Backend is unavailable"}</span>
+          <span>{bannerUnavailableReason}</span>
           <button
             type="button"
             className="border border-oxblood/50 bg-paper px-2 py-0.5 text-xs font-semibold text-oxblood underline-offset-2 hover:bg-oxblood hover:text-paper"
@@ -553,14 +688,33 @@ function SettingsButton() {
             </p>
             {showUnconfiguredGuidance && (
               <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                Select a default build model before the harness can create work.
+                Select a default build model before the harness can create work
+                on Repositories that inherit this default. Repositories with a
+                fully configured Agent Backend override can still create work.
               </p>
             )}
-            {!backendChanging && status?.kind === "UNAVAILABLE" && (
-              <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                {status.reason ?? "Agent Backend is unavailable."}
-              </p>
-            )}
+            {!backendChanging &&
+              (unavailableStatuses.length > 0 ||
+                (unavailableStatuses.length === 0 &&
+                  defaultStatus?.kind === "UNAVAILABLE")) && (
+                <div className="mt-3 grid gap-2">
+                  {(unavailableStatuses.length > 0
+                    ? unavailableStatuses
+                    : defaultStatus !== undefined
+                      ? [defaultStatus as AgentBackendStatusRow]
+                      : []
+                  ).map((row) => (
+                    <p
+                      key={row.backend.id}
+                      className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+                    >
+                      <span className="font-semibold">{row.backend.label}</span>
+                      {": "}
+                      {row.reason ?? "Agent Backend is unavailable."}
+                    </p>
+                  ))}
+                </div>
+              )}
           </div>
 
           <div className="grid gap-5 px-6 py-5">
@@ -575,7 +729,7 @@ function SettingsButton() {
             ) : (
               <>
                 <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                  Agent Backend
+                  Default Agent Backend
                   <select
                     className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="selectedAgentBackend"
@@ -595,32 +749,82 @@ function SettingsButton() {
                   </select>
                   <span className="text-xs font-normal text-ink-faint">
                     {backendChangeBlocked
-                      ? `${unfinishedWorkItemCount} unfinished Work Item${unfinishedWorkItemCount === 1 ? "" : "s"} — finish or abandon them before changing Agent Backend.`
-                      : "Activates immediately on Save when no Work Items are unfinished. Model prefs are remembered per backend."}
+                      ? `${blockingUnfinishedWorkItemCount} unfinished Work Item${
+                          blockingUnfinishedWorkItemCount === 1 ? "" : "s"
+                        } on Repositories inheriting the harness default — finish or abandon them before changing the default Agent Backend.${
+                          unfinishedWorkItemCount >
+                          blockingUnfinishedWorkItemCount
+                            ? ` (${unfinishedWorkItemCount} unfinished fleet-wide.)`
+                            : ""
+                        }`
+                      : "Activates immediately on Save when no inheriting Work Items are unfinished. Model prefs are remembered per backend. Repository overrides are independent."}
                   </span>
                 </label>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="m-0 text-xs text-ink-soft">
-                    Active:{" "}
-                    <span className="font-semibold text-ink-2">
-                      {status?.activeBackend.label ?? "—"}
-                    </span>
-                    {status?.kind === "READY" ? " · Ready" : null}
-                    {backendChanging ? " · Previewing selection" : null}
-                  </p>
-                  <button
-                    type="button"
-                    className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
-                    disabled={recheckBackend.isPending || backendChanging}
-                    onClick={() => {
-                      recheckBackend.mutate()
-                    }}
-                  >
-                    {recheckBackend.isPending
-                      ? "Rechecking…"
-                      : "Recheck Agent Backend"}
-                  </button>
+                <div className="grid gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="m-0 text-xs font-semibold tracking-[0.12em] text-ink-faint uppercase">
+                      Active Agent Backends
+                    </p>
+                    <button
+                      type="button"
+                      className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
+                      disabled={recheckBusy || backendChanging}
+                      onClick={() => {
+                        void recheckAllBackends()
+                      }}
+                    >
+                      {recheckAllPending ? "Rechecking all…" : "Recheck all"}
+                    </button>
+                  </div>
+                  {(statuses.length > 0
+                    ? statuses
+                    : defaultStatus !== undefined
+                      ? [defaultStatus as AgentBackendStatusRow]
+                      : []
+                  ).map((row) => {
+                    const isDefault = row.backend.id === savedAgentBackend
+                    const rowRechecking = recheckingBackendId === row.backend.id
+                    return (
+                      <div
+                        key={row.backend.id}
+                        className="flex flex-wrap items-center justify-between gap-2 border border-rule bg-paper-2 px-3 py-2"
+                      >
+                        <p className="m-0 text-xs text-ink-soft">
+                          <span className="font-semibold text-ink-2">
+                            {row.backend.label}
+                          </span>
+                          {isDefault ? " · Default" : null}
+                          {row.kind === "READY" ? " · Ready" : " · Unavailable"}
+                          {backendChanging &&
+                          row.backend.id === selectedAgentBackend
+                            ? " · Previewing selection"
+                            : null}
+                          {row.kind === "UNAVAILABLE" && row.reason !== null
+                            ? ` — ${row.reason}`
+                            : null}
+                        </p>
+                        <button
+                          type="button"
+                          className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
+                          disabled={recheckBusy || backendChanging}
+                          onClick={() => {
+                            setRecheckAllFailures([])
+                            recheckBackend.mutate(row.backend.id)
+                          }}
+                        >
+                          {rowRechecking
+                            ? "Rechecking…"
+                            : `Recheck ${row.backend.label}`}
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {statuses.length === 0 && defaultStatus === undefined && (
+                    <p className="m-0 text-xs text-ink-soft">
+                      No Active Agent Backend status yet.
+                    </p>
+                  )}
                 </div>
 
                 {backendChanging && previewError !== null && (
@@ -853,9 +1057,23 @@ function SettingsButton() {
                   : "Settings could not be saved. Check the values and try again."}
               </p>
             )}
-            {recheckBackend.isError && (
+            {recheckAllFailures.length > 0 && (
               <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                Recheck failed. Try again after fixing the Agent Backend.
+                Recheck failed for{" "}
+                {recheckAllFailures.length === 1
+                  ? recheckAllFailures[0]
+                  : recheckAllFailures.join(", ")}
+                . Other backends may have refreshed. Try again after fixing
+                those Agent Backends.
+              </p>
+            )}
+            {recheckAllFailures.length === 0 && recheckBackend.isError && (
+              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                Recheck failed
+                {recheckBackend.variables !== undefined
+                  ? ` for ${backendLabelForId(recheckBackend.variables)}`
+                  : ""}
+                . Try again after fixing that Agent Backend.
               </p>
             )}
           </div>
@@ -880,6 +1098,7 @@ function SettingsButton() {
                 config.isError ||
                 modelsLoading ||
                 updateConfig.isPending ||
+                (backendChangeBlocked && backendChanging) ||
                 (backendChanging && previewError !== null) ||
                 // Empty build model allowed on backend change (first-run style);
                 // non-empty must still be in the preview/active catalog.
