@@ -7,7 +7,7 @@ import {
   shouldOpenBrowser,
 } from "../browser-open.ts"
 import { checkHostTools } from "../host-tools-preflight.ts"
-import { peekSelectedAgentBackendId } from "../peek-selected-agent-backend.ts"
+import { peekSelectedAgentBackendIds } from "../peek-selected-agent-backend.ts"
 import { bootStandaloneProduction } from "../standalone-boot.ts"
 import { ApplicationConfig } from "./application-config.ts"
 
@@ -79,12 +79,12 @@ export class StartHarness extends Context.Service<
       )
 
       const runPreflight = Effect.fn("StartHarness.runPreflight")(function* () {
-        const selectedAgentBackendId = peekSelectedAgentBackendId(
+        const selectedAgentBackendIds = peekSelectedAgentBackendIds(
           config.databasePath,
         )
         const result = checkHostTools(
           (command) => Bun.which(command) !== null,
-          { selectedAgentBackendId },
+          { selectedAgentBackendIds },
         )
         if (!result.ok) {
           return yield* new StartHarnessFailed({ detail: result.message })
