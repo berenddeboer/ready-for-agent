@@ -16,6 +16,7 @@ type TaggedError = {
   readonly selectedBackendId?: string
   readonly activeBackendId?: string
   readonly unfinishedWorkItemCount?: number
+  readonly scope?: string
 }
 
 const isTaggedError = (error: unknown): error is TaggedError =>
@@ -94,6 +95,9 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
             "unfinishedWorkItemCount" in error
               ? error.unfinishedWorkItemCount
               : undefined,
+          scope: "scope" in error ? error.scope : undefined,
+          repositoryId:
+            "repositoryId" in error ? error.repositoryId : undefined,
         },
       )
     case "WorkItemLifecycleDatabaseError":

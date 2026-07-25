@@ -19,13 +19,18 @@ export const repository = snakeCase.table(
     localPath: text().notNull().unique(),
     isBare: integer({ mode: "boolean" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(true),
+    /**
+     * Optional Agent Backend override. Null means inherit harness default.
+     * New and migrated rows stay null.
+     */
+    selectedAgentBackend: text(),
     defaultModel: text(),
     defaultThinkingLevel: text(),
     reviewModel: text(),
     reviewThinkingLevel: text(),
     /**
      * Per-Agent-Backend model preferences (JSON map keyed by backend id).
-     * Flat model columns mirror the Active/selected backend entry.
+     * Flat model columns mirror this row's effective backend entry.
      */
     backendModelPrefs: text().notNull().default("{}"),
     autoMerge: integer({ mode: "boolean" }).notNull().default(false),

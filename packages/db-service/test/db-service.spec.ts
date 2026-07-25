@@ -229,7 +229,128 @@ describe("DbService", () => {
           expect(error).toMatchObject({
             _tag: "AgentBackendChangeBlockedError",
             unfinishedWorkItemCount: 1,
+            scope: "global",
           })
+        }),
+      ))
+
+    it("allows default Agent Backend change when only explicit-override Repositories have unfinished Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const inheriting = yield* db.addRepository(sampleInput)
+          const overridden = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: overridden.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          const now = Date.now()
+          // Unfinished only on the explicit-override repository.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 1, 'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-override-only", overridden.id, now, now, now],
+          )
+          // Terminal WIP on inheriting repo must not block.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 2, 'complete', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-inheriting-done", inheriting.id, now, now, now],
+          )
+
+          const switched = yield* db.updateConfig({
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          expect(switched.selectedAgentBackend).toBe("grok")
+          // Fleet total still counts the unfinished override WI.
+          expect(yield* db.countUnfinishedWorkItems).toBe(1)
+        }),
+      ))
+
+    it("blocks default Agent Backend change only for unfinished Work Items on inheriting Repositories", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const inheriting = yield* db.addRepository(sampleInput)
+          const overridden = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: overridden.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 1, 'needs_human', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-inheriting-block", inheriting.id, now, now, now],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 2, 'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-override-wip", overridden.id, now, now, now],
+          )
+
+          const error = yield* Effect.flip(
+            db.updateConfig({
+              selectedAgentBackend: "grok",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
+              maxConcurrentWorkItems: 5,
+            }),
+          )
+          // Blocking count is inheriting only (1), not fleet total (2).
+          expect(error).toMatchObject({
+            _tag: "AgentBackendChangeBlockedError",
+            unfinishedWorkItemCount: 1,
+            scope: "global",
+          })
+          expect(yield* db.countUnfinishedWorkItems).toBe(2)
         }),
       ))
 
@@ -352,6 +473,7 @@ describe("DbService", () => {
           expect(repo.localPath).toBe("/repos/acme/widgets.git")
           expect(repo.isBare).toBe(true)
           expect(repo.paused).toBe(true)
+          expect(repo.selectedAgentBackend).toBeNull()
           expect(repo.defaultModel).toBeNull()
           expect(repo.defaultThinkingLevel).toBeNull()
           expect(repo.reviewModel).toBeNull()
@@ -475,6 +597,7 @@ describe("DbService", () => {
           expect(updated).toEqual({
             ...repo,
             paused: false,
+            selectedAgentBackend: null,
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
             reviewModel: "anthropic/claude-opus-4-6",
@@ -483,6 +606,356 @@ describe("DbService", () => {
             includeAllIssueAuthors: true,
           })
           expect(yield* db.listRepositories).toEqual([updated])
+        }),
+      ))
+
+    it("sets and clears a Repository Agent Backend override (null inherits default)", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          expect(repo.selectedAgentBackend).toBeNull()
+
+          const withOverride = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            selectedAgentBackend: "  grok  ",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(withOverride.selectedAgentBackend).toBe("grok")
+          expect(withOverride.defaultModel).toBe("grok-code")
+
+          const cleared = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(cleared.selectedAgentBackend).toBeNull()
+
+          // Omitting selectedAgentBackend leaves the override unchanged.
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          const preserved = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: false,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(preserved.selectedAgentBackend).toBe("grok")
+          expect(preserved.paused).toBe(false)
+        }),
+      ))
+
+    it("rejects unknown Repository Agent Backend ids", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository(sampleInput)
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: repo.id,
+              paused: true,
+              selectedAgentBackend: "not-a-backend",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              autoMerge: false,
+              includeAllIssueAuthors: false,
+            }),
+          )
+          expect(error).toMatchObject({
+            _tag: "InvalidRepositorySettingsError",
+            field: "selectedAgentBackend",
+          })
+        }),
+      ))
+
+    it("blocks Repository Agent Backend override change while unfinished Work Items exist on that Repository only", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const blocked = yield* db.addRepository(sampleInput)
+          const other = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          const now = Date.now()
+          // Unfinished only on the target repository (Needs Human counts).
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               paused, waiting_since, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, 1, 'needs_human', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-blocked-repo", blocked.id, now, now, now],
+          )
+          // Terminal work on the other repository must not affect the gate.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 2, 'complete', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-other-repo-done", other.id, now, now, now],
+          )
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: blocked.id,
+              paused: true,
+              selectedAgentBackend: "grok",
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              autoMerge: false,
+              includeAllIssueAuthors: false,
+            }),
+          )
+          expect(error).toMatchObject({
+            _tag: "AgentBackendChangeBlockedError",
+            unfinishedWorkItemCount: 1,
+            scope: "repository",
+            repositoryId: blocked.id,
+          })
+
+          // Idle other repository can still change its override.
+          const otherUpdated = yield* db.updateRepositorySettings({
+            repositoryId: other.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(otherUpdated.selectedAgentBackend).toBe("grok")
+
+          // Same-value override write is not a change and stays allowed.
+          const sameOverride = yield* db.updateRepositorySettings({
+            repositoryId: blocked.id,
+            paused: false,
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(sameOverride.paused).toBe(false)
+          expect(sameOverride.selectedAgentBackend).toBeNull()
+        }),
+      ))
+
+    it("keys Repository model prefs by effective Agent Backend without clobbering the other backend", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          const repo = yield* db.addRepository(sampleInput)
+
+          // Inheriting: write prefs for harness default (opencode).
+          yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            defaultModel: "openai/opencode-model",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/opencode-review",
+            reviewThinkingLevel: "max",
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+
+          // Override to grok: write prefs for effective grok.
+          const grokSettings = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(grokSettings.selectedAgentBackend).toBe("grok")
+          expect(grokSettings.defaultModel).toBe("grok-code")
+          expect(grokSettings.defaultThinkingLevel).toBeNull()
+
+          const prefsJson = (yield* sql.unsafe(
+            `SELECT backend_model_prefs AS backendModelPrefs FROM repository WHERE id = ?`,
+            [repo.id],
+          )) as readonly { readonly backendModelPrefs: string }[]
+          const prefs = JSON.parse(prefsJson[0]?.backendModelPrefs ?? "{}") as {
+            opencode?: {
+              defaultModel: string | null
+              defaultThinkingLevel: string | null
+              reviewModel: string | null
+              reviewThinkingLevel: string | null
+            }
+            grok?: {
+              defaultModel: string | null
+              defaultThinkingLevel: string | null
+              reviewModel: string | null
+              reviewThinkingLevel: string | null
+            }
+          }
+          expect(prefs.opencode).toEqual({
+            defaultModel: "openai/opencode-model",
+            defaultThinkingLevel: "high",
+            reviewModel: "openai/opencode-review",
+            reviewThinkingLevel: "max",
+          })
+          expect(prefs.grok).toEqual({
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+
+          // Clear override (inherit opencode): flat columns write to opencode
+          // entry; grok map entry remains.
+          const inherited = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            paused: true,
+            selectedAgentBackend: null,
+            defaultModel: "openai/opencode-model-v2",
+            defaultThinkingLevel: "low",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          expect(inherited.selectedAgentBackend).toBeNull()
+          expect(inherited.defaultModel).toBe("openai/opencode-model-v2")
+          expect(inherited.defaultThinkingLevel).toBe("low")
+
+          const prefsAfter = JSON.parse(
+            (
+              (yield* sql.unsafe(
+                `SELECT backend_model_prefs AS backendModelPrefs FROM repository WHERE id = ?`,
+                [repo.id],
+              )) as readonly { readonly backendModelPrefs: string }[]
+            )[0]?.backendModelPrefs ?? "{}",
+          ) as typeof prefs
+          expect(prefsAfter.opencode?.defaultModel).toBe(
+            "openai/opencode-model-v2",
+          )
+          expect(prefsAfter.grok).toEqual({
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+          })
+        }),
+      ))
+
+    it("does not re-project flat model columns for explicit-override Repositories when harness default changes", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "openai/gpt-5.6-terra",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+          const inheriting = yield* db.addRepository(sampleInput)
+          const overridden = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: inheriting.id,
+            paused: true,
+            defaultModel: "openai/opencode-repo",
+            defaultThinkingLevel: "high",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+          yield* db.updateRepositorySettings({
+            repositoryId: overridden.id,
+            paused: true,
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+          })
+
+          yield* db.updateConfig({
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+
+          const repos = yield* db.listRepositories
+          const byId = new Map(repos.map((r) => [r.id, r]))
+          // Inheriting repo projects empty-ish grok prefs from its map (no grok entry).
+          expect(byId.get(inheriting.id)).toMatchObject({
+            selectedAgentBackend: null,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+          })
+          // Override repo keeps its grok flat projection.
+          expect(byId.get(overridden.id)).toMatchObject({
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code",
+            defaultThinkingLevel: null,
+          })
         }),
       ))
 

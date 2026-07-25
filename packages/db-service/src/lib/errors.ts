@@ -76,7 +76,16 @@ export class AgentBackendChangeBlockedError extends Schema.TaggedErrorClass<Agen
   "AgentBackendChangeBlockedError",
   {
     message: Schema.String,
+    /**
+     * Work Items that block this change (scoped gate), not fleet total
+     * unfinished. Kept as unfinishedWorkItemCount for GraphQL extension
+     * compatibility.
+     */
     unfinishedWorkItemCount: Schema.Finite,
+    /** Where the unfinished Work Items that block this change live. */
+    scope: Schema.Literals(["global", "repository"]),
+    /** Set when scope is repository. */
+    repositoryId: Schema.optional(Schema.String),
   },
 ) {}
 
@@ -84,6 +93,7 @@ export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<Inva
   "InvalidRepositorySettingsError",
   {
     field: Schema.Literals([
+      "selectedAgentBackend",
       "defaultModel",
       "defaultThinkingLevel",
       "reviewModel",
