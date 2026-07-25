@@ -299,4 +299,195 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       }).pipe(Effect.provide(makeLayer({ _tag: "closed" }, steps))),
     )
   })
+
+  const driveToWatchPrStatusChecks = Effect.gen(function* () {
+    const db = yield* DbService
+    const lifecycle = yield* WorkItemLifecycle
+    yield* db.updateConfig({
+      selectedAgentBackend: "opencode",
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultThinkingLevel: "low",
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      maxConcurrentAgentTurns: 2,
+      maxConcurrentWorkItems: 5,
+    })
+    const repository = yield* db.addRepository({
+      githubOwner: "acme",
+      githubRepo: "widgets",
+      localPath: "/repos/acme/widgets.git",
+      isBare: true,
+    })
+    yield* db.storeIssue({
+      repositoryId: repository.id,
+      githubIssueNumber: 42,
+      title: "Implement feature",
+      body: "Issue body",
+      url: "https://github.com/acme/widgets/issues/42",
+      state: "OPEN",
+      githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+      issueAuthor: null,
+      parent: null,
+      parentPosition: null,
+      hasChildren: false,
+      blockedBy: [],
+    })
+    const created = yield* lifecycle.implementNow(repository.id, 42)
+    for (let index = 0; index < 8; index += 1) {
+      yield* makeQueuedJobsAvailable
+      yield* claimAndRunPending
+    }
+    const watching = yield* lifecycle.getWorkItem(created.id)
+    expect(watching.state).toBe("watch_pr_status_checks")
+    expect(watching.githubPullRequestNumber).toBe(101)
+    return { repository, created, lifecycle }
+  })
+
+  it("advances a Watch PR Status Checks Work Item to local cleanup when Refresh sees a merge", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToWatchPrStatusChecks
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("local_cleanup")
+        expect(advanced.failureCode).toBeNull()
+        const cancelledWatch = advanced.stepRuns.find(
+          (run) =>
+            run.step === "watch_pr_status_checks" && run.status === "cancelled",
+        )
+        expect(cancelledWatch).toBeDefined()
+        expect(cancelledWatch?.reasonCode).toBe("pr_merged")
+      }).pipe(Effect.provide(makeLayer({ _tag: "merged" }))),
+    )
+  })
+
+  it("does not abandon operational steps when the PR is only closed unmerged", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToWatchPrStatusChecks
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        const still = yield* lifecycle.getWorkItem(created.id)
+        expect(still.state).toBe("watch_pr_status_checks")
+      }).pipe(Effect.provide(makeLayer({ _tag: "closed" }))),
+    )
+  })
+
+  it("completes cleanup after Refresh sees a merge during status-check investigation (restart regression)", async () => {
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      watchPrStatusChecks: () =>
+        Effect.succeed({
+          _tag: "handoff_needed" as const,
+          createdAt: new Date(0),
+          headSha: "settled-head",
+          headPushedAt: new Date(0),
+          isDraft: false,
+        }),
+      investigatePrStatusChecks: () =>
+        Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const queue = yield* QueueService
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "low",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        const repository = yield* db.addRepository({
+          githubOwner: "acme",
+          githubRepo: "widgets",
+          localPath: "/repos/acme/widgets.git",
+          isBare: true,
+        })
+        yield* db.storeIssue({
+          repositoryId: repository.id,
+          githubIssueNumber: 2116,
+          title: "Status check investigation",
+          body: "Issue body",
+          url: "https://github.com/acme/widgets/issues/2116",
+          state: "OPEN",
+          githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        const created = yield* lifecycle.implementNow(repository.id, 2116)
+        for (let index = 0; index < 8; index += 1) {
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+        }
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
+          [created.id],
+        )
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+        const investigating = yield* lifecycle.getWorkItem(created.id)
+        expect(investigating.state).toBe("investigate_pr_status_checks")
+
+        // Simulate prior-process interrupt (harness restart) without requeue:
+        // cancel the queued investigation the way startup would leave durable
+        // state after interrupting a still-running delivery, or after a
+        // worker_restarted mark with no automatic redelivery.
+        const queuedInvestigate = investigating.stepRuns.find(
+          (run) =>
+            run.step === "investigate_pr_status_checks" &&
+            run.status === "queued",
+        )
+        expect(queuedInvestigate).toBeDefined()
+        yield* sql.unsafe(
+          `UPDATE step_run
+           SET status = 'interrupted',
+               finished_at = ?,
+               reason_code = 'worker_restarted',
+               reason_message = 'Harness restarted',
+               updated_at = ?
+           WHERE id = ?`,
+          [Date.now(), Date.now(), queuedInvestigate!.id],
+        )
+        if (queuedInvestigate!.queueJobId !== null) {
+          yield* queue
+            .acknowledge(queuedInvestigate!.queueJobId)
+            .pipe(Effect.catch(() => Effect.void))
+        }
+        yield* sql.unsafe(
+          `UPDATE work_item SET holds_worker_slot = 0, waiting_since = NULL WHERE id = ?`,
+          [created.id],
+        )
+
+        // Issue closed/removed by the merge — must not produce Failed.
+        yield* db.deleteIssue(repository.id, 2116)
+
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("local_cleanup")
+        expect(advanced.failureCode).toBeNull()
+
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+        const completed = yield* lifecycle.getWorkItem(created.id)
+        expect(completed.state).toBe("complete")
+        expect(completed.worktreePath).toBeNull()
+        expect(
+          completed.stepRuns.some(
+            (run) =>
+              run.step === "investigate_pr_status_checks" &&
+              run.status === "queued",
+          ),
+        ).toBe(false)
+      }).pipe(Effect.provide(makeLayer({ _tag: "merged" }, steps))),
+    )
+  })
 })

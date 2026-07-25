@@ -287,6 +287,11 @@ export const STEP_RUN_REASON = {
   reviewAccepted: "review_accepted",
   /** Successful Merge PR run that returned to Watch for fresh validation. */
   mergeRevalidation: "merge_revalidation",
+  /**
+   * Step Run superseded because the Work Item PR was confirmed merged
+   * (human or external merge) before this step could finish its work.
+   */
+  prMerged: "pr_merged",
 } as const
 
 export type StepRunReasonCode =

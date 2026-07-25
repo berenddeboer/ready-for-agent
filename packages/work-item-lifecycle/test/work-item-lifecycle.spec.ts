@@ -4141,6 +4141,192 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("supersedes a queued Watch PR Status Checks Step Run when the PR is merged", () => {
+      return runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          const watching = yield* lifecycle.getWorkItem(created.id)
+          expect(watching.state).toBe("watch_pr_status_checks")
+          expect(watching.githubPullRequestNumber).toBe(101)
+
+          const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
+            created.id,
+            "merged",
+          )
+          expect(advanced.state).toBe("local_cleanup")
+          const cancelled = advanced.stepRuns.find(
+            (run) =>
+              run.step === "watch_pr_status_checks" &&
+              run.status === "cancelled",
+          )
+          expect(cancelled).toBeDefined()
+          expect(cancelled?.reasonCode).toBe(STEP_RUN_REASON.prMerged)
+
+          yield* makeQueuedJobsAvailable
+          const afterCleanup = yield* claimAndRunPending
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.state).toBe("complete")
+          }
+        }),
+      )
+    })
+
+    it("interrupts a running Investigate PR Status Checks turn before local cleanup after merge", async () => {
+      const started = await Effect.runPromise(Deferred.make<void>())
+      const interrupted = await Effect.runPromise(Deferred.make<void>())
+      let cleanupCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Deferred.succeed(interrupted, undefined)),
+          ),
+        localCleanup: () => {
+          cleanupCalls += 1
+          return Effect.void
+        },
+      }
+
+      await runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+          const investigating = yield* lifecycle.getWorkItem(created.id)
+          expect(investigating.state).toBe("investigate_pr_status_checks")
+
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          if (Option.isNone(job)) {
+            return yield* Effect.die("expected investigation job")
+          }
+          const runFiber = yield* lifecycle
+            .runStep((job.value.payload as { stepRunId: string }).stepRunId)
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(started)
+
+          const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
+            created.id,
+            "merged",
+          )
+          expect(advanced.state).toBe("local_cleanup")
+          expect(yield* Deferred.isDone(interrupted)).toBe(true)
+          const superseded = advanced.stepRuns.find(
+            (run) =>
+              run.step === "investigate_pr_status_checks" &&
+              run.status === "interrupted",
+          )
+          expect(superseded).toBeDefined()
+          expect(superseded?.reasonCode).toBe(STEP_RUN_REASON.prMerged)
+
+          yield* Fiber.join(runFiber)
+          yield* makeQueuedJobsAvailable
+          const afterCleanup = yield* claimAndRunPending
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.state).toBe("complete")
+          }
+          expect(cleanupCalls).toBe(1)
+        }),
+      )
+    })
+
+    it("does not Failed or Complete when Issue revalidation fails after a PR is owned without merge confirmation", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+          const investigating = yield* lifecycle.getWorkItem(created.id)
+          expect(investigating.state).toBe("investigate_pr_status_checks")
+
+          // Issue gone (may be merge-closed or operator-closed). Without a
+          // confirmed PR merge, park non-terminal for Refresh.
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.state).toBe(
+              "investigate_pr_status_checks",
+            )
+            expect(afterInvestigate.workItem.failureCode).toBeNull()
+            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
+            expect(
+              afterInvestigate.workItem.stepRuns.some(
+                (run) =>
+                  run.step === "investigate_pr_status_checks" &&
+                  run.status === "succeeded",
+              ),
+            ).toBe(true)
+          }
+
+          const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+
+          // Confirmed merge via Refresh path still Completes.
+          const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
+            created.id,
+            "merged",
+          )
+          expect(advanced.state).toBe("local_cleanup")
+          yield* makeQueuedJobsAvailable
+          const afterCleanup = yield* claimAndRunPending
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.state).toBe("complete")
+          }
+        }),
+      )
+    })
+
     it("abandons a Decide PR Merge handoff after cleanup when the PR is closed unmerged", () => {
       let cleanupCalls = 0
       const steps: LifecycleStepsShape = {
