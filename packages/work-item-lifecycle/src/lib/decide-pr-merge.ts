@@ -3,6 +3,7 @@ import { AgentBackend } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   AgentTurnGitHubCredentialMissingError,
+  InvalidCapturedAgentBackendError,
   agentTurnGitHubCredentialGuidance,
   resolveAgentTurnGitHubAuth,
 } from "./agent-turn-github-auth.js"
@@ -106,7 +107,10 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
       githubRepo: repository.githubRepo,
     }).pipe(
       Effect.mapError((cause) => {
-        if (cause instanceof AgentTurnGitHubCredentialMissingError) {
+        if (
+          cause instanceof AgentTurnGitHubCredentialMissingError ||
+          cause instanceof InvalidCapturedAgentBackendError
+        ) {
           return new DecidePrMergeContextError({ message: cause.message })
         }
         return new DecidePrMergeContextError({

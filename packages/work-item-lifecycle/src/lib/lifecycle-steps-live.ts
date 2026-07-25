@@ -4,11 +4,17 @@ import { SqlClient } from "effect/unstable/sql"
 import {
   ActiveAgentBackend,
   AgentBackend,
+  AgentBackendConfigError,
+  isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
-import { limitAgentTurns } from "./agent-turn-limiter.js"
+import {
+  CurrentCapturedAgentBackendId,
+  CurrentStepRun,
+  limitAgentTurns,
+} from "./agent-turn-limiter.js"
 import { assessChanges } from "./assess-changes.js"
 import { closeIssue } from "./close-issue.js"
 import { commit } from "./commit.js"
@@ -55,11 +61,60 @@ export const LifecycleStepsLive = Layer.effect(
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const rawAgentBackend = yield* AgentBackend
+    const fallbackAgentBackend = yield* AgentBackend
     const activeAgentBackend = yield* ActiveAgentBackend
     const github = yield* GitHubService
     const sql = yield* SqlClient.SqlClient
-    const agentBackend = yield* limitAgentTurns(rawAgentBackend, db, sql)
+    // Dispatch Agent Turns by the Work Item's captured backend (ambient) so
+    // concurrent dual-backend fleets never share the process-wide proxy.
+    // Fail closed: non-selectable capture, or null capture while a Step Run
+    // fiber is in flight (no silent proxy fallback for lifecycle turns).
+    const resolveCapturedBackendId = Effect.gen(function* () {
+      const captured = yield* CurrentCapturedAgentBackendId
+      if (captured === null) {
+        const stepRun = yield* CurrentStepRun
+        if (stepRun !== null) {
+          return yield* new AgentBackendConfigError({
+            message:
+              "Work Item captured Agent Backend is missing on an in-flight Step Run",
+          })
+        }
+        return null
+      }
+      if (!isSelectableAgentBackendId(captured)) {
+        return yield* new AgentBackendConfigError({
+          message: `Work Item captured Agent Backend is not selectable: ${captured}`,
+        })
+      }
+      return captured
+    })
+    const routedAgentBackend = AgentBackend.of({
+      startTurn: (input) =>
+        Effect.gen(function* () {
+          const captured = yield* resolveCapturedBackendId
+          if (captured === null) {
+            return yield* fallbackAgentBackend.startTurn(input)
+          }
+          return yield* activeAgentBackend.startTurn(captured, input)
+        }),
+      continueTurn: (input) =>
+        Effect.gen(function* () {
+          const captured = yield* resolveCapturedBackendId
+          if (captured === null) {
+            return yield* fallbackAgentBackend.continueTurn(input)
+          }
+          return yield* activeAgentBackend.continueTurn(captured, input)
+        }),
+      inspect: (input) =>
+        Effect.gen(function* () {
+          const captured = yield* resolveCapturedBackendId
+          if (captured === null) {
+            return yield* fallbackAgentBackend.inspect(input)
+          }
+          return yield* activeAgentBackend.inspectBackend(captured, input)
+        }),
+    })
+    const agentBackend = yield* limitAgentTurns(routedAgentBackend, db, sql)
 
     const services = Layer.mergeAll(
       Layer.succeed(DbService, db),

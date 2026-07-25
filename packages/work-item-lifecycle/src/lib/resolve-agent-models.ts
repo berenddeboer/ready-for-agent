@@ -30,6 +30,11 @@ const nonEmpty = (value: string | null | undefined): value is string =>
  * to harness config. Review falls back to the resolved build selection when no
  * distinct review model is configured. Returns null when no build model can be
  * resolved.
+ *
+ * Callers that key prefs by Agent Backend must pass repository and harness
+ * sources already projected for that backend (Repository flat columns project
+ * the effective backend; harness fallback should use `getBackendModelPrefs`
+ * for the captured backend, not the default backend's flat columns).
  */
 export const resolveAgentModelSelection = (
   repository: AgentModelSettingsSource | null | undefined,
@@ -78,8 +83,41 @@ export const resolveAgentModelSelection = (
 }
 
 /**
+ * Load repository flat model columns and harness backend-scoped prefs for
+ * `backendId`, then resolve Agent Models for the next Agent Turn. Fails when
+ * no build model is configured for that backend.
+ */
+export const resolveAgentModelsForBackend = (
+  repositoryId: string,
+  backendId: string,
+): Effect.Effect<
+  AgentModelSelection,
+  BuildModelNotConfiguredError | DatabaseError,
+  DbService
+> =>
+  Effect.gen(function* () {
+    const db = yield* DbService
+    const repositories = yield* db.listRepositories
+    const repository: RepositoryRecord | undefined = repositories.find(
+      ({ id }) => id === repositoryId,
+    )
+    // Harness flat columns mirror the default backend; prefer the map entry
+    // for the backend this Work Item (or create path) actually uses.
+    const harnessPrefs = yield* db.getBackendModelPrefs(backendId)
+    const selection = resolveAgentModelSelection(repository, harnessPrefs)
+    if (selection === null) {
+      return yield* new BuildModelNotConfiguredError({
+        message: "Select a default build model first",
+      })
+    }
+    return selection
+  })
+
+/**
  * Load current repository and harness settings and resolve Agent Models for
- * the next Agent Turn. Fails when no build model is configured.
+ * the next Agent Turn using the harness default backend's prefs map entry.
+ * Prefer {@link resolveAgentModelsForBackend} when a captured or effective
+ * backend id is known.
  */
 export const resolveAgentModelsForRepository = (
   repositoryId: string,
@@ -91,15 +129,8 @@ export const resolveAgentModelsForRepository = (
   Effect.gen(function* () {
     const db = yield* DbService
     const config = yield* db.getConfig
-    const repositories = yield* db.listRepositories
-    const repository: RepositoryRecord | undefined = repositories.find(
-      ({ id }) => id === repositoryId,
+    return yield* resolveAgentModelsForBackend(
+      repositoryId,
+      config.selectedAgentBackend,
     )
-    const selection = resolveAgentModelSelection(repository, config)
-    if (selection === null) {
-      return yield* new BuildModelNotConfiguredError({
-        message: "Select a default build model first",
-      })
-    }
-    return selection
   })

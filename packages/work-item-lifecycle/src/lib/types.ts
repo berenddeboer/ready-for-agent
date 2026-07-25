@@ -84,7 +84,10 @@ export interface WorkItemRecord {
   readonly githubIssueNumber: number
   readonly issueTitle: string | null
   readonly githubPullRequestNumber: number | null
-  /** Active Agent Backend captured at creation (provenance). */
+  /**
+   * Effective Agent Backend captured at creation: provenance and routing
+   * authority for Agent Turns and model resolution for the Work Item lifetime.
+   */
   readonly agentBackend: string
   readonly state: WorkItemState
   readonly stateReadyAt: Date

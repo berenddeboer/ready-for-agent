@@ -1,9 +1,16 @@
 import { Effect, Schema } from "effect"
 import {
   ActiveAgentBackend,
+  type AgentBackendId,
+  type AgentBackendRegistration,
   capabilitySupported,
+  isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import {
+  CurrentCapturedAgentBackendId,
+  CurrentStepRun,
+} from "./agent-turn-limiter.js"
 
 /**
  * Effective Agent Turn GitHub auth: vault-backed only when the Active Agent
@@ -20,6 +27,20 @@ export class AgentTurnGitHubCredentialMissingError extends Schema.TaggedErrorCla
   },
 ) {}
 
+/**
+ * Captured Agent Backend is missing or not selectable while a Step Run needs
+ * it. Fail closed rather than falling back to the process-wide Active
+ * registration.
+ */
+export class InvalidCapturedAgentBackendError extends Schema.TaggedErrorClass<InvalidCapturedAgentBackendError>()(
+  "InvalidCapturedAgentBackendError",
+  {
+    message: Schema.String,
+    /** Empty string when ambient capture was null on an in-flight Step Run. */
+    backendId: Schema.String,
+  },
+) {}
+
 export const isAgentTurnKeymaxxerEffective = (
   keymaxxerMcpSupported: boolean,
   keymaxxerEnabled: boolean | undefined,
@@ -31,7 +52,34 @@ export const resolveAgentTurnGitHubAuth = (input: {
 }) =>
   Effect.gen(function* () {
     const active = yield* ActiveAgentBackend
-    const registration = yield* active.getActiveRegistration
+    // Prefer the Work Item's captured backend when a Step Run is in flight.
+    // Fail closed: non-selectable capture, or null capture while a Step Run is
+    // ambient (mirrors LifecycleStepsLive routing — no silent proxy fallback).
+    const captured = yield* CurrentCapturedAgentBackendId
+    const registration: AgentBackendRegistration = yield* (() => {
+      if (captured === null) {
+        return Effect.gen(function* () {
+          const stepRun = yield* CurrentStepRun
+          if (stepRun !== null) {
+            return yield* new InvalidCapturedAgentBackendError({
+              message:
+                "Work Item captured Agent Backend is missing on an in-flight Step Run",
+              backendId: "",
+            })
+          }
+          return yield* active.getActiveRegistration
+        })
+      }
+      if (!isSelectableAgentBackendId(captured)) {
+        return Effect.fail(
+          new InvalidCapturedAgentBackendError({
+            message: `Work Item captured Agent Backend is not selectable: ${captured}`,
+            backendId: captured,
+          }),
+        )
+      }
+      return active.getRegistration(captured as AgentBackendId)
+    })()
     const keymaxxer = yield* KeymaxxerService
     const effective = isAgentTurnKeymaxxerEffective(
       capabilitySupported(registration, "KeymaxxerMcp"),

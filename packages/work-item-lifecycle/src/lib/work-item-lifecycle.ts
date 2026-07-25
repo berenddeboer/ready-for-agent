@@ -18,6 +18,7 @@ import {
   ActiveAgentBackend,
   type AgentBackendId,
   isAgentDependentLifecycleStep,
+  isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import {
   type DatabaseError,
@@ -35,13 +36,16 @@ import {
   type JobNotFoundError,
   QueueService,
 } from "@ready-for-agent/queue-service"
-import { CurrentStepRun } from "./agent-turn-limiter.js"
+import {
+  CurrentCapturedAgentBackendId,
+  CurrentStepRun,
+} from "./agent-turn-limiter.js"
 import { CloseIssueEligibilityError } from "./close-issue-errors.js"
 import {
   AbandonCleanupError,
   ActiveStepRunExistsError,
   AgentBackendUnavailableError,
-  BuildModelNotConfiguredError,
+  type BuildModelNotConfiguredError,
   IssueBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
@@ -69,7 +73,7 @@ import {
 } from "./pre-commit-errors.js"
 import {
   type AgentModelSelection,
-  resolveAgentModelSelection,
+  resolveAgentModelsForBackend,
 } from "./resolve-agent-models.js"
 import {
   formatAcceptedReviewSummary,
@@ -648,24 +652,21 @@ export const makeWorkItemLifecycleLive = (
       const queue = yield* QueueService
       const steps = yield* LifecycleSteps
       const activeAgentBackend = yield* ActiveAgentBackend
-      const resolveModelsForRepository = (
+      /**
+       * Resolve build/review models for a backend id (create: effective;
+       * turns: captured). Uses repository flat columns (project effective)
+       * then harness `backendModelPrefs` for that backend id.
+       */
+      const resolveModelsForBackend = (
         repositoryId: string,
+        backendId: string,
       ): Effect.Effect<
         AgentModelSelection,
         BuildModelNotConfiguredError | DatabaseError
       > =>
-        Effect.gen(function* () {
-          const configRecord = yield* db.getConfig
-          const repositories = yield* db.listRepositories
-          const repository = repositories.find(({ id }) => id === repositoryId)
-          const selection = resolveAgentModelSelection(repository, configRecord)
-          if (selection === null) {
-            return yield* new BuildModelNotConfiguredError({
-              message: "Select a default build model first",
-            })
-          }
-          return selection
-        })
+        resolveAgentModelsForBackend(repositoryId, backendId).pipe(
+          Effect.provideService(DbService, db),
+        )
       const notifyWorkItemsChanged = (
         repositoryId: string,
       ): Effect.Effect<void> => db.notifyWorkItemsChanged(repositoryId)
@@ -2582,6 +2583,20 @@ export const makeWorkItemLifecycleLive = (
               yield* notifyWorkItemsChanged(workItem.repository_id)
 
               if (isAgentDependentLifecycleStep(stepRun.step)) {
+                // Fail closed on corrupt capture: getBackendStatus normalizes
+                // unknown ids to the default backend, which would silently
+                // evaluate the wrong backend's readiness.
+                if (!isSelectableAgentBackendId(workItem.agent_backend)) {
+                  const reasonMessage = `Work Item captured Agent Backend is not selectable: ${workItem.agent_backend}`
+                  const failed = yield* completeFailedStep({
+                    stepRun: afterStart,
+                    workItem,
+                    reasonCode: STEP_RUN_REASON.agentBackendUnavailable,
+                    reasonMessage,
+                    cause: Cause.fail(reasonMessage),
+                  })
+                  return { _tag: "processed" as const, workItem: failed }
+                }
                 const readiness = yield* activeAgentBackend.getBackendStatus(
                   workItem.agent_backend as AgentBackendId,
                 )
@@ -2603,8 +2618,9 @@ export const makeWorkItemLifecycleLive = (
               }
 
               const maxDuration = maxDurations[stepRun.step]
-              const modelOutcome = yield* resolveModelsForRepository(
+              const modelOutcome = yield* resolveModelsForBackend(
                 workItem.repository_id,
+                workItem.agent_backend,
               ).pipe(
                 Effect.map(
                   (
@@ -2721,6 +2737,10 @@ export const makeWorkItemLifecycleLive = (
                             stepRunId: afterStart.id,
                             repositoryId: workItem.repository_id,
                           }),
+                          Effect.provideService(
+                            CurrentCapturedAgentBackendId,
+                            workItem.agent_backend,
+                          ),
                           Effect.raceFirst(productiveTimeout),
                         ),
                         Deferred.await(cancel).pipe(
@@ -3982,12 +4002,25 @@ export const makeWorkItemLifecycleLive = (
           // runs inside the same section so it matches the backend that is stamped.
           const createdId = yield* activeAgentBackend.withConfigCoordination(
             Effect.gen(function* () {
-              // Capture harness default until lifecycle resolves effective
-              // backend (override ?? default) in #466.
+              // Effective Agent Backend: Repository override or harness default.
+              // Capture it as routing authority for the Work Item lifetime.
               const harnessConfig = yield* db.getConfig
-              const captureBackendId = harnessConfig.selectedAgentBackend
+              const repositories = yield* db.listRepositories
+              const repository = repositories.find(
+                ({ id }) => id === repositoryId,
+              )
+              const rawCaptureBackendId =
+                repository?.selectedAgentBackend ??
+                harnessConfig.selectedAgentBackend
+              if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
+                return yield* new AgentBackendUnavailableError({
+                  message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+                  reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+                })
+              }
+              const captureBackendId = rawCaptureBackendId
               yield* activeAgentBackend
-                .requireAgentTurnsAllowed(captureBackendId as AgentBackendId)
+                .requireAgentTurnsAllowed(captureBackendId)
                 .pipe(
                   Effect.mapError(
                     (error) =>
@@ -3998,12 +4031,10 @@ export const makeWorkItemLifecycleLive = (
                   ),
                 )
               // Models are not stored on the Work Item; resolve against the
-              // Active backend / prefs after coordination has locked the switch.
-              yield* resolveModelsForRepository(repositoryId)
+              // captured backend's prefs after coordination has locked the switch.
+              yield* resolveModelsForBackend(repositoryId, captureBackendId)
               const activeRegistration =
-                yield* activeAgentBackend.getRegistration(
-                  captureBackendId as AgentBackendId,
-                )
+                yield* activeAgentBackend.getRegistration(captureBackendId)
               const agentBackendId = activeRegistration.descriptor.id
               const workItemId = makeWorkItemId()
               const now = yield* Clock.currentTimeMillis

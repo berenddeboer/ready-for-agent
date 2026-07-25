@@ -41,6 +41,19 @@ export const CurrentStepRun = Context.Reference<CurrentStepRunValue>(
   { defaultValue: () => null },
 )
 
+/**
+ * Captured Agent Backend id for the Work Item whose Step Run is executing.
+ * Lifecycle sets this for the handler fiber so Agent Turns and Session ops
+ * route to the captured adapter instead of re-resolving settings each turn.
+ */
+export type CurrentCapturedAgentBackendIdValue = string | null
+
+export const CurrentCapturedAgentBackendId =
+  Context.Reference<CurrentCapturedAgentBackendIdValue>(
+    "@ready-for-agent/work-item-lifecycle/CurrentCapturedAgentBackendId",
+    { defaultValue: () => null },
+  )
+
 type SavedStepRunReason = {
   readonly reasonCode: string | null
   readonly reasonMessage: string | null

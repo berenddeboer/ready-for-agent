@@ -4,6 +4,9 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  CurrentCapturedAgentBackendId,
+  CurrentStepRun,
+  InvalidCapturedAgentBackendError,
   agentTurnGitHubCredentialGuidance,
   isAgentTurnKeymaxxerEffective,
   resolveAgentTurnGitHubAuth,
@@ -77,6 +80,50 @@ describe("resolveAgentTurnGitHubAuth", () => {
     )
     expect(auth).toEqual({ _tag: "ambient" })
     expect(findSecretCalled).toBe(false)
+  })
+
+  it("fails closed when ambient capture is set but not selectable", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        resolveAgentTurnGitHubAuth({
+          githubOwner: "acme",
+          githubRepo: "widgets",
+        }).pipe(
+          Effect.provideService(CurrentCapturedAgentBackendId, "not-a-backend"),
+          Effect.provide(
+            Layer.mergeAll(vaultEnabled, stubActiveAgentBackendLayer()),
+          ),
+        ),
+      ),
+    )
+    expect(error).toBeInstanceOf(InvalidCapturedAgentBackendError)
+    if (error instanceof InvalidCapturedAgentBackendError) {
+      expect(error.backendId).toBe("not-a-backend")
+    }
+  })
+
+  it("fails closed when capture is missing during an in-flight Step Run", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        resolveAgentTurnGitHubAuth({
+          githubOwner: "acme",
+          githubRepo: "widgets",
+        }).pipe(
+          Effect.provideService(CurrentCapturedAgentBackendId, null),
+          Effect.provideService(CurrentStepRun, {
+            stepRunId: "srun-test",
+            repositoryId: "repo-test",
+          }),
+          Effect.provide(
+            Layer.mergeAll(vaultEnabled, stubActiveAgentBackendLayer()),
+          ),
+        ),
+      ),
+    )
+    expect(error).toBeInstanceOf(InvalidCapturedAgentBackendError)
+    if (error instanceof InvalidCapturedAgentBackendError) {
+      expect(error.message).toContain("missing on an in-flight Step Run")
+    }
   })
 
   it("returns ambient auth when Keymaxxer is disabled on a capable backend", async () => {

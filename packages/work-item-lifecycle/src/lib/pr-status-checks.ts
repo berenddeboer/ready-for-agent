@@ -10,6 +10,7 @@ import {
 } from "@ready-for-agent/github-service"
 import {
   AgentTurnGitHubCredentialMissingError,
+  InvalidCapturedAgentBackendError,
   agentTurnGitHubCredentialGuidance,
   resolveAgentTurnGitHubAuth,
 } from "./agent-turn-github-auth.js"
@@ -594,7 +595,10 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       githubRepo: repository.githubRepo,
     }).pipe(
       Effect.mapError((cause) => {
-        if (cause instanceof AgentTurnGitHubCredentialMissingError) {
+        if (
+          cause instanceof AgentTurnGitHubCredentialMissingError ||
+          cause instanceof InvalidCapturedAgentBackendError
+        ) {
           return new PrStatusChecksContextError({ message: cause.message })
         }
         return new PrStatusChecksContextError({
