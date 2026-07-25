@@ -25,6 +25,7 @@ export const makeRepositoryRecord = (
   reviewThinkingLevel: null,
   autoMerge: false,
   includeAllIssueAuthors: false,
+  waitForReadyForReviewChecks: true,
   issuesReconciledAt: null,
   ...overrides,
 })

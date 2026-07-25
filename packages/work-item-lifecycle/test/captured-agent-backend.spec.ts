@@ -163,6 +163,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           reviewThinkingLevel: null,
           autoMerge: false,
           includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 2)
         const created = yield* lifecycle.implementNow(repo.id, 2)
@@ -215,6 +216,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           reviewThinkingLevel: null,
           autoMerge: false,
           includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 3)
         const created = yield* lifecycle.implementNow(repo.id, 3)
@@ -448,6 +450,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           reviewThinkingLevel: null,
           autoMerge: false,
           includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
         })
 
         const config = yield* db.getConfig
@@ -499,6 +502,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           reviewThinkingLevel: null,
           autoMerge: false,
           includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 4)
         const created = yield* lifecycle.implementNow(repo.id, 4)
@@ -550,6 +554,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           reviewThinkingLevel: null,
           autoMerge: false,
           includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 5)
         const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 5))
@@ -597,6 +602,7 @@ describe("Captured Agent Backend (create + route + models)", () => {
           reviewThinkingLevel: null,
           autoMerge: false,
           includeAllIssueAuthors: false,
+          waitForReadyForReviewChecks: true,
         })
         yield* storeOpenLeafIssue(db, repo.id, 6)
         const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 6))

@@ -110,6 +110,7 @@ type UpdateRepositorySettingsArgs = {
     reviewThinkingLevel: string | null
     autoMerge: boolean
     includeAllIssueAuthors: boolean
+    waitForReadyForReviewChecks: boolean
   }
 }
 
@@ -806,6 +807,8 @@ export const createGraphqlApi = (
                         args.input.reviewThinkingLevel ?? null,
                       autoMerge: args.input.autoMerge,
                       includeAllIssueAuthors: args.input.includeAllIssueAuthors,
+                      waitForReadyForReviewChecks:
+                        args.input.waitForReadyForReviewChecks,
                     })
                     // Sync Active set (activate missing, drop unused). Prefer
                     // setSelectedOrInUse over activate so repository Saves do
