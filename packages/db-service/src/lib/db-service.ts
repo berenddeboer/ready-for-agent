@@ -312,6 +312,30 @@ export interface DbServiceShape {
    * (inheriting repos for harness default; one repository for override).
    */
   readonly countUnfinishedWorkItems: Effect.Effect<number, DatabaseError>
+  /**
+   * Unfinished Work Items on Repositories that inherit the harness default
+   * (override is null). Blocks changing Config.selectedAgentBackend when > 0.
+   */
+  readonly countBlockingUnfinishedForGlobalDefault: Effect.Effect<
+    number,
+    DatabaseError
+  >
+  /**
+   * Unfinished Work Items on one Repository. Blocks changing that Repository's
+   * Agent Backend override when > 0.
+   */
+  readonly countBlockingUnfinishedForRepository: (
+    repositoryId: string,
+  ) => Effect.Effect<number, DatabaseError>
+  /**
+   * Selected-or-in-use Agent Backend ids: harness default ∪ distinct
+   * Repository overrides ∪ unfinished Work Items' captured backends.
+   * Used to hot-activate / drop Active backends after settings Save.
+   */
+  readonly listSelectedOrInUseBackendIds: Effect.Effect<
+    ReadonlyArray<string>,
+    DatabaseError
+  >
   readonly addRepository: (
     input: AddRepositoryInput,
   ) => Effect.Effect<
@@ -504,24 +528,25 @@ export const DbServiceLive = Layer.effect(
      * Unfinished Work Items on Repositories that inherit the harness default
      * (override is null). These alone block changing the global default.
      */
-    const countBlockingUnfinishedForGlobalDefault = (): Effect.Effect<
+    const countBlockingUnfinishedForGlobalDefault: Effect.Effect<
       number,
       DatabaseError
-    > =>
-      Effect.gen(function* () {
-        const rows = (yield* sql
-          .unsafe(
-            `SELECT COUNT(*) AS count
+    > = Effect.gen(function* () {
+      const rows = (yield* sql
+        .unsafe(
+          `SELECT COUNT(*) AS count
              FROM work_item wi
              INNER JOIN repository r ON r.id = wi.repository_id
              WHERE ${isUnfinishedStateSql("wi.state")}
                AND r.selected_agent_backend IS NULL`,
-          )
-          .pipe(Effect.mapError(toDatabaseError))) as readonly {
-          readonly count: number
-        }[]
-        return readCount(rows)
-      })
+        )
+        .pipe(Effect.mapError(toDatabaseError))) as readonly {
+        readonly count: number
+      }[]
+      return readCount(rows)
+    }).pipe(
+      Effect.withSpan("DbService.countBlockingUnfinishedForGlobalDefault"),
+    )
 
     /**
      * Unfinished Work Items on one Repository (blocks that repo's override change).
@@ -541,7 +566,7 @@ export const DbServiceLive = Layer.effect(
           readonly count: number
         }[]
         return readCount(rows)
-      })
+      }).pipe(Effect.withSpan("DbService.countBlockingUnfinishedForRepository"))
 
     const readConfigRow = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
@@ -578,6 +603,78 @@ export const DbServiceLive = Layer.effect(
         return toConfigRecord(yield* readConfigRow)
       },
     ).pipe(Effect.withSpan("DbService.getConfig"))
+
+    /**
+     * Selected-or-in-use set for Active multi-backend registry sync after Save.
+     */
+    const listSelectedOrInUseBackendIds: Effect.Effect<
+      ReadonlyArray<string>,
+      DatabaseError
+    > = Effect.gen(function* () {
+      const config = yield* getConfig
+      const ids = new Set<string>()
+      const harnessDefault = config.selectedAgentBackend.trim()
+      if (
+        harnessDefault.length > 0 &&
+        isSelectableAgentBackendId(harnessDefault)
+      ) {
+        ids.add(harnessDefault)
+      }
+      const overrideRows = (yield* sql
+        .unsafe(
+          `SELECT DISTINCT selected_agent_backend AS selectedAgentBackend
+           FROM repository
+           WHERE selected_agent_backend IS NOT NULL
+             AND trim(selected_agent_backend) != ''`,
+        )
+        .pipe(Effect.mapError(toDatabaseError))) as readonly {
+        readonly selectedAgentBackend: string | null
+      }[]
+      for (const row of overrideRows) {
+        const id = row.selectedAgentBackend?.trim()
+        if (
+          id !== undefined &&
+          id.length > 0 &&
+          isSelectableAgentBackendId(id)
+        ) {
+          ids.add(id)
+        }
+      }
+      const captureRows = (yield* sql
+        .unsafe(
+          `SELECT DISTINCT agent_backend AS agentBackend
+           FROM work_item
+           WHERE ${isUnfinishedStateSql()}
+             AND agent_backend IS NOT NULL
+             AND trim(agent_backend) != ''`,
+        )
+        .pipe(Effect.mapError(toDatabaseError))) as readonly {
+        readonly agentBackend: string | null
+      }[]
+      for (const row of captureRows) {
+        const id = row.agentBackend?.trim()
+        if (
+          id !== undefined &&
+          id.length > 0 &&
+          isSelectableAgentBackendId(id)
+        ) {
+          ids.add(id)
+        }
+      }
+      if (ids.size === 0) {
+        return ["opencode"]
+      }
+      // Stable order: harness default first (operational input for Active seed /
+      // setSelectedOrInUse proxy fallback), then remaining selectable ids sorted.
+      const primary =
+        harnessDefault.length > 0 &&
+        isSelectableAgentBackendId(harnessDefault) &&
+        ids.has(harnessDefault)
+          ? harnessDefault
+          : null
+      const remaining = [...ids].filter((id) => id !== primary).sort()
+      return primary === null ? remaining : [primary, ...remaining]
+    }).pipe(Effect.withSpan("DbService.listSelectedOrInUseBackendIds"))
 
     const getBackendModelPrefs = Effect.fn("DbService.getBackendModelPrefs")(
       function* (backendId: string) {
@@ -707,7 +804,7 @@ export const DbServiceLive = Layer.effect(
             if (changing) {
               // Gate on inheriting repos only. Explicit-override WIP does not
               // block the harness default change.
-              const count = yield* countBlockingUnfinishedForGlobalDefault()
+              const count = yield* countBlockingUnfinishedForGlobalDefault
               if (count > 0) {
                 return yield* new AgentBackendChangeBlockedError({
                   message: `Cannot change default Agent Backend while ${count} Work Item(s) are unfinished on Repositories that inherit the default`,
@@ -1549,6 +1646,9 @@ export const DbServiceLive = Layer.effect(
       getBackendModelPrefs,
       updateConfig,
       countUnfinishedWorkItems,
+      countBlockingUnfinishedForGlobalDefault,
+      countBlockingUnfinishedForRepository,
+      listSelectedOrInUseBackendIds,
       addRepository,
       updateRepositorySettings,
       pauseRepository,

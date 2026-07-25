@@ -4,6 +4,7 @@ import { createSchema, createYoga } from "graphql-yoga"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
+  type AgentBackendRuntimeStatus,
   type AgentBackendStatus,
   type SessionTelemetry,
   type SessionTelemetryAvailability,
@@ -90,6 +91,11 @@ type UpdateRepositorySettingsArgs = {
   input: {
     repositoryId: string
     paused: boolean
+    /**
+     * Undefined when the client omits the field (leave override unchanged).
+     * Null clears the override (inherit harness default).
+     */
+    selectedAgentBackend?: string | null
     defaultModel: string | null
     defaultThinkingLevel: string | null
     reviewModel: string | null
@@ -153,13 +159,31 @@ const toGraphqlSession = (session: SessionTelemetry) => ({
   updatedAt: session.updatedAt,
 })
 
-const toGraphqlAgentBackendStatus = (status: AgentBackendStatus) => ({
-  selectedBackend: toGraphqlBackend(status.selectedBackend),
-  activeBackend: toGraphqlBackend(status.activeBackend),
-  kind: status.kind.toUpperCase(),
-  reason: status.reason,
-  models: status.models,
-})
+const toGraphqlAgentBackendStatus = (
+  status: AgentBackendStatus | AgentBackendRuntimeStatus,
+) => {
+  const singular: AgentBackendStatus =
+    "selectedBackend" in status ? status : toAgentBackendStatus(status)
+  return {
+    backend: toGraphqlBackend(singular.selectedBackend),
+    selectedBackend: toGraphqlBackend(singular.selectedBackend),
+    activeBackend: toGraphqlBackend(singular.activeBackend),
+    kind: singular.kind.toUpperCase(),
+    reason: singular.reason,
+    models: singular.models,
+  }
+}
+
+const effectiveAgentBackendId = (
+  repositoryOverride: string | null,
+  harnessDefault: string,
+): string => repositoryOverride ?? harnessDefault
+
+const inspectInput = (cwd: string) =>
+  ({
+    cwd,
+    timeout: "30 seconds" as const,
+  }) satisfies { cwd: string; timeout: "30 seconds" }
 
 const toGraphqlAgentBackendPreview = (preview: {
   readonly backend: AgentBackendStatus["selectedBackend"]
@@ -321,16 +345,35 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
-                const [config, unfinishedWorkItemCount] = yield* Effect.all([
+                const [
+                  config,
+                  unfinishedWorkItemCount,
+                  blockingUnfinishedWorkItemCount,
+                ] = yield* Effect.all([
                   db.getConfig,
                   db.countUnfinishedWorkItems,
+                  db.countBlockingUnfinishedForGlobalDefault,
                 ])
-                return { ...config, unfinishedWorkItemCount }
+                return {
+                  ...config,
+                  unfinishedWorkItemCount,
+                  blockingUnfinishedWorkItemCount,
+                }
               }).pipe(Effect.withSpan("graphql-api.config")),
             ),
           agentBackends: () =>
             listBuiltInAgentBackends().map((entry) =>
               toGraphqlBackend(entry.descriptor),
+            ),
+          agentBackendStatuses: async () =>
+            runGraphql(
+              Effect.gen(function* () {
+                const active = yield* ActiveAgentBackend
+                const statuses = yield* active.listStatuses
+                return statuses.map((status) =>
+                  toGraphqlAgentBackendStatus(status),
+                )
+              }).pipe(Effect.withSpan("graphql-api.agentBackendStatuses")),
             ),
           agentBackendStatus: async () =>
             runGraphql(
@@ -343,9 +386,7 @@ export const createGraphqlApi = (
                     config.selectedAgentBackend as AgentBackendId,
                   )
                   if (runtime !== null) {
-                    return toGraphqlAgentBackendStatus(
-                      toAgentBackendStatus(runtime),
-                    )
+                    return toGraphqlAgentBackendStatus(runtime)
                   }
                 }
                 return toGraphqlAgentBackendStatus(yield* active.getStatus)
@@ -480,6 +521,34 @@ export const createGraphqlApi = (
           issuesReconciledAt: (repository: {
             issuesReconciledAt: Date | null
           }) => repository.issuesReconciledAt?.toISOString() ?? null,
+          effectiveAgentBackend: async (repository: {
+            selectedAgentBackend: string | null
+          }) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                const config = yield* db.getConfig
+                return effectiveAgentBackendId(
+                  repository.selectedAgentBackend,
+                  config.selectedAgentBackend,
+                )
+              }).pipe(
+                Effect.withSpan("graphql-api.Repository.effectiveAgentBackend"),
+              ),
+            ),
+          blockingUnfinishedWorkItemCount: async (repository: { id: string }) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                return yield* db.countBlockingUnfinishedForRepository(
+                  repository.id,
+                )
+              }).pipe(
+                Effect.withSpan(
+                  "graphql-api.Repository.blockingUnfinishedWorkItemCount",
+                ),
+              ),
+            ),
         },
         WorkItem: {
           agentBackend: (workItem: WorkItemRecord) =>
@@ -592,34 +661,41 @@ export const createGraphqlApi = (
                         args.input.maxConcurrentAgentTurns,
                       maxConcurrentWorkItems: args.input.maxConcurrentWorkItems,
                     })
-                    if (
-                      !isSelectableAgentBackendId(next.selectedAgentBackend)
-                    ) {
-                      return next
-                    }
-                    const backendId =
-                      next.selectedAgentBackend as AgentBackendId
-                    const status = yield* active.getBackendStatus(backendId)
-                    // Process-wide proxy tracks Config selected backend until
-                    // #466 routes turns by captured Work Item backend. Multi
-                    // Active means the selected id may already be Active while
-                    // the proxy still points at a prior selection (A→B→A).
-                    // activate skips re-inspect when already Active.
-                    const proxyStatus = yield* active.getStatus
-                    if (
-                      status === null ||
-                      proxyStatus.activeBackend.id !== backendId
-                    ) {
-                      yield* active.activate(backendId, {
-                        cwd: agentBackendCwd,
-                        timeout: "30 seconds",
-                      })
+                    // Sync Active set to selected-or-in-use after Save (activate
+                    // missing, drop unused). Same-backend members skip re-inspect.
+                    const selectedOrInUse =
+                      yield* db.listSelectedOrInUseBackendIds
+                    const backendIds = selectedOrInUse.filter(
+                      (id): id is AgentBackendId =>
+                        isSelectableAgentBackendId(id),
+                    )
+                    yield* active.setSelectedOrInUse(
+                      backendIds,
+                      inspectInput(agentBackendCwd),
+                    )
+                    // Process-wide proxy tracks Config selected backend so
+                    // legacy singular status and proxy turns stay aligned.
+                    if (isSelectableAgentBackendId(next.selectedAgentBackend)) {
+                      const backendId =
+                        next.selectedAgentBackend as AgentBackendId
+                      const proxyStatus = yield* active.getStatus
+                      if (proxyStatus.activeBackend.id !== backendId) {
+                        yield* active.activate(
+                          backendId,
+                          inspectInput(agentBackendCwd),
+                        )
+                      }
                     }
                     return next
                   }),
                 )
-                const unfinishedWorkItemCount =
-                  yield* db.countUnfinishedWorkItems
+                const [
+                  unfinishedWorkItemCount,
+                  blockingUnfinishedWorkItemCount,
+                ] = yield* Effect.all([
+                  db.countUnfinishedWorkItems,
+                  db.countBlockingUnfinishedForGlobalDefault,
+                ])
                 const lifecycle = yield* WorkItemLifecycle
                 yield* lifecycle.admitWaitingWorkItems.pipe(
                   Effect.catch((error) =>
@@ -629,29 +705,49 @@ export const createGraphqlApi = (
                     ),
                   ),
                 )
-                return { ...updated, unfinishedWorkItemCount }
+                return {
+                  ...updated,
+                  unfinishedWorkItemCount,
+                  blockingUnfinishedWorkItemCount,
+                }
               }).pipe(Effect.withSpan("graphql-api.updateConfig")),
             ),
-          recheckAgentBackend: async () =>
+          recheckAgentBackend: async (
+            _parent: unknown,
+            args: { backendId?: string | null },
+          ) =>
             runGraphql(
               Effect.gen(function* () {
-                const active = yield* ActiveAgentBackend
                 const db = yield* DbService
-                const config = yield* db.getConfig
-                const backendId = isSelectableAgentBackendId(
-                  config.selectedAgentBackend,
+                const active = yield* ActiveAgentBackend
+                // Null/undefined omits the arg → recheck harness default.
+                // Explicit empty/whitespace is an invalid id, not omit.
+                const rawArg = args.backendId
+                const backendId =
+                  rawArg === undefined || rawArg === null
+                    ? (yield* db.getConfig).selectedAgentBackend
+                    : rawArg.trim()
+                if (
+                  backendId.length === 0 ||
+                  !isSelectableAgentBackendId(backendId)
+                ) {
+                  // Return GraphQL shape directly — do not construct a branded
+                  // AgentBackendDescriptor for unknown ids.
+                  const displayId =
+                    backendId.length > 0 ? backendId : (rawArg ?? "")
+                  return {
+                    backend: { id: displayId, label: displayId },
+                    selectedBackend: { id: displayId, label: displayId },
+                    activeBackend: { id: displayId, label: displayId },
+                    kind: "UNAVAILABLE",
+                    reason: `Unknown Agent Backend: ${displayId}`,
+                    models: [] as const,
+                  }
+                }
+                const status = yield* active.recheck(
+                  backendId,
+                  inspectInput(agentBackendCwd),
                 )
-                  ? (config.selectedAgentBackend as AgentBackendId)
-                  : undefined
-                const status =
-                  backendId === undefined
-                    ? yield* active.getStatus
-                    : toAgentBackendStatus(
-                        yield* active.recheck(backendId, {
-                          cwd: agentBackendCwd,
-                          timeout: "30 seconds",
-                        }),
-                      )
                 return toGraphqlAgentBackendStatus(status)
               }).pipe(Effect.withSpan("graphql-api.recheckAgentBackend")),
             ),
@@ -662,16 +758,45 @@ export const createGraphqlApi = (
             runGraphql(
               Effect.gen(function* () {
                 const db = yield* DbService
-                return yield* db.updateRepositorySettings({
-                  repositoryId: args.input.repositoryId,
-                  paused: args.input.paused,
-                  defaultModel: args.input.defaultModel ?? null,
-                  defaultThinkingLevel: args.input.defaultThinkingLevel ?? null,
-                  reviewModel: args.input.reviewModel ?? null,
-                  reviewThinkingLevel: args.input.reviewThinkingLevel ?? null,
-                  autoMerge: args.input.autoMerge,
-                  includeAllIssueAuthors: args.input.includeAllIssueAuthors,
-                })
+                const active = yield* ActiveAgentBackend
+                // Coordinate with Work Item creation when the effective backend
+                // may change so Implement Now cannot capture a pre-activate id.
+                return yield* active.withConfigCoordination(
+                  Effect.gen(function* () {
+                    const updated = yield* db.updateRepositorySettings({
+                      repositoryId: args.input.repositoryId,
+                      paused: args.input.paused,
+                      ...(args.input.selectedAgentBackend !== undefined
+                        ? {
+                            selectedAgentBackend:
+                              args.input.selectedAgentBackend,
+                          }
+                        : {}),
+                      defaultModel: args.input.defaultModel ?? null,
+                      defaultThinkingLevel:
+                        args.input.defaultThinkingLevel ?? null,
+                      reviewModel: args.input.reviewModel ?? null,
+                      reviewThinkingLevel:
+                        args.input.reviewThinkingLevel ?? null,
+                      autoMerge: args.input.autoMerge,
+                      includeAllIssueAuthors: args.input.includeAllIssueAuthors,
+                    })
+                    // Sync Active set (activate missing, drop unused). Prefer
+                    // setSelectedOrInUse over activate so repository Saves do
+                    // not retarget the process-wide proxy (harness default).
+                    const selectedOrInUse =
+                      yield* db.listSelectedOrInUseBackendIds
+                    const backendIds = selectedOrInUse.filter(
+                      (id): id is AgentBackendId =>
+                        isSelectableAgentBackendId(id),
+                    )
+                    yield* active.setSelectedOrInUse(
+                      backendIds,
+                      inspectInput(agentBackendCwd),
+                    )
+                    return updated
+                  }),
+                )
               }).pipe(Effect.withSpan("graphql-api.updateRepositorySettings")),
             ),
           pauseRepository: async (

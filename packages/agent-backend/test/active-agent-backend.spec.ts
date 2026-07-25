@@ -107,6 +107,26 @@ describe("ActiveAgentBackend multi-backend registry", () => {
     )
   })
 
+  it("uses selectedBackendId as process-wide proxy when multi-seeding", async () => {
+    // List order puts opencode first, but Config selected is grok.
+    const layer = ActiveAgentBackendLive({
+      initialBackendIds: [AGENT_BACKEND_IDS.opencode, AGENT_BACKEND_IDS.grok],
+      selectedBackendId: AGENT_BACKEND_IDS.grok,
+      resolveRuntime: makeResolve({}),
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const status = yield* active.getStatus
+        expect(status.activeBackend.id).toBe("grok")
+        expect(status.selectedBackend.id).toBe("grok")
+        const ids = (yield* active.listStatuses).map((s) => s.backend.id).sort()
+        expect(ids).toEqual(["grok", "opencode"])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
   it("activates on demand and drops when unused", async () => {
     const layer = ActiveAgentBackendLive({
       selectedBackendId: AGENT_BACKEND_IDS.opencode,

@@ -13,14 +13,18 @@ type Query {
   """
   agentBackends: [AgentBackendInfo!]!
   """
-  Active Agent Backend readiness, actionable reason, and the instance-wide
-  model catalog from the latest successful inspection. Selected and Active
-  always match after Save (hot-activate).
+  Readiness for every Active (selected-or-in-use) Agent Backend: Ready or
+  Unavailable with reason and model catalog. Prefer this for multi-backend UI.
+  """
+  agentBackendStatuses: [AgentBackendStatus!]!
+  """
+  Readiness for the harness default Agent Backend (legacy singular surface).
+  Prefer agentBackendStatuses when multiple backends may be Active.
   """
   agentBackendStatus: AgentBackendStatus!
   """
   Settings-only inspection of a not-yet-saved Agent Backend catalog.
-  Does not change the Active Agent Backend.
+  Does not change the Active Agent Backend set.
   """
   previewAgentBackend(backendId: String!): AgentBackendPreview!
   """
@@ -99,11 +103,21 @@ type AgentBackendInfo {
 }
 
 """
-Instance-wide Agent Backend readiness for Settings and lifecycle guards.
-Selected and Active always match (hot-activate on Save).
+Per-backend readiness for one Active Agent Backend (Ready or Unavailable).
+selectedBackend and activeBackend match backend (no Selected≠Active limbo).
 """
 type AgentBackendStatus {
+  """
+  The Agent Backend this status describes.
+  """
+  backend: AgentBackendInfo!
+  """
+  Same as backend (legacy Selected/Active identity fields).
+  """
   selectedBackend: AgentBackendInfo!
+  """
+  Same as backend (legacy Selected/Active identity fields).
+  """
   activeBackend: AgentBackendInfo!
   """
   ready | unavailable
@@ -168,7 +182,8 @@ enum WorkItemsListKind {
 
 type Config {
   """
-  Active Agent Backend (hot-activated on Save).
+  Harness default Agent Backend (hot-activated on Save). Repositories without
+  an override inherit this selection.
   """
   selectedAgentBackend: String!
   defaultModel: String
@@ -178,9 +193,15 @@ type Config {
   maxConcurrentAgentTurns: Int!
   maxConcurrentWorkItems: Int!
   """
-  Count of Work Items that block Agent Backend change (includes Needs Human).
+  Fleet-wide unfinished Work Item total (visibility only; includes Needs Human).
+  Backend-change gates use blockingUnfinishedWorkItemCount instead.
   """
   unfinishedWorkItemCount: Int!
+  """
+  Unfinished Work Items on Repositories that inherit the harness default.
+  Changing selectedAgentBackend is rejected while this is greater than zero.
+  """
+  blockingUnfinishedWorkItemCount: Int!
 }
 
 type AgentModel {
@@ -199,6 +220,16 @@ type Repository {
   localPath: String!
   isBare: Boolean!
   paused: Boolean!
+  """
+  Optional Agent Backend override. Null means inherit the harness default
+  (Config.selectedAgentBackend).
+  """
+  selectedAgentBackend: String
+  """
+  Effective Agent Backend for new Work Items: selectedAgentBackend when set,
+  otherwise Config.selectedAgentBackend.
+  """
+  effectiveAgentBackend: String!
   defaultModel: String
   defaultThinkingLevel: String
   reviewModel: String
@@ -206,6 +237,11 @@ type Repository {
   autoMerge: Boolean!
   includeAllIssueAuthors: Boolean!
   issuesReconciledAt: String
+  """
+  Unfinished Work Items on this Repository. Changing selectedAgentBackend is
+  rejected while this is greater than zero.
+  """
+  blockingUnfinishedWorkItemCount: Int!
 }
 
 type RepositoryCredential {
@@ -368,6 +404,11 @@ input UpdateConfigInput {
 input UpdateRepositorySettingsInput {
   repositoryId: ID!
   paused: Boolean!
+  """
+  Set the Repository Agent Backend override, pass null to clear (inherit
+  harness default), or omit to leave the stored override unchanged.
+  """
+  selectedAgentBackend: String
   defaultModel: String
   defaultThinkingLevel: String
   reviewModel: String
@@ -392,9 +433,11 @@ type Mutation {
   resetWorkItem(workItemId: ID!): ID!
   updateConfig(input: UpdateConfigInput!): Config!
   """
-  Revalidate the Active Agent Backend and refresh its model catalog.
+  Revalidate one Active Agent Backend by id and refresh its model catalog.
+  When backendId is omitted, rechecks the harness default (Config.selectedAgentBackend).
+  Does not activate a backend that is not already Active.
   """
-  recheckAgentBackend: AgentBackendStatus!
+  recheckAgentBackend(backendId: String): AgentBackendStatus!
   updateRepositorySettings(input: UpdateRepositorySettingsInput!): Repository!
   pauseRepository(repositoryId: ID!): Repository!
   unpauseRepository(repositoryId: ID!): Repository!
