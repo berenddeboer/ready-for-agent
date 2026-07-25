@@ -1,4 +1,11 @@
-import { Effect, type ManagedRuntime, Result, Semaphore, Stream } from "effect"
+import {
+  Duration,
+  Effect,
+  type ManagedRuntime,
+  Result,
+  Semaphore,
+  Stream,
+} from "effect"
 import { GraphQLError } from "graphql"
 import { createSchema, createYoga } from "graphql-yoga"
 import {
@@ -42,6 +49,7 @@ import {
   activatePollingIfCredentialed,
   githubTokenSecretName,
   repositoryCredential,
+  withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import {
@@ -262,6 +270,13 @@ const toNativeResponse = (response: unknown): Response => {
   })
 }
 
+/**
+ * Bound for GraphQL-facing Keymaxxer metadata (list / find secret).
+ * Long enough for an operator unlock dialog; short enough that an abandoned
+ * wait does not freeze the Harness UI forever.
+ */
+export const DEFAULT_KEYMAXXER_METADATA_TIMEOUT = Duration.seconds(60)
+
 export const createGraphqlApi = (
   runtime: GraphqlRuntime,
   options: {
@@ -269,11 +284,18 @@ export const createGraphqlApi = (
     /** @deprecated Use agentBackendCwd */
     readonly opencodeCwd?: string
     readonly commandExists?: (command: string) => boolean
+    /**
+     * Bound for GraphQL Keymaxxer metadata waits (repositoryCredentials, etc.).
+     * Defaults to {@link DEFAULT_KEYMAXXER_METADATA_TIMEOUT}.
+     */
+    readonly keymaxxerMetadataTimeout?: Duration.Duration
   } = {},
 ) => {
   const agentBackendCwd =
     options.agentBackendCwd ?? options.opencodeCwd ?? process.cwd()
   const commandExists = options.commandExists ?? commandExistsOnPath
+  const keymaxxerMetadataTimeout =
+    options.keymaxxerMetadataTimeout ?? DEFAULT_KEYMAXXER_METADATA_TIMEOUT
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
 
   const runGraphql = <A>(
@@ -326,11 +348,15 @@ export const createGraphqlApi = (
                 const ambientAuthentication = keymaxxer.enabled === false
                 const tokenNames = ambientAuthentication
                   ? repositories.map(() => null)
-                  : yield* keymaxxer.findSecrets(
-                      repositories.map((repository) => ({
-                        provider: "github",
-                        account: `${repository.githubOwner}/${repository.githubRepo}`,
-                      })),
+                  : yield* withKeymaxxerMetadataTimeout(
+                      keymaxxer.findSecrets(
+                        repositories.map((repository) => ({
+                          provider: "github",
+                          account: `${repository.githubOwner}/${repository.githubRepo}`,
+                        })),
+                      ),
+                      keymaxxerMetadataTimeout,
+                      "findSecrets",
                     )
                 return repositories.map((repository, index) =>
                   repositoryCredential(
@@ -824,7 +850,9 @@ export const createGraphqlApi = (
               Effect.gen(function* () {
                 const db = yield* DbService
                 const added = yield* db.addRepository(args.input)
-                yield* activatePollingIfCredentialed(added).pipe(
+                yield* activatePollingIfCredentialed(added, {
+                  metadataTimeout: keymaxxerMetadataTimeout,
+                }).pipe(
                   Effect.catch((error) =>
                     Effect.logWarning(
                       "Automatic Repository polling was not activated",
@@ -859,18 +887,31 @@ export const createGraphqlApi = (
 
                     const keymaxxer = yield* KeymaxxerService
                     const account = `${repository.githubOwner}/${repository.githubRepo}`
-                    const existingToken = yield* keymaxxer.findSecret({
-                      provider: "github",
-                      account,
-                    })
+                    const existingToken = yield* withKeymaxxerMetadataTimeout(
+                      keymaxxer.findSecret({
+                        provider: "github",
+                        account,
+                      }),
+                      keymaxxerMetadataTimeout,
+                      "findSecret",
+                    )
                     let tokenName = existingToken
                     if (tokenName === null) {
                       tokenName = githubTokenSecretName(repository)
-                      if (yield* keymaxxer.hasSecret(tokenName)) {
+                      if (
+                        yield* withKeymaxxerMetadataTimeout(
+                          keymaxxer.hasSecret(tokenName),
+                          keymaxxerMetadataTimeout,
+                          "hasSecret",
+                        )
+                      ) {
                         return yield* new RepositoryCredentialError({
                           message: `Keymaxxer secret ${tokenName} already exists for another account`,
                         })
                       }
+                      // Interactive secret entry/approval: intentionally not
+                      // wrapped in the short metadata timeout. Holds
+                      // tokenProvisioning until the operator finishes or cancels.
                       const added = yield* keymaxxer.addSecret({
                         name: tokenName,
                         provider: "github",
@@ -885,10 +926,14 @@ export const createGraphqlApi = (
                           message: "Keymaxxer GitHub token setup was cancelled",
                         })
                       }
-                      tokenName = yield* keymaxxer.findSecret({
-                        provider: "github",
-                        account,
-                      })
+                      tokenName = yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecret({
+                          provider: "github",
+                          account,
+                        }),
+                        keymaxxerMetadataTimeout,
+                        "findSecret",
+                      )
                       if (tokenName === null) {
                         return yield* new RepositoryCredentialError({
                           message:
@@ -958,19 +1003,13 @@ export const createGraphqlApi = (
                   })
                 }
 
-                const keymaxxer = yield* KeymaxxerService
-                if (keymaxxer.enabled !== false) {
-                  const credential = yield* keymaxxer.findSecret({
-                    provider: "github",
-                    account: `${repository.githubOwner}/${repository.githubRepo}`,
-                  })
-                  if (credential === null) {
-                    return yield* new RepositoryCredentialError({
-                      message: `GitHub credential is not configured for ${repository.githubOwner}/${repository.githubRepo}`,
-                    })
-                  }
-                }
-
+                // Accept promptly after Repository validation. Credential
+                // availability and reconciliation outcomes belong to job
+                // execution — do not block GraphQL on Keymaxxer dialogs.
+                // Acceptance is intentionally non-blocking; the Refresh Job
+                // worker may still wait on vault unlock or secret-use approval
+                // while reconciling (failure/progress is job status, not this
+                // mutation).
                 const jobId = yield* enqueueRefreshRepositoryJob(repository.id)
                 return {
                   id: jobId,

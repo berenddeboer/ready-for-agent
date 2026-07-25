@@ -9,6 +9,21 @@ import { keymaxxerEnvironment, keymaxxerMcpCommand } from "./mcp-layer.js"
 
 export const KEYMAXXER_SIDECAR_URL_PREFIX = "KEYMAXXER_SIDECAR_URL="
 
+/** Max unlock probe attempts for wrong-passphrase failures (inclusive). */
+export const MAX_UNLOCK_ATTEMPTS = 3
+
+/**
+ * Keymaxxer 0.2.x returns `error: wrong passphrase.` as tool text (no structured
+ * code). Treat this as a safe pre-operation unlock failure that may be retried.
+ */
+export const isWrongPassphraseResult = (result: {
+  readonly isError?: boolean
+  readonly content?: unknown
+}): boolean => {
+  if (result.isError !== true) return false
+  return /error:\s*wrong passphrase\.?/i.test(toolResultText(result))
+}
+
 export const TOOL_NAMES = [
   "keymaxxer_list",
   "keymaxxer_run",
@@ -44,6 +59,12 @@ export type KeymaxxerUpstreamClient = {
   readonly close: () => Promise<void>
 }
 
+type UpstreamToolResult = {
+  content?: unknown
+  isError?: boolean
+  structuredContent?: unknown
+}
+
 const createCapability = () => randomBytes(32).toString("base64url")
 
 const constantTimeEqual = (a: string, b: string) => {
@@ -52,6 +73,22 @@ const constantTimeEqual = (a: string, b: string) => {
   if (ab.length !== bb.length) return false
   return timingSafeEqual(ab, bb)
 }
+
+const toolResultText = (result: { readonly content?: unknown }): string =>
+  Array.isArray(result.content)
+    ? result.content
+        .map((item: unknown) =>
+          typeof item === "object" &&
+          item !== null &&
+          "type" in item &&
+          item.type === "text" &&
+          "text" in item &&
+          typeof item.text === "string"
+            ? item.text
+            : "",
+        )
+        .join("\n")
+    : ""
 
 const makeDialogLane = () => {
   let chain: Promise<void> = Promise.resolve()
@@ -105,6 +142,16 @@ const createDefaultUpstream = async (
   }
 }
 
+const exhaustedUnlockError = (): UpstreamToolResult => ({
+  content: [
+    {
+      type: "text",
+      text: `error: vault unlock failed after ${MAX_UNLOCK_ATTEMPTS} attempts (wrong passphrase).`,
+    },
+  ],
+  isError: true,
+})
+
 export const startKeymaxxerFacade = async (
   options: StartFacadeOptions = {},
 ): Promise<FacadeHandle> => {
@@ -117,6 +164,8 @@ export const startKeymaxxerFacade = async (
   let upstream: KeymaxxerUpstreamClient | null = null
   let upstreamPromise: Promise<KeymaxxerUpstreamClient> | null = null
   let unlockObserved = false
+  /** Shared in-flight unlock so concurrent waiters share one probe outcome. */
+  let unlockInFlight: Promise<UpstreamToolResult> | null = null
 
   const ensureUpstream = () => {
     if (upstream) return Promise.resolve(upstream)
@@ -135,29 +184,145 @@ export const startKeymaxxerFacade = async (
     return upstreamPromise
   }
 
-  const forwardTool = async (name: string, args: Record<string, unknown>) => {
+  const callUpstream = async (
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<UpstreamToolResult> => {
     const client = await ensureUpstream()
-    const needsDialogLane =
-      name === "keymaxxer_run" || name === "keymaxxer_add" || !unlockObserved
+    try {
+      return await client.callTool({ name, arguments: args })
+    } catch (error) {
+      if (upstream === client) {
+        upstream = null
+        upstreamPromise = null
+        unlockObserved = false
+      }
+      await client.close().catch(() => undefined)
+      throw error
+    }
+  }
 
-    const call = async () => {
-      try {
-        const result = await client.callTool({ name, arguments: args })
-        if (!result.isError) unlockObserved = true
+  /**
+   * Note a locked-vault list failure so later traffic re-enters the unlock path.
+   * Wrong passphrase is the only Keymaxxer 0.2.x signal we treat as re-lock.
+   */
+  const noteListResult = (result: UpstreamToolResult): UpstreamToolResult => {
+    if (isWrongPassphraseResult(result)) {
+      unlockObserved = false
+    }
+    return result
+  }
+
+  /**
+   * Serialized unlock probe via metadata-only `keymaxxer_list`.
+   * Wrong passphrase is retried up to MAX_UNLOCK_ATTEMPTS; other failures are not.
+   * Must run inside the dialog lane (via {@link sharedUnlockProbe}).
+   */
+  const unlockProbe = async (): Promise<UpstreamToolResult> => {
+    if (unlockObserved) {
+      return noteListResult(await callUpstream("keymaxxer_list", {}))
+    }
+
+    log("[facade] waiting for vault unlock")
+
+    for (let attempt = 1; attempt <= MAX_UNLOCK_ATTEMPTS; attempt++) {
+      const result = await callUpstream("keymaxxer_list", {})
+      if (result.isError !== true) {
+        unlockObserved = true
         return result
-      } catch (error) {
-        if (upstream === client) {
-          upstream = null
-          upstreamPromise = null
-          unlockObserved = false
+      }
+
+      if (isWrongPassphraseResult(result)) {
+        if (attempt < MAX_UNLOCK_ATTEMPTS) {
+          log(
+            `[facade] vault unlock attempt ${attempt}/${MAX_UNLOCK_ATTEMPTS} failed (wrong passphrase); retrying`,
+          )
+          continue
         }
-        await client.close().catch(() => undefined)
+        log(
+          `[facade] vault unlock exhausted after ${MAX_UNLOCK_ATTEMPTS} wrong-passphrase attempts`,
+        )
+        return exhaustedUnlockError()
+      }
+
+      // Non-retryable unlock failure (e.g. no vault) — surface immediately.
+      return result
+    }
+
+    // Loop always returns on the final attempt; keep a defensive exhausted path.
+    return exhaustedUnlockError()
+  }
+
+  /**
+   * Single-flight unlock: concurrent waiters share one probe result.
+   * A later independent request may start a new probe after this settles.
+   */
+  const sharedUnlockProbe = (): Promise<UpstreamToolResult> => {
+    if (unlockInFlight !== null) return unlockInFlight
+    unlockInFlight = dialogLane(unlockProbe).then(
+      (result) => {
+        unlockInFlight = null
+        return result
+      },
+      (error) => {
+        unlockInFlight = null
         throw error
+      },
+    )
+    return unlockInFlight
+  }
+
+  /**
+   * Ensure the vault is unlocked before a dialog-producing operation.
+   * Success is decided from the probe result only — do not re-read the shared
+   * `unlockObserved` flag after the dialog lane releases (TOCTOU with transport
+   * recovery). Never return a successful list payload as a run/add outcome.
+   */
+  const ensureUnlocked = async (): Promise<UpstreamToolResult | null> => {
+    if (unlockObserved) return null
+    const result = await sharedUnlockProbe()
+    if (result.isError === true) {
+      return result
+    }
+    return null
+  }
+
+  const forwardTool = async (
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<UpstreamToolResult> => {
+    if (name === "keymaxxer_list") {
+      // Once unlocked, metadata-only list bypasses a run/add waiting on approval.
+      if (unlockObserved) {
+        return noteListResult(await callUpstream(name, args))
+      }
+      return sharedUnlockProbe()
+    }
+
+    // Dialog-producing operations: unlock first (separate dialog-lane acquisition
+    // so metadata list can proceed while this op later waits on approval), then
+    // re-check unlock inside the op lane before calling upstream. Re-check covers
+    // transport recovery or concurrent re-lock that clears unlockObserved after
+    // ensureUnlocked returned. Call unlockProbe directly here — not
+    // sharedUnlockProbe — to avoid re-entering dialogLane while holding it.
+    if (!unlockObserved) {
+      const unlockFailure = await ensureUnlocked()
+      if (unlockFailure !== null) {
+        return unlockFailure
       }
     }
 
-    if (needsDialogLane) return dialogLane(call)
-    return call()
+    return dialogLane(async () => {
+      if (!unlockObserved) {
+        log(`[facade] re-probing vault unlock before ${name}`)
+        const unlockResult = await unlockProbe()
+        if (unlockResult.isError === true) {
+          return unlockResult
+        }
+      }
+      log(`[facade] waiting for secret-use approval (${name})`)
+      return callUpstream(name, args)
+    })
   }
 
   const createServer = () => {

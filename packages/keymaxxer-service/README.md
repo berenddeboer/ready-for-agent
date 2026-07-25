@@ -26,6 +26,11 @@ result; transport, protocol, and execution failures use `KeymaxxerError`.
 
 - `startKeymaxxerFacade()` — Streamable HTTP MCP facade used by
   `apps/keymaxxer-sidecar` (one stdio keyholder; path capability auth).
+  Before the first `keymaxxer_run` / `keymaxxer_add`, it runs a serialized
+  `keymaxxer_list` unlock probe (wrong passphrase retried up to three times).
+  Once unlocked, metadata-only `keymaxxer_list` may proceed while a dialog
+  operation waits for secret-use approval. Side-effecting failures are not
+  replayed; transport failures invalidate the upstream for the next request.
 - `runKeymaxxerSidecarProcess()` — sidecar process body (listen, bootstrap URL,
   signals). Uses zod only for MCP SDK tool `inputSchema` registration; Effect
   client payloads use Schema.
