@@ -22,6 +22,9 @@
   --color-oxblood-wash: #f0ddd9;
   --color-vermilion-wash: #f4e1d8;
   --color-violet-wash: #e7dff0;
+  /* Waiting for blockers (Queue hold) — distinct from violet Worker Slot wait */
+  --color-teal: #2f5d50;
+  --color-teal-wash: #e2ebe7;
   --font-serif:
     "Iowan Old Style", "Palatino Linotype", "URW Palladio L", Palatino,
     "Book Antiqua", Georgia, "Times New Roman", serif;
