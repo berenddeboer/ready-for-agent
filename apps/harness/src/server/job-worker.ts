@@ -157,8 +157,12 @@ const refreshRepository = Effect.fn("JobWorker.refreshRepository")(function* (
     return yield* new RepositoryNotFoundError({ repositoryId })
   }
 
+  const lifecycle = yield* WorkItemLifecycle
   const summary = yield* reconciler.reconcile(repository)
   yield* syncNeedsHumanMergeHandoffs(repositoryId)
+  // Issue store is current: lift or fail Waiting for blockers Work Items.
+  // Lifecycle owns Work Item mutations; reconciler only updates Issues.
+  yield* lifecycle.releaseWaitingForBlockers(repositoryId)
   yield* db.notifyIssuesChanged(repositoryId)
   return summary
 })

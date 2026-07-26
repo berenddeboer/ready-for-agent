@@ -244,6 +244,7 @@ const queueLayer = (
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     }),
   )
 
@@ -1448,6 +1449,7 @@ describe("Job worker", () => {
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -1553,6 +1555,7 @@ describe("Job worker", () => {
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -1622,6 +1625,7 @@ describe("Job worker", () => {
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     })
     // Block Keymaxxer so auto-heal cannot finish during startup.
     const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
@@ -1756,6 +1760,7 @@ describe("Job worker", () => {
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -1946,6 +1951,7 @@ describe("Job worker", () => {
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     })
 
     await Effect.runPromise(
@@ -2058,6 +2064,7 @@ describe("Job worker", () => {
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
       admitWaitingWorkItems: Effect.succeed(0),
+      releaseWaitingForBlockers: () => Effect.succeed(0),
     })
 
     await Effect.runPromise(

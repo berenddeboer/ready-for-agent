@@ -8527,5 +8527,326 @@ describe("WorkItemLifecycle", () => {
           expect(stillHeld.stepRuns).toHaveLength(0)
         }),
       ))
+
+    it("releases a held Work Item when the Issue becomes Implementable", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const held = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(held.waitingForBlockers).toBe(true)
+          expect(held.holdsWorkerSlot).toBe(false)
+          expect(held.stepRuns).toHaveLength(0)
+
+          // Simulate Issue reconciliation clearing blockers (and keep repo paused).
+          expect(repository.paused).toBe(true)
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+            title: issue.title,
+            url: issue.url,
+            blockedBy: [],
+          })
+
+          const changed = yield* lifecycle.releaseWaitingForBlockers(
+            repository.id,
+          )
+          expect(changed).toBe(1)
+
+          const released = yield* lifecycle.getWorkItem(held.id)
+          expect(released.waitingForBlockers).toBe(false)
+          expect(released.holdsWorkerSlot).toBe(true)
+          expect(released.waitingSince).toBeNull()
+          expect(released.state).toBe("create_worktree")
+          expect(released.pauseBeforeStep).toBeNull()
+          expect(released.stepRuns).toHaveLength(1)
+          expect(released.failureCode).toBeNull()
+
+          const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(job)).toBe(true)
+        }),
+      ))
+
+    it("keeps a still-blocked valid open leaf Waiting for blockers", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const held = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          // Partial clearance: one blocker remains — still not Implementable.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+            title: issue.title,
+            url: issue.url,
+            blockedBy: [
+              {
+                githubIssueNumber: 12,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/12",
+              },
+            ],
+          })
+
+          const changed = yield* lifecycle.releaseWaitingForBlockers(
+            repository.id,
+          )
+          expect(changed).toBe(0)
+
+          const stillHeld = yield* lifecycle.getWorkItem(held.id)
+          expect(stillHeld.waitingForBlockers).toBe(true)
+          expect(stillHeld.holdsWorkerSlot).toBe(false)
+          expect(stillHeld.waitingSince).toBeNull()
+          expect(stillHeld.stepRuns).toHaveLength(0)
+          expect(stillHeld.state).not.toBe("failed")
+        }),
+      ))
+
+    it("fails terminally when a held Issue is no longer a valid open leaf", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-held-invalid.git",
+            githubRepo: "widgets-held-invalid",
+          })
+
+          const closed = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 201,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/201",
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const closedHeld = yield* lifecycle.queue(repository.id, 201)
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 201,
+            ...sampleIssueFields,
+            title: closed.title,
+            url: closed.url,
+            state: "CLOSED",
+            blockedBy: [],
+          })
+
+          const missing = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 202,
+            ...sampleIssueFields,
+            title: "Missing later",
+            url: "https://github.com/acme/widgets/issues/202",
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const missingHeld = yield* lifecycle.queue(repository.id, 202)
+          yield* db.deleteIssue(repository.id, missing.githubIssueNumber)
+
+          const parent = yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 203,
+            ...sampleIssueFields,
+            title: "Becomes parent",
+            url: "https://github.com/acme/widgets/issues/203",
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const parentHeld = yield* lifecycle.queue(repository.id, 203)
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 203,
+            ...sampleIssueFields,
+            title: parent.title,
+            url: parent.url,
+            hasChildren: true,
+            blockedBy: [],
+          })
+
+          const changed = yield* lifecycle.releaseWaitingForBlockers(
+            repository.id,
+          )
+          expect(changed).toBe(3)
+
+          const failedClosed = yield* lifecycle.getWorkItem(closedHeld.id)
+          expect(failedClosed.state).toBe("failed")
+          expect(failedClosed.waitingForBlockers).toBe(false)
+          expect(failedClosed.failureCode).toBe("issue_not_open")
+          expect(failedClosed.stepRuns).toHaveLength(0)
+
+          const failedMissing = yield* lifecycle.getWorkItem(missingHeld.id)
+          expect(failedMissing.state).toBe("failed")
+          expect(failedMissing.failureCode).toBe("issue_not_found")
+
+          const failedParent = yield* lifecycle.getWorkItem(parentHeld.id)
+          expect(failedParent.state).toBe("failed")
+          expect(failedParent.failureCode).toBe("issue_is_parent")
+        }),
+      ))
+
+    it("joins Worker Slot wait FIFO by creation time with existing waiters", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const config = yield* db.getConfig
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 1,
+          })
+
+          // Held first (oldest creation time among the trio).
+          const heldRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-release-fifo-held.git",
+            githubRepo: "widgets-release-fifo-held",
+          })
+          yield* db.storeIssue({
+            repositoryId: heldRepo.id,
+            githubIssueNumber: 301,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/301",
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const held = yield* lifecycle.queue(heldRepo.id, 301)
+
+          const admittedRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-release-fifo-admitted.git",
+            githubRepo: "widgets-release-fifo-admitted",
+          })
+          yield* db.storeIssue({
+            repositoryId: admittedRepo.id,
+            githubIssueNumber: 302,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/302",
+          })
+          const occupying = yield* lifecycle.implementNow(admittedRepo.id, 302)
+          expect(occupying.holdsWorkerSlot).toBe(true)
+
+          const waiterRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-release-fifo-waiter.git",
+            githubRepo: "widgets-release-fifo-waiter",
+          })
+          yield* db.storeIssue({
+            repositoryId: waiterRepo.id,
+            githubIssueNumber: 303,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/303",
+          })
+          const slotWaiter = yield* lifecycle.implementNow(waiterRepo.id, 303)
+          expect(slotWaiter.holdsWorkerSlot).toBe(false)
+          expect(slotWaiter.waitingSince).not.toBeNull()
+
+          // Clear blockers; release should join wait line by creation time.
+          yield* db.storeIssue({
+            repositoryId: heldRepo.id,
+            githubIssueNumber: 301,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/301",
+            blockedBy: [],
+          })
+          const changed = yield* lifecycle.releaseWaitingForBlockers(
+            heldRepo.id,
+          )
+          expect(changed).toBe(1)
+
+          const released = yield* lifecycle.getWorkItem(held.id)
+          expect(released.waitingForBlockers).toBe(false)
+          expect(released.holdsWorkerSlot).toBe(false)
+          expect(released.waitingSince).not.toBeNull()
+          expect(released.waitingSince?.getTime()).toBe(
+            held.createdAt.getTime(),
+          )
+          expect(released.stepRuns).toHaveLength(0)
+
+          // Free the only slot: oldest creation-time waiter (released held) wins.
+          yield* lifecycle.abandon(occupying.id)
+
+          const admittedReleased = yield* lifecycle.getWorkItem(held.id)
+          expect(admittedReleased.holdsWorkerSlot).toBe(true)
+          expect(admittedReleased.waitingSince).toBeNull()
+          expect(admittedReleased.stepRuns).toHaveLength(1)
+
+          const stillWaiting = yield* lifecycle.getWorkItem(slotWaiter.id)
+          expect(stillWaiting.holdsWorkerSlot).toBe(false)
+          expect(stillWaiting.waitingSince).not.toBeNull()
+          expect(stillWaiting.stepRuns).toHaveLength(0)
+        }),
+      ))
+
+    it("second release after lift is a no-op and does not re-hold", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedBlockedIssue
+
+          const held = yield* lifecycle.queue(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+            title: issue.title,
+            url: issue.url,
+            blockedBy: [],
+          })
+          yield* lifecycle.releaseWaitingForBlockers(repository.id)
+
+          const released = yield* lifecycle.getWorkItem(held.id)
+          expect(released.waitingForBlockers).toBe(false)
+          // A second release must not touch already-lifted Work Items.
+          const second = yield* lifecycle.releaseWaitingForBlockers(
+            repository.id,
+          )
+          expect(second).toBe(0)
+          const still = yield* lifecycle.getWorkItem(held.id)
+          expect(still.waitingForBlockers).toBe(false)
+          expect(still.state).toBe("create_worktree")
+        }),
+      ))
   })
 })
