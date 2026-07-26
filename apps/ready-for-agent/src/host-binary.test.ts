@@ -3,10 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import {
-  BINARY_RELATIVE_PATH,
-  selectPlatformPackage,
-} from "../bin/select-platform.js"
+import { selectPlatformPackage } from "../bin/select-platform.js"
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -28,7 +25,7 @@ const binaryPath = hostSelection.ok
       workspaceRoot,
       "packages",
       hostSelection.packageName,
-      BINARY_RELATIVE_PATH,
+      hostSelection.binaryRelativePath,
     )
   : ""
 

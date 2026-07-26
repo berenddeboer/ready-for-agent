@@ -21,8 +21,7 @@ See [the introduction video](https://www.youtube.com/watch?v=bj_aPnjS3d0) to see
 
 # Usage
 
-Requires a supported platform (Linux or macOS, x64 or arm64). Windows is not
-supported in v1.
+Requires a supported platform: Linux, macOS, or Windows (x64 or arm64).
 
 ```bash
 npx ready-for-agent@latest

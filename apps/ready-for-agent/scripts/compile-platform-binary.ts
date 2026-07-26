@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
-  BINARY_RELATIVE_PATH,
+  binaryRelativePathFor,
   bunCompileTarget,
   selectPlatformPackage,
 } from "../bin/select-platform.js"
@@ -17,12 +17,39 @@ const knownKeys = [
   "linux-arm64",
   "darwin-x64",
   "darwin-arm64",
+  "win32-x64",
+  "win32-arm64",
 ] as const
 
 type SupportedPlatformKey = (typeof knownKeys)[number]
 
 const isSupportedPlatformKey = (value: string): value is SupportedPlatformKey =>
   (knownKeys as ReadonlyArray<string>).includes(value)
+
+/**
+ * Map a platform key back to process.platform / process.arch for selection.
+ * Keys are always `{os}-{arch}` with os in {linux,darwin,win32}.
+ */
+const hostFromPlatformKey = (
+  platformKey: SupportedPlatformKey,
+): { platform: string; arch: string } => {
+  if (platformKey.startsWith("win32-")) {
+    return {
+      platform: "win32",
+      arch: platformKey.endsWith("arm64") ? "arm64" : "x64",
+    }
+  }
+  if (platformKey.startsWith("darwin-")) {
+    return {
+      platform: "darwin",
+      arch: platformKey.endsWith("arm64") ? "arm64" : "x64",
+    }
+  }
+  return {
+    platform: "linux",
+    arch: platformKey.endsWith("arm64") ? "arm64" : "x64",
+  }
+}
 
 const arg = process.argv[2]
 
@@ -47,10 +74,7 @@ const platformKey: SupportedPlatformKey = (() => {
   return arg
 })()
 
-const selection = selectPlatformPackage({
-  platform: platformKey.startsWith("darwin") ? "darwin" : "linux",
-  arch: platformKey.endsWith("arm64") ? "arm64" : "x64",
-})
+const selection = selectPlatformPackage(hostFromPlatformKey(platformKey))
 if (!selection.ok) {
   console.error(selection.message)
   process.exit(1)
@@ -60,7 +84,7 @@ const outfile = join(
   workspaceRoot,
   "packages",
   selection.packageName,
-  BINARY_RELATIVE_PATH,
+  binaryRelativePathFor(platformKey),
 )
 mkdirSync(dirname(outfile), { recursive: true })
 

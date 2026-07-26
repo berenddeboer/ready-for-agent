@@ -1,7 +1,10 @@
 import { join } from "node:path"
 
 type ProductPathEnv = Partial<
-  Record<"HOME" | "XDG_DATA_HOME" | "SQLITE_DATABASE_PATH", string | undefined>
+  Record<
+    "HOME" | "XDG_DATA_HOME" | "LOCALAPPDATA" | "SQLITE_DATABASE_PATH",
+    string | undefined
+  >
 >
 
 export type ProductPathInput = {
@@ -10,12 +13,25 @@ export type ProductPathInput = {
   readonly home: string
 }
 
-/** Product application data directory (XDG on Linux, Application Support on macOS). */
+/**
+ * Product application data directory:
+ * - Windows: `%LOCALAPPDATA%\ready-for-agent` (or `~\AppData\Local\ready-for-agent`)
+ * - macOS: `~/Library/Application Support/ready-for-agent`
+ * - Linux / other: XDG data home or `~/.local/share/ready-for-agent`
+ */
 export const resolveProductDataDir = ({
   env,
   platform,
   home,
 }: ProductPathInput): string => {
+  if (platform === "win32") {
+    const localAppData = env.LOCALAPPDATA?.trim()
+    if (localAppData !== undefined && localAppData !== "") {
+      return join(localAppData, "ready-for-agent")
+    }
+    return join(home, "AppData", "Local", "ready-for-agent")
+  }
+
   if (platform === "darwin") {
     return join(home, "Library", "Application Support", "ready-for-agent")
   }

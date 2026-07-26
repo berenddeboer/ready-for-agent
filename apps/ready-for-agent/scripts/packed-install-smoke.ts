@@ -28,10 +28,7 @@ import {
   PLATFORM_PACKAGE_README,
   launcherManifestForNpmPublish,
 } from "@ready-for-agent/release-versioning"
-import {
-  BINARY_RELATIVE_PATH,
-  selectPlatformPackage,
-} from "../bin/select-platform.js"
+import { selectPlatformPackage } from "../bin/select-platform.js"
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const workspaceRoot = resolve(appRoot, "../..")
@@ -236,7 +233,7 @@ try {
     workspaceRoot,
     "packages",
     hostSelection.packageName,
-    BINARY_RELATIVE_PATH,
+    hostSelection.binaryRelativePath,
   )
 
   if (!skipCompile) {
@@ -322,8 +319,14 @@ try {
     )}\n`,
   )
   writeFileSync(join(platformStage, "README.md"), PLATFORM_PACKAGE_README)
-  copyFileSync(hostBinaryPath, join(platformStage, BINARY_RELATIVE_PATH))
-  spawnSync("chmod", ["+x", join(platformStage, BINARY_RELATIVE_PATH)])
+  copyFileSync(
+    hostBinaryPath,
+    join(platformStage, hostSelection.binaryRelativePath),
+  )
+  spawnSync("chmod", [
+    "+x",
+    join(platformStage, hostSelection.binaryRelativePath),
+  ])
 
   // Stage launcher package for npm pack (JS launcher only; monorepo deps stripped).
   const launcherStage = join(stageRoot, "ready-for-agent")

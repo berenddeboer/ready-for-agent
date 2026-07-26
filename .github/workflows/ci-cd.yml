@@ -204,13 +204,19 @@ jobs:
       - name: Compile platform binaries
         run: |
           set -euo pipefail
-          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+          platforms=(linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64)
+          for platform in "${platforms[@]}"; do
             bunx nx run ready-for-agent:compile --platform="${platform}"
           done
-          # Cross-compiled packages: structural validation only (file + executable).
+          # Cross-compiled packages: structural validation only (file + executable bit).
           # Full runtime smoke runs on the host platform via packed-install-smoke.
-          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
-            binary="packages/ready-for-agent-${platform}/bin/ready-for-agent"
+          # Host packed-install remains Linux-runner only (no windows-latest runtime smoke).
+          for platform in "${platforms[@]}"; do
+            if [[ "${platform}" == win32-* ]]; then
+              binary="packages/ready-for-agent-${platform}/bin/ready-for-agent.exe"
+            else
+              binary="packages/ready-for-agent-${platform}/bin/ready-for-agent"
+            fi
             test -f "${binary}"
             test -x "${binary}"
           done
@@ -251,7 +257,7 @@ jobs:
         run: |
           set -euo pipefail
           # Platform packages first so optionalDependencies resolve on install.
-          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
             (
               cd "packages/ready-for-agent-${platform}"
               npm publish --access public --provenance
@@ -275,15 +281,20 @@ jobs:
           git push origin "${TAG}"
 
           mkdir -p dist-release
-          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
-            cp "packages/ready-for-agent-${platform}/bin/ready-for-agent" \
-              "dist-release/ready-for-agent-${platform}"
+          assets=()
+          for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
+            if [[ "${platform}" == win32-* ]]; then
+              src="packages/ready-for-agent-${platform}/bin/ready-for-agent.exe"
+              dest="dist-release/ready-for-agent-${platform}.exe"
+            else
+              src="packages/ready-for-agent-${platform}/bin/ready-for-agent"
+              dest="dist-release/ready-for-agent-${platform}"
+            fi
+            cp "${src}" "${dest}"
+            assets+=("${dest}")
           done
 
           gh release create "${TAG}" \
             --title "${TAG}" \
             --generate-notes \
-            dist-release/ready-for-agent-linux-x64 \
-            dist-release/ready-for-agent-linux-arm64 \
-            dist-release/ready-for-agent-darwin-x64 \
-            dist-release/ready-for-agent-darwin-arm64
+            "${assets[@]}"

@@ -1,0 +1,24 @@
+{
+  "name": "ready-for-agent-win32-arm64",
+  "version": "0.0.0",
+  "description": "The Windows arm64 binary for ready-for-agent",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/berenddeboer/ready-for-agent.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/ready-for-agent.exe",
+    "README.md"
+  ],
+  "preferUnplugged": true
+}

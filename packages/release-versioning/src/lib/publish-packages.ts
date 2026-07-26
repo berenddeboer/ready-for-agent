@@ -9,6 +9,8 @@ export const PLATFORM_PACKAGE_NAMES = [
   "ready-for-agent-linux-arm64",
   "ready-for-agent-darwin-x64",
   "ready-for-agent-darwin-arm64",
+  "ready-for-agent-win32-x64",
+  "ready-for-agent-win32-arm64",
 ] as const
 
 export type PlatformPackageName = (typeof PLATFORM_PACKAGE_NAMES)[number]
