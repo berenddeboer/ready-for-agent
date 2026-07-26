@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import {
   resolveDefaultDatabasePath,
   resolveProductDataDir,
@@ -35,6 +36,36 @@ describe("product data dir", () => {
     ).toBe("/Users/op/Library/Application Support/ready-for-agent")
   })
 
+  test("Windows uses LOCALAPPDATA when set", () => {
+    expect(
+      resolveProductDataDir({
+        env: { LOCALAPPDATA: "C:\\Users\\op\\AppData\\Local" },
+        platform: "win32",
+        home: "C:\\Users\\op",
+      }),
+    ).toBe(join("C:\\Users\\op\\AppData\\Local", "ready-for-agent"))
+  })
+
+  test("Windows falls back to home\\AppData\\Local when LOCALAPPDATA is unset", () => {
+    expect(
+      resolveProductDataDir({
+        env: {},
+        platform: "win32",
+        home: "C:\\Users\\op",
+      }),
+    ).toBe(join("C:\\Users\\op", "AppData", "Local", "ready-for-agent"))
+  })
+
+  test("Windows ignores blank LOCALAPPDATA", () => {
+    expect(
+      resolveProductDataDir({
+        env: { LOCALAPPDATA: "  " },
+        platform: "win32",
+        home: "C:\\Users\\op",
+      }),
+    ).toBe(join("C:\\Users\\op", "AppData", "Local", "ready-for-agent"))
+  })
+
   test("default database path is under the product data dir", () => {
     expect(
       resolveDefaultDatabasePath({
@@ -43,6 +74,22 @@ describe("product data dir", () => {
         home: "/home/op",
       }),
     ).toBe("/home/op/.local/share/ready-for-agent/ready-for-agent.db")
+  })
+
+  test("Windows default database path is under LOCALAPPDATA", () => {
+    expect(
+      resolveDefaultDatabasePath({
+        env: { LOCALAPPDATA: "C:\\Users\\op\\AppData\\Local" },
+        platform: "win32",
+        home: "C:\\Users\\op",
+      }),
+    ).toBe(
+      join(
+        "C:\\Users\\op\\AppData\\Local",
+        "ready-for-agent",
+        "ready-for-agent.db",
+      ),
+    )
   })
 
   test("SQLITE_DATABASE_PATH overrides the product default", () => {

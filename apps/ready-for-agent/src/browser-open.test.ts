@@ -46,5 +46,9 @@ describe("browser open policy", () => {
       command: "open",
       args: ["http://127.0.0.1:6056/"],
     })
+    expect(browserOpenCommand("win32", "http://127.0.0.1:6056/")).toEqual({
+      command: "cmd",
+      args: ["/c", "start", "", "http://127.0.0.1:6056/"],
+    })
   })
 })

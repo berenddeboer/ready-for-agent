@@ -3,7 +3,9 @@
  * Node-compatible; no Bun APIs. Unit-tested from select-platform.test.ts.
  */
 
-/** @typedef {"linux-x64" | "linux-arm64" | "darwin-x64" | "darwin-arm64"} SupportedPlatformKey */
+/**
+ * @typedef {"linux-x64" | "linux-arm64" | "darwin-x64" | "darwin-arm64" | "win32-x64" | "win32-arm64"} SupportedPlatformKey
+ */
 
 /**
  * @typedef {object} PlatformPackageSelection
@@ -25,6 +27,8 @@ export const SUPPORTED_PLATFORM_KEYS = Object.freeze([
   "linux-arm64",
   "darwin-x64",
   "darwin-arm64",
+  "win32-x64",
+  "win32-arm64",
 ])
 
 /** @type {Readonly<Record<SupportedPlatformKey, string>>} */
@@ -33,9 +37,24 @@ export const PLATFORM_PACKAGE_NAMES = Object.freeze({
   "linux-arm64": "ready-for-agent-linux-arm64",
   "darwin-x64": "ready-for-agent-darwin-x64",
   "darwin-arm64": "ready-for-agent-darwin-arm64",
+  "win32-x64": "ready-for-agent-win32-x64",
+  "win32-arm64": "ready-for-agent-win32-arm64",
 })
 
+/** Binary path inside a non-Windows platform package. */
 export const BINARY_RELATIVE_PATH = "bin/ready-for-agent"
+
+/** Binary path inside a Windows platform package (PE executable). */
+export const WINDOWS_BINARY_RELATIVE_PATH = "bin/ready-for-agent.exe"
+
+/**
+ * @param {SupportedPlatformKey} platformKey
+ * @returns {string}
+ */
+export const binaryRelativePathFor = (platformKey) =>
+  platformKey.startsWith("win32-")
+    ? WINDOWS_BINARY_RELATIVE_PATH
+    : BINARY_RELATIVE_PATH
 
 /**
  * @param {string} arch
@@ -54,6 +73,7 @@ const normalizeArch = (arch) => {
 const normalizeOs = (platform) => {
   if (platform === "linux") return "linux"
   if (platform === "darwin") return "darwin"
+  if (platform === "win32") return "win32"
   return undefined
 }
 
@@ -87,7 +107,7 @@ export const selectPlatformPackage = (host) => {
     ok: true,
     platformKey: key,
     packageName: PLATFORM_PACKAGE_NAMES[key],
-    binaryRelativePath: BINARY_RELATIVE_PATH,
+    binaryRelativePath: binaryRelativePathFor(key),
   }
 }
 
@@ -100,8 +120,7 @@ export const unsupportedPlatformMessage = (platform, arch) => {
   const supported = SUPPORTED_PLATFORM_KEYS.join(", ")
   return (
     `ready-for-agent does not support this platform (${platform}/${arch}). ` +
-    `Supported platforms: ${supported}. ` +
-    `Windows is not supported in v1.`
+    `Supported platforms: ${supported}.`
   )
 }
 
@@ -120,6 +139,10 @@ export const bunCompileTarget = (platformKey) => {
       return "bun-darwin-x64"
     case "darwin-arm64":
       return "bun-darwin-arm64"
+    case "win32-x64":
+      return "bun-windows-x64"
+    case "win32-arm64":
+      return "bun-windows-arm64"
     default: {
       const _exhaustive = /** @type {never} */ (platformKey)
       return _exhaustive

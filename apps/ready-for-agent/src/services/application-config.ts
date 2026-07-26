@@ -24,6 +24,7 @@ export class ApplicationConfig extends Context.Service<
       ).pipe(Config.orElse(() => Config.succeed(DEFAULT_GRAPHQL_URL)))
       const homeOption = yield* optionalString("HOME")
       const xdgDataHome = yield* optionalString("XDG_DATA_HOME")
+      const localAppData = yield* optionalString("LOCALAPPDATA")
       const sqliteDatabasePath = yield* optionalString("SQLITE_DATABASE_PATH")
       const noBrowser = yield* optionalString("NO_BROWSER")
       const port = yield* optionalString("PORT")
@@ -36,6 +37,7 @@ export class ApplicationConfig extends Context.Service<
           env: {
             HOME: homeValue,
             XDG_DATA_HOME: Option.getOrUndefined(xdgDataHome),
+            LOCALAPPDATA: Option.getOrUndefined(localAppData),
             SQLITE_DATABASE_PATH: Option.getOrUndefined(sqliteDatabasePath),
           },
           platform,

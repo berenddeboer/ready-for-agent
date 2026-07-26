@@ -19,6 +19,8 @@ bin that selects the host platform binary from optional dependencies:
 - `ready-for-agent-linux-arm64`
 - `ready-for-agent-darwin-x64`
 - `ready-for-agent-darwin-arm64`
+- `ready-for-agent-win32-x64`
+- `ready-for-agent-win32-arm64`
 
 Compile a host binary into the matching platform package (depends on
 `harness:build` and embeds UI assets, GraphQL schema, and migrations):
@@ -39,8 +41,8 @@ Then the launcher runs that binary without Bun on `PATH`:
 node apps/ready-for-agent/bin/ready-for-agent.js --help
 ```
 
-Unsupported platforms (including Windows in v1) exit with a clear error from the
-platform-selection seam (`bin/select-platform.js`).
+Unsupported platforms exit with a clear error from the platform-selection seam
+(`bin/select-platform.js`).
 
 Internal `@ready-for-agent/*` workspace packages stay private and are not published.
 
@@ -79,6 +81,7 @@ By default, product state is stored under the platform data directory:
 
 - Linux: `$XDG_DATA_HOME/ready-for-agent/` or `~/.local/share/ready-for-agent/`
 - macOS: `~/Library/Application Support/ready-for-agent/`
+- Windows: `%LOCALAPPDATA%\ready-for-agent\` (or `%USERPROFILE%\AppData\Local\ready-for-agent\`)
 
 The SQLite database file is `ready-for-agent.db` in that directory. Set
 `SQLITE_DATABASE_PATH` to use another SQLite/Turso database (this still overrides

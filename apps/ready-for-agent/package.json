@@ -26,7 +26,9 @@
     "ready-for-agent-darwin-arm64": "0.0.0",
     "ready-for-agent-darwin-x64": "0.0.0",
     "ready-for-agent-linux-arm64": "0.0.0",
-    "ready-for-agent-linux-x64": "0.0.0"
+    "ready-for-agent-linux-x64": "0.0.0",
+    "ready-for-agent-win32-arm64": "0.0.0",
+    "ready-for-agent-win32-x64": "0.0.0"
   },
   "dependencies": {
     "@effect/platform-bun": "^4.0.0-beta.97",

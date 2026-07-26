@@ -1,4 +1,5 @@
 import { ConfigProvider, Effect } from "effect"
+import { resolveDefaultDatabasePath } from "../product-data-dir.ts"
 import { ApplicationConfig } from "./application-config.ts"
 import { describe, expect, test } from "bun:test"
 
@@ -34,10 +35,18 @@ describe("ApplicationConfig", () => {
     })
 
     expect(config.graphqlUrl).toBe("http://127.0.0.1:6056/graphql")
+    // Match the pure product-path resolver for this host platform (linux /
+    // darwin / win32). Platform-specific shapes are covered in
+    // product-data-dir.test.ts; this asserts Config wiring only.
     expect(config.databasePath).toBe(
-      config.platform === "darwin"
-        ? "/home/operator/Library/Application Support/ready-for-agent/ready-for-agent.db"
-        : "/home/operator/.local/share/ready-for-agent/ready-for-agent.db",
+      resolveDefaultDatabasePath({
+        env: {
+          HOME: "/home/operator",
+          SQLITE_DATABASE_PATH: "  ",
+        },
+        platform: config.platform,
+        home: "/home/operator",
+      }),
     )
     expect(config.browserEnv.NO_BROWSER).toBeUndefined()
   })

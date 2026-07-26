@@ -89,7 +89,9 @@
         "{workspaceRoot}/packages/ready-for-agent-linux-x64/bin",
         "{workspaceRoot}/packages/ready-for-agent-linux-arm64/bin",
         "{workspaceRoot}/packages/ready-for-agent-darwin-x64/bin",
-        "{workspaceRoot}/packages/ready-for-agent-darwin-arm64/bin"
+        "{workspaceRoot}/packages/ready-for-agent-darwin-arm64/bin",
+        "{workspaceRoot}/packages/ready-for-agent-win32-x64/bin",
+        "{workspaceRoot}/packages/ready-for-agent-win32-arm64/bin"
       ],
       "cache": false
     },

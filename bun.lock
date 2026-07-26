@@ -98,6 +98,8 @@
         "ready-for-agent-darwin-x64": "0.0.0",
         "ready-for-agent-linux-arm64": "0.0.0",
         "ready-for-agent-linux-x64": "0.0.0",
+        "ready-for-agent-win32-arm64": "0.0.0",
+        "ready-for-agent-win32-x64": "0.0.0",
       },
     },
     "packages/agent-backend": {
@@ -283,6 +285,14 @@
     },
     "packages/ready-for-agent-linux-x64": {
       "name": "ready-for-agent-linux-x64",
+      "version": "0.0.0",
+    },
+    "packages/ready-for-agent-win32-arm64": {
+      "name": "ready-for-agent-win32-arm64",
+      "version": "0.0.0",
+    },
+    "packages/ready-for-agent-win32-x64": {
+      "name": "ready-for-agent-win32-x64",
       "version": "0.0.0",
     },
     "packages/release-versioning": {
@@ -1849,6 +1859,10 @@
     "ready-for-agent-linux-arm64": ["ready-for-agent-linux-arm64@workspace:packages/ready-for-agent-linux-arm64"],
 
     "ready-for-agent-linux-x64": ["ready-for-agent-linux-x64@workspace:packages/ready-for-agent-linux-x64"],
+
+    "ready-for-agent-win32-arm64": ["ready-for-agent-win32-arm64@workspace:packages/ready-for-agent-win32-arm64"],
+
+    "ready-for-agent-win32-x64": ["ready-for-agent-win32-x64@workspace:packages/ready-for-agent-win32-x64"],
 
     "reflect-metadata": ["reflect-metadata@0.2.2", "", {}, "sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q=="],
 
