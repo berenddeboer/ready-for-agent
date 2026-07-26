@@ -320,7 +320,7 @@ export const startKeymaxxerFacade = async (
           return unlockResult
         }
       }
-      log(`[facade] waiting for secret-use approval (${name})`)
+      log(`[facade] ${name} may require operator interaction`)
       return callUpstream(name, args)
     })
   }
