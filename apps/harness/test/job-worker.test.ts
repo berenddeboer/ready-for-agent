@@ -34,6 +34,7 @@ import {
   KeymaxxerError,
   KeymaxxerService,
 } from "@ready-for-agent/keymaxxer-service"
+import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { OpencodeSessionStore } from "@ready-for-agent/opencode"
 import {
   ClaimError,
@@ -608,6 +609,14 @@ describe("Job worker", () => {
           updatedAt: null,
         }),
     })
+    const localGit = Layer.succeed(LocalGit, {
+      inspect: () =>
+        Effect.die("local git not used in issue subscription test"),
+    })
+    const directoryPicker = Layer.succeed(DirectoryPicker, {
+      available: Effect.succeed(false),
+      pick: Effect.succeed(null),
+    })
     const runtime = ManagedRuntime.make(
       Layer.mergeAll(
         database,
@@ -617,6 +626,8 @@ describe("Job worker", () => {
         opencode,
         sessionStore,
         defaultGithubLayer,
+        localGit,
+        directoryPicker,
       ),
     )
     const controller = new AbortController()

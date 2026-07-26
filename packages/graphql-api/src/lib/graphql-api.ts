@@ -23,6 +23,7 @@ import {
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
@@ -69,6 +70,10 @@ type AddRepositoryArgs = {
     localPath: string
     isBare: boolean
   }
+}
+
+type AddLocalRepositoryArgs = {
+  path: string
 }
 
 type RefreshRepositoryArgs = {
@@ -249,6 +254,8 @@ export type GraphqlServices =
   | ActiveAgentBackend
   | QueueService
   | WorkItemLifecycle
+  | LocalGit
+  | DirectoryPicker
 
 export type GraphqlRuntime = ManagedRuntime.ManagedRuntime<
   GraphqlServices,
@@ -333,6 +340,13 @@ export const createGraphqlApi = (
           health: () => true,
           addRepositoryCommand: () =>
             resolveAddRepositoryCommand(commandExists),
+          directoryPickerAvailable: async () =>
+            runGraphql(
+              Effect.gen(function* () {
+                const picker = yield* DirectoryPicker
+                return yield* picker.available
+              }).pipe(Effect.withSpan("graphql-api.directoryPickerAvailable")),
+            ),
           repositories: async () =>
             runGraphql(
               Effect.gen(function* () {
@@ -891,6 +905,52 @@ export const createGraphqlApi = (
                 )
                 return added
               }).pipe(Effect.withSpan("graphql-api.addRepository")),
+            ),
+          addLocalRepository: async (
+            _parent: unknown,
+            args: AddLocalRepositoryArgs,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const path = args.path.trim()
+                if (path.length === 0) {
+                  return yield* Effect.fail(
+                    new GraphQLError("Path is required", {
+                      extensions: { code: "BAD_USER_INPUT" },
+                    }),
+                  )
+                }
+                const localGit = yield* LocalGit
+                const db = yield* DbService
+                const inspected = yield* localGit.inspect(path)
+                const added = yield* db.addRepository({
+                  githubOwner: inspected.githubOwner,
+                  githubRepo: inspected.githubRepo,
+                  localPath: inspected.localPath,
+                  isBare: inspected.isBare,
+                })
+                yield* activatePollingIfCredentialed(added, {
+                  metadataTimeout: keymaxxerMetadataTimeout,
+                }).pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning(
+                      "Automatic Repository polling was not activated",
+                      {
+                        repositoryId: added.id,
+                        error,
+                      },
+                    ),
+                  ),
+                )
+                return added
+              }).pipe(Effect.withSpan("graphql-api.addLocalRepository")),
+            ),
+          pickLocalDirectory: async () =>
+            runGraphql(
+              Effect.gen(function* () {
+                const picker = yield* DirectoryPicker
+                return yield* picker.pick
+              }).pipe(Effect.withSpan("graphql-api.pickLocalDirectory")),
             ),
           addRepositoryGitHubToken: async (
             _parent: unknown,

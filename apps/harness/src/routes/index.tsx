@@ -43,6 +43,8 @@ import {
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
+// Long-lived host folder dialog must not pin co-batched GraphQL operations.
+const graphqlUnbatched = createClient({ url: "/graphql", batch: false })
 
 const configQuery = {
   queryKey: ["config"],
@@ -224,6 +226,16 @@ const addRepositoryCommandQuery = {
   queryFn: async () => {
     const result = await graphql.query({ addRepositoryCommand: true })
     return result.addRepositoryCommand
+  },
+}
+
+const directoryPickerAvailableQuery = {
+  queryKey: ["directoryPickerAvailable"],
+  staleTime: Number.POSITIVE_INFINITY,
+  gcTime: Number.POSITIVE_INFINITY,
+  queryFn: async () => {
+    const result = await graphql.query({ directoryPickerAvailable: true })
+    return result.directoryPickerAvailable
   },
 }
 
@@ -817,6 +829,100 @@ function AddRepositoryGuidance({
   command: string
   heading?: string
 }) {
+  const queryClient = useQueryClient()
+  // Non-suspense: default false hides Browse until known so parent HomeBody
+  // Suspense is not re-triggered after repositories/command already painted.
+  const { data: directoryPickerAvailable = false } = useQuery(
+    directoryPickerAvailableQuery,
+  )
+  const [path, setPath] = useState("")
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // Bridges pick→add so controls stay disabled across the handoff.
+  const [pickToAddBridging, setPickToAddBridging] = useState(false)
+
+  const addLocalRepository = useMutation({
+    mutationFn: async (localPath: string) => {
+      const result = await graphql.mutation({
+        addLocalRepository: {
+          __args: { path: localPath },
+          id: true,
+          githubOwner: true,
+          githubRepo: true,
+          localPath: true,
+          isBare: true,
+          paused: true,
+          selectedAgentBackend: true,
+          effectiveAgentBackend: true,
+          defaultModel: true,
+          defaultThinkingLevel: true,
+          reviewModel: true,
+          reviewThinkingLevel: true,
+          autoMerge: true,
+          includeAllIssueAuthors: true,
+          waitForReadyForReviewChecks: true,
+          issuesReconciledAt: true,
+          blockingUnfinishedWorkItemCount: true,
+        },
+      })
+      return result.addLocalRepository
+    },
+    onSuccess: async () => {
+      setErrorMessage(null)
+      setPath("")
+      await queryClient.invalidateQueries({
+        queryKey: repositoriesQuery.queryKey,
+      })
+    },
+    onError: (error) => {
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not add repository. Check the path and try again.",
+      )
+    },
+    onSettled: () => {
+      setPickToAddBridging(false)
+    },
+  })
+
+  const pickDirectory = useMutation({
+    mutationFn: async () => {
+      const result = await graphqlUnbatched.mutation({
+        pickLocalDirectory: true,
+      })
+      return result.pickLocalDirectory
+    },
+    onSuccess: (picked) => {
+      // Cancel or unavailable dialog: no-op (no error toast).
+      if (picked === null || picked === undefined || picked.length === 0) {
+        return
+      }
+      setPickToAddBridging(true)
+      setPath(picked)
+      setErrorMessage(null)
+      addLocalRepository.mutate(picked)
+    },
+    onError: () => {
+      // Transport/server failures only — cancel maps to null in onSuccess.
+      setPickToAddBridging(false)
+      setErrorMessage("Could not open the folder dialog. Enter a path instead.")
+    },
+  })
+
+  const busy =
+    addLocalRepository.isPending || pickDirectory.isPending || pickToAddBridging
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmed = path.trim()
+    if (trimmed.length === 0) {
+      setErrorMessage("Enter a path to a local Git repository.")
+      return
+    }
+    setErrorMessage(null)
+    addLocalRepository.mutate(trimmed)
+  }
+
   return (
     <section
       className="border border-dashed border-rule-2 bg-panel px-6 py-12 text-center sm:px-10"
@@ -827,9 +933,63 @@ function AddRepositoryGuidance({
           {heading}
         </h2>
       ) : null}
-      <p
-        className={`text-sm text-ink-soft ${heading !== undefined ? "mt-2" : "m-0"}`}
+      <form
+        className={`mx-auto flex w-full max-w-xl flex-col gap-3 ${heading !== undefined ? "mt-6" : "mt-0"}`}
+        onSubmit={onSubmit}
       >
+        <label className="sr-only" htmlFor="add-repository-path">
+          Local repository path
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+          <input
+            id="add-repository-path"
+            type="text"
+            value={path}
+            onChange={(event) => {
+              setPath(event.target.value)
+              if (errorMessage !== null) {
+                setErrorMessage(null)
+              }
+            }}
+            placeholder="/path/to/local/repo"
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+            className="min-w-0 flex-1 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2 placeholder:text-ink-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:opacity-60"
+          />
+          <div className="flex shrink-0 gap-2">
+            {directoryPickerAvailable ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => pickDirectory.mutate()}
+                className="border border-rule-2 bg-panel px-3 py-2 text-sm font-semibold text-ink-2 transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+              >
+                {pickDirectory.isPending ? "Browsing…" : "Browse…"}
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              disabled={busy}
+              className="bg-oxblood px-3 py-2 text-sm font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+            >
+              {addLocalRepository.isPending ? "Adding…" : "Add"}
+            </button>
+          </div>
+        </div>
+        {errorMessage !== null ? (
+          <p className="m-0 text-left text-sm text-oxblood-deep" role="alert">
+            {errorMessage}
+          </p>
+        ) : null}
+      </form>
+      <p
+        className="mt-8 mb-0 text-center text-xs tracking-[0.18em] text-ink-faint uppercase"
+        aria-hidden="true"
+      >
+        --- or ---
+      </p>
+      <p className="mt-6 text-sm text-ink-soft">
         Add a local Git repository with the operator binary:
       </p>
       <code className="mt-4 inline-block max-w-full overflow-x-auto border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2">

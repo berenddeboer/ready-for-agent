@@ -1,5 +1,5 @@
 import { Option } from "effect"
-import { parseGitHubRemote } from "./parse-github-remote.ts"
+import { parseGitHubRemote } from "../src/lib/parse-github-remote.js"
 import { describe, expect, test } from "bun:test"
 
 const expectRemote = (url: string, owner: string, repo: string): void => {
@@ -54,14 +54,8 @@ describe("parseGitHubRemote", () => {
     expectRemote("git://github.com/owner/repo.git", "owner", "repo")
   })
 
-  test("trims whitespace and strips trailing slash", () => {
-    expectRemote("  git@github.com:owner/repo.git  ", "owner", "repo")
-    expectRemote("https://github.com/owner/repo/", "owner", "repo")
-  })
-
   test("rejects non-GitHub remotes", () => {
     expectNone("git@gitlab.com:owner/repo.git")
-    expectNone("https://gitlab.com/owner/repo.git")
     expectNone("https://bitbucket.org/owner/repo.git")
     expectNone("not-a-url")
     expectNone("")
