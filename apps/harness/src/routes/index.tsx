@@ -780,17 +780,10 @@ function RepositoryCards() {
     return (
       <>
         {warning}
-        <div className="border border-dashed border-rule-2 bg-panel px-6 py-12 text-center sm:px-10">
-          <h2 className="m-0 font-serif text-2xl font-semibold text-ink">
-            No repositories configured
-          </h2>
-          <p className="mt-2 text-sm text-ink-soft">
-            Add a local Git repository with the operator binary:
-          </p>
-          <code className="mt-4 inline-block max-w-full overflow-x-auto border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2">
-            {addRepositoryCommand}
-          </code>
-        </div>
+        <AddRepositoryGuidance
+          command={addRepositoryCommand}
+          heading="No repositories configured"
+        />
       </>
     )
   }
@@ -810,7 +803,39 @@ function RepositoryCards() {
           />
         ))}
       </section>
+      <div className="mt-12 sm:mt-16">
+        <AddRepositoryGuidance command={addRepositoryCommand} />
+      </div>
     </>
+  )
+}
+
+function AddRepositoryGuidance({
+  command,
+  heading,
+}: {
+  command: string
+  heading?: string
+}) {
+  return (
+    <section
+      className="border border-dashed border-rule-2 bg-panel px-6 py-12 text-center sm:px-10"
+      aria-label="Add a repository"
+    >
+      {heading !== undefined ? (
+        <h2 className="m-0 font-serif text-2xl font-semibold text-ink">
+          {heading}
+        </h2>
+      ) : null}
+      <p
+        className={`text-sm text-ink-soft ${heading !== undefined ? "mt-2" : "m-0"}`}
+      >
+        Add a local Git repository with the operator binary:
+      </p>
+      <code className="mt-4 inline-block max-w-full overflow-x-auto border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2">
+        {command}
+      </code>
+    </section>
   )
 }
 
