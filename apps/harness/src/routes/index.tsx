@@ -38,6 +38,7 @@ import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.j
 import {
   lifecycleStepChipClassName,
   statusBadgeClassNameForStatus,
+  statusMessageClassNameForStatus,
 } from "../work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 
@@ -3237,13 +3238,16 @@ function WorkItemLifecycleStatus({
 }) {
   const queryClient = useQueryClient()
   const status = workItem.status
-  const canRetry = compact && workItem.canRetry
+  const heldForBlockers = status === "WAITING_FOR_BLOCKERS"
+  // Queue hold: Retry is never offered; API also sets canRetry false.
+  const canRetry = compact && workItem.canRetry && !heldForBlockers
   const retriesStatusChecks =
     workItem.failureCode === "pr_status_checks_unresolved" ||
     workItem.state === "WATCH_PR_STATUS_CHECKS" ||
     workItem.state === "INVESTIGATE_PR_STATUS_CHECKS" ||
     (workItem.canRetry &&
       workItem.lifecycleLabels.at(-1)?.phase === "GITHUB_STATUS_CHECKS")
+  // Reset is the cancel affordance for held Queue rows (and compact jobs generally).
   const canReset = compact
   const dataUpdatedAt = queryClient
     .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })
@@ -3293,6 +3297,7 @@ function WorkItemLifecycleStatus({
   const actionsPending = retry.isPending || reset.isPending
   const prNumber = workItem.githubPullRequestNumber
   const statusBadgeClassName = statusBadgeClassNameForStatus(status)
+  const statusMessageClassName = statusMessageClassNameForStatus(status)
   const openPullRequestLabel =
     prNumber === null ? null : `Open pull request #${prNumber}`
   const isNoChangeComplete =
@@ -3366,14 +3371,7 @@ function WorkItemLifecycleStatus({
         </ol>
       )}
       {workItem.statusMessage !== null && (
-        <p
-          className={`mt-1.5 mb-0 text-xs ${
-            status === "WAITING_FOR_WORKER_SLOT" ||
-            status === "WAITING_FOR_BLOCKERS"
-              ? "text-violet-800"
-              : "text-oxblood-deep"
-          }`}
-        >
+        <p className={`mt-1.5 mb-0 text-xs ${statusMessageClassName}`}>
           {workItem.statusMessage}
         </p>
       )}
