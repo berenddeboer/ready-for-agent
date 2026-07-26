@@ -673,6 +673,23 @@ export interface WorkItemLifecycleShape {
     | InvalidQueueNameError
     | DatabaseError
   >
+  /**
+   * After Issue reconciliation for a Repository: revalidate Work Items Waiting
+   * for blockers. Implementable Issues leave the hold and seek Worker Slot
+   * admission (FIFO by creation time with other waiters). Still-blocked valid
+   * open leaves stay held. Invalid candidates fail terminally. Repository
+   * Paused does not block lift; path is full remote (no pause-before-step).
+   */
+  readonly releaseWaitingForBlockers: (
+    repositoryId: string,
+  ) => Effect.Effect<
+    number,
+    | WorkItemLifecycleDatabaseError
+    | EnqueueError
+    | InvalidQueueNameError
+    | DatabaseError
+    | RepositoryNotFoundError
+  >
 }
 
 export class WorkItemLifecycle extends Context.Service<
@@ -1228,6 +1245,270 @@ export const makeWorkItemLifecycleLive = (
           }
         }
         return admitted
+      })
+
+      /**
+       * Classify a held (Waiting for blockers) Work Item's Issue after
+       * reconciliation. Still-blocked valid open leaves stay held — that is
+       * not terminal. Mid-flight revalidation uses revalidateIssue instead.
+       * Callers load the Issue store once per release pass and pass it in.
+       */
+      type HeldIssueClassification =
+        | { readonly _tag: "still_blocked" }
+        | { readonly _tag: "implementable" }
+        | {
+            readonly _tag: "invalid"
+            readonly failureCode: string
+            readonly failureMessage: string
+          }
+
+      const classifyHeldIssue = (
+        issues: readonly {
+          readonly githubIssueNumber: number
+          readonly state: string
+          readonly hasChildren: boolean
+          readonly blockedBy: readonly unknown[]
+        }[],
+        githubIssueNumber: number,
+      ): HeldIssueClassification => {
+        const issue = issues.find(
+          (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+        )
+
+        if (!issue) {
+          return {
+            _tag: "invalid",
+            failureCode: "issue_not_found",
+            failureMessage: `Issue #${githubIssueNumber} is no longer present in the Issue store`,
+          }
+        }
+
+        if (issue.state !== "OPEN") {
+          return {
+            _tag: "invalid",
+            failureCode: "issue_not_open",
+            failureMessage: `Issue #${githubIssueNumber} is ${issue.state}, not OPEN`,
+          }
+        }
+
+        if (issue.hasChildren) {
+          return {
+            _tag: "invalid",
+            failureCode: "issue_is_parent",
+            failureMessage: `Issue #${githubIssueNumber} has children and is no longer a Leaf Issue`,
+          }
+        }
+
+        if (issue.blockedBy.length > 0) {
+          return { _tag: "still_blocked" }
+        }
+
+        return { _tag: "implementable" }
+      }
+
+      const releaseWaitingForBlockers = Effect.fn(
+        "WorkItemLifecycle.releaseWaitingForBlockers",
+      )(function* (repositoryId: string) {
+        // Creation order so free slots go to oldest held items first when
+        // several become Implementable together.
+        const heldRows = (yield* sql
+          .unsafe(
+            `SELECT ${WORK_ITEM_SELECT_COLUMNS}
+             FROM work_item
+             WHERE repository_id = ?
+               AND waiting_for_blockers = 1
+               AND state NOT IN ('complete', 'failed', 'abandoned')
+             ORDER BY created_at ASC, rowid ASC`,
+            [repositoryId],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
+
+        if (heldRows.length === 0) {
+          return 0
+        }
+
+        // One Issue-store snapshot per refresh release pass (not per held row).
+        const issues = yield* db.listIssues(repositoryId)
+        let changed = 0
+
+        for (const held of heldRows) {
+          // Per-item isolation: one release failure must not abort the rest of
+          // the repository pass (or skip post-reconcile Issue notification).
+          // Matches syncNeedsHumanMergeHandoffs. Next refresh retries leftovers.
+          const didChange = yield* Effect.gen(function* () {
+            const classification = classifyHeldIssue(
+              issues,
+              held.github_issue_number,
+            )
+
+            if (classification._tag === "still_blocked") {
+              return false
+            }
+
+            const now = yield* Clock.currentTimeMillis
+
+            if (classification._tag === "invalid") {
+              const failedRows = (yield* sql
+                .unsafe(
+                  `UPDATE work_item
+                   SET state = 'failed',
+                       state_ready_at = ?,
+                       failure_code = ?,
+                       failure_message = ?,
+                       holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       waiting_for_blockers = 0,
+                       updated_at = ?
+                   WHERE id = ?
+                     AND waiting_for_blockers = 1
+                     AND state NOT IN ('complete', 'failed', 'abandoned')
+                   RETURNING id`,
+                  [
+                    now,
+                    classification.failureCode,
+                    classification.failureMessage,
+                    now,
+                    held.id,
+                  ],
+                )
+                .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                readonly id: string
+              }[]
+              return Boolean(failedRows[0])
+            }
+
+            // Implementable: clear hold and admit like a fresh Implement Now
+            // (full remote path — pause_before_step stays null from Queue).
+            return yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  const current = yield* loadWorkItemRow(held.id)
+                  if (
+                    !current?.waiting_for_blockers ||
+                    isTerminalWorkItemState(current.state)
+                  ) {
+                    return false
+                  }
+
+                  // Leave Waiting for blockers before admission so the row is
+                  // eligible for Worker Slot wait / Step Run enqueue. RETURNING
+                  // gates concurrent abandon/reset that already left the hold.
+                  const clearedRows = (yield* sql
+                    .unsafe(
+                      `UPDATE work_item
+                       SET waiting_for_blockers = 0,
+                           updated_at = ?
+                       WHERE id = ?
+                         AND waiting_for_blockers = 1
+                         AND state NOT IN ('complete', 'failed', 'abandoned')
+                       RETURNING id, state, created_at`,
+                      [now, held.id],
+                    )
+                    .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                    readonly id: string
+                    readonly state: WorkItemState
+                    readonly created_at: number
+                  }[]
+                  const cleared = clearedRows[0]
+                  if (!cleared) {
+                    return false
+                  }
+
+                  const limit = yield* maxWorkerSlots()
+                  const occupied = yield* countOccupiedWorkerSlots()
+                  if (occupied < limit) {
+                    yield* sql
+                      .unsafe(
+                        `UPDATE work_item
+                         SET holds_worker_slot = 1,
+                             waiting_since = NULL,
+                             updated_at = ?
+                         WHERE id = ?
+                           AND waiting_for_blockers = 0
+                           AND state NOT IN ('complete', 'failed', 'abandoned')`,
+                        [now, held.id],
+                      )
+                      .pipe(Effect.mapError(toDatabaseError))
+                    const pendingStep =
+                      cleared.state as OperationalLifecycleStep
+                    const activeRows = (yield* sql.unsafe(
+                      `SELECT id FROM step_run
+                       WHERE work_item_id = ?
+                         AND status IN ('queued', 'running')
+                       LIMIT 1`,
+                      [held.id],
+                    )) as readonly { readonly id: string }[]
+                    if (!activeRows[0]) {
+                      yield* enqueueStepRunForWorkItem(
+                        held.id,
+                        pendingStep,
+                        now,
+                      )
+                    }
+                  } else {
+                    // FIFO with other Worker Slot waiters by creation time when
+                    // never previously admitted (CONTEXT: Waiting for Worker Slot).
+                    yield* sql
+                      .unsafe(
+                        `UPDATE work_item
+                         SET holds_worker_slot = 0,
+                             waiting_since = ?,
+                             updated_at = ?
+                         WHERE id = ?
+                           AND waiting_for_blockers = 0
+                           AND state NOT IN ('complete', 'failed', 'abandoned')`,
+                        [cleared.created_at, now, held.id],
+                      )
+                      .pipe(Effect.mapError(toDatabaseError))
+                  }
+                  return true
+                }),
+              )
+              .pipe(
+                Effect.catch((error) => {
+                  if (
+                    error instanceof WorkItemLifecycleDatabaseError ||
+                    error instanceof EnqueueError ||
+                    error instanceof InvalidQueueNameError
+                  ) {
+                    return Effect.fail(error)
+                  }
+                  if (
+                    typeof error === "object" &&
+                    error !== null &&
+                    "_tag" in error &&
+                    (error as { _tag: string })._tag === "SqlError"
+                  ) {
+                    return Effect.fail(toDatabaseError(error as SqlError))
+                  }
+                  return Effect.fail(
+                    new WorkItemLifecycleDatabaseError({
+                      message: `Failed releasing Waiting for blockers Work Item: ${String(error)}`,
+                      cause: error,
+                    }),
+                  )
+                }),
+              )
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(
+                "Failed releasing Waiting for blockers Work Item; continuing pass",
+                {
+                  workItemId: held.id,
+                  repositoryId,
+                  error: String(error),
+                },
+              ).pipe(Effect.as(false)),
+            ),
+          )
+
+          if (didChange) {
+            changed += 1
+            yield* notifyWorkItemsChanged(repositoryId)
+          }
+        }
+
+        return changed
       })
 
       const revalidateIssue = (
@@ -4738,6 +5019,7 @@ export const makeWorkItemLifecycleLive = (
         countCommittedPullRequests,
         continueAfterHumanPrOutcome,
         admitWaitingWorkItems,
+        releaseWaitingForBlockers,
       })
     }),
   )

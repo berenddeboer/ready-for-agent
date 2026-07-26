@@ -238,6 +238,7 @@ const makeRuntime = (
     countCommittedPullRequests: unused,
     continueAfterHumanPrOutcome: unused,
     admitWaitingWorkItems: Effect.succeed(0),
+    releaseWaitingForBlockers: () => Effect.succeed(0),
     ...lifecycleOverrides,
   }
   const readyRuntime = readyRuntimeStatus()
