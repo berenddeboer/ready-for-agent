@@ -29,6 +29,9 @@
       "path": "../../packages/github-service/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/local-git/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/release-versioning/tsconfig.lib.json"
     }
   ]

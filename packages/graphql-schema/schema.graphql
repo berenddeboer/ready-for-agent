@@ -5,6 +5,12 @@ type Query {
   Uses `ready-for-agent` when that binary is on PATH; otherwise `npx ready-for-agent`.
   """
   addRepositoryCommand: String!
+  """
+  Whether a host-side OS directory picker is available (zenity/kdialog,
+  osascript, or PowerShell FolderBrowserDialog). When false, the UI path
+  field and CLI guidance remain usable.
+  """
+  directoryPickerAvailable: Boolean!
   repositories: [Repository!]!
   repositoryCredentials: [RepositoryCredential!]!
   config: Config!
@@ -435,6 +441,18 @@ input UpdateRepositorySettingsInput {
 
 type Mutation {
   addRepository(input: AddRepositoryInput!): Repository!
+  """
+  Inspect a host path (same rules as the operator `add` command: directory,
+  git repository, resolvable GitHub remote, bare detection) and register it.
+  Prefer this over client-side inspect + addRepository so inspect stays one
+  deep server module.
+  """
+  addLocalRepository(path: String!): Repository!
+  """
+  Open a native OS folder dialog on the Harness host. Returns the absolute
+  path, or null when the user cancels or no dialog tool is available.
+  """
+  pickLocalDirectory: String
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!

@@ -1,9 +1,5 @@
 import { Option } from "effect"
-
-export type GitHubRemote = {
-  readonly owner: string
-  readonly repo: string
-}
+import type { GitHubRemote } from "./types.js"
 
 const githubRemotePatterns = [
   // git@github.com:owner/repo.git

@@ -33,6 +33,7 @@ import {
   disabledKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
+import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import {
   Opencode,
   OpencodeSessionTelemetryLive,
@@ -204,6 +205,10 @@ export const createApplication = async (
     Layer.provideMerge(keymaxxerLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
+  const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))
+  const directoryPickerLayer = DirectoryPicker.layer().pipe(
+    Layer.provide(platformLayer),
+  )
   const applicationServices =
     options.startWorker === false
       ? Layer.mergeAll(
@@ -212,6 +217,8 @@ export const createApplication = async (
           keymaxxerLayer,
           activeLayer,
           lifecycleLayer,
+          localGitLayer,
+          directoryPickerLayer,
           loggingLayer,
         )
       : Layer.mergeAll(
@@ -221,6 +228,8 @@ export const createApplication = async (
           keymaxxerLayer,
           activeLayer,
           lifecycleLayer,
+          localGitLayer,
+          directoryPickerLayer,
           loggingLayer,
         )
   const appLayer = applicationServices.pipe(Layer.provide(configLayer))

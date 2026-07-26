@@ -52,6 +52,9 @@
       "path": "./packages/graphql-api"
     },
     {
+      "path": "./packages/local-git"
+    },
+    {
       "path": "./apps/keymaxxer-sidecar"
     },
     {

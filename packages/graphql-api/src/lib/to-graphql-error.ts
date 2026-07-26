@@ -14,6 +14,7 @@ type TaggedError = {
   readonly githubOwner?: string
   readonly githubRepo?: string
   readonly localPath?: string
+  readonly path?: string
   readonly selectedBackendId?: string
   readonly activeBackendId?: string
   readonly unfinishedWorkItemCount?: number
@@ -186,6 +187,30 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       return gql(
         `Repository not found: ${error.repositoryId}`,
         "REPOSITORY_NOT_FOUND",
+      )
+    case "PathNotFound":
+      return gql(
+        error.message ?? `Path not found: ${error.path ?? ""}`,
+        "PATH_NOT_FOUND",
+        { path: error.path },
+      )
+    case "NotADirectory":
+      return gql(
+        error.message ?? `Not a directory: ${error.path ?? ""}`,
+        "NOT_A_DIRECTORY",
+        { path: error.path },
+      )
+    case "NotAGitRepository":
+      return gql(
+        error.message ?? `Not a git repository: ${error.path ?? ""}`,
+        "NOT_A_GIT_REPOSITORY",
+        { path: error.path },
+      )
+    case "NoGitHubRemote":
+      return gql(
+        error.message ?? `No GitHub remote found for: ${error.path ?? ""}`,
+        "NO_GITHUB_REMOTE",
+        { path: error.path },
       )
     case "DatabaseError":
       return gql(error.message ?? "Database error", "DATABASE_ERROR")

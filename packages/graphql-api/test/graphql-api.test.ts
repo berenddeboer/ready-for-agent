@@ -19,6 +19,12 @@ import {
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  DirectoryPicker,
+  LocalGit,
+  type LocalRepository,
+  NotAGitRepository,
+} from "@ready-for-agent/local-git"
+import {
   EnqueueError,
   QueueService,
   type QueueServiceShape,
@@ -151,6 +157,9 @@ const makeRuntime = (
   queueOverrides: Partial<QueueServiceShape> = {},
   lifecycleOverrides: Partial<WorkItemLifecycleShape> = {},
   activeBackendOverrides: Partial<ActiveAgentBackendShape> = {},
+  localGitOverrides: Partial<{
+    readonly inspect: (path: string) => Effect.Effect<LocalRepository, unknown>
+  }> = {},
 ) => {
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -289,6 +298,21 @@ const makeRuntime = (
       ),
     ...activeBackendOverrides,
   }
+  const localGit = Layer.succeed(LocalGit, {
+    inspect: (path) =>
+      Effect.succeed({
+        githubOwner: repository.githubOwner,
+        githubRepo: repository.githubRepo,
+        localPath: path,
+        isBare: repository.isBare,
+        paused: true as const,
+      } satisfies LocalRepository),
+    ...localGitOverrides,
+  })
+  const directoryPicker = Layer.succeed(DirectoryPicker, {
+    available: Effect.succeed(false),
+    pick: Effect.succeed(null),
+  })
   return ManagedRuntime.make(
     Layer.mergeAll(
       Layer.succeed(DbService, db),
@@ -296,6 +320,8 @@ const makeRuntime = (
       Layer.succeed(ActiveAgentBackend, activeBackend),
       Layer.succeed(QueueService, queue),
       Layer.succeed(WorkItemLifecycle, lifecycle),
+      localGit,
+      directoryPicker,
     ),
   )
 }
@@ -382,6 +408,144 @@ describe("GraphQL API", () => {
     expect(await response.json()).toEqual({
       data: {
         addRepositoryCommand: "ready-for-agent add /path/to/local/repo",
+      },
+    })
+  })
+
+  test("reports directory picker availability from DirectoryPicker service", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query { directoryPickerAvailable }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        directoryPickerAvailable: false,
+      },
+    })
+  })
+
+  test("addLocalRepository inspects then adds via DbService", async () => {
+    let addedInput: {
+      githubOwner: string
+      githubRepo: string
+      localPath: string
+      isBare: boolean
+    } | null = null
+    const addRuntime = makeRuntime({
+      addRepository: (input) => {
+        addedInput = input
+        return Effect.succeed({
+          ...repository,
+          githubOwner: input.githubOwner,
+          githubRepo: input.githubRepo,
+          localPath: input.localPath,
+          isBare: input.isBare,
+        })
+      },
+    })
+
+    try {
+      const response = await createGraphqlApi(addRuntime).fetch(
+        graphqlRequest({
+          query: `mutation AddLocal($path: String!) {
+            addLocalRepository(path: $path) {
+              id
+              githubOwner
+              githubRepo
+              localPath
+              isBare
+            }
+          }`,
+          variables: { path: "/tmp/fixture-repo" },
+        }),
+      )
+
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({
+        data: {
+          addLocalRepository: {
+            id: repository.id,
+            githubOwner: repository.githubOwner,
+            githubRepo: repository.githubRepo,
+            localPath: "/tmp/fixture-repo",
+            isBare: repository.isBare,
+          },
+        },
+      })
+      expect(addedInput).toEqual({
+        githubOwner: repository.githubOwner,
+        githubRepo: repository.githubRepo,
+        localPath: "/tmp/fixture-repo",
+        isBare: repository.isBare,
+      })
+    } finally {
+      await addRuntime.dispose()
+    }
+  })
+
+  test("addLocalRepository rejects an empty path", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          addLocalRepository(path: "   ") { id }
+        }`,
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string }
+      }>
+    }
+    expect(body.errors?.[0]?.message).toContain("Path is required")
+    expect(body.errors?.[0]?.extensions?.code).toBe("BAD_USER_INPUT")
+  })
+
+  test("addLocalRepository maps LocalGit inspect failures to GraphQL errors", async () => {
+    const failRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        inspect: (path) => Effect.fail(new NotAGitRepository({ path })),
+      },
+    )
+    try {
+      const response = await createGraphqlApi(failRuntime).fetch(
+        graphqlRequest({
+          query: `mutation {
+            addLocalRepository(path: "/tmp/not-a-repo") { id }
+          }`,
+        }),
+      )
+      const body = (await response.json()) as {
+        errors?: ReadonlyArray<{
+          message: string
+          extensions?: { code?: string }
+        }>
+      }
+      expect(body.errors?.[0]?.message).toContain("Not a git repository")
+      expect(body.errors?.[0]?.extensions?.code).toBe("NOT_A_GIT_REPOSITORY")
+    } finally {
+      await failRuntime.dispose()
+    }
+  })
+
+  test("pickLocalDirectory returns null when picker yields no path", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation { pickLocalDirectory }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        pickLocalDirectory: null,
       },
     })
   })

@@ -54,6 +54,9 @@
     },
     {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../../packages/local-git/tsconfig.lib.json"
     }
   ]
 }

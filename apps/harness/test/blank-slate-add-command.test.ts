@@ -82,4 +82,40 @@ describe("blank-slate add repository command", () => {
     expect(guidance).toContain("max-w-full overflow-x-auto")
     expect(guidance).not.toContain("ready-for-agent add /path/to/local/repo")
   })
+
+  test("primary UI is path entry and optional host Browse before CLI guidance", () => {
+    const guidance = addRepositoryGuidanceSource()
+    expect(guidance).toContain("addLocalRepository")
+    expect(guidance).toContain("directoryPickerAvailable")
+    // Non-suspense so Browse availability cannot re-suspend the whole page.
+    expect(guidance).toContain("useQuery(\n    directoryPickerAvailableQuery")
+    expect(guidance).not.toContain(
+      "useSuspenseQuery(\n    directoryPickerAvailableQuery",
+    )
+    expect(guidance).toContain("pickLocalDirectory")
+    // Host folder dialog is long-lived; must not share the batched client.
+    expect(guidance).toContain("graphqlUnbatched.mutation")
+    expect(guidance).toContain("Browse…")
+    expect(guidance).toContain("--- or ---")
+    expect(guidance).toContain('id="add-repository-path"')
+    expect(guidance).toContain('placeholder="/path/to/local/repo"')
+    expect(guidance).toContain(
+      "Could not open the folder dialog. Enter a path instead.",
+    )
+    // pick→add handoff keeps controls disabled (no busy=false gap).
+    expect(guidance).toContain("pickToAddBridging")
+    expect(guidance).toContain("setPickToAddBridging(true)")
+
+    const separatorAt = guidance.indexOf("--- or ---")
+    const cliCopyAt = guidance.indexOf(
+      "Add a local Git repository with the operator binary:",
+    )
+    const pathFieldAt = guidance.indexOf('id="add-repository-path"')
+    expect(pathFieldAt).toBeGreaterThan(-1)
+    expect(separatorAt).toBeGreaterThan(pathFieldAt)
+    expect(cliCopyAt).toBeGreaterThan(separatorAt)
+    // Browser File System Access API must not be the localPath source.
+    expect(guidance).not.toContain("showDirectoryPicker")
+    expect(guidance).not.toContain("webkitdirectory")
+  })
 })
