@@ -1,0 +1,5 @@
+# Atomically implement Parent Issue children with Work Item merge mode
+
+`Implement all with auto-merge` is one atomic command over the Parent Issue's currently open children, not a parent-level Work Item or durable batch. It creates ordinary Work Items for children without unfinished work, updates existing unfinished child Work Items, and sets each covered Work Item's durable Merge Mode to `Always`; atomic enrollment prevents the UI from claiming the parent was queued when only some children were accepted.
+
+`Always` bypasses Decide PR Merge independently of the Repository's Auto-merge setting, but preserves status checks, conflict handling, merge revalidation, and GitHub requirements. Child Work Items otherwise remain independent: blockers use Queue, unblocked children use normal admission, siblings may run concurrently, and one child's later failure does not stop another. This keeps the feature a bulk operator convenience and leaves room for an individual Issue action to select the same Merge Mode later without introducing a second lifecycle.

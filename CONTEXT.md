@@ -29,7 +29,7 @@ A Repository setting that, when enabled, lets Decide PR Merge ask whether a clan
 _Avoid_: Automerge (GitHub product), auto-approve
 
 **Merge Mode**:
-Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, GitHub requirements, or technical Needs Human outcomes. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts.
+Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, GitHub requirements, or technical Needs Human outcomes. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts. A merge-related Needs Human handoff reached before the mode became `always` is not revoked.
 _Avoid_: Auto-merge (Repository setting), force merge, skip checks
 
 **Include all Issue Authors**:
@@ -164,8 +164,12 @@ A GitHub issue hierarchy wholly contained within one Repository and limited to a
 _Avoid_: Issue tree (implies arbitrary depth), nested Issues
 
 **Parent Issue**:
-A root Issue with one or more direct children. It organizes related work but is not itself a unit the harness works directly.
+A root Issue with one or more direct children. It organizes related work and may receive Implement All with Auto-merge, but is not itself a unit the harness works directly.
 _Avoid_: PRD (the relationship does not establish document type), epic
+
+**Implement All with Auto-merge**:
+An atomic explicit operator request on a Parent Issue covering the open Child Issues present when the request is accepted. Children added later are not part of that request. It creates a separate Work Item for each covered child without unfinished work and sets every covered unfinished Work Item's Merge Mode to `Always`; if any child cannot be enrolled, none are created or changed. An unblocked child starts through the ordinary remote implementation and Worker Slot admission path, while a blocked child waits for its blockers through Queue. Siblings may run concurrently; hierarchy and child order add no dependency, and one child's later failure or Needs Human outcome does not stop its siblings. The Parent Issue itself does not become a Work Item, and the request never closes or updates it. The request does not overturn a Work Item already stopped at a merge-related Needs Human handoff.
+_Avoid_: Queue Parent Issue, Parent Work Item, Implement Now with Auto-merge
 
 **Child Issue**:
 A direct child of a Parent Issue. In a Supported Issue Hierarchy, a Child Issue has no children of its own.
@@ -182,10 +186,6 @@ _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 **Work Item**:
 A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns, and a durable Merge Mode (ordinary by default). Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
-
-**Implement All with Auto-merge**:
-A Parent Issue operator command that atomically enrolls every current open Child Issue without an unfinished Work Item as an ordinary independent Work Item with Merge Mode Always. Unblocked children follow Implement Now and Worker Slot admission; blocked children follow Queue and enter Waiting for blockers. Siblings may run concurrently under the global Worker Slot limit; parent order does not invent dependencies. It creates no Parent Work Item, batch, or parent lifecycle and never updates or closes the Parent Issue. Children with existing unfinished Work Items are not adopted by this command until a later product slice.
-_Avoid_: Parent batch, implement parent, bulk implement without auto-merge
 
 **Implement**:
 The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective. Completion may change repository files, produce findings, create or update GitHub artifacts, or perform other work required by the Issue; repository changes are not required.
