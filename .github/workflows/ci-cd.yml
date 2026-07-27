@@ -12,6 +12,26 @@ permissions:
   contents: read
 
 jobs:
+  # Dependency pin integrity: full SHAs + version comments match upstream releases.
+  pinact:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify GitHub Action pins
+        uses: suzuki-shunsuke/pinact-action@896d595f299e71d65b9d28349d6956abe144390a # v3.0.0
+        with:
+          fix: "false"
+          verify: "true"
+          # Built-in GITHUB_TOKEN only; pinact uses it for release/tag lookups.
+          github_token: ${{ github.token }}
+
   main:
     runs-on: ubuntu-latest
     steps:
@@ -20,7 +40,7 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -116,7 +136,7 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
@@ -162,7 +182,7 @@ jobs:
     # Manual release only, from main (never on PR/push).
     # Requires quality gates + packed-install distribution smoke before publish.
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    needs: [main, packed-install]
+    needs: [main, packed-install, pinact]
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -175,7 +195,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
