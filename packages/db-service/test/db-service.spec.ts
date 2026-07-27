@@ -1788,4 +1788,83 @@ describe("DbService", () => {
         }),
       ))
   })
+
+  describe("countPullRequestsForRepository", () => {
+    it("returns zero when the Repository has no Work Item PRs", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository(sampleInput)
+          expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
+            0,
+          )
+        }),
+      ))
+
+    it("counts distinct Work Item PRs across all states without Issue filters", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          const other = yield* db.addRepository({
+            githubOwner: "acme",
+            githubRepo: "other",
+            localPath: "/repos/acme/other.git",
+            isBare: true,
+          })
+          const now = Date.now()
+          // Terminal + unfinished + abandoned with PRs all count.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, github_pull_request_number,
+               state, state_ready_at, agent_backend, worktree_path, session_id,
+               failure_code, failure_message, created_at, updated_at
+             ) VALUES
+               ('wi-pr-1', ?, 1, 10, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-pr-2', ?, 2, 20, 'watch_pr_status_checks', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-pr-3', ?, 3, 30, 'abandoned', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-no-pr', ?, 4, NULL, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-other', ?, 5, 99, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
+            [
+              repository.id,
+              now,
+              now,
+              now,
+              repository.id,
+              now,
+              now,
+              now,
+              repository.id,
+              now,
+              now,
+              now,
+              repository.id,
+              now,
+              now,
+              now,
+              other.id,
+              now,
+              now,
+              now,
+            ],
+          )
+          // Duplicate PR number on the same repository still counts once.
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, github_pull_request_number,
+               state, state_ready_at, agent_backend, worktree_path, session_id,
+               failure_code, failure_message, created_at, updated_at
+             ) VALUES
+               ('wi-pr-dup', ?, 6, 10, 'failed', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
+            [repository.id, now, now, now],
+          )
+
+          expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
+            3,
+          )
+          expect(yield* db.countPullRequestsForRepository(other.id)).toBe(1)
+        }),
+      ))
+  })
 })

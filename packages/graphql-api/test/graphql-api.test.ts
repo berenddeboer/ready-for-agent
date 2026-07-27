@@ -1453,6 +1453,8 @@ describe("GraphQL API", () => {
       countBlockingUnfinishedForGlobalDefault: Effect.succeed(1),
       countBlockingUnfinishedForRepository: (repositoryId) =>
         Effect.succeed(repositoryId === repository.id ? 2 : 0),
+      countPullRequestsForRepository: (repositoryId) =>
+        Effect.succeed(repositoryId === repository.id ? 7 : 0),
       listRepositories: Effect.succeed([
         makeRepositoryRecord({
           id: repository.id,
@@ -1473,6 +1475,7 @@ describe("GraphQL API", () => {
             selectedAgentBackend
             effectiveAgentBackend
             blockingUnfinishedWorkItemCount
+            pullRequestCount
           }
         }`,
       }),
@@ -1489,6 +1492,7 @@ describe("GraphQL API", () => {
             selectedAgentBackend: "grok",
             effectiveAgentBackend: "grok",
             blockingUnfinishedWorkItemCount: 2,
+            pullRequestCount: 7,
           },
         ],
       },

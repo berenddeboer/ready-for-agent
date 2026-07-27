@@ -254,6 +254,12 @@ type Repository {
   rejected while this is greater than zero.
   """
   blockingUnfinishedWorkItemCount: Int!
+  """
+  Distinct Work Item PRs recorded for this Repository (any Work Item state).
+  Total only — does not apply Issue relevance filters (label, author, hierarchy)
+  or Jobs-card status partitions.
+  """
+  pullRequestCount: Int!
 }
 
 type RepositoryCredential {

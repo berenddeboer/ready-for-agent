@@ -590,6 +590,15 @@ export const createGraphqlApi = (
                 ),
               ),
             ),
+          pullRequestCount: async (repository: { id: string }) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const db = yield* DbService
+                return yield* db.countPullRequestsForRepository(repository.id)
+              }).pipe(
+                Effect.withSpan("graphql-api.Repository.pullRequestCount"),
+              ),
+            ),
         },
         WorkItem: {
           agentBackend: (workItem: WorkItemRecord) =>
