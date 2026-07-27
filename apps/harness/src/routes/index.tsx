@@ -199,6 +199,7 @@ const repositoriesQuery = {
         waitForReadyForReviewChecks: true,
         issuesReconciledAt: true,
         blockingUnfinishedWorkItemCount: true,
+        pullRequestCount: true,
       },
       repositoryCredentials: {
         repositoryId: true,
@@ -285,6 +286,7 @@ type Repository = {
   waitForReadyForReviewChecks: boolean
   issuesReconciledAt: string | null
   blockingUnfinishedWorkItemCount: number
+  pullRequestCount: number
   credential: RepositoryCredential
 }
 
@@ -862,6 +864,7 @@ function AddRepositoryGuidance({
           waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,
           blockingUnfinishedWorkItemCount: true,
+          pullRequestCount: true,
         },
       })
       return result.addLocalRepository
@@ -1098,6 +1101,7 @@ function RepositoryCard({
           waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,
           blockingUnfinishedWorkItemCount: true,
+          pullRequestCount: true,
         },
       })
       return result.updateRepositorySettings
@@ -1618,6 +1622,10 @@ function RepositoryCard({
     ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
     : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
   const repositoryLabel = `${repository.githubOwner}/${repository.githubRepo}`
+  const pullRequestCountLabel =
+    repository.pullRequestCount === 1
+      ? "1 pull request"
+      : `${repository.pullRequestCount} pull requests`
   const {
     collapsed: repositoryCollapsed,
     toggleCollapsed: toggleRepositoryCollapsed,
@@ -1629,13 +1637,20 @@ function RepositoryCard({
       <div
         className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${repositoryCollapsed ? "" : "mb-5"}`}
       >
-        <h2 className="m-0 min-w-0 truncate font-serif text-2xl font-semibold tracking-[-0.012em]">
+        <h2 className="m-0 flex min-w-0 max-w-full items-baseline gap-x-2 font-serif text-2xl font-semibold tracking-[-0.012em]">
           <a
-            className="text-ink hover:text-oxblood hover:underline"
+            className="min-w-0 truncate text-ink hover:text-oxblood hover:underline"
             href={`https://github.com/${repository.githubOwner}/${repository.githubRepo}`}
           >
             {repositoryLabel}
           </a>
+          <span
+            className="shrink-0 font-mono text-sm font-semibold tracking-normal text-ink-faint tabular-nums"
+            title={pullRequestCountLabel}
+          >
+            <span className="sr-only">{pullRequestCountLabel}</span>
+            <span aria-hidden="true">{repository.pullRequestCount}</span>
+          </span>
         </h2>
         <div className="flex shrink-0 items-center gap-1">
           <CardCollapseToggle
