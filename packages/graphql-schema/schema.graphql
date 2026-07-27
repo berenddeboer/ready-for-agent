@@ -255,9 +255,9 @@ type Repository {
   """
   blockingUnfinishedWorkItemCount: Int!
   """
-  Distinct Work Item PRs recorded for this Repository (any Work Item state).
-  Total only — does not apply Issue relevance filters (label, author, hierarchy)
-  or Jobs-card status partitions.
+  Distinct open Work Item PRs for this Repository (unfinished Work Items only).
+  Terminal complete/failed/abandoned PRs are excluded. Does not apply Issue
+  relevance filters (label, author, hierarchy) or Jobs-card status partitions.
   """
   pullRequestCount: Int!
 }

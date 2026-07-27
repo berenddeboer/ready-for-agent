@@ -1790,7 +1790,7 @@ describe("DbService", () => {
   })
 
   describe("countPullRequestsForRepository", () => {
-    it("returns zero when the Repository has no Work Item PRs", () =>
+    it("returns zero when the Repository has no open Work Item PRs", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
@@ -1801,7 +1801,7 @@ describe("DbService", () => {
         }),
       ))
 
-    it("counts distinct Work Item PRs across all states without Issue filters", () =>
+    it("counts only open (unfinished) Work Item PRs and excludes closed or merged", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
@@ -1814,19 +1814,30 @@ describe("DbService", () => {
             isBare: true,
           })
           const now = Date.now()
-          // Terminal + unfinished + abandoned with PRs all count.
+          // Terminal complete/failed/abandoned (merged or closed) do not count.
+          // Unfinished Work Items with a PR number do.
           yield* sql.unsafe(
             `INSERT INTO work_item (
                id, repository_id, github_issue_number, github_pull_request_number,
                state, state_ready_at, agent_backend, worktree_path, session_id,
                failure_code, failure_message, created_at, updated_at
              ) VALUES
-               ('wi-pr-1', ?, 1, 10, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
-               ('wi-pr-2', ?, 2, 20, 'watch_pr_status_checks', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
-               ('wi-pr-3', ?, 3, 30, 'abandoned', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
-               ('wi-no-pr', ?, 4, NULL, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
-               ('wi-other', ?, 5, 99, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
+               ('wi-pr-merged', ?, 1, 10, 'complete', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-pr-open', ?, 2, 20, 'watch_pr_status_checks', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-pr-closed', ?, 3, 30, 'abandoned', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-pr-failed', ?, 4, 40, 'failed', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-pr-needs-human', ?, 5, 50, 'needs_human', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-no-pr', ?, 6, NULL, 'implement', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?),
+               ('wi-other-open', ?, 7, 99, 'decide_pr_merge', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
             [
+              repository.id,
+              now,
+              now,
+              now,
+              repository.id,
+              now,
+              now,
+              now,
               repository.id,
               now,
               now,
@@ -1849,21 +1860,68 @@ describe("DbService", () => {
               now,
             ],
           )
-          // Duplicate PR number on the same repository still counts once.
+          // Duplicate open PR number on the same repository still counts once.
           yield* sql.unsafe(
             `INSERT INTO work_item (
                id, repository_id, github_issue_number, github_pull_request_number,
                state, state_ready_at, agent_backend, worktree_path, session_id,
                failure_code, failure_message, created_at, updated_at
              ) VALUES
-               ('wi-pr-dup', ?, 6, 10, 'failed', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
+               ('wi-pr-dup', ?, 8, 20, 'merge_pr', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
             [repository.id, now, now, now],
           )
 
+          // Open: 20 (watch + merge_pr dup), 50 (needs_human). Merged/closed/failed excluded.
           expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
-            3,
+            2,
           )
           expect(yield* db.countPullRequestsForRepository(other.id)).toBe(1)
+        }),
+      ))
+
+    it("drops a PR from the count when its Work Item becomes terminal", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repository = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, github_pull_request_number,
+               state, state_ready_at, agent_backend, worktree_path, session_id,
+               failure_code, failure_message, created_at, updated_at
+             ) VALUES
+               ('wi-open-then-merge', ?, 1, 42, 'watch_pr_status_checks', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
+            [repository.id, now, now, now],
+          )
+          expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
+            1,
+          )
+
+          yield* sql.unsafe(
+            `UPDATE work_item SET state = 'complete', updated_at = ? WHERE id = 'wi-open-then-merge'`,
+            [now],
+          )
+          expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
+            0,
+          )
+
+          yield* sql.unsafe(
+            `UPDATE work_item SET state = 'needs_human', updated_at = ? WHERE id = 'wi-open-then-merge'`,
+            [now],
+          )
+          expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
+            1,
+          )
+
+          yield* sql.unsafe(
+            `UPDATE work_item SET state = 'abandoned', updated_at = ? WHERE id = 'wi-open-then-merge'`,
+            [now],
+          )
+          expect(yield* db.countPullRequestsForRepository(repository.id)).toBe(
+            0,
+          )
         }),
       ))
   })

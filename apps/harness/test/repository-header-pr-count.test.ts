@@ -12,7 +12,7 @@ const refreshSource = () =>
   )
 
 describe("repository header pull request count", () => {
-  test("repositories query requests total pullRequestCount", () => {
+  test("repositories query requests open pullRequestCount", () => {
     const source = homeSource()
     expect(source).toContain("pullRequestCount: true")
     expect(source).toContain("pullRequestCount: number")
@@ -39,16 +39,17 @@ describe("repository header pull request count", () => {
     expect(header).toContain("tabular-nums")
   })
 
-  test("zero PRs use plural accessible label without special-casing away the digit", () => {
+  test("labels describe open PRs; zero uses plural without dropping the digit", () => {
     const source = homeSource()
-    expect(source).toContain('? "1 pull request"')
-    expect(source).toContain("pull requests`")
+    expect(source).toContain('? "1 open pull request"')
+    expect(source).toContain("open pull requests`")
     expect(source).toContain("repository.pullRequestCount === 1")
   })
 
-  test("work-item live refresh keeps repository PR counts current", () => {
+  test("work-item live refresh keeps open repository PR counts current", () => {
     const source = refreshSource()
     expect(source).toContain("pullRequestCount")
+    expect(source).toContain("open Work")
     expect(source).toContain('const repositoriesQueryKey = ["repositories"]')
   })
 })
