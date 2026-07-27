@@ -1836,10 +1836,9 @@ function RepositoryCard({
                 Wait for checks to start after ready for review
               </span>
               <span className="font-normal text-ink-faint">
-                When enabled, waits up to 90 seconds after ready for review for
-                new checks to start. Disable only when becoming ready cannot
-                start relevant workflows; then settled draft-phase checks may
-                advance without that startup wait.
+                Wait up to 90 seconds for workflows that start after a PR is
+                marked ready for review. If this repository has no such
+                workflows, turn off this setting to skip the wait.
               </span>
             </label>
 

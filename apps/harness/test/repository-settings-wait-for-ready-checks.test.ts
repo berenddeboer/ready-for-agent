@@ -25,8 +25,12 @@ describe("Repository settings Wait for checks to start after ready for review", 
     expect(source).not.toContain(
       "waitForReadyForReviewChecks: repository.waitForReadyForReviewChecks",
     )
-    expect(source).toContain("Disable only when becoming ready cannot")
-    expect(source).toContain("start relevant workflows")
+    expect(source).toContain(
+      "Wait up to 90 seconds for workflows that start after a PR is",
+    )
+    expect(source).toContain(
+      "workflows, turn off this setting to skip the wait.",
+    )
     expect(source).toContain("repository.waitForReadyForReviewChecks")
     expect(source).toContain('? "Enabled"')
     expect(source).toContain("Wait for ready checks:")
