@@ -1290,32 +1290,35 @@ describe("GitHubService live implementation", () => {
     ["non-green checks", "MERGEABLE", "FAILURE", "checks_not_green"],
     ["a conflict", "CONFLICTING", "SUCCESS", "mergeability_changed"],
     ["unknown mergeability", "UNKNOWN", "SUCCESS", "mergeability_changed"],
-  ] as const)("returns a revalidation outcome for %s", async (_description, mergeable, checkState, reason) => {
-    const service = makeGitHubService({
-      query: () =>
-        Promise.resolve({
-          repository: {
-            pullRequests: {
-              nodes: [
-                {
-                  id: "PR_kwDOOpen",
-                  state: "OPEN",
-                  merged: false,
-                  headRefOid: "abc123",
-                  mergeable,
-                  statusCheckRollup: { state: checkState },
-                },
-              ],
+  ] as const)(
+    "returns a revalidation outcome for %s",
+    async (_description, mergeable, checkState, reason) => {
+      const service = makeGitHubService({
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    id: "PR_kwDOOpen",
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "abc123",
+                    mergeable,
+                    statusCheckRollup: { state: checkState },
+                  },
+                ],
+              },
             },
-          },
-        }) as never,
-    })
+          }) as never,
+      })
 
-    const result = await Effect.runPromise(
-      service.mergePullRequest(repository, "branch"),
-    )
-    expect(result).toMatchObject({ _tag: "revalidation", reason })
-  })
+      const result = await Effect.runPromise(
+        service.mergePullRequest(repository, "branch"),
+      )
+      expect(result).toMatchObject({ _tag: "revalidation", reason })
+    },
+  )
 
   it.each([
     [
@@ -1366,34 +1369,37 @@ describe("GitHubService live implementation", () => {
       "needs_human",
       "merge_rejected",
     ],
-  ] as const)("classifies %s returned by the merge mutation", async (_description, pullRequest, tag, reason) => {
-    const service = makeGitHubService({
-      query: () =>
-        Promise.resolve({
-          repository: {
-            pullRequests: {
-              nodes: [
-                {
-                  id: "PR_kwDOOpen",
-                  state: "OPEN",
-                  merged: false,
-                  headRefOid: "abc123",
-                  mergeable: "MERGEABLE",
-                  statusCheckRollup: { state: "SUCCESS" },
-                },
-              ],
+  ] as const)(
+    "classifies %s returned by the merge mutation",
+    async (_description, pullRequest, tag, reason) => {
+      const service = makeGitHubService({
+        query: () =>
+          Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  {
+                    id: "PR_kwDOOpen",
+                    state: "OPEN",
+                    merged: false,
+                    headRefOid: "abc123",
+                    mergeable: "MERGEABLE",
+                    statusCheckRollup: { state: "SUCCESS" },
+                  },
+                ],
+              },
             },
-          },
-        }) as never,
-      mutation: () =>
-        Promise.resolve({ mergePullRequest: { pullRequest } }) as never,
-    })
+          }) as never,
+        mutation: () =>
+          Promise.resolve({ mergePullRequest: { pullRequest } }) as never,
+      })
 
-    const result = await Effect.runPromise(
-      service.mergePullRequest(repository, "branch"),
-    )
-    expect(result).toMatchObject({ _tag: tag, reason })
-  })
+      const result = await Effect.runPromise(
+        service.mergePullRequest(repository, "branch"),
+      )
+      expect(result).toMatchObject({ _tag: tag, reason })
+    },
+  )
 
   it("keeps malformed merge responses as operational failures", async () => {
     const service = makeGitHubService({
