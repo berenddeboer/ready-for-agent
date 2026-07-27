@@ -1624,8 +1624,8 @@ function RepositoryCard({
   const repositoryLabel = `${repository.githubOwner}/${repository.githubRepo}`
   const pullRequestCountLabel =
     repository.pullRequestCount === 1
-      ? "1 pull request"
-      : `${repository.pullRequestCount} pull requests`
+      ? "1 open pull request"
+      : `${repository.pullRequestCount} open pull requests`
   const {
     collapsed: repositoryCollapsed,
     toggleCollapsed: toggleRepositoryCollapsed,

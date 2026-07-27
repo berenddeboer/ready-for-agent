@@ -7,7 +7,7 @@ export const committedPullRequestsCountQueryKeyPrefix = [
 
 const configQueryKey = ["config"] as const
 /**
- * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) and total Work
+ * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) and open Work
  * Item PR count (`pullRequestCount`) live here.
  */
 const repositoriesQueryKey = ["repositories"] as const

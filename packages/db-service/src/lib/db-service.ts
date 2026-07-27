@@ -330,9 +330,11 @@ export interface DbServiceShape {
     repositoryId: string,
   ) => Effect.Effect<number, DatabaseError>
   /**
-   * Distinct Work Item PRs for one Repository (any Work Item state). Does not
-   * apply Issue relevance filters (label, author, hierarchy) or Jobs-card
-   * listKind partitions — total recorded pull requests only.
+   * Distinct open Work Item PRs for one Repository: unfinished Work Items with a
+   * recorded PR number. Terminal complete/failed/abandoned are excluded so
+   * merged and closed PRs do not accumulate in the header count. Does not apply
+   * Issue relevance filters (label, author, hierarchy) or Jobs-card listKind
+   * partitions.
    */
   readonly countPullRequestsForRepository: (
     repositoryId: string,
@@ -579,7 +581,7 @@ export const DbServiceLive = Layer.effect(
       }).pipe(Effect.withSpan("DbService.countBlockingUnfinishedForRepository"))
 
     /**
-     * Distinct Work Item PR numbers for one Repository (all Work Item states).
+     * Distinct open Work Item PR numbers for one Repository (unfinished only).
      */
     const countPullRequestsForRepository = (
       repositoryId: string,
@@ -590,7 +592,8 @@ export const DbServiceLive = Layer.effect(
             `SELECT COUNT(DISTINCT github_pull_request_number) AS count
              FROM work_item
              WHERE repository_id = ?
-               AND github_pull_request_number IS NOT NULL`,
+               AND github_pull_request_number IS NOT NULL
+               AND ${isUnfinishedStateSql()}`,
             [repositoryId],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly {
