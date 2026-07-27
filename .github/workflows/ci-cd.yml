@@ -256,16 +256,27 @@ jobs:
       - name: Publish packages to npm (OIDC + provenance)
         run: |
           set -euo pipefail
+          publish_if_missing() {
+            local package_name package_version
+            package_name="$(node -p "require('./package.json').name")"
+            package_version="$(node -p "require('./package.json').version")"
+
+            if npm view "${package_name}@${package_version}" version --json >/dev/null 2>&1; then
+              echo "${package_name}@${package_version} is already published; skipping."
+            else
+              npm publish --access public --provenance
+            fi
+          }
           # Platform packages first so optionalDependencies resolve on install.
           for platform in linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64; do
             (
               cd "packages/ready-for-agent-${platform}"
-              npm publish --access public --provenance
+              publish_if_missing
             )
           done
           (
             cd apps/ready-for-agent
-            npm publish --access public --provenance
+            publish_if_missing
           )
 
       - name: Create git tag and GitHub Release
