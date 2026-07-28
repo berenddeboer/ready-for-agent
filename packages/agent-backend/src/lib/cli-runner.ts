@@ -1,6 +1,7 @@
 import { Duration, Effect, Ref, Result, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
+import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
 import { collectChildStdout } from "./collect-child-stdout.js"
 import {
   AgentBackendExitError,
@@ -8,6 +9,7 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendTimeoutError,
 } from "./errors.js"
+import { killProcessTree } from "./kill-process-tree.js"
 import type { OnSessionId } from "./types.js"
 
 /** Graceful terminate then force-kill bound for the Agent Turn process tree. */
@@ -54,9 +56,35 @@ const commandOptions = (input: RunCliCaptureInput) => ({
   extendEnv: false as const,
   stdin: input.stdin ?? ("ignore" as const),
   stderr: "ignore" as const,
+  // Own process group on POSIX so group signals reach every CLI worker that
+  // stayed in the session. Combined with killProcessTree for setsid stragglers.
+  detached: process.platform !== "win32",
   killSignal: "SIGTERM" as const,
   forceKillAfter: input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER,
 })
+
+/**
+ * Terminate the harness-spawned CLI and every process it started.
+ *
+ * Snapshots the PPID tree then SIGTERM→SIGKILL escalates across the process
+ * group and known descendants. Runs as a scope finalizer (timeout / interrupt)
+ * and on the finalizeText early-exit path.
+ *
+ * `killProcessTree` always escalates to SIGKILL via `Effect.ensuring`, so an
+ * outer bound only caps the interruptible wait loop — hard kill still runs.
+ * The ensuring body is uninterruptible: it SIGKILLs the starttime-checked
+ * snapshot and, only while the original root is still ours, a short PPID
+ * re-scan for late-spawned children.
+ */
+const terminateCliTree = (
+  handle: ChildProcessHandle,
+  forceKillAfter: Duration.Input,
+): Effect.Effect<void> =>
+  killProcessTree(Number(handle.pid), { forceKillAfter }).pipe(
+    // Bounds the wait loop if it hangs; cannot cut short the ensuring escalate.
+    Effect.timeout(Duration.millis(Duration.toMillis(forceKillAfter) + 1_000)),
+    Effect.ignore,
+  )
 
 /**
  * Run a CLI once, capture full stdout, map non-zero exit and timeout to
@@ -71,6 +99,7 @@ export const runCliCapture = (
   Effect.gen(function* () {
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
+    const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
     const command = ChildProcess.make(
       input.binary,
       [...input.args],
@@ -80,6 +109,11 @@ export const runCliCapture = (
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(command)
+        // Finalizer runs before Effect's handle cleanup (LIFO): snapshot the
+        // tree while the root is still alive, then reap group + descendants.
+        yield* Effect.addFinalizer(() =>
+          terminateCliTree(handle, forceKillAfter),
+        )
         return yield* collectChildStdout(handle)
       }),
     ).pipe(
@@ -114,6 +148,7 @@ export const runCliTurn = (
   Effect.gen(function* () {
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
+    const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
     const knownSessionId = input.knownSessionId
     const seenSessionId = yield* Ref.make(knownSessionId)
     const sessionIdNotified = yield* Ref.make(false)
@@ -128,6 +163,9 @@ export const runCliTurn = (
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(command)
+        yield* Effect.addFinalizer(() =>
+          terminateCliTree(handle, forceKillAfter),
+        )
 
         const collectOutput = Stream.decodeText(handle.stdout).pipe(
           Stream.splitLines,
@@ -170,7 +208,17 @@ export const runCliTurn = (
                 if (event.finalizeText !== undefined) {
                   const running = yield* handle.isRunning
                   if (running) {
-                    yield* handle.kill()
+                    // Single authoritative tree kill; join exit without a
+                    // second full SIGTERM→SIGKILL budget on the direct child.
+                    yield* terminateCliTree(handle, forceKillAfter)
+                    yield* handle.exitCode.pipe(
+                      Effect.timeout(
+                        Duration.millis(
+                          Duration.toMillis(forceKillAfter) + 500,
+                        ),
+                      ),
+                      Effect.ignore,
+                    )
                   }
                   return {
                     sessionId,
