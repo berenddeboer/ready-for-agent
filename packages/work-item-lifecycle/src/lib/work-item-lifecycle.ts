@@ -768,6 +768,16 @@ export const formatIssueClosedPrClosedUnmergedMessage = (
 ): string =>
   `Issue #${githubIssueNumber} is closed or no longer present and pull request #${githubPullRequestNumber} was closed without merge. Start job after reopening if you want to continue, or Abandon or Reset.`
 
+/**
+ * Step Run history reason when Issue revalidation finds the Issue closed/missing
+ * and the owned Work Item PR is already merged — advances to local cleanup.
+ */
+export const formatIssueClosedPrMergedMessage = (
+  githubIssueNumber: number,
+  githubPullRequestNumber: number,
+): string =>
+  `Issue #${githubIssueNumber} is closed or no longer present and pull request #${githubPullRequestNumber} is merged; advancing to local cleanup`
+
 export const makeWorkItemLifecycleLive = (
   config: WorkItemLifecycleConfig = {},
 ): Layer.Layer<
@@ -2348,7 +2358,10 @@ export const makeWorkItemLifecycleLive = (
             return {
               _tag: "merged" as const,
               reasonCode: STEP_RUN_REASON.prMerged,
-              reasonMessage: `Issue #${row.github_issue_number} is closed or missing and pull request #${githubPullRequestNumber} is merged; advancing to local cleanup`,
+              reasonMessage: formatIssueClosedPrMergedMessage(
+                row.github_issue_number,
+                githubPullRequestNumber,
+              ),
             }
           }
           if (status !== null && status._tag === "closed") {
