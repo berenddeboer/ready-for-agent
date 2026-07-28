@@ -257,11 +257,15 @@ describe("runCliTurn", () => {
   it("terminates the process tree on timeout", async () => {
     const markerDir = await mkdtemp(join(tmpdir(), "agent-backend-tree-"))
     const childAlive = join(markerDir, "child-alive")
+    const grandPidFile = join(markerDir, "grand.pid")
     try {
       await withExecutable(
         [
-          `printf '%s\\n' '{"sessionID":"ses_tree"}'`,
+          // Record grandchild pid before the session line so the assert is hard.
           `( while true; do touch "${childAlive}"; sleep 0.05; done ) &`,
+          `echo $! > "${grandPidFile}"`,
+          `while [ ! -s "${grandPidFile}" ]; do sleep 0.01; done`,
+          `printf '%s\\n' '{"sessionID":"ses_tree"}'`,
           "wait",
         ].join("\n"),
         async (binary) => {
@@ -285,10 +289,173 @@ describe("runCliTurn", () => {
             .then((s) => Date.now() - s.mtime.getTime() < 200)
             .catch(() => false)
           expect(stillTouched).toBe(false)
+
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
         },
       )
     } finally {
       await rm(markerDir, { recursive: true, force: true })
     }
   })
+
+  it("terminates setsid grandchildren on timeout", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "agent-backend-setsid-"))
+    const childAlive = join(markerDir, "child-alive")
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withExecutable(
+        [
+          // Leave the process group (like some agent CLIs) so group-only kill
+          // is insufficient; tree kill via PPID must still reap the child.
+          `setsid sh -c 'echo $$ > "${grandPidFile}"; while true; do touch "${childAlive}"; sleep 0.05; done' &`,
+          `while [ ! -s "${grandPidFile}" ]; do sleep 0.01; done`,
+          `printf '%s\\n' '{"sessionID":"ses_setsid"}'`,
+          "sleep 100",
+        ].join("\n"),
+        async (binary) => {
+          await Effect.runPromise(
+            withSpawner((spawner) =>
+              runCliTurn({
+                spawner,
+                binary,
+                args: [],
+                cwd: process.cwd(),
+                env: sanitizeInheritedEnvironment(),
+                timeout: Duration.millis(400),
+                parseLine: parseSimpleLine,
+                forceKillAfter: Duration.millis(100),
+              }).pipe(Effect.flip),
+            ),
+          )
+          await Bun.sleep(300)
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+          const stillTouched = await Bun.file(childAlive)
+            .stat()
+            .then((s) => Date.now() - s.mtime.getTime() < 200)
+            .catch(() => false)
+          expect(stillTouched).toBe(false)
+        },
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
+  })
+
+  it("terminates the process tree on finalizeText", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "agent-backend-finalize-"))
+    const childAlive = join(markerDir, "child-alive")
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withExecutable(
+        [
+          // Spawn the setsid grandchild first so it exists before finalize kills.
+          `setsid sh -c 'echo $$ > "${grandPidFile}"; while true; do touch "${childAlive}"; sleep 0.05; done' &`,
+          `while [ ! -s "${grandPidFile}" ]; do sleep 0.01; done`,
+          `printf '%s\\n' '{"sessionID":"ses_fin","finalize":"done"}'`,
+          "sleep 100",
+        ].join("\n"),
+        async (binary) => {
+          const result = await Effect.runPromise(
+            withSpawner((spawner) =>
+              runCliTurn({
+                spawner,
+                binary,
+                args: [],
+                cwd: process.cwd(),
+                env: sanitizeInheritedEnvironment(),
+                timeout: Duration.seconds(5),
+                forceKillAfter: Duration.millis(100),
+                parseLine: (line) => {
+                  try {
+                    const parsed = JSON.parse(line) as {
+                      sessionID?: string
+                      finalize?: string
+                    }
+                    if (
+                      typeof parsed.sessionID === "string" &&
+                      typeof parsed.finalize === "string"
+                    ) {
+                      return {
+                        sessionId: parsed.sessionID,
+                        finalizeText: parsed.finalize,
+                      }
+                    }
+                    return parseSimpleLine(line)
+                  } catch {
+                    return {}
+                  }
+                },
+              }),
+            ),
+          )
+          expect(result).toEqual({
+            sessionId: "ses_fin",
+            assistantText: "done",
+          })
+          await Bun.sleep(300)
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+        },
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
+  })
+
+  it("returns cleanly when the CLI exits on its own", async () => {
+    await withExecutable(
+      [`printf '%s\\n' '{"sessionID":"ses_clean","text":"ok"}'`].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              parseLine: parseSimpleLine,
+            }),
+          ),
+        )
+        expect(result).toEqual({
+          sessionId: "ses_clean",
+          assistantText: "ok",
+        })
+      },
+    )
+  })
 })
+
+const isPidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
