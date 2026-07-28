@@ -133,6 +133,54 @@ describe("runCliCapture", () => {
       )
     })
   })
+
+  it("returns stdout when allowNonZeroExit is set", async () => {
+    await withExecutable(
+      ["echo 'Not logged in'", "exit 1"].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              allowNonZeroExit: true,
+            }),
+          ),
+        )
+        expect(result.exitCode).toBe(1)
+        expect(result.stdout).toContain("Not logged in")
+        expect(result.stderr).toBe("")
+      },
+    )
+  })
+
+  it("captures stderr when captureStderr is set", async () => {
+    await withExecutable(
+      ["echo 'Logged in using ChatGPT' 1>&2", "exit 0"].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliCapture({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              captureStderr: true,
+            }),
+          ),
+        )
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout).toBe("")
+        expect(result.stderr).toContain("Logged in using ChatGPT")
+      },
+    )
+  })
 })
 
 describe("runCliTurn", () => {

@@ -33,10 +33,22 @@ const GROK_REGISTRATION: AgentBackendRegistration = {
   ],
 }
 
+const CODEX_REGISTRATION: AgentBackendRegistration = {
+  descriptor: {
+    id: AGENT_BACKEND_IDS.codex,
+    label: "Codex Build",
+  },
+  capabilities: [
+    { _tag: "SessionTelemetry", supported: false },
+    { _tag: "KeymaxxerMcp", supported: false },
+  ],
+}
+
 /** Production selectable backends registered at build time. */
 const BUILT_IN_REGISTRY: ReadonlyArray<AgentBackendRegistration> = [
   OPENCODE_REGISTRATION,
   GROK_REGISTRATION,
+  CODEX_REGISTRATION,
 ]
 
 export const listBuiltInAgentBackends =

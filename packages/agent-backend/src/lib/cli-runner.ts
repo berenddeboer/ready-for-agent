@@ -2,7 +2,10 @@ import { Duration, Effect, Ref, Result, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
-import { collectChildStdout } from "./collect-child-stdout.js"
+import {
+  collectChildStdout,
+  collectChildStdoutAndStderr,
+} from "./collect-child-stdout.js"
 import {
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
@@ -41,21 +44,51 @@ export type RunCliCaptureInput = {
   readonly timeout: Duration.Input
   readonly stdin?: "ignore" | Stream.Stream<Uint8Array, PlatformError>
   readonly forceKillAfter?: Duration.Input
+  /**
+   * When true, return stdout + exitCode even if exit is non-zero instead of
+   * failing with AgentBackendExitError. Used by readiness probes that encode
+   * auth state in exit status (e.g. `codex login status`).
+   */
+  readonly allowNonZeroExit?: boolean
+  /**
+   * When true, pipe and capture stderr (returned as `stderr`). Default ignores
+   * stderr so Agent Turn noise does not fill memory. Readiness probes that
+   * print status on stderr (Codex `login status`) must opt in.
+   */
+  readonly captureStderr?: boolean
 }
 
-export type RunCliTurnInput = RunCliCaptureInput & {
+export type RunCliTurnInput = {
+  readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]
+  readonly binary: string
+  readonly args: ReadonlyArray<string>
+  readonly cwd: string
+  readonly env: Record<string, string>
+  readonly timeout: Duration.Input
+  readonly stdin?: "ignore" | Stream.Stream<Uint8Array, PlatformError>
+  readonly forceKillAfter?: Duration.Input
   readonly knownSessionId?: string
   readonly onSessionId?: OnSessionId
   readonly parseLine: (line: string) => CliLineEvent
   readonly observerLabel?: string
 }
 
-const commandOptions = (input: RunCliCaptureInput) => ({
+const commandOptions = (input: {
+  readonly cwd: string
+  readonly env: Record<string, string>
+  readonly stdin?: "ignore" | Stream.Stream<Uint8Array, PlatformError>
+  readonly forceKillAfter?: Duration.Input
+  readonly captureStderr?: boolean
+}) => ({
   cwd: input.cwd,
   env: input.env,
   extendEnv: false as const,
   stdin: input.stdin ?? ("ignore" as const),
-  stderr: "ignore" as const,
+  // Turns always ignore stderr so a chatty CLI cannot fill an undrained pipe.
+  // Capture probes opt in via captureStderr on runCliCapture only.
+  stderr: (input.captureStderr === true ? "pipe" : "ignore") as
+    | "pipe"
+    | "ignore",
   // Own process group on POSIX so group signals reach every CLI worker that
   // stayed in the session. Combined with killProcessTree for setsid stragglers.
   detached: process.platform !== "win32",
@@ -87,19 +120,24 @@ const terminateCliTree = (
   )
 
 /**
- * Run a CLI once, capture full stdout, map non-zero exit and timeout to
- * generic Agent Backend errors.
+ * Run a CLI once, capture full stdout (and optionally stderr), map non-zero
+ * exit and timeout to generic Agent Backend errors.
  */
 export const runCliCapture = (
   input: RunCliCaptureInput,
 ): Effect.Effect<
-  { readonly exitCode: number; readonly stdout: string },
+  {
+    readonly exitCode: number
+    readonly stdout: string
+    readonly stderr: string
+  },
   AgentBackendExitError | AgentBackendTimeoutError | PlatformError
 > =>
   Effect.gen(function* () {
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
     const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
+    const captureStderr = input.captureStderr === true
     const command = ChildProcess.make(
       input.binary,
       [...input.args],
@@ -114,7 +152,15 @@ export const runCliCapture = (
         yield* Effect.addFinalizer(() =>
           terminateCliTree(handle, forceKillAfter),
         )
-        return yield* collectChildStdout(handle)
+        if (captureStderr) {
+          return yield* collectChildStdoutAndStderr(handle)
+        }
+        const captured = yield* collectChildStdout(handle)
+        return {
+          exitCode: captured.exitCode,
+          stdout: captured.stdout,
+          stderr: "",
+        }
       }),
     ).pipe(
       Effect.timeout(input.timeout),
@@ -125,7 +171,7 @@ export const runCliCapture = (
       ),
     )
 
-    if (result.exitCode !== 0) {
+    if (result.exitCode !== 0 && input.allowNonZeroExit !== true) {
       return yield* new AgentBackendExitError({
         exitCode: result.exitCode,
         cwd: input.cwd,
@@ -157,7 +203,8 @@ export const runCliTurn = (
     const command = ChildProcess.make(
       input.binary,
       [...input.args],
-      commandOptions(input),
+      // Never pipe stderr for turns (undrained stderr can deadlock).
+      commandOptions({ ...input, captureStderr: false }),
     )
 
     const result = yield* Effect.scoped(

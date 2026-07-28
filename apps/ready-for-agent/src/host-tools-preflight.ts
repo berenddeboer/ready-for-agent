@@ -25,6 +25,11 @@ const BACKEND_HOST_TOOLS: Record<
     installHint:
       "Install Grok Build CLI: https://docs.x.ai/docs/grok-build (binary name: grok)",
   },
+  [AGENT_BACKEND_IDS.codex]: {
+    name: "codex",
+    installHint:
+      "Install Codex CLI: https://developers.openai.com/codex/cli (binary name: codex)",
+  },
 }
 
 const alwaysRequiredTools: ReadonlyArray<HostTool> = [
