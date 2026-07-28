@@ -63,6 +63,7 @@ import {
   WorkItemWaitingForBlockersError,
   filterWorkItemsByListKind,
   formatIssueClosedPrClosedUnmergedMessage,
+  formatIssueClosedPrMergedMessage,
   formatIssueClosedPrStatusIndeterminateMessage,
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
@@ -5959,7 +5960,12 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("advances to local cleanup when Issue revalidation fails and owned PR is merged", () => {
+    const runMergedOwnedPrCleanupAfterIssueInvalidation = (
+      invalidate: (
+        repositoryId: string,
+        githubIssueNumber: number,
+      ) => Effect.Effect<void, never, DbService>,
+    ) => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
@@ -5974,14 +5980,9 @@ describe("WorkItemLifecycle", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
       }
 
-      const layer = makeTestLayer(steps, {
-        getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "merged" }),
-      })
-
       return Effect.runPromise(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
-          const db = yield* DbService
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
@@ -5994,19 +5995,38 @@ describe("WorkItemLifecycle", () => {
             "investigate_pr_status_checks",
           )
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* invalidate(repository.id, issue.githubIssueNumber)
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
           expect(afterInvestigate._tag).toBe("processed")
           if (afterInvestigate._tag === "processed") {
+            // Merged → cleanup path, not pause and not idle park.
             expect(afterInvestigate.workItem.state).toBe("local_cleanup")
             expect(afterInvestigate.workItem.paused).toBe(false)
+            expect(afterInvestigate.workItem.failureCode).toBeNull()
+            expect(afterInvestigate.workItem.failureMessage).toBeNull()
+            // Worker slot retained/reacquired so cleanup can run.
+            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(true)
+            // Owning a PR number alone never Completes (ADR 0039): we land
+            // on local_cleanup first, then Complete after cleanup succeeds.
+            expect(afterInvestigate.workItem.state).not.toBe("complete")
+
             const investigateRun = afterInvestigate.workItem.stepRuns.find(
               (run) =>
                 run.step === "investigate_pr_status_checks" &&
                 run.status === "succeeded",
             )
+            expect(investigateRun).toBeDefined()
             expect(investigateRun?.reasonCode).toBe(STEP_RUN_REASON.prMerged)
+            expect(investigateRun?.reasonMessage).toBe(
+              formatIssueClosedPrMergedMessage(issue.githubIssueNumber, 101),
+            )
+            expect(
+              afterInvestigate.workItem.stepRuns.some(
+                (run) =>
+                  run.step === "local_cleanup" && run.status === "queued",
+              ),
+            ).toBe(true)
           }
 
           yield* makeQueuedJobsAvailable
@@ -6014,10 +6034,43 @@ describe("WorkItemLifecycle", () => {
           expect(afterCleanup._tag).toBe("processed")
           if (afterCleanup._tag === "processed") {
             expect(afterCleanup.workItem.state).toBe("complete")
+            expect(afterCleanup.workItem.paused).toBe(false)
+            expect(afterCleanup.workItem.holdsWorkerSlot).toBe(false)
           }
-        }).pipe(Effect.provide(layer)),
+        }).pipe(
+          Effect.provide(
+            makeTestLayer(steps, {
+              getPullRequestLifecycleStatus: () =>
+                Effect.succeed({ _tag: "merged" }),
+            }),
+          ),
+        ),
       )
-    })
+    }
+
+    it("advances cleanup → Complete when Issue is missing and owned PR is merged", () =>
+      runMergedOwnedPrCleanupAfterIssueInvalidation(
+        (repositoryId, githubIssueNumber) =>
+          Effect.gen(function* () {
+            const db = yield* DbService
+            yield* db.deleteIssue(repositoryId, githubIssueNumber)
+          }),
+      ))
+
+    it("advances cleanup → Complete when Issue is closed and owned PR is merged", () =>
+      runMergedOwnedPrCleanupAfterIssueInvalidation(
+        (repositoryId, githubIssueNumber) =>
+          Effect.gen(function* () {
+            const db = yield* DbService
+            yield* db.storeIssue({
+              repositoryId,
+              githubIssueNumber,
+              ...sampleIssueFields,
+              state: "CLOSED",
+              url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+            })
+          }),
+      ))
 
     it("pauses when Issue revalidation fails and owned PR is closed unmerged", () => {
       const steps: LifecycleStepsShape = {

@@ -327,8 +327,10 @@ export const STEP_RUN_REASON = {
    */
   greenNoReviewEvidence: "green-no-review-evidence",
   /**
-   * Step Run superseded because the Work Item PR was confirmed merged
-   * (human or external merge) before this step could finish its work.
+   * Confirmed Work Item PR merge outcome. Used when:
+   * - a Step Run is interrupted/cancelled because the PR merged before it finished
+   * - a successful Step Run stops at Issue revalidation because the Issue is
+   *   closed/missing and the owned PR is already merged (advance to local cleanup)
    */
   prMerged: "pr_merged",
   /**
