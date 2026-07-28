@@ -136,6 +136,7 @@ const defaultGithubLayer = Layer.succeed(GitHubService, {
   getOpenPullRequestNumber: () => Effect.succeed(1),
   findOpenPullRequestNumber: () => Effect.succeed(1),
   createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
   getPullRequestCheckStatus: () =>
     Effect.succeed({
@@ -405,6 +406,7 @@ describe("Job worker", () => {
       getOpenPullRequestNumber: () => Effect.succeed(1),
       findOpenPullRequestNumber: () => Effect.succeed(1),
       createDraftPullRequest: () => Effect.succeed(1),
+      updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed({

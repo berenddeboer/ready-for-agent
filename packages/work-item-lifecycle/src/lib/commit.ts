@@ -1,18 +1,34 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import { DbService } from "@ready-for-agent/db-service"
+import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
   CommitInvalidWorktreeContextError,
   CommitOpenCodeError,
   CommitPostconditionError,
+  CommitPublicationCopyError,
   CommitSessionContextMissingError,
   CommitStartingCommitMissingError,
   CommitWorktreeContextMissingError,
 } from "./commit-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
+  type PublicationCopy,
+  buildCommitFallbackPromptWithCopy,
+  buildPublicationCopyFormatCorrectionPrompt,
+  buildPublicationCopyPrompt,
+  formatPublicationCommitMessage,
+  normalizePublicationCopy,
+  parsePublicationCopyResult,
+  publicationCopyFromCommitMessage,
+} from "./publication-copy.js"
+import {
+  COMMIT_COPY_GENERATION_MESSAGE,
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleStepCompletion,
+  STEP_RUN_REASON,
 } from "./types.js"
 
 const DIAGNOSTIC_CHAR_LIMIT = 4_000
@@ -20,6 +36,8 @@ const HARNESS_ARTIFACT_PATHSPEC = ":(exclude).ready-for-agent"
 
 export type CommitResult = {
   readonly completion: LifecycleStepCompletion
+  readonly publicationTitle: string
+  readonly publicationBody: string
 }
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
@@ -75,7 +93,7 @@ const resolveSessionId = (context: LifecycleStepContext) => {
       new CommitSessionContextMissingError({
         workItemId: context.workItemId,
         message:
-          "Commit agent fallback requires a Session ID persisted by a successful Implement Step Run",
+          "Commit requires a Session ID persisted by a successful Implement Step Run for publication copy and agent repair",
       }),
     )
   }
@@ -121,44 +139,6 @@ const boundDiagnostics = (text: string): string => {
   }
   return `${trimmed.slice(0, DIAGNOSTIC_CHAR_LIMIT)}\n…(truncated)`
 }
-
-/**
- * Deterministic commit message from Issue identity and title with GitHub
- * closing semantics. Repository hooks may still reject the wording; the agent
- * fallback repairs policy-specific failures.
- */
-export const buildDeterministicCommitMessage = (input: {
-  readonly githubIssueNumber: number
-  readonly issueTitle: string | null
-}): string => {
-  const title =
-    input.issueTitle === null || input.issueTitle.trim() === ""
-      ? `Implement issue #${input.githubIssueNumber}`
-      : input.issueTitle.trim()
-  return [
-    `${title} (#${input.githubIssueNumber})`,
-    "",
-    `Closes #${input.githubIssueNumber}`,
-  ].join("\n")
-}
-
-const buildCommitFallbackPrompt = (
-  githubIssueNumber: number,
-  diagnostics: string,
-) =>
-  [
-    "The harness attempted to create a git commit for the implementation changes in this worktree and failed.",
-    "Repair the underlying problem and create the commit yourself.",
-    "Follow this repository's commit message conventions (for example conventional commits if the repo uses them).",
-    `The commit message must mention that it closes GitHub issue #${githubIssueNumber}.`,
-    "Stage only the relevant implementation changes, then commit.",
-    "Exclude harness-owned diagnostic artifacts such as `.ready-for-agent/`.",
-    "If there is nothing left to commit because a valid commit already exists for this work, succeed without creating an empty commit.",
-    "Do not open a pull request.",
-    "",
-    "Bounded native failure diagnostics:",
-    diagnostics,
-  ].join("\n")
 
 const hasCommitsAfterStartingOid = (
   worktreePath: string,
@@ -228,6 +208,250 @@ const collectGitStateDiagnostics = (worktreePath: string) =>
         log.output || "(no commits)",
       ].join("\n"),
     )
+  })
+
+const readHeadCommitMessage = (worktreePath: string) =>
+  runGitInWorktree(worktreePath, ["log", "-1", "--pretty=%B"]).pipe(
+    Effect.map((result) =>
+      result.exitCode === 0 ? result.stdout.replace(/\r\n/g, "\n") : "",
+    ),
+  )
+
+const markCopyGenerationPhase = Effect.gen(function* () {
+  const current = yield* CurrentStepRun
+  if (current === null) {
+    return
+  }
+  const sql = yield* SqlClient.SqlClient
+  const db = yield* DbService
+  const now = Date.now()
+  yield* sql.unsafe(
+    `UPDATE step_run
+     SET reason_code = ?,
+         reason_message = ?,
+         updated_at = ?
+     WHERE id = ?
+       AND status = 'running'`,
+    [
+      STEP_RUN_REASON.copyGeneration,
+      COMMIT_COPY_GENERATION_MESSAGE,
+      now,
+      current.stepRunId,
+    ],
+  )
+  yield* db.notifyWorkItemsChanged(current.repositoryId)
+}).pipe(
+  Effect.catch((error) =>
+    Effect.logWarning("Failed to mark Commit Step Run as copy_generation", {
+      error,
+    }),
+  ),
+  Effect.asVoid,
+)
+
+/**
+ * Persist canonical publication copy before native git mutations so retries
+ * and restarts reuse it. Soft-fails on SQL/update errors; unit tests either
+ * provide SqlClient or skip the generation/seed path.
+ */
+const persistPublicationCopy = (
+  workItemId: string,
+  copy: PublicationCopy,
+): Effect.Effect<void, never, SqlClient.SqlClient | DbService> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const db = yield* DbService
+    const now = Date.now()
+    yield* sql.unsafe(
+      `UPDATE work_item
+       SET publication_title = ?,
+           publication_body = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [copy.title, copy.body, now, workItemId],
+    )
+    const current = yield* CurrentStepRun
+    if (current !== null) {
+      yield* db.notifyWorkItemsChanged(current.repositoryId)
+    }
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Failed to persist publication copy mid-Commit", {
+        error,
+        workItemId,
+      }),
+    ),
+    Effect.asVoid,
+  )
+
+const parseAndNormalize = (
+  assistantText: string,
+  githubIssueNumber: number,
+): PublicationCopy | null => {
+  const parsed = parsePublicationCopyResult(assistantText)
+  if (parsed === null) {
+    return null
+  }
+  return normalizePublicationCopy(parsed, githubIssueNumber)
+}
+
+const generatePublicationCopy = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+  sessionId: string,
+) =>
+  Effect.gen(function* () {
+    yield* markCopyGenerationPhase
+    const agentBackend = yield* AgentBackend
+    const timeout =
+      context.maxDuration ?? DEFAULT_LIFECYCLE_MAX_DURATIONS.commit
+
+    const first = yield* agentBackend
+      .continueTurn({
+        sessionId,
+        prompt: buildPublicationCopyPrompt(context.githubIssueNumber),
+        cwd: worktreePath,
+        model: context.model,
+        thinkingLevel: context.thinkingLevel,
+        timeout,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new CommitOpenCodeError({
+              message: `${agentBackendLabel(context.agentBackend)} failed to generate publication copy`,
+              worktreePath,
+              sessionId,
+              cause,
+            }),
+        ),
+      )
+
+    let copy = parseAndNormalize(first.assistantText, context.githubIssueNumber)
+    if (copy === null) {
+      const correction = yield* agentBackend
+        .continueTurn({
+          sessionId,
+          prompt: buildPublicationCopyFormatCorrectionPrompt(
+            context.githubIssueNumber,
+          ),
+          cwd: worktreePath,
+          model: context.model,
+          thinkingLevel: context.thinkingLevel,
+          timeout,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new CommitOpenCodeError({
+                message: `${agentBackendLabel(context.agentBackend)} failed during publication copy format correction`,
+                worktreePath,
+                sessionId,
+                cause,
+              }),
+          ),
+        )
+      copy = parseAndNormalize(
+        correction.assistantText,
+        context.githubIssueNumber,
+      )
+    }
+
+    if (copy === null) {
+      return yield* new CommitPublicationCopyError({
+        workItemId: context.workItemId,
+        message: `${agentBackendLabel(context.agentBackend)} did not report valid publication copy (unique final READY_FOR_AGENT_RESULT: PUBLICATION_COPY with nonblank title and substantive body). Did not fall back to Issue-title placeholder copy.`,
+      })
+    }
+
+    return copy
+  })
+
+const resolvePublicationCopy = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+  options: {
+    readonly postconditionAlreadyMet: boolean
+  },
+) =>
+  Effect.gen(function* () {
+    // When a commit already exists, HEAD is authoritative so Retry after agent
+    // repair (or soft mid-persist failure) cannot publish stale copy.
+    if (options.postconditionAlreadyMet) {
+      const message = yield* readHeadCommitMessage(worktreePath)
+      const seeded = publicationCopyFromCommitMessage(
+        message,
+        context.githubIssueNumber,
+      )
+      if (seeded !== null) {
+        const existingTitle = context.publicationTitle?.trim() ?? ""
+        const existingBody = context.publicationBody?.trim() ?? ""
+        if (existingTitle !== seeded.title || existingBody !== seeded.body) {
+          yield* persistPublicationCopy(context.workItemId, seeded)
+        }
+        return seeded
+      }
+      // HEAD unreadable/empty: fall through to persisted fields if present.
+    }
+
+    const existingTitle = context.publicationTitle?.trim() ?? ""
+    const existingBody = context.publicationBody?.trim() ?? ""
+    if (existingTitle !== "" && existingBody !== "") {
+      const normalized = normalizePublicationCopy(
+        { title: existingTitle, body: existingBody },
+        context.githubIssueNumber,
+      )
+      // Already-persisted copy is trusted even if slightly over bounds after deploy;
+      // re-normalize when possible, otherwise reuse as stored.
+      if (normalized !== null) {
+        return normalized
+      }
+      return { title: existingTitle, body: existingBody }
+    }
+
+    if (options.postconditionAlreadyMet) {
+      return yield* new CommitPublicationCopyError({
+        workItemId: context.workItemId,
+        message:
+          "Commit already exists but canonical publication copy is absent and the head commit message could not be seeded",
+      })
+    }
+
+    const sessionId = yield* resolveSessionId(context)
+    const generated = yield* generatePublicationCopy(
+      context,
+      worktreePath,
+      sessionId,
+    )
+    yield* persistPublicationCopy(context.workItemId, generated)
+    return generated
+  })
+
+/**
+ * Align canonical copy with the actual HEAD commit message when hooks or
+ * agent repair rewrote it. Persists only when the message differs.
+ */
+const alignCopyWithHeadCommit = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+  preferred: PublicationCopy,
+) =>
+  Effect.gen(function* () {
+    const actualMessage = yield* readHeadCommitMessage(worktreePath)
+    const fromCommit = publicationCopyFromCommitMessage(
+      actualMessage,
+      context.githubIssueNumber,
+    )
+    if (fromCommit === null) {
+      return preferred
+    }
+    if (
+      fromCommit.title !== preferred.title ||
+      fromCommit.body !== preferred.body
+    ) {
+      yield* persistPublicationCopy(context.workItemId, fromCommit)
+    }
+    return fromCommit
   })
 
 const attemptNativeCommit = (worktreePath: string, message: string) =>
@@ -310,16 +534,16 @@ const attemptNativeCommit = (worktreePath: string, message: string) =>
     }
 
     // Respect repository hooks and commit-message validation; do not bypass.
-    const commit = yield* runGitInWorktree(worktreePath, [
+    const commitResult = yield* runGitInWorktree(worktreePath, [
       "commit",
       "-m",
       message,
     ])
-    if (commit.exitCode !== 0) {
+    if (commitResult.exitCode !== 0) {
       return {
         ok: false as const,
         diagnostics: boundDiagnostics(
-          `git commit failed (exit ${commit.exitCode})\n${commit.output}`,
+          `git commit failed (exit ${commitResult.exitCode})\n${commitResult.output}`,
         ),
       }
     }
@@ -330,6 +554,7 @@ const askAgentToRepairCommit = (
   context: LifecycleStepContext,
   worktreePath: string,
   sessionId: string,
+  copy: PublicationCopy,
   diagnostics: string,
 ) =>
   Effect.gen(function* () {
@@ -337,10 +562,12 @@ const askAgentToRepairCommit = (
     yield* agentBackend
       .continueTurn({
         sessionId,
-        prompt: buildCommitFallbackPrompt(
-          context.githubIssueNumber,
+        prompt: buildCommitFallbackPromptWithCopy({
+          githubIssueNumber: context.githubIssueNumber,
+          title: copy.title,
+          body: copy.body,
           diagnostics,
-        ),
+        }),
         cwd: worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
@@ -359,33 +586,59 @@ const askAgentToRepairCommit = (
       )
   })
 
+const toResult = (
+  completion: LifecycleStepCompletion,
+  copy: PublicationCopy,
+): CommitResult => ({
+  completion,
+  publicationTitle: copy.title,
+  publicationBody: copy.body,
+})
+
 /**
  * Production Commit Lifecycle Step.
- * Attempts a harness-owned deterministic git commit first. Continues the
- * Implement Session only when the native attempt does not establish the
- * postcondition (repair fallback). Success requires a commit after the Work
- * Item starting OID with implementation changes committed.
+ *
+ * Generates shared publication copy (or reuses/seeds persisted copy), then
+ * attempts a harness-owned native git commit. Continues the Implement Session
+ * only when the native attempt does not establish the postcondition (repair
+ * fallback). Success requires a commit after the Work Item starting OID with
+ * implementation changes committed.
  */
 export const commit = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const startingCommitOid = yield* resolveStartingCommitOid(context)
 
+    const alreadyCommitted = yield* commitPostconditionMet(
+      worktreePath,
+      startingCommitOid,
+    )
+
     // Operator Retry / indeterminate prior attempt: re-check before mutating.
-    if (yield* commitPostconditionMet(worktreePath, startingCommitOid)) {
-      return { completion: "native" } satisfies CommitResult
+    // Still ensure canonical publication copy exists (seed from commit if needed).
+    if (alreadyCommitted) {
+      const copy = yield* resolvePublicationCopy(context, worktreePath, {
+        postconditionAlreadyMet: true,
+      })
+      return toResult("native", copy)
     }
 
-    const message = buildDeterministicCommitMessage({
-      githubIssueNumber: context.githubIssueNumber,
-      issueTitle: context.issueTitle,
+    const copy = yield* resolvePublicationCopy(context, worktreePath, {
+      postconditionAlreadyMet: false,
     })
+    const message = formatPublicationCommitMessage(copy)
     const native = yield* attemptNativeCommit(worktreePath, message)
 
     // Always re-check after the native attempt: a successful commit with a lost
     // process response must not fall through to a duplicate agent commit.
     if (yield* commitPostconditionMet(worktreePath, startingCommitOid)) {
-      return { completion: "native" } satisfies CommitResult
+      // prepare-commit-msg (or similar) may rewrite the message on success.
+      const aligned = yield* alignCopyWithHeadCommit(
+        context,
+        worktreePath,
+        copy,
+      )
+      return toResult("native", aligned)
     }
 
     const gitState = yield* collectGitStateDiagnostics(worktreePath)
@@ -396,10 +649,22 @@ export const commit = (context: LifecycleStepContext) =>
       : boundDiagnostics(`${native.diagnostics}\n\n${gitState}`)
 
     const sessionId = yield* resolveSessionId(context)
-    yield* askAgentToRepairCommit(context, worktreePath, sessionId, diagnostics)
+    yield* askAgentToRepairCommit(
+      context,
+      worktreePath,
+      sessionId,
+      copy,
+      diagnostics,
+    )
 
     if (yield* commitPostconditionMet(worktreePath, startingCommitOid)) {
-      return { completion: "agent_fallback" } satisfies CommitResult
+      // Agent may have rewritten the message for policy; re-seed so Create PR matches.
+      const finalCopy = yield* alignCopyWithHeadCommit(
+        context,
+        worktreePath,
+        copy,
+      )
+      return toResult("agent_fallback", finalCopy)
     }
 
     const afterFallback = yield* collectGitStateDiagnostics(worktreePath)

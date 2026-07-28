@@ -131,6 +131,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -204,6 +208,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -252,6 +260,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -303,6 +315,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })).worktreePath
         }),
@@ -354,6 +370,10 @@ describe("createWorktree", () => {
               worktreePath: null,
               startingCommitOid: null,
               completionSummary: null,
+
+              publicationTitle: null,
+
+              publicationBody: null,
               sessionId: null,
             },
             { tmpDir },
@@ -408,6 +428,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           } as const
 
@@ -466,6 +490,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -513,6 +541,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -554,6 +586,10 @@ describe("createWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),

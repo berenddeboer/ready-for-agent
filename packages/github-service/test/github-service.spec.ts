@@ -165,6 +165,118 @@ describe("GitHubService live implementation", () => {
     ).toBe(99)
   })
 
+  it("updates open draft PR copy and leaves non-draft PRs unchanged", async () => {
+    const mutations: unknown[] = []
+    const draftService = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_draft",
+                  number: 12,
+                  isDraft: true,
+                  title: "old",
+                  body: "old body",
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: (input) => {
+        mutations.push(input)
+        return Promise.resolve({
+          updatePullRequest: { pullRequest: { number: 12 } },
+        }) as never
+      },
+    })
+    expect(
+      await Effect.runPromise(
+        draftService.updateOpenDraftPullRequestCopy(
+          repository,
+          "rfa/issue-12",
+          { title: "new title", body: "new body\n\nCloses #12" },
+        ),
+      ),
+    ).toBe(12)
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]).toMatchObject({
+      updatePullRequest: {
+        __args: {
+          input: {
+            pullRequestId: "PR_draft",
+            title: "new title",
+            body: "new body\n\nCloses #12",
+          },
+        },
+      },
+    })
+
+    const readyMutations: unknown[] = []
+    const readyService = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_ready",
+                  number: 13,
+                  isDraft: false,
+                  title: "human",
+                  body: "human body",
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: (input) => {
+        readyMutations.push(input)
+        return Promise.resolve({}) as never
+      },
+    })
+    expect(
+      await Effect.runPromise(
+        readyService.updateOpenDraftPullRequestCopy(
+          repository,
+          "rfa/issue-13",
+          { title: "should not apply", body: "should not apply" },
+        ),
+      ),
+    ).toBe(13)
+    expect(readyMutations).toHaveLength(0)
+
+    // Mutation failure after a successful draft lookup still returns the PR number.
+    const failService = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [
+                {
+                  id: "PR_draft_fail",
+                  number: 14,
+                  isDraft: true,
+                  title: "old",
+                  body: "old",
+                },
+              ],
+            },
+          },
+        }) as never,
+      mutation: () => Promise.reject(new Error("rate limited")),
+    })
+    expect(
+      await Effect.runPromise(
+        failService.updateOpenDraftPullRequestCopy(repository, "rfa/issue-14", {
+          title: "new",
+          body: "new",
+        }),
+      ),
+    ).toBe(14)
+  })
+
   it("creates a draft pull request against the repository default base", async () => {
     const queries: unknown[] = []
     const mutations: unknown[] = []

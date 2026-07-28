@@ -272,6 +272,8 @@ type WorkItemRow = {
   readonly worktree_path: string | null
   readonly starting_commit_oid: string | null
   readonly completion_summary: string | null
+  readonly publication_title: string | null
+  readonly publication_body: string | null
   readonly session_id: string | null
   readonly failure_code: string | null
   readonly failure_message: string | null
@@ -370,6 +372,8 @@ const toWorkItemRecord = (
   worktreePath: row.worktree_path,
   startingCommitOid: row.starting_commit_oid,
   completionSummary: row.completion_summary,
+  publicationTitle: row.publication_title,
+  publicationBody: row.publication_body,
   sessionId: row.session_id,
   failureCode: row.failure_code,
   failureMessage: row.failure_message,
@@ -382,7 +386,8 @@ const toWorkItemRecord = (
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend,
                    state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
                    holds_worker_slot,
-                   pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
+                   pause_before_step, worktree_path, starting_commit_oid, completion_summary,
+                   publication_title, publication_body, session_id,
                    github_pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
                     check_start_observed_head_sha, check_start_observed_head_at,
@@ -1697,6 +1702,8 @@ export const makeWorkItemLifecycleLive = (
           readonly worktreePath?: string | null
           readonly startingCommitOid?: string | null
           readonly completionSummary?: string | null
+          readonly publicationTitle?: string | null
+          readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
@@ -1790,6 +1797,8 @@ export const makeWorkItemLifecycleLive = (
           case "commit":
             return steps.commit(context).pipe(
               Effect.map((result) => ({
+                publicationTitle: result.publicationTitle,
+                publicationBody: result.publicationBody,
                 stepRunReasonCode:
                   result.completion === "native"
                     ? STEP_RUN_REASON.native
@@ -1800,6 +1809,9 @@ export const makeWorkItemLifecycleLive = (
             return steps.createPr(context).pipe(
               Effect.map((result) => ({
                 githubPullRequestNumber: result.pullRequestNumber,
+                // Hard-persist copy used this step (includes HEAD seed).
+                publicationTitle: result.publicationTitle,
+                publicationBody: result.publicationBody,
                 // Create PR opens a draft; persist so an external ready before
                 // the first Watch poll still gets a ready-phase anchor.
                 checkStartLastObservedIsDraft: 1,
@@ -2405,6 +2417,8 @@ export const makeWorkItemLifecycleLive = (
           readonly worktreePath?: string | null
           readonly startingCommitOid?: string | null
           readonly completionSummary?: string | null
+          readonly publicationTitle?: string | null
+          readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
           readonly sessionId?: string
           readonly githubPullRequestNumber?: number
@@ -2446,6 +2460,14 @@ export const makeWorkItemLifecycleLive = (
             output.completionSummary === undefined
               ? workItem.completion_summary
               : output.completionSummary
+          const publicationTitle =
+            output.publicationTitle === undefined
+              ? workItem.publication_title
+              : output.publicationTitle
+          const publicationBody =
+            output.publicationBody === undefined
+              ? workItem.publication_body
+              : output.publicationBody
           const sessionId = output.sessionId ?? workItem.session_id
           const githubPullRequestNumber =
             output.githubPullRequestNumber ??
@@ -2548,6 +2570,8 @@ export const makeWorkItemLifecycleLive = (
                        worktree_path = ?,
                        starting_commit_oid = ?,
                        completion_summary = ?,
+                       publication_title = ?,
+                       publication_body = ?,
                        session_id = ?,
                        github_pull_request_number = ?,
                        waiting_since = NULL,
@@ -2559,6 +2583,8 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      publicationTitle,
+                      publicationBody,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -2587,6 +2613,8 @@ export const makeWorkItemLifecycleLive = (
                        worktree_path = ?,
                        starting_commit_oid = ?,
                        completion_summary = ?,
+                       publication_title = ?,
+                       publication_body = ?,
                        session_id = ?,
                        github_pull_request_number = ?,
                        holds_worker_slot = 0,
@@ -2599,6 +2627,8 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      publicationTitle,
+                      publicationBody,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -2615,6 +2645,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
@@ -2629,6 +2661,8 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      publicationTitle,
+                      publicationBody,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -2643,6 +2677,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
@@ -2655,6 +2691,8 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      publicationTitle,
+                      publicationBody,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -2671,6 +2709,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         holds_worker_slot = 0,
@@ -2685,6 +2725,8 @@ export const makeWorkItemLifecycleLive = (
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
+                      publicationTitle,
+                      publicationBody,
                       sessionId,
                       githubPullRequestNumber,
                       now,
@@ -2726,6 +2768,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         updated_at = ?
@@ -2737,6 +2781,8 @@ export const makeWorkItemLifecycleLive = (
                         worktreePath,
                         startingCommitOid,
                         completionSummary,
+                        publicationTitle,
+                        publicationBody,
                         sessionId,
                         githubPullRequestNumber,
                         now,
@@ -2755,6 +2801,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         updated_at = ?
@@ -2766,6 +2814,8 @@ export const makeWorkItemLifecycleLive = (
                         worktreePath,
                         startingCommitOid,
                         completionSummary,
+                        publicationTitle,
+                        publicationBody,
                         sessionId,
                         githubPullRequestNumber,
                         now,
@@ -2781,6 +2831,8 @@ export const makeWorkItemLifecycleLive = (
                         worktree_path = ?,
                         starting_commit_oid = ?,
                         completion_summary = ?,
+                        publication_title = ?,
+                        publication_body = ?,
                         session_id = ?,
                         github_pull_request_number = ?,
                         updated_at = ?
@@ -2792,6 +2844,8 @@ export const makeWorkItemLifecycleLive = (
                         worktreePath,
                         startingCommitOid,
                         completionSummary,
+                        publicationTitle,
+                        publicationBody,
                         sessionId,
                         githubPullRequestNumber,
                         now,
@@ -3426,6 +3480,8 @@ export const makeWorkItemLifecycleLive = (
                 worktreePath: workItem.worktree_path,
                 startingCommitOid: workItem.starting_commit_oid,
                 completionSummary: workItem.completion_summary,
+                publicationTitle: workItem.publication_title,
+                publicationBody: workItem.publication_body,
                 sessionId: workItem.session_id,
                 maxDuration,
               }
@@ -3904,6 +3960,8 @@ export const makeWorkItemLifecycleLive = (
         worktreePath: row.worktree_path,
         startingCommitOid: row.starting_commit_oid,
         completionSummary: row.completion_summary,
+        publicationTitle: row.publication_title,
+        publicationBody: row.publication_body,
         sessionId: row.session_id,
       })
 

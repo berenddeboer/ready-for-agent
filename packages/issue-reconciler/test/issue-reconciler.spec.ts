@@ -170,6 +170,7 @@ const makeGitHubLayer = (
     getOpenPullRequestNumber: () => Effect.succeed(1),
     findOpenPullRequestNumber: () => Effect.succeed(1),
     createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
     countOpenNonDraftPullRequests: () => Effect.succeed(0),
     getPullRequestCheckStatus: () =>
       Effect.succeed({

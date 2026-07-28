@@ -38,6 +38,10 @@ const context: LifecycleStepContext = {
   worktreePath: "/tmp/worktree",
   startingCommitOid: null,
   completionSummary: null,
+
+  publicationTitle: null,
+
+  publicationBody: null,
   sessionId: "ses_implement",
 }
 

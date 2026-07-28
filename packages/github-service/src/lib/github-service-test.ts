@@ -42,6 +42,7 @@ export const makeGitHubServiceTest = (
     findOpenPullRequestNumber: () => Effect.succeed(1),
     countOpenNonDraftPullRequests: () => Effect.succeed(0),
     createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
     getPullRequestCheckStatus: () =>
       Effect.succeed({
         _tag: "succeeded",
