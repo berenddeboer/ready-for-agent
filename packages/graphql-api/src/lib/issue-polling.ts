@@ -14,7 +14,7 @@ export const POLLING_AUTO_HEAL_KEY = "polling-auto-heal"
 export const JOB_RECOVERY_RETRY_LIMIT = 1
 
 /** Base quiet period after a scheduled attempt completes. */
-export const ISSUE_POLLING_BASE_SECONDS = 120
+export const ISSUE_POLLING_BASE_SECONDS = 60
 
 /** Inclusive upper bound for additive jitter seconds (0–30). */
 export const ISSUE_POLLING_JITTER_SECONDS = 30
@@ -32,7 +32,7 @@ export const PollingAutoHealJobPayload = {
 }
 
 /**
- * Sample the next Issue Polling delay: 120s + uniform integer jitter in [0, 30].
+ * Sample the next Issue Polling delay: 60s + uniform integer jitter in [0, 30].
  * Injectable via Effect Random so tests can seed or replace sampling.
  */
 export const sampleIssuePollingDelay: Effect.Effect<Duration.Duration> =
