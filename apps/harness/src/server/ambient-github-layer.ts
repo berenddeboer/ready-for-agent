@@ -177,6 +177,17 @@ export const ambientGitHubLayer = (options: {
             ),
           ),
         ),
+        observeAutomatedReviewEvidence: Effect.fn(
+          "AmbientGitHub.observeAutomatedReviewEvidence",
+        )((repository, headRefName, checks) =>
+          authenticated((service) =>
+            service.observeAutomatedReviewEvidence(
+              repository,
+              headRefName,
+              checks,
+            ),
+          ),
+        ),
         getPullRequestLifecycleStatus: Effect.fn(
           "AmbientGitHub.getPullRequestLifecycleStatus",
         )((repository, headRefName) =>

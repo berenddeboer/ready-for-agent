@@ -10,6 +10,7 @@ import { getPrStatusCheckDiagnosticsProgram } from "../bin/get-pr-status-check-d
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
+import { observeAutomatedReviewEvidenceProgram } from "../bin/observe-automated-review-evidence.js"
 import { rerunWorkflowRunProgram } from "../bin/rerun-workflow-run.js"
 import { githubServiceBinScriptPath } from "../bin-script-path.js"
 import type { GitHubService } from "./github-service.js"
@@ -25,6 +26,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "count-open-non-draft-pull-requests",
   "get-pr-check-status",
   "get-pr-status-check-diagnostics",
+  "observe-automated-review-evidence",
   "get-pr-lifecycle-status",
   "mark-pr-ready-for-review",
   "merge-pull-request",
@@ -128,6 +130,7 @@ const programs: Record<
   "count-open-non-draft-pull-requests": countOpenNonDraftPullRequestsProgram,
   "get-pr-check-status": getPrCheckStatusProgram,
   "get-pr-status-check-diagnostics": getPrStatusCheckDiagnosticsProgram,
+  "observe-automated-review-evidence": observeAutomatedReviewEvidenceProgram,
   "get-pr-lifecycle-status": getPrLifecycleStatusProgram,
   "mark-pr-ready-for-review": markPrReadyForReviewProgram,
   "merge-pull-request": mergePullRequestProgram,

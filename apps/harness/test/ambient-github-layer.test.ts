@@ -23,6 +23,11 @@ const serviceWithList = (
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
   getPullRequestCheckStatus: () => Effect.die("not used"),
   getPrStatusCheckDiagnostics: () => Effect.die("not used"),
+  observeAutomatedReviewEvidence: () =>
+    Effect.succeed({
+      _tag: "ambiguous" as const,
+      reason: "Automated review evidence observation is not configured",
+    }),
   getPullRequestLifecycleStatus: () => Effect.die("not used"),
   markPullRequestReadyForReview: () => Effect.die("not used"),
   mergePullRequest: () => Effect.die("not used"),

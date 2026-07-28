@@ -1,5 +1,9 @@
 import { Context, type Effect } from "effect"
 import type {
+  AutomatedReviewEvidenceCheck,
+  AutomatedReviewEvidenceObservation,
+} from "./automated-review-evidence.js"
+import type {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
 } from "./errors.js"
@@ -50,6 +54,19 @@ export interface GitHubServiceShape {
     options?: PrStatusCheckDiagnosticsOptions,
   ) => Effect.Effect<
     readonly PrStatusCheckDiagnostic[],
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
+  /**
+   * Observe whether a green-only Status Check Handoff has positive or
+   * ambiguous automated-review evidence. Used by Investigate to skip an
+   * Agent Turn when harness-owned GitHub data proves there is none.
+   */
+  readonly observeAutomatedReviewEvidence: (
+    repository: GitHubRepository,
+    headRefName: string,
+    checks: readonly AutomatedReviewEvidenceCheck[],
+  ) => Effect.Effect<
+    AutomatedReviewEvidenceObservation,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
   readonly getPullRequestLifecycleStatus: (

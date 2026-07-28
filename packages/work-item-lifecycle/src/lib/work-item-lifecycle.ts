@@ -2053,6 +2053,8 @@ export const makeWorkItemLifecycleLive = (
                 if (result._tag === "processed") {
                   return {
                     handledCheckIds: result.handledCheckIds,
+                    stepRunReasonCode: result.reasonCode,
+                    stepRunNote: result.reasonNote,
                     transition: {
                       nextState: "watch_pr_status_checks" as const,
                     },

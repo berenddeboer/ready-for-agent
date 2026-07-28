@@ -109,6 +109,11 @@ const githubWith = (
     countOpenNonDraftPullRequests: () => Effect.succeed(0),
     getPullRequestCheckStatus: () => Effect.succeed(status),
     getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    observeAutomatedReviewEvidence: () =>
+      Effect.succeed({
+        _tag: "ambiguous" as const,
+        reason: "Automated review evidence observation is not configured",
+      }),
     getPullRequestLifecycleStatus: () =>
       Effect.succeed({ _tag: "open" as const }),
     markPullRequestReadyForReview: () => Effect.void,
@@ -159,6 +164,11 @@ describe("PR status check steps", () => {
         })
       },
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -331,6 +341,11 @@ describe("PR status check steps", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -420,6 +435,11 @@ describe("PR status check steps", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[2]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -572,6 +592,11 @@ describe("PR status check steps", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[2]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -666,6 +691,11 @@ describe("PR status check steps", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -719,6 +749,11 @@ describe("PR status check steps", () => {
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,
@@ -818,6 +853,12 @@ describe("PR status check steps", () => {
                       },
                     },
                   ]),
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "ambiguous" as const,
+                    reason:
+                      "Automated review evidence observation is not configured",
+                  }),
               },
             ),
             keymaxxer,
@@ -1287,6 +1328,404 @@ describe("PR status check steps", () => {
     expect(prompts[0]).toContain(
       "technical or observability failure prevented you from determining the relevant review state",
     )
+  })
+
+  it("processes ordinary green CI with no review evidence without an Agent Turn", async () => {
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        const investigation = yield* investigatePrStatusChecks(context)
+        const sql = yield* SqlClient.SqlClient
+        // Simulate lifecycle marking checks handled from the investigation result.
+        if (investigation._tag === "processed") {
+          const now = Date.now()
+          for (const id of investigation.handledCheckIds) {
+            yield* sql.unsafe(
+              `UPDATE pr_status_check
+               SET handled_at = ?, updated_at = ?
+               WHERE id = ?`,
+              [now, now, id],
+            )
+          }
+        }
+        const rows = (yield* sql.unsafe(
+          `SELECT external_id, handled_at FROM pr_status_check
+           WHERE work_item_id = ? ORDER BY external_id`,
+          [context.workItemId],
+        )) as readonly {
+          readonly external_id: string
+          readonly handled_at: number | null
+        }[]
+        // Restart coverage: a second investigate must not re-open handled checks.
+        const second = yield* investigatePrStatusChecks(context)
+        return { investigation, rows, second }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:1",
+                    name: "lint",
+                    outcome: "green",
+                  },
+                  {
+                    externalId: "actions-job:2",
+                    name: "test",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "none" as const,
+                    reason: "green-no-review-evidence" as const,
+                  }),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"], () => {
+              agentCalls += 1
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(agentCalls).toBe(0)
+    expect(result.investigation).toEqual({
+      _tag: "processed",
+      handledCheckIds: [expect.any(String), expect.any(String)],
+      reasonCode: "green-no-review-evidence",
+      reasonNote: "green-no-review-evidence",
+    })
+    expect(result.rows.every((row) => row.handled_at !== null)).toBe(true)
+    expect(result.second).toEqual({
+      _tag: "processed",
+      handledCheckIds: [],
+    })
+  })
+
+  it("does not treat a successful workflow named like review as positive evidence", async () => {
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:10",
+                    name: "PR Review/main",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "none" as const,
+                    reason: "green-no-review-evidence" as const,
+                  }),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"], () => {
+              agentCalls += 1
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(agentCalls).toBe(0)
+    expect(result._tag).toBe("processed")
+    if (result._tag === "processed") {
+      expect(result.reasonCode).toBe("green-no-review-evidence")
+    }
+  })
+
+  it("does not treat a skipped zero-step recognized reviewer as positive evidence", async () => {
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:20",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green",
+                  },
+                  {
+                    externalId: "actions-job:21",
+                    name: "PR Review/main",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "none" as const,
+                    reason: "green-no-review-evidence" as const,
+                  }),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(["should not run"], () => {
+              agentCalls += 1
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(agentCalls).toBe(0)
+    expect(result._tag).toBe("processed")
+    if (result._tag === "processed") {
+      expect(result.reasonNote).toBe("green-no-review-evidence")
+    }
+  })
+
+  it("uses the Agent Turn when a recognized reviewer executed without a comment", async () => {
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:30",
+                    name: "Claude Code Review/claude-review",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "positive" as const,
+                    kind: "executed_reviewer_job" as const,
+                    detail:
+                      "Executed recognized reviewer job Claude Code Review/claude-review",
+                  }),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(
+              [
+                "No comment means no feedback.\nREADY_FOR_AGENT_RESULT: PROCESSED",
+              ],
+              () => {
+                agentCalls += 1
+              },
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(agentCalls).toBe(1)
+    expect(result).toEqual({
+      _tag: "processed",
+      handledCheckIds: [expect.any(String)],
+    })
+  })
+
+  it("uses the Agent Turn when a recognized automated-review comment exists", async () => {
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:40",
+                    name: "lint",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "positive" as const,
+                    kind: "review_comment" as const,
+                    detail: "Issue comment from claude[bot]",
+                  }),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(
+              ["Addressed review feedback.\nREADY_FOR_AGENT_RESULT: PROCESSED"],
+              () => {
+                agentCalls += 1
+              },
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(agentCalls).toBe(1)
+    expect(result._tag).toBe("processed")
+  })
+
+  it("fails safe into the Agent Turn when evidence observation is ambiguous", async () => {
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:50",
+                    name: "lint",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.succeed({
+                    _tag: "ambiguous" as const,
+                    reason: "GitHub rate limited",
+                  }),
+              },
+            ),
+            keymaxxer,
+            opencodeWith(
+              ["Inspected; ordinary CI.\nREADY_FOR_AGENT_RESULT: PROCESSED"],
+              () => {
+                agentCalls += 1
+              },
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(agentCalls).toBe(1)
+    expect(result._tag).toBe("processed")
+  })
+
+  it("never takes the green-only fast path when the handoff contains a red check", async () => {
+    let observeCalls = 0
+    let agentCalls = 0
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "actions-job:60",
+                    name: "lint",
+                    outcome: "red",
+                  },
+                  {
+                    externalId: "actions-job:61",
+                    name: "test",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                observeAutomatedReviewEvidence: () => {
+                  observeCalls += 1
+                  return Effect.succeed({
+                    _tag: "none" as const,
+                    reason: "green-no-review-evidence" as const,
+                  })
+                },
+              },
+            ),
+            keymaxxer,
+            opencodeWith(
+              ["Fixed lint.\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
+              () => {
+                agentCalls += 1
+              },
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(observeCalls).toBe(0)
+    expect(agentCalls).toBe(1)
+    expect(result).toEqual({
+      _tag: "checks_triggered",
+      handledCheckIds: [expect.any(String), expect.any(String)],
+      checkStartAnchorRecorded: false,
+    })
   })
 
   it("treats a successful terminal review with no relevant comment as PROCESSED no feedback", async () => {

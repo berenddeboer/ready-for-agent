@@ -23,6 +23,14 @@ import type {
   QueryGenqlSelection,
 } from "../internal/generated/schema.js"
 import {
+  type AutomatedReviewEvidenceCheck,
+  type AutomatedReviewEvidenceObservation,
+  GREEN_NO_REVIEW_EVIDENCE_REASON,
+  inspectReviewerJobSteps,
+  isRecognizedAutomatedReviewerLogin,
+  isRecognizedAutomatedReviewerName,
+} from "./automated-review-evidence.js"
+import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
 } from "./errors.js"
@@ -182,6 +190,17 @@ interface GitHubRestJob {
   readonly name?: unknown
   readonly status?: unknown
   readonly conclusion?: unknown
+  readonly steps?:
+    | readonly {
+        readonly name?: unknown
+        readonly status?: unknown
+        readonly conclusion?: unknown
+      }[]
+    | null
+}
+
+interface GitHubRestLoginAuthor {
+  readonly login?: unknown
 }
 
 interface GitHubRestCommitStatus {
@@ -212,6 +231,14 @@ export type RerunWorkflowRun = (
   workflowRunId: number,
   signal?: AbortSignal,
 ) => Promise<void>
+
+/** Observe automated-review evidence for a green Status Check Handoff. */
+export type ObserveAutomatedReviewEvidence = (
+  repository: { owner: string; name: string },
+  headRefName: string,
+  checks: readonly AutomatedReviewEvidenceCheck[],
+  signal?: AbortSignal,
+) => Effect.Effect<AutomatedReviewEvidenceObservation, GitHubRequestError>
 
 const emptyTerminalChecks: readonly TerminalPrStatusCheck[] = []
 
@@ -814,6 +841,7 @@ export const makeGitHubService = (
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
   loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
   rerunWorkflowRunImpl?: RerunWorkflowRun,
+  observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
 ): GitHubServiceShape => ({
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
@@ -949,6 +977,31 @@ export const makeGitHubService = (
         Effect.fail(
           new GitHubRequestError({
             message: `Failed to load PR Status Check diagnostics for ${repository.owner}/${repository.name} timed out`,
+            cause,
+          }),
+        ),
+      ),
+    )
+  }),
+  observeAutomatedReviewEvidence: Effect.fn(
+    "GitHubService.observeAutomatedReviewEvidence",
+  )(function* (repository, headRefName, checks) {
+    if (observeAutomatedReviewEvidenceImpl === undefined) {
+      return {
+        _tag: "ambiguous" as const,
+        reason: "Automated review evidence observation is not configured",
+      }
+    }
+    return yield* observeAutomatedReviewEvidenceImpl(
+      repository,
+      headRefName,
+      checks,
+    ).pipe(
+      Effect.timeout(REQUEST_TIMEOUT),
+      Effect.catchTag("TimeoutError", (cause) =>
+        Effect.fail(
+          new GitHubRequestError({
+            message: `Failed to observe automated review evidence for ${repository.owner}/${repository.name}:${headRefName} timed out`,
             cause,
           }),
         ),
@@ -2238,6 +2291,255 @@ const makeRerunWorkflowRun =
     }
   }
 
+const loginFromAuthor = (author: unknown): string | null => {
+  if (author === null || author === undefined || typeof author !== "object") {
+    return null
+  }
+  const login = (author as GitHubRestLoginAuthor).login
+  if (typeof login !== "string" || login.trim() === "") {
+    return null
+  }
+  return login.trim()
+}
+
+const listAuthorLoginsFromRestCollection = async (
+  token: string,
+  urlBase: string,
+  fetchImpl: GitHubFetch,
+  errorMessage: string,
+  signal?: AbortSignal,
+): Promise<readonly string[]> => {
+  const logins: string[] = []
+  for (let page = 1; ; page += 1) {
+    const url = new URL(urlBase)
+    url.searchParams.set("per_page", String(PAGE_SIZE))
+    url.searchParams.set("page", String(page))
+    const response = await fetchImpl(url, {
+      headers: githubRestHeaders(token),
+      signal,
+    })
+    const items = await readGitHubJson<
+      readonly { readonly user?: unknown; readonly author?: unknown }[]
+    >(response, errorMessage)
+    for (const item of items) {
+      const login = loginFromAuthor(item.user) ?? loginFromAuthor(item.author)
+      if (login !== null) {
+        logins.push(login)
+      }
+    }
+    if (items.length < PAGE_SIZE) {
+      break
+    }
+  }
+  return logins
+}
+
+const fetchActionsJobExecution = async (
+  token: string,
+  repository: { owner: string; name: string },
+  jobId: number,
+  fetchImpl: GitHubFetch,
+  signal?: AbortSignal,
+): Promise<{
+  readonly conclusion: unknown
+  readonly steps: readonly {
+    readonly status?: unknown
+    readonly conclusion?: unknown
+  }[]
+}> => {
+  const response = await fetchImpl(
+    `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/actions/jobs/${jobId}`,
+    {
+      headers: githubRestHeaders(token),
+      signal,
+    },
+  )
+  const job = await readGitHubJson<{
+    readonly conclusion?: unknown
+    readonly steps?:
+      | readonly {
+          readonly status?: unknown
+          readonly conclusion?: unknown
+        }[]
+      | null
+  }>(
+    response,
+    `Failed to load Actions job ${jobId} for ${repository.owner}/${repository.name}`,
+  )
+  return {
+    conclusion: job.conclusion,
+    steps: job.steps ?? [],
+  }
+}
+
+const resolveOpenPullRequestNumberForEvidence = async (
+  token: string,
+  repository: { owner: string; name: string },
+  headRefName: string,
+  fetchImpl: GitHubFetch,
+  signal?: AbortSignal,
+): Promise<number | null> => {
+  const url = new URL(
+    `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/pulls`,
+  )
+  url.searchParams.set("state", "open")
+  url.searchParams.set("head", `${repository.owner}:${headRefName}`)
+  url.searchParams.set("per_page", "1")
+  const response = await fetchImpl(url, {
+    headers: githubRestHeaders(token),
+    signal,
+  })
+  const pulls = await readGitHubJson<readonly { readonly number?: unknown }[]>(
+    response,
+    `Failed to resolve open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+  )
+  const number = pulls[0]?.number
+  if (
+    typeof number === "number" &&
+    Number.isSafeInteger(number) &&
+    number > 0
+  ) {
+    return number
+  }
+  return null
+}
+
+const makeObserveAutomatedReviewEvidence =
+  (token: string, fetchImpl: GitHubFetch): ObserveAutomatedReviewEvidence =>
+  (repository, headRefName, checks) =>
+    Effect.gen(function* () {
+      const pullNumber = yield* githubRequest(
+        `Failed to resolve open pull request for automated review evidence on ${repository.owner}/${repository.name}:${headRefName}`,
+        (signal) =>
+          resolveOpenPullRequestNumberForEvidence(
+            token,
+            repository,
+            headRefName,
+            fetchImpl,
+            signal,
+          ),
+      )
+      if (pullNumber === null) {
+        return {
+          _tag: "ambiguous" as const,
+          reason: `No open pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
+        }
+      }
+
+      const issueComments = yield* githubRequest(
+        `Failed to list issue comments for automated review evidence on ${repository.owner}/${repository.name}#${pullNumber}`,
+        (signal) =>
+          listAuthorLoginsFromRestCollection(
+            token,
+            `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/issues/${pullNumber}/comments`,
+            fetchImpl,
+            `Failed to list issue comments for ${repository.owner}/${repository.name}#${pullNumber}`,
+            signal,
+          ),
+      )
+      for (const login of issueComments) {
+        if (isRecognizedAutomatedReviewerLogin(login)) {
+          return {
+            _tag: "positive" as const,
+            kind: "review_comment" as const,
+            detail: `Issue comment from ${login}`,
+          }
+        }
+      }
+
+      const reviewComments = yield* githubRequest(
+        `Failed to list review comments for automated review evidence on ${repository.owner}/${repository.name}#${pullNumber}`,
+        (signal) =>
+          listAuthorLoginsFromRestCollection(
+            token,
+            `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/pulls/${pullNumber}/comments`,
+            fetchImpl,
+            `Failed to list review comments for ${repository.owner}/${repository.name}#${pullNumber}`,
+            signal,
+          ),
+      )
+      for (const login of reviewComments) {
+        if (isRecognizedAutomatedReviewerLogin(login)) {
+          return {
+            _tag: "positive" as const,
+            kind: "review_comment" as const,
+            detail: `Review comment from ${login}`,
+          }
+        }
+      }
+
+      const reviews = yield* githubRequest(
+        `Failed to list pull request reviews for automated review evidence on ${repository.owner}/${repository.name}#${pullNumber}`,
+        (signal) =>
+          listAuthorLoginsFromRestCollection(
+            token,
+            `${GITHUB_API_URL}/repos/${repository.owner}/${repository.name}/pulls/${pullNumber}/reviews`,
+            fetchImpl,
+            `Failed to list pull request reviews for ${repository.owner}/${repository.name}#${pullNumber}`,
+            signal,
+          ),
+      )
+      for (const login of reviews) {
+        if (isRecognizedAutomatedReviewerLogin(login)) {
+          return {
+            _tag: "positive" as const,
+            kind: "pull_request_review" as const,
+            detail: `Pull request review from ${login}`,
+          }
+        }
+      }
+
+      for (const check of checks) {
+        if (!isRecognizedAutomatedReviewerName(check.name)) {
+          continue
+        }
+        const { source, actionsJobId } = parseDiagnosticSource(check.externalId)
+        if (source !== "actions-job" || actionsJobId === null) {
+          return {
+            _tag: "ambiguous" as const,
+            reason: `Recognized automated reviewer check ${check.name} (${check.externalId}) has no inspectable Actions job steps`,
+          }
+        }
+        const jobResult = yield* githubRequest(
+          `Failed to load Actions job for automated review evidence on ${repository.owner}/${repository.name}`,
+          (signal) =>
+            fetchActionsJobExecution(
+              token,
+              repository,
+              actionsJobId,
+              fetchImpl,
+              signal,
+            ),
+        ).pipe(Effect.result)
+        if (Result.isFailure(jobResult)) {
+          return {
+            _tag: "ambiguous" as const,
+            reason: `Could not load Actions job steps for recognized reviewer ${check.name}: ${jobResult.failure.message}`,
+          }
+        }
+        const stepInspection = inspectReviewerJobSteps(jobResult.success)
+        if (stepInspection._tag === "executed") {
+          return {
+            _tag: "positive" as const,
+            kind: "executed_reviewer_job" as const,
+            detail: `Executed recognized reviewer job ${check.name} (${check.externalId})`,
+          }
+        }
+        if (stepInspection._tag === "steps_unavailable") {
+          return {
+            _tag: "ambiguous" as const,
+            reason: `Recognized automated reviewer job ${check.name} (${check.externalId}) concluded without inspectable steps`,
+          }
+        }
+        // Skipped or all-skipped-step recognized reviewer: not positive evidence.
+      }
+
+      return {
+        _tag: "none" as const,
+        reason: GREEN_NO_REVIEW_EVIDENCE_REASON,
+      }
+    })
+
 const listTerminalCommitStatuses = async (
   token: string,
   repository: { owner: string; name: string },
@@ -2510,6 +2812,7 @@ export const makeGitHubServiceFromToken = (
     makeListTerminalChecksForCommit(token, fetchImpl),
     makeLoadPrStatusCheckDiagnostics(token, fetchImpl, fs),
     makeRerunWorkflowRun(token, fetchImpl),
+    makeObserveAutomatedReviewEvidence(token, fetchImpl),
   )
 
 export const GitHubServiceLive = Layer.effect(

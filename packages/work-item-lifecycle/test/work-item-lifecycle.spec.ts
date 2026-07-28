@@ -4579,6 +4579,80 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("persists green-no-review-evidence reason when Investigate skips the Agent Turn", () => {
+      const checkId = "psc-green-no-review"
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed(watchResult("handoff_needed")),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "processed",
+            handledCheckIds: [checkId],
+            reasonCode: STEP_RUN_REASON.greenNoReviewEvidence,
+            reasonNote: "green-no-review-evidence",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+
+          for (let index = 0; index < 8; index += 1) {
+            yield* claimAndRunPending
+          }
+          yield* forgetCreatePrDraftProvenance(created.id)
+
+          const watched = yield* claimAndRunPending
+          expect(watched._tag).toBe("processed")
+          if (watched._tag === "processed") {
+            expect(watched.workItem.state).toBe("investigate_pr_status_checks")
+          }
+
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO pr_status_check (
+               id, work_item_id, external_id, name, outcome,
+               handled_at, observed_at, created_at, updated_at
+             ) VALUES (?, ?, 'actions-job:green-ci', 'lint', 'green', NULL, ?, ?, ?)`,
+            [checkId, created.id, now, now, now],
+          )
+
+          const investigated = yield* claimAndRunPending
+          expect(investigated._tag).toBe("processed")
+          if (investigated._tag === "processed") {
+            expect(investigated.workItem.state).toBe("watch_pr_status_checks")
+          }
+
+          const checks = (yield* sql.unsafe(
+            `SELECT handled_at FROM pr_status_check WHERE id = ?`,
+            [checkId],
+          )) as readonly { handled_at: number | null }[]
+          expect(checks[0]?.handled_at).not.toBeNull()
+
+          const stepRuns = (yield* sql.unsafe(
+            `SELECT reason_code, reason_message
+             FROM step_run
+             WHERE work_item_id = ? AND step = 'investigate_pr_status_checks'
+             ORDER BY queued_at DESC LIMIT 1`,
+            [created.id],
+          )) as readonly {
+            readonly reason_code: string | null
+            readonly reason_message: string | null
+          }[]
+          expect(stepRuns[0]?.reason_code).toBe("green-no-review-evidence")
+          expect(stepRuns[0]?.reason_message).toBe("green-no-review-evidence")
+        }),
+      )
+    })
+
     it("returns PROCESSED investigation to Watch immediately without resetting the Check-Start Anchor", () => {
       const checkId = "psc-processed-noop"
       const priorAnchorAt = 1_000
