@@ -119,11 +119,11 @@ required; default is OpenCode):
 
 Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
 Agent Turns. Harness-launched Grok processes disable auto-update for that
-session (`--no-auto-update` / `GROK_DISABLE_AUTOUPDATER`). Initial Grok Build
-support does not integrate Keymaxxer for Agent Turns and does not expose
-Session Telemetry (shown as unsupported). Opt-in live adapter tests use
-`GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1`; normal CI does not need paid
-model credentials.
+session (`--no-auto-update` / `GROK_DISABLE_AUTOUPDATER`). Grok Build Agent
+Turns do not integrate Keymaxxer; Session Telemetry is live-read from on-disk
+Grok session files under `$GROK_HOME/sessions` (default `~/.grok`). Opt-in live
+adapter tests use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1`; normal CI
+does not need paid model credentials.
 
 **Optional:**
 

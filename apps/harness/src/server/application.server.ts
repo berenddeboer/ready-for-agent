@@ -21,12 +21,11 @@ import {
   SessionTelemetryProvider,
   isSelectableAgentBackendId,
   resolveActiveRegistration,
-  unsupportedSessionTelemetry,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
-import { Grok } from "@ready-for-agent/grok"
+import { Grok, GrokSessionTelemetryLive } from "@ready-for-agent/grok"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
   KeymaxxerService,
@@ -76,17 +75,20 @@ const makeResolveRuntime = (
     if (registration.descriptor.id === AGENT_BACKEND_IDS.grok) {
       return Effect.gen(function* () {
         const adapter = yield* AgentBackend
+        const telemetry = yield* SessionTelemetryProvider
         return {
           registration,
           adapter,
-          telemetry: {
-            getSession: (sessionId: string) =>
-              Effect.succeed(
-                unsupportedSessionTelemetry(sessionId, registration.descriptor),
-              ),
-          },
+          telemetry,
         }
-      }).pipe(Effect.provide(Grok.layer().pipe(Layer.provide(platformLayer))))
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Grok.layer().pipe(Layer.provide(platformLayer)),
+            GrokSessionTelemetryLive(),
+          ),
+        ),
+      )
     }
 
     return Effect.gen(function* () {
