@@ -11,26 +11,31 @@ import {
 import { describe, expect, it } from "bun:test"
 
 describe("Agent Backend registry", () => {
-  it("exposes OpenCode and Grok Build as selectable production backends", () => {
+  it("exposes OpenCode, Grok Build, and Codex Build as selectable production backends", () => {
     const backends = listBuiltInAgentBackends()
     expect(backends.map((entry) => entry.descriptor.id)).toEqual([
       AGENT_BACKEND_IDS.opencode,
       AGENT_BACKEND_IDS.grok,
+      AGENT_BACKEND_IDS.codex,
     ])
     expect(defaultAgentBackendId).toBe(AGENT_BACKEND_IDS.opencode)
     expect(getBuiltInAgentBackend("missing")).toBeUndefined()
     expect(
       getBuiltInAgentBackend(AGENT_BACKEND_IDS.grok)?.descriptor.label,
     ).toBe("Grok Build")
+    expect(
+      getBuiltInAgentBackend(AGENT_BACKEND_IDS.codex)?.descriptor.label,
+    ).toBe("Codex Build")
   })
 
   it("maps backend ids to operator-visible labels for failure copy", () => {
     expect(agentBackendLabel(AGENT_BACKEND_IDS.opencode)).toBe("OpenCode")
     expect(agentBackendLabel(AGENT_BACKEND_IDS.grok)).toBe("Grok Build")
+    expect(agentBackendLabel(AGENT_BACKEND_IDS.codex)).toBe("Codex Build")
     expect(agentBackendLabel("unknown-backend")).toBe("unknown-backend")
   })
 
-  it("declares typed capabilities for OpenCode and Grok Build", () => {
+  it("declares typed capabilities for OpenCode, Grok Build, and Codex Build", () => {
     const opencode = getBuiltInAgentBackend(AGENT_BACKEND_IDS.opencode)
     expect(opencode).toBeDefined()
     expect(capabilitySupported(opencode!, "SessionTelemetry")).toBe(true)
@@ -40,6 +45,11 @@ describe("Agent Backend registry", () => {
     expect(grok).toBeDefined()
     expect(capabilitySupported(grok!, "SessionTelemetry")).toBe(true)
     expect(capabilitySupported(grok!, "KeymaxxerMcp")).toBe(false)
+
+    const codex = getBuiltInAgentBackend(AGENT_BACKEND_IDS.codex)
+    expect(codex).toBeDefined()
+    expect(capabilitySupported(codex!, "SessionTelemetry")).toBe(false)
+    expect(capabilitySupported(codex!, "KeymaxxerMcp")).toBe(false)
   })
 })
 

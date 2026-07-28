@@ -35,6 +35,9 @@
       "path": "../../packages/grok/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/codex/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/issue-reconciler/tsconfig.lib.json"
     },
     {

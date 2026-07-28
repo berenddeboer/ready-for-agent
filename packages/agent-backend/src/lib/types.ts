@@ -4,6 +4,7 @@ import type { Duration, Effect } from "effect"
 export const AGENT_BACKEND_IDS = {
   opencode: "opencode",
   grok: "grok",
+  codex: "codex",
 } as const
 
 export type AgentBackendId =

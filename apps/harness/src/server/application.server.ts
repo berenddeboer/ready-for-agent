@@ -22,6 +22,7 @@ import {
   isSelectableAgentBackendId,
   resolveActiveRegistration,
 } from "@ready-for-agent/agent-backend"
+import { Codex, CodexSessionTelemetryLive } from "@ready-for-agent/codex"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
@@ -86,6 +87,25 @@ const makeResolveRuntime = (
           Layer.mergeAll(
             Grok.layer().pipe(Layer.provide(platformLayer)),
             GrokSessionTelemetryLive(),
+          ),
+        ),
+      )
+    }
+
+    if (registration.descriptor.id === AGENT_BACKEND_IDS.codex) {
+      return Effect.gen(function* () {
+        const adapter = yield* AgentBackend
+        const telemetry = yield* SessionTelemetryProvider
+        return {
+          registration,
+          adapter,
+          telemetry,
+        }
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Codex.layer().pipe(Layer.provide(platformLayer)),
+            CodexSessionTelemetryLive(),
           ),
         ),
       )

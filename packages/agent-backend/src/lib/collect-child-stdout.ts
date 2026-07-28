@@ -22,3 +22,36 @@ export const collectChildStdout = (
       stdout,
     }
   })
+
+/**
+ * Drain stdout and stderr concurrently to EOF, then read exit code.
+ *
+ * Concurrent drain avoids pipe-buffer deadlock when both streams produce
+ * output. Used by readiness probes whose CLIs print status on stderr
+ * (e.g. `codex login status`).
+ */
+export const collectChildStdoutAndStderr = (
+  handle: ChildProcessHandle,
+): Effect.Effect<
+  {
+    readonly exitCode: number
+    readonly stdout: string
+    readonly stderr: string
+  },
+  PlatformError
+> =>
+  Effect.gen(function* () {
+    const [stdout, stderr] = yield* Effect.all(
+      [
+        Stream.decodeText(handle.stdout).pipe(Stream.mkString),
+        Stream.decodeText(handle.stderr).pipe(Stream.mkString),
+      ],
+      { concurrency: 2 },
+    )
+    const exitCode = yield* handle.exitCode
+    return {
+      exitCode: Number(exitCode),
+      stdout,
+      stderr,
+    }
+  })

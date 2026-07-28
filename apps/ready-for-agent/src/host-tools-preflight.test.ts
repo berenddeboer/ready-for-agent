@@ -54,7 +54,7 @@ describe("host tools preflight", () => {
     expect(missingGrok.message).toContain("Grok Build")
   })
 
-  test("unused built-ins not required even when only one of two is selected", () => {
+  test("unused built-ins not required when a single backend is selected", () => {
     const onlyGrok = checkHostTools(
       (command) => ["git", "gh", "grok"].includes(command),
       { selectedAgentBackendIds: ["grok"] },
@@ -66,6 +66,24 @@ describe("host tools preflight", () => {
       { selectedAgentBackendIds: ["opencode"] },
     )
     expect(onlyOpenCode.ok).toBe(true)
+  })
+
+  test("requires codex when only Codex Build is selected", () => {
+    const withCodex = checkHostTools(
+      (command) => ["git", "gh", "codex"].includes(command),
+      { selectedAgentBackendIds: ["codex"] },
+    )
+    expect(withCodex.ok).toBe(true)
+
+    const missingCodex = checkHostTools(
+      (command) => ["git", "gh", "opencode"].includes(command),
+      { selectedAgentBackendIds: ["codex"] },
+    )
+    expect(missingCodex.ok).toBe(false)
+    if (missingCodex.ok) return
+    expect(missingCodex.missing.map((tool) => tool.name)).toEqual(["codex"])
+    expect(missingCodex.message).toContain("codex")
+    expect(missingCodex.message).toContain("Codex Build")
   })
 
   test("passes without keymaxxer", () => {
