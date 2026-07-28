@@ -5,6 +5,7 @@ A confirmed merged Work Item PR supersedes every unfinished operational Lifecycl
 ## Consequences
 
 - Refresh is the automatic merge-outcome seam for both Needs Human merge handoffs and mid-loop operational steps (Watch, Investigate, and peers).
-- When a Work Item already owns a PR and Issue revalidation reports only `issue_not_open` / `issue_not_found`, the Step Run may succeed without failing the Work Item, but Complete still requires a confirmed merged PR (Refresh / `continueAfterHumanPrOutcome`). “Has a PR number” alone never Completes.
-- Startup orphan recovery still marks prior-process Running Step Runs Interrupted without redelivery; merge discovery is Refresh-driven, not silent requeue.
-- Step Run history retains interrupted/cancelled outcomes with reason `pr_merged` for superseded work.
+- When a Work Item already owns a PR and Issue revalidation reports only `issue_not_open` / `issue_not_found`, the completing Step Run succeeds without terminal Failed, then branches on Work Item PR lifecycle status: **merged** advances to local cleanup (same destination as Refresh / `continueAfterHumanPrOutcome`); **open** (or indeterminate PR status) applies Pause Work Item with an operator-visible reason that the Issue is closed while the PR remains open; **closed unmerged** pauses with a closed-unmerged reason. Complete still requires a confirmed merged PR. “Has a PR number” alone never Completes. Silent park (operational state, no pause flag, no reason, no job) is not used.
+- Reopening the Issue does not auto-Start a Work Item paused for closed Issue + open PR; operator Start resumes the current operational Lifecycle Step.
+- Startup orphan recovery still marks prior-process Running Step Runs Interrupted without redelivery; merge discovery is Refresh-driven, not silent requeue (and may still supersede a Work Item paused for closed Issue + open PR).
+- Step Run history retains interrupted/cancelled outcomes with reason `pr_merged` for superseded work, and succeeded stop reasons such as `issue_closed_while_pr_open` when Pause is applied at the revalidation seam.

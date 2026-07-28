@@ -27,6 +27,8 @@ import {
   type RepositoryNotFoundError,
 } from "@ready-for-agent/db-service"
 import {
+  GitHubService,
+  type PullRequestLifecycleStatus,
   formatUserFacingError,
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
@@ -106,6 +108,7 @@ import {
   makeStepRunId,
   makeWorkItemId,
 } from "./types.js"
+import { workItemBranchName } from "./worktree-names.js"
 
 export { WAITING_FOR_WORKER_SLOT_MESSAGE } from "./types.js"
 
@@ -741,6 +744,30 @@ export class WorkItemLifecycle extends Context.Service<
   WorkItemLifecycleShape
 >()("@ready-for-agent/work-item-lifecycle/WorkItemLifecycle") {}
 
+/** Operator-visible reason when Issue is closed/missing and PR is still open. */
+export const formatIssueClosedWhilePrOpenMessage = (
+  githubIssueNumber: number,
+  githubPullRequestNumber: number,
+): string =>
+  `Issue #${githubIssueNumber} is closed or no longer present while pull request #${githubPullRequestNumber} is still open. Reopen the issue if you want to continue, then Start job.`
+
+/**
+ * Operator-visible reason when Issue is closed/missing and PR status is
+ * indeterminate (lookup failed or PR not found). Same Pause policy as open PR.
+ */
+export const formatIssueClosedPrStatusIndeterminateMessage = (
+  githubIssueNumber: number,
+  githubPullRequestNumber: number,
+): string =>
+  `Issue #${githubIssueNumber} is closed or no longer present while pull request #${githubPullRequestNumber} appears still open or its status could not be confirmed. Reopen the issue if you want to continue, then Start job.`
+
+/** Operator-visible reason when Issue is closed/missing and PR was closed unmerged. */
+export const formatIssueClosedPrClosedUnmergedMessage = (
+  githubIssueNumber: number,
+  githubPullRequestNumber: number,
+): string =>
+  `Issue #${githubIssueNumber} is closed or no longer present and pull request #${githubPullRequestNumber} was closed without merge. Start job after reopening if you want to continue, or Abandon or Reset.`
+
 export const makeWorkItemLifecycleLive = (
   config: WorkItemLifecycleConfig = {},
 ): Layer.Layer<
@@ -751,6 +778,7 @@ export const makeWorkItemLifecycleLive = (
   | QueueService
   | LifecycleSteps
   | ActiveAgentBackend
+  | GitHubService
 > =>
   Layer.effect(
     WorkItemLifecycle,
@@ -760,6 +788,7 @@ export const makeWorkItemLifecycleLive = (
       const queue = yield* QueueService
       const steps = yield* LifecycleSteps
       const activeAgentBackend = yield* ActiveAgentBackend
+      const github = yield* GitHubService
       /**
        * Resolve build/review models for a backend id (create: effective;
        * turns: captured). Uses repository flat columns (project effective)
@@ -2256,6 +2285,103 @@ export const makeWorkItemLifecycleLive = (
         )
       }
 
+      /**
+       * When Issue revalidation fails only with issue_not_open / issue_not_found
+       * and a Work Item PR is owned, inspect PR lifecycle to decide stop shape.
+       * Lookup failures fail closed to a visible open-PR pause (never silent park).
+       */
+      const inspectOwnedPrLifecycleStatus = (
+        row: WorkItemRow,
+      ): Effect.Effect<PullRequestLifecycleStatus | null> =>
+        Effect.gen(function* () {
+          const repositories = yield* db.listRepositories
+          const repository = repositories.find(
+            (candidate) => candidate.id === row.repository_id,
+          )
+          if (repository === undefined) {
+            return null
+          }
+          const headRefName = workItemBranchName({
+            githubOwner: repository.githubOwner,
+            githubRepo: repository.githubRepo,
+            githubIssueNumber: row.github_issue_number,
+            workItemId: row.id,
+          })
+          return yield* github.getPullRequestLifecycleStatus(
+            {
+              owner: repository.githubOwner,
+              name: repository.githubRepo,
+            },
+            headRefName,
+          )
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "Owned-PR lifecycle lookup failed after Issue revalidation; failing closed to pause",
+              {
+                workItemId: row.id,
+                error: String(error),
+              },
+            ).pipe(Effect.as(null)),
+          ),
+        )
+
+      type OwnedPrIssueStop =
+        | {
+            readonly _tag: "merged"
+            readonly reasonCode: StepRunReasonCode
+            readonly reasonMessage: string
+          }
+        | {
+            readonly _tag: "pause"
+            readonly reasonCode: StepRunReasonCode
+            readonly reasonMessage: string
+          }
+
+      const resolveOwnedPrIssueStop = (
+        row: WorkItemRow,
+        githubPullRequestNumber: number,
+      ): Effect.Effect<OwnedPrIssueStop> =>
+        Effect.gen(function* () {
+          const status = yield* inspectOwnedPrLifecycleStatus(row)
+          if (status !== null && status._tag === "merged") {
+            return {
+              _tag: "merged" as const,
+              reasonCode: STEP_RUN_REASON.prMerged,
+              reasonMessage: `Issue #${row.github_issue_number} is closed or missing and pull request #${githubPullRequestNumber} is merged; advancing to local cleanup`,
+            }
+          }
+          if (status !== null && status._tag === "closed") {
+            return {
+              _tag: "pause" as const,
+              reasonCode: STEP_RUN_REASON.issueClosedPrClosedUnmerged,
+              reasonMessage: formatIssueClosedPrClosedUnmergedMessage(
+                row.github_issue_number,
+                githubPullRequestNumber,
+              ),
+            }
+          }
+          if (status !== null && status._tag === "open") {
+            return {
+              _tag: "pause" as const,
+              reasonCode: STEP_RUN_REASON.issueClosedWhilePrOpen,
+              reasonMessage: formatIssueClosedWhilePrOpenMessage(
+                row.github_issue_number,
+                githubPullRequestNumber,
+              ),
+            }
+          }
+          // not_found or lookup failed → pause (fail closed, never silent park)
+          return {
+            _tag: "pause" as const,
+            reasonCode: STEP_RUN_REASON.issueClosedWhilePrOpen,
+            reasonMessage: formatIssueClosedPrStatusIndeterminateMessage(
+              row.github_issue_number,
+              githubPullRequestNumber,
+            ),
+          }
+        })
+
       const completeSuccessfulStep = (input: {
         readonly stepRun: StepRunRow
         readonly workItem: WorkItemRow
@@ -2310,16 +2436,22 @@ export const makeWorkItemLifecycleLive = (
             workItem.github_pull_request_number
 
           // A merged Work Item PR often closes the Issue. Do not Failed the Work
-          // Item for issue_not_open / issue_not_found when a PR is already owned,
-          // but also do not Complete without Refresh confirming the PR is merged
-          // (operator may have closed the Issue while the PR is still open).
+          // Item for issue_not_open / issue_not_found when a PR is already owned;
+          // branch on PR lifecycle (open → Pause, merged → cleanup, closed → Pause).
           const deferIssueRevalidationForOwnedPr =
             !revalidation.ok &&
             githubPullRequestNumber !== null &&
             (revalidation.failureCode === "issue_not_found" ||
               revalidation.failureCode === "issue_not_open")
+          const ownedPrIssueStop = deferIssueRevalidationForOwnedPr
+            ? yield* resolveOwnedPrIssueStop(workItem, githubPullRequestNumber)
+            : null
           const nextStep =
             transition?.nextState ?? nextOperationalStep(stepRun.step)
+          const stepRunReasonCode =
+            ownedPrIssueStop?.reasonCode ?? output.stepRunReasonCode ?? null
+          const stepRunReasonMessage =
+            ownedPrIssueStop?.reasonMessage ?? output.stepRunNote ?? null
 
           yield* sql
             .withTransaction(
@@ -2334,8 +2466,8 @@ export const makeWorkItemLifecycleLive = (
                   WHERE id = ? AND status = 'running'`,
                   [
                     now,
-                    output.stepRunReasonCode ?? null,
-                    output.stepRunNote ?? null,
+                    stepRunReasonCode,
+                    stepRunReasonMessage,
                     now,
                     stepRun.id,
                   ],
@@ -2387,13 +2519,55 @@ export const makeWorkItemLifecycleLive = (
                   )
                 }
 
-                if (deferIssueRevalidationForOwnedPr) {
-                  // Park: Step Run succeeded; keep current operational state and
-                  // release the slot. Refresh's confirmed-merge path advances.
+                if (ownedPrIssueStop?._tag === "merged") {
+                  // Confirmed merge at revalidation seam: same destination as
+                  // Refresh / continueAfterHumanPrOutcome (local cleanup).
                   yield* sql.unsafe(
                     `UPDATE work_item
-                   SET failure_code = NULL,
+                   SET state = 'local_cleanup',
+                       state_ready_at = ?,
+                       paused = 0,
+                       failure_code = NULL,
                        failure_message = NULL,
+                       worktree_path = ?,
+                       starting_commit_oid = ?,
+                       completion_summary = ?,
+                       session_id = ?,
+                       github_pull_request_number = ?,
+                       waiting_since = NULL,
+                       waiting_for_blockers = 0,
+                       updated_at = ?
+                   WHERE id = ?`,
+                    [
+                      now,
+                      worktreePath,
+                      startingCommitOid,
+                      completionSummary,
+                      sessionId,
+                      githubPullRequestNumber,
+                      now,
+                      workItem.id,
+                    ],
+                  )
+                  const acquired = yield* tryAcquireWorkerSlot(workItem.id, now)
+                  if (acquired) {
+                    yield* enqueueStepRunForWorkItem(
+                      workItem.id,
+                      "local_cleanup",
+                      now,
+                    )
+                  }
+                } else if (ownedPrIssueStop?._tag === "pause") {
+                  // Pause Work Item: keep current operational state, release
+                  // slot, no next step. Operator Start resumes after reopen.
+                  // waiting_for_blockers cannot apply on this seam (blocked
+                  // Issues fail revalidation without owned-PR deferral) but
+                  // clear it for symmetry with merged/failed paths.
+                  yield* sql.unsafe(
+                    `UPDATE work_item
+                   SET paused = 1,
+                       failure_code = NULL,
+                       failure_message = ?,
                        worktree_path = ?,
                        starting_commit_oid = ?,
                        completion_summary = ?,
@@ -2401,9 +2575,11 @@ export const makeWorkItemLifecycleLive = (
                        github_pull_request_number = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
+                       waiting_for_blockers = 0,
                        updated_at = ?
                    WHERE id = ?`,
                     [
+                      ownedPrIssueStop.reasonMessage,
                       worktreePath,
                       startingCommitOid,
                       completionSummary,
@@ -3575,6 +3751,8 @@ export const makeWorkItemLifecycleLive = (
               const startedRows = (yield* sql.unsafe(
                 `UPDATE work_item
                   SET paused = 0,
+                      failure_code = NULL,
+                      failure_message = NULL,
                       updated_at = ?
                   WHERE id = ?
                     AND paused = 1

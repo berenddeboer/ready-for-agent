@@ -96,13 +96,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
+      // githubWith alone satisfies WorkItemLifecycle's GitHubService requirement
+      // and controls PR lifecycle for syncNeedsHumanMergeHandoffs.
+      Layer.provideMerge(githubWith(status)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
       Layer.provideMerge(DbServiceLive),
       Layer.provideMerge(SqliteQueueServiceLive),
       Layer.provideMerge(DatabaseTest),
-      Layer.provideMerge(githubWith(status)),
     )
 
   const makeQueuedJobsAvailable = Effect.gen(function* () {
