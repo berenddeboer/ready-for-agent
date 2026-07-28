@@ -330,16 +330,6 @@ export interface DbServiceShape {
     repositoryId: string,
   ) => Effect.Effect<number, DatabaseError>
   /**
-   * Distinct open Work Item PRs for one Repository: unfinished Work Items with a
-   * recorded PR number. Terminal complete/failed/abandoned are excluded so
-   * merged and closed PRs do not accumulate in the header count. Does not apply
-   * Issue relevance filters (label, author, hierarchy) or Jobs-card listKind
-   * partitions.
-   */
-  readonly countPullRequestsForRepository: (
-    repositoryId: string,
-  ) => Effect.Effect<number, DatabaseError>
-  /**
    * Selected-or-in-use Agent Backend ids: harness default ∪ distinct
    * Repository overrides ∪ unfinished Work Items' captured backends.
    * Used to hot-activate / drop Active backends after settings Save.
@@ -579,28 +569,6 @@ export const DbServiceLive = Layer.effect(
         }[]
         return readCount(rows)
       }).pipe(Effect.withSpan("DbService.countBlockingUnfinishedForRepository"))
-
-    /**
-     * Distinct open Work Item PR numbers for one Repository (unfinished only).
-     */
-    const countPullRequestsForRepository = (
-      repositoryId: string,
-    ): Effect.Effect<number, DatabaseError> =>
-      Effect.gen(function* () {
-        const rows = (yield* sql
-          .unsafe(
-            `SELECT COUNT(DISTINCT github_pull_request_number) AS count
-             FROM work_item
-             WHERE repository_id = ?
-               AND github_pull_request_number IS NOT NULL
-               AND ${isUnfinishedStateSql()}`,
-            [repositoryId],
-          )
-          .pipe(Effect.mapError(toDatabaseError))) as readonly {
-          readonly count: number
-        }[]
-        return readCount(rows)
-      }).pipe(Effect.withSpan("DbService.countPullRequestsForRepository"))
 
     const readConfigRow = Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis
@@ -1686,7 +1654,6 @@ export const DbServiceLive = Layer.effect(
       countUnfinishedWorkItems,
       countBlockingUnfinishedForGlobalDefault,
       countBlockingUnfinishedForRepository,
-      countPullRequestsForRepository,
       listSelectedOrInUseBackendIds,
       addRepository,
       updateRepositorySettings,

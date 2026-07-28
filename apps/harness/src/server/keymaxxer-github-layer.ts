@@ -324,6 +324,48 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             ),
           ),
+        countOpenNonDraftPullRequests: (repository) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "count open non-draft pull requests",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const result = yield* runGitHubBin(
+              tokenName,
+              "count-open-non-draft-pull-requests",
+              [owner, name],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "count open non-draft pull requests",
+                result.stderr || result.stdout,
+              )
+            }
+            const count = Number(result.stdout.trim())
+            if (!Number.isSafeInteger(count) || count < 0) {
+              return yield* requestError(
+                repository,
+                "decode open non-draft pull request count",
+                result.stdout,
+              )
+            }
+            return count
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "count open non-draft pull requests"),
+              ),
+            ),
+          ),
         getPullRequestCheckStatus: (repository, headRefName) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

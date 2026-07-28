@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { runGitHubCli } from "../bin/cli.js"
+import { countOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
 import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
 import { getOpenPullRequestNumberProgram } from "../bin/get-open-pr-number.js"
@@ -21,6 +22,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "list-ready-issues",
   "get-authenticated-user-login",
   "get-open-pr-number",
+  "count-open-non-draft-pull-requests",
   "get-pr-check-status",
   "get-pr-status-check-diagnostics",
   "get-pr-lifecycle-status",
@@ -123,6 +125,7 @@ const programs: Record<
   "list-ready-issues": listReadyIssuesProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "get-open-pr-number": getOpenPullRequestNumberProgram,
+  "count-open-non-draft-pull-requests": countOpenNonDraftPullRequestsProgram,
   "get-pr-check-status": getPrCheckStatusProgram,
   "get-pr-status-check-diagnostics": getPrStatusCheckDiagnosticsProgram,
   "get-pr-lifecycle-status": getPrLifecycleStatusProgram,

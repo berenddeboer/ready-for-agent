@@ -58,7 +58,6 @@ export const stubDbService = (
   countUnfinishedWorkItems: Effect.succeed(0),
   countBlockingUnfinishedForGlobalDefault: Effect.succeed(0),
   countBlockingUnfinishedForRepository: () => Effect.succeed(0),
-  countPullRequestsForRepository: () => Effect.succeed(0),
   listSelectedOrInUseBackendIds: Effect.succeed(["opencode"]),
   addRepository: unused,
   updateRepositorySettings: unused,

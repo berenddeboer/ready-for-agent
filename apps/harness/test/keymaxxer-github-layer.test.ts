@@ -278,6 +278,38 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(runs[0]?.command).toContain('"--conditions"')
   })
 
+  test("counts open non-draft pull requests through the configured repository token", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({ exitCode: 0, stdout: "4", stderr: "" })
+      },
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    const count = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.countOpenNonDraftPullRequests({
+          owner: "acme",
+          name: "widgets",
+        })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(count).toBe(4)
+    expect(runs[0]?.command).toContain("count-open-non-draft-pull-requests.ts")
+    expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+  })
+
   test("decodes no_checks and pending terminalChecks from the bin", async () => {
     const responses = [
       JSON.stringify({

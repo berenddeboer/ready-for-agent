@@ -84,6 +84,7 @@ const stubGitHub = (
     GitHubService,
     GitHubService.of({
       getOpenPullRequestNumber: () => Effect.succeed(321),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed({
           _tag: "succeeded",

@@ -1034,6 +1034,64 @@ export const makeGitHubService = (
       return Number(number)
     },
   ),
+  countOpenNonDraftPullRequests: Effect.fn(
+    "GitHubService.countOpenNonDraftPullRequests",
+  )(function* (repository) {
+    let count = 0
+    let cursor: string | null = null
+    for (;;) {
+      const afterCursor: string | null = cursor
+      const page = yield* githubQuery(
+        `Failed to count open pull requests for ${repository.owner}/${repository.name}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                pullRequests: {
+                  __args: {
+                    first: PAGE_SIZE,
+                    states: ["OPEN" as const],
+                    ...(afterCursor === null ? {} : { after: afterCursor }),
+                  },
+                  nodes: {
+                    isDraft: true,
+                  },
+                  pageInfo: {
+                    endCursor: true,
+                    hasNextPage: true,
+                  },
+                },
+              },
+            },
+            signal,
+          ),
+      )
+      if (page.repository === null) {
+        return yield* new GitHubRepositoryUnavailableError(repository)
+      }
+      const nodes = page.repository.pullRequests.nodes ?? []
+      for (const node of nodes) {
+        if (node !== null && node !== undefined && node.isDraft === false) {
+          count += 1
+        }
+      }
+      const pageInfo: {
+        readonly endCursor?: string | null
+        readonly hasNextPage: boolean
+      } = page.repository.pullRequests.pageInfo
+      if (
+        !pageInfo.hasNextPage ||
+        pageInfo.endCursor === null ||
+        pageInfo.endCursor === undefined ||
+        pageInfo.endCursor === ""
+      ) {
+        break
+      }
+      cursor = pageInfo.endCursor
+    }
+    return count
+  }),
   markPullRequestReadyForReview: Effect.fn(
     "GitHubService.markPullRequestReadyForReview",
   )(function* (repository, headRefName) {

@@ -66,6 +66,17 @@ export interface GitHubServiceShape {
     number,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
+  /**
+   * Count currently open, non-draft pull requests for the Repository.
+   * Author, branch, labels, and Work Item ownership are ignored. Merged,
+   * closed-unmerged, and draft PRs are excluded.
+   */
+  readonly countOpenNonDraftPullRequests: (
+    repository: GitHubRepository,
+  ) => Effect.Effect<
+    number,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
   readonly markPullRequestReadyForReview: (
     repository: GitHubRepository,
     headRefName: string,
