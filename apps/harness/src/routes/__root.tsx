@@ -885,17 +885,18 @@ function SettingsButton() {
 
                 {defaultModel.length > 0 && hasUnavailableBuildModel ? (
                   <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                    Build thinking level is unavailable — the selected model is
-                    not in the Agent Model catalog. Choose another build model.
+                    Build effort (thinking) is unavailable — the selected model
+                    is not in the Agent Model catalog. Choose another build
+                    model.
                   </p>
                 ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
                   <p className="bg-paper-2 p-3 text-sm text-ink-soft">
-                    Build thinking level is unavailable — this model has no
-                    Thinking Levels.
+                    Build effort (thinking) is unavailable — this model has no
+                    effort (thinking) options.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                    Build thinking level
+                    Build effort (thinking)
                     <select
                       className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       name="defaultThinkingLevel"
@@ -907,7 +908,7 @@ function SettingsButton() {
                     >
                       <option value="">
                         {buildVariants.length === 0
-                          ? "Model default (no Thinking Levels)"
+                          ? "Model default (no effort (thinking) options)"
                           : "Model default"}
                       </option>
                       {hasCustomBuildVariant && (
@@ -922,8 +923,8 @@ function SettingsButton() {
                       ))}
                     </select>
                     <span className="text-xs font-normal text-ink-faint">
-                      Optional Thinking Level for this model. Options come from
-                      the selected model.
+                      Optional effort (thinking) for this model. Options come
+                      from the selected model.
                     </span>
                   </label>
                 )}
@@ -968,19 +969,19 @@ function SettingsButton() {
                 ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
                   (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
                   <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                    Review thinking level is unavailable — the selected model is
-                    not in the Agent Model catalog. Choose another model or use
-                    the build model.
+                    Review effort (thinking) is unavailable — the selected model
+                    is not in the Agent Model catalog. Choose another model or
+                    use the build model.
                   </p>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
                   <p className="bg-paper-2 p-3 text-sm text-ink-soft">
-                    Review thinking level is unavailable — this model has no
-                    Thinking Levels.
+                    Review effort (thinking) is unavailable — this model has no
+                    effort (thinking) options.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                    Review thinking level
+                    Review effort (thinking)
                     <select
                       className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       name="reviewThinkingLevel"
@@ -992,7 +993,7 @@ function SettingsButton() {
                         reviewThinkingLevels.length === 0
                       }
                     >
-                      <option value="">Same as build thinking level</option>
+                      <option value="">Same as build effort (thinking)</option>
                       {hasCustomReviewVariant && (
                         <option value={reviewThinkingLevel}>
                           {formatVariantLabel(reviewThinkingLevel)}

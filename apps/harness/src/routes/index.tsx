@@ -1996,20 +1996,20 @@ function RepositoryCard({
                 {buildVariantSourceModel.length > 0 &&
                 buildVariantSourceUnavailable ? (
                   <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                    Build thinking level override is unavailable — the selected
-                    model is not in the Agent Model catalog. Use harness default
-                    or pick another model.
+                    Build effort (thinking) override is unavailable — the
+                    selected model is not in the Agent Model catalog. Use
+                    harness default or pick another model.
                   </p>
                 ) : buildVariantSourceModel.length > 0 &&
                   buildVariants.length === 0 ? (
                   <p className="bg-paper-2 p-3 text-sm text-ink-soft">
-                    Build thinking level override is unavailable — this model
-                    has no Thinking Levels. Use harness default or pick another
-                    model.
+                    Build effort (thinking) override is unavailable — this model
+                    has no effort (thinking) options. Use harness default or
+                    pick another model.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                    Build thinking level
+                    Build effort (thinking)
                     <select
                       className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       value={defaultThinkingLevel}
@@ -2081,20 +2081,20 @@ function RepositoryCard({
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 reviewThinkingLevelSourceUnavailable ? (
                   <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                    Review thinking level override is unavailable — the selected
-                    model is not in the Agent Model catalog. Use harness default
-                    or pick another model.
+                    Review effort (thinking) override is unavailable — the
+                    selected model is not in the Agent Model catalog. Use
+                    harness default or pick another model.
                   </p>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
                   <p className="bg-paper-2 p-3 text-sm text-ink-soft">
-                    Review thinking level override is unavailable — this model
-                    has no Thinking Levels. Use harness default or pick another
-                    model.
+                    Review effort (thinking) override is unavailable — this
+                    model has no effort (thinking) options. Use harness default
+                    or pick another model.
                   </p>
                 ) : (
                   <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
-                    Review thinking level
+                    Review effort (thinking)
                     <select
                       className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       value={reviewThinkingLevel}

@@ -37,7 +37,7 @@ ready-for-agent
 This opens the UI in the browser
 ([http://127.0.0.1:6056/](http://127.0.0.1:6056/)). This shows the
 configured state. If you open this for the first time, you will be
-prompted to set a default build model and thinking level, and configure repos.
+prompted to set a default build model and effort (thinking), and configure repos.
 
 ## Stop opening a browser window
 
@@ -153,8 +153,8 @@ KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 
 Yes. Settings can select **OpenCode** or **Grok Build** as the instance-wide
 Agent Backend. The change hot-activates on Save when no Work Items are
-unfinished (including Needs Human). Model catalogs and Thinking Levels are
-backend-local, and build/review prefs are remembered per backend.
+unfinished (including Needs Human). Model catalogs and effort (thinking)
+options are backend-local, and build/review prefs are remembered per backend.
 
 2. Does the harness support any other backend than GitHub?
 
