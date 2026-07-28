@@ -53,6 +53,15 @@ export class CreatePrLookupError extends Schema.TaggedErrorClass<CreatePrLookupE
   },
 ) {}
 
+export class CreatePrPostconditionError extends Schema.TaggedErrorClass<CreatePrPostconditionError>()(
+  "CreatePrPostconditionError",
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+    diagnostics: Schema.optional(Schema.String),
+  },
+) {}
+
 export type CreatePrError =
   | CreatePrWorktreeContextMissingError
   | CreatePrInvalidWorktreeContextError
@@ -60,3 +69,4 @@ export type CreatePrError =
   | CreatePrCredentialError
   | CreatePrOpenCodeError
   | CreatePrLookupError
+  | CreatePrPostconditionError

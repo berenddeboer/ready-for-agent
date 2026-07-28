@@ -152,11 +152,25 @@ export const ambientGitHubLayer = (options: {
             service.getOpenPullRequestNumber(repository, headRefName),
           ),
         ),
+        findOpenPullRequestNumber: Effect.fn(
+          "AmbientGitHub.findOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          authenticated((service) =>
+            service.findOpenPullRequestNumber(repository, headRefName),
+          ),
+        ),
         countOpenNonDraftPullRequests: Effect.fn(
           "AmbientGitHub.countOpenNonDraftPullRequests",
         )((repository) =>
           authenticated((service) =>
             service.countOpenNonDraftPullRequests(repository),
+          ),
+        ),
+        createDraftPullRequest: Effect.fn(
+          "AmbientGitHub.createDraftPullRequest",
+        )((repository, input) =>
+          authenticated((service) =>
+            service.createDraftPullRequest(repository, input),
           ),
         ),
         getPullRequestCheckStatus: Effect.fn(

@@ -134,6 +134,8 @@ const keymaxxerLayer = (
 
 const defaultGithubLayer = Layer.succeed(GitHubService, {
   getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(1),
+  createDraftPullRequest: () => Effect.succeed(1),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
   getPullRequestCheckStatus: () =>
     Effect.succeed({
@@ -396,6 +398,8 @@ describe("Job worker", () => {
     const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
     const github = Layer.succeed(GitHubService, {
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      findOpenPullRequestNumber: () => Effect.succeed(1),
+      createDraftPullRequest: () => Effect.succeed(1),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed({

@@ -809,6 +809,45 @@ const safeLogFileName = (externalId: string): string =>
 const workItemCompletionMarker = (workItemId: string): string =>
   `<!-- ready-for-agent:work-item:${workItemId} -->`
 
+const findOpenPullRequestNumberImpl = (
+  client: GitHubGraphqlClient,
+  repository: { readonly owner: string; readonly name: string },
+  headRefName: string,
+): Effect.Effect<
+  number | null,
+  GitHubRepositoryUnavailableError | GitHubRequestError
+> =>
+  Effect.gen(function* () {
+    const result = yield* githubQuery(
+      `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        client.query(
+          {
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  states: ["OPEN"],
+                  headRefName,
+                },
+                nodes: { number: true },
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    if (result.repository === null) {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const number = result.repository.pullRequests.nodes?.[0]?.number
+    if (!Number.isSafeInteger(number) || Number(number) <= 0) {
+      return null
+    }
+    return Number(number)
+  })
+
 export const makeGitHubService = (
   client: GitHubGraphqlClient,
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
@@ -1002,33 +1041,97 @@ export const makeGitHubService = (
   }),
   getOpenPullRequestNumber: Effect.fn("GitHubService.getOpenPullRequestNumber")(
     function* (repository, headRefName) {
-      const result = yield* githubQuery(
-        `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+      const number = yield* findOpenPullRequestNumberImpl(
+        client,
+        repository,
+        headRefName,
+      )
+      if (number === null) {
+        return yield* new GitHubRequestError({
+          message: `No open pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      return number
+    },
+  ),
+  findOpenPullRequestNumber: Effect.fn(
+    "GitHubService.findOpenPullRequestNumber",
+  )(function* (repository, headRefName) {
+    return yield* findOpenPullRequestNumberImpl(client, repository, headRefName)
+  }),
+  createDraftPullRequest: Effect.fn("GitHubService.createDraftPullRequest")(
+    function* (repository, input) {
+      const repositoryMeta = yield* githubQuery(
+        `Failed to resolve repository metadata for ${repository.owner}/${repository.name}`,
         (signal) =>
           client.query(
             {
               repository: {
                 __args: repository,
-                pullRequests: {
-                  __args: {
-                    first: 1,
-                    states: ["OPEN"],
-                    headRefName,
-                  },
-                  nodes: { number: true },
+                id: true,
+                defaultBranchRef: {
+                  name: true,
                 },
               },
             },
             signal,
           ),
       )
-      if (result.repository === null) {
+      if (repositoryMeta.repository === null) {
         return yield* new GitHubRepositoryUnavailableError(repository)
       }
-      const number = result.repository.pullRequests.nodes?.[0]?.number
+      const repositoryId = repositoryMeta.repository.id
+      if (typeof repositoryId !== "string" || repositoryId.trim() === "") {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid repository id for ${repository.owner}/${repository.name}`,
+        })
+      }
+      const defaultBase =
+        repositoryMeta.repository.defaultBranchRef?.name?.trim() ?? ""
+      const baseRefName =
+        input.baseRefName !== undefined && input.baseRefName.trim() !== ""
+          ? input.baseRefName.trim()
+          : defaultBase
+      if (baseRefName === "") {
+        return yield* new GitHubRequestError({
+          message: `Repository ${repository.owner}/${repository.name} has no default base branch`,
+        })
+      }
+      if (client.mutation === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}`,
+        })
+      }
+      const mutate = client.mutation
+      const mutation = yield* githubRequest(
+        `Failed to create draft pull request for ${repository.owner}/${repository.name}:${input.headRefName}`,
+        (signal) =>
+          mutate(
+            {
+              createPullRequest: {
+                __args: {
+                  input: {
+                    repositoryId,
+                    baseRefName,
+                    headRefName: input.headRefName,
+                    title: input.title,
+                    body: input.body,
+                    draft: true,
+                  },
+                },
+                pullRequest: {
+                  number: true,
+                },
+              },
+            },
+            signal,
+          ),
+      )
+      const pullRequest = mutation.createPullRequest?.pullRequest
+      const number = pullRequest?.number
       if (!Number.isSafeInteger(number) || Number(number) <= 0) {
         return yield* new GitHubRequestError({
-          message: `No open pull request found for ${repository.owner}/${repository.name}:${headRefName}`,
+          message: `GitHub did not return a pull request number after creating a draft for ${repository.owner}/${repository.name}:${input.headRefName}`,
         })
       }
       return Number(number)

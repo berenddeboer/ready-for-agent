@@ -14,7 +14,9 @@ import type { KeymaxxerError } from "@ready-for-agent/keymaxxer-service"
 import type { AssessChangesResult } from "./assess-changes.js"
 import type { AssessChangesError } from "./assess-changes-errors.js"
 import type { CloseIssueError } from "./close-issue-errors.js"
+import type { CommitResult } from "./commit.js"
 import type { CommitError } from "./commit-errors.js"
+import type { CreatePrResult } from "./create-pr.js"
 import type { CreatePrError } from "./create-pr-errors.js"
 import type { CreateWorktreeError } from "./create-worktree-errors.js"
 import type {
@@ -56,6 +58,11 @@ export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
   readonly githubIssueNumber: number
+  /**
+   * Issue title captured on the Work Item for identification after the Issue
+   * leaves the store (used for deterministic Commit/Create PR messages).
+   */
+  readonly issueTitle: string | null
   /**
    * Work Item captured Agent Backend id (provenance for Agent Turns and
    * operator-visible failure copy).
@@ -142,10 +149,10 @@ export interface LifecycleStepsShape {
   ) => Effect.Effect<ReviewResult, LifecycleStepError>
   readonly commit: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<void, LifecycleStepError>
+  ) => Effect.Effect<CommitResult, LifecycleStepError>
   readonly createPr: (
     context: LifecycleStepContext,
-  ) => Effect.Effect<number, LifecycleStepError>
+  ) => Effect.Effect<CreatePrResult, LifecycleStepError>
   readonly watchPrStatusChecks: (
     context: LifecycleStepContext,
   ) => Effect.Effect<PrStatusCheckResult, LifecycleStepError>
