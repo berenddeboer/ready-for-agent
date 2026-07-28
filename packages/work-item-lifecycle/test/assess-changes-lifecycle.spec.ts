@@ -16,6 +16,7 @@ import {
   WorkItemLifecycleLive,
   assessChanges,
   stubActiveAgentBackendLayer,
+  stubGitHubServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -105,6 +106,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -255,6 +257,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -375,6 +378,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -533,6 +537,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -694,6 +699,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -820,6 +826,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -951,6 +958,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -1123,6 +1131,7 @@ describe("Assess Changes lifecycle routes", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),

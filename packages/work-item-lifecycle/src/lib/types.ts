@@ -332,6 +332,18 @@ export const STEP_RUN_REASON = {
    */
   prMerged: "pr_merged",
   /**
+   * Successful Step Run that stopped because Issue revalidation found the
+   * Issue closed/missing while a Work Item PR is still open (or PR status
+   * was indeterminate). Work Item is paused for operator Start after reopen.
+   */
+  issueClosedWhilePrOpen: "issue_closed_while_pr_open",
+  /**
+   * Successful Step Run that stopped because Issue revalidation found the
+   * Issue closed/missing and the Work Item PR was closed without merge.
+   * Work Item is paused for operator decision (Start / Abandon / Reset).
+   */
+  issueClosedPrClosedUnmerged: "issue_closed_pr_closed_unmerged",
+  /**
    * Conditionally agent-using step completed via harness-owned native path
    * (no Agent Turn).
    */

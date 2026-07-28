@@ -65,6 +65,7 @@ import {
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
+  stubGitHubServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -126,6 +127,7 @@ describe("WorkItemLifecycle", () => {
 
   const TestLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(stubActiveAgentBackendLayer()),
+    Layer.provideMerge(stubGitHubServiceLayer()),
     Layer.provideMerge(SuccessfulStepsLive),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),
@@ -138,9 +140,13 @@ describe("WorkItemLifecycle", () => {
     test: Effect.Effect<A, E, TestRequirements>,
   ): Promise<A> => Effect.runPromise(Effect.provide(test, TestLayer))
 
-  const makeTestLayer = (steps: LifecycleStepsShape) =>
+  const makeTestLayer = (
+    steps: LifecycleStepsShape,
+    github: Parameters<typeof stubGitHubServiceLayer>[0] = {},
+  ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
+      Layer.provideMerge(stubGitHubServiceLayer(github)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -152,6 +158,7 @@ describe("WorkItemLifecycle", () => {
   const makeRestartTestLayer = (steps: LifecycleStepsShape, filename: string) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
+      Layer.provideMerge(stubGitHubServiceLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -523,6 +530,7 @@ describe("WorkItemLifecycle", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -991,6 +999,7 @@ describe("WorkItemLifecycle", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1239,6 +1248,7 @@ describe("WorkItemLifecycle", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1992,6 +2002,7 @@ describe("WorkItemLifecycle", () => {
 
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(NonTransactionalQueueLive),
@@ -5854,7 +5865,7 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("does not Failed or Complete when Issue revalidation fails after a PR is owned without merge confirmation", () => {
+    it("pauses when Issue revalidation fails after a PR is owned and still open", () => {
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
@@ -5885,9 +5896,9 @@ describe("WorkItemLifecycle", () => {
           yield* claimAndRunPending
           const investigating = yield* lifecycle.getWorkItem(created.id)
           expect(investigating.state).toBe("investigate_pr_status_checks")
+          expect(investigating.githubPullRequestNumber).toBe(101)
 
-          // Issue gone (may be merge-closed or operator-closed). Without a
-          // confirmed PR merge, park non-terminal for Refresh.
+          // Issue gone (operator-closed or removed). Open PR → Pause, not silent park.
           yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
 
           yield* makeQueuedJobsAvailable
@@ -5897,32 +5908,233 @@ describe("WorkItemLifecycle", () => {
             expect(afterInvestigate.workItem.state).toBe(
               "investigate_pr_status_checks",
             )
+            expect(afterInvestigate.workItem.paused).toBe(true)
             expect(afterInvestigate.workItem.failureCode).toBeNull()
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              `Issue #${issue.githubIssueNumber} is closed or no longer present while pull request #101 is still open. Reopen the issue if you want to continue, then Start job.`,
+            )
             expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
-            expect(
-              afterInvestigate.workItem.stepRuns.some(
-                (run) =>
-                  run.step === "investigate_pr_status_checks" &&
-                  run.status === "succeeded",
-              ),
-            ).toBe(true)
+            const investigateRun = afterInvestigate.workItem.stepRuns.find(
+              (run) =>
+                run.step === "investigate_pr_status_checks" &&
+                run.status === "succeeded",
+            )
+            expect(investigateRun).toBeDefined()
+            expect(investigateRun?.reasonCode).toBe(
+              STEP_RUN_REASON.issueClosedWhilePrOpen,
+            )
+            expect(investigateRun?.reasonMessage).toBe(
+              afterInvestigate.workItem.failureMessage,
+            )
           }
 
           const remaining = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isNone(remaining)).toBe(true)
 
-          // Confirmed merge via Refresh path still Completes.
+          // Retry blocked while paused; Start first.
+          const retryBlocked = yield* lifecycle
+            .retry(created.id)
+            .pipe(Effect.flip)
+          expect(retryBlocked).toBeInstanceOf(RetryNotEligibleError)
+          if (retryBlocked instanceof RetryNotEligibleError) {
+            expect(retryBlocked.reason).toBe("paused")
+          }
+
+          // Confirmed merge via Refresh path still Completes even while paused.
           const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
             created.id,
             "merged",
           )
           expect(advanced.state).toBe("local_cleanup")
+          expect(advanced.paused).toBe(false)
           yield* makeQueuedJobsAvailable
           const afterCleanup = yield* claimAndRunPending
           expect(afterCleanup._tag).toBe("processed")
           if (afterCleanup._tag === "processed") {
             expect(afterCleanup.workItem.state).toBe("complete")
           }
+        }),
+      )
+    })
+
+    it("advances to local cleanup when Issue revalidation fails and owned PR is merged", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(steps, {
+        getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "merged" }),
+      })
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+          expect((yield* lifecycle.getWorkItem(created.id)).state).toBe(
+            "investigate_pr_status_checks",
+          )
+
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.state).toBe("local_cleanup")
+            expect(afterInvestigate.workItem.paused).toBe(false)
+            const investigateRun = afterInvestigate.workItem.stepRuns.find(
+              (run) =>
+                run.step === "investigate_pr_status_checks" &&
+                run.status === "succeeded",
+            )
+            expect(investigateRun?.reasonCode).toBe(STEP_RUN_REASON.prMerged)
+          }
+
+          yield* makeQueuedJobsAvailable
+          const afterCleanup = yield* claimAndRunPending
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.state).toBe("complete")
+          }
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("pauses when Issue revalidation fails and owned PR is closed unmerged", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(steps, {
+        getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "closed" }),
+      })
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.state).toBe(
+              "investigate_pr_status_checks",
+            )
+            expect(afterInvestigate.workItem.paused).toBe(true)
+            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
+            expect(afterInvestigate.workItem.failureMessage).toContain(
+              "closed without merge",
+            )
+            const investigateRun = afterInvestigate.workItem.stepRuns.find(
+              (run) =>
+                run.step === "investigate_pr_status_checks" &&
+                run.status === "succeeded",
+            )
+            expect(investigateRun?.reasonCode).toBe(
+              STEP_RUN_REASON.issueClosedPrClosedUnmerged,
+            )
+          }
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("Starts a Work Item paused for closed Issue + open PR and resumes the current step", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* makeQueuedJobsAvailable
+          const paused = yield* claimAndRunPending
+          expect(paused._tag).toBe("processed")
+          if (paused._tag !== "processed") return
+          expect(paused.workItem.paused).toBe(true)
+          expect(paused.workItem.state).toBe("investigate_pr_status_checks")
+
+          // Reopen Issue in store; Start resumes current operational step.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+          })
+
+          const started = yield* lifecycle.start(created.id)
+          expect(started.paused).toBe(false)
+          expect(started.failureMessage).toBeNull()
+          expect(started.state).toBe("investigate_pr_status_checks")
+          expect(started.holdsWorkerSlot).toBe(true)
+          expect(
+            started.stepRuns.some(
+              (run) =>
+                run.step === "investigate_pr_status_checks" &&
+                run.status === "queued",
+            ),
+          ).toBe(true)
         }),
       )
     })
@@ -6930,6 +7142,7 @@ describe("WorkItemLifecycle", () => {
       // Step run is started via runStep using the id from implementNow.
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -7122,6 +7335,7 @@ describe("WorkItemLifecycle", () => {
         },
       }).pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(slowSteps)),
         ),
@@ -7999,6 +8213,7 @@ describe("WorkItemLifecycle", () => {
         },
       }).pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -8097,6 +8312,7 @@ describe("WorkItemLifecycle", () => {
         },
       }).pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),

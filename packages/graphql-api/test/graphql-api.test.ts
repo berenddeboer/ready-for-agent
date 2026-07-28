@@ -2535,6 +2535,85 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("projects paused closed-Issue + open-PR stop as Needs human review with reason, not Succeeded", async () => {
+    const baseRun = workItem.stepRuns[0]!
+    const reason =
+      "Issue #42 is closed or no longer present while pull request #101 is still open. Reopen the issue if you want to continue, then Start job."
+    const pausedClosedIssue = {
+      ...workItem,
+      state: "watch_pr_status_checks",
+      paused: true,
+      pauseBeforeStep: null,
+      githubPullRequestNumber: 101,
+      failureCode: null,
+      failureMessage: reason,
+      holdsWorkerSlot: false,
+      stepRuns: [
+        { ...baseRun, step: "create_worktree", status: "succeeded" },
+        {
+          ...baseRun,
+          step: "watch_pr_status_checks",
+          status: "succeeded",
+          reasonCode: "issue_closed_while_pr_open",
+          reasonMessage: reason,
+        },
+      ],
+    } as WorkItemRecord
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed([pausedClosedIssue]),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            state stateLabel status statusLabel statusMessage paused isTerminal canRetry
+            lifecycleLabels { phase label status }
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: issue.githubIssueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            state: "WATCH_PR_STATUS_CHECKS",
+            stateLabel: "GitHub status checks",
+            status: "NEEDS_HUMAN_REVIEW",
+            statusLabel: "Needs human review",
+            statusMessage: reason,
+            paused: true,
+            isTerminal: false,
+            canRetry: false,
+            lifecycleLabels: [
+              {
+                phase: "CREATE_WORKTREE",
+                label: "Create worktree: Succeeded",
+                status: "SUCCEEDED",
+              },
+              {
+                phase: "GITHUB_STATUS_CHECKS",
+                label: "GitHub status checks: Succeeded",
+                status: "SUCCEEDED",
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
   test("keeps terminal Needs human distinct from paused Needs human review", async () => {
     const baseRun = workItem.stepRuns[0]!
     const needsHuman = {
