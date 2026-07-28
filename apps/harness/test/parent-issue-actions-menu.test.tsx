@@ -8,12 +8,20 @@ import {
 import { describe, expect, test } from "bun:test"
 
 describe("isParentImplementAllWithAutoMergeEligible", () => {
-  test("requires exactly one open actionable child without unfinished work", () => {
+  const leaf = (
+    githubIssueNumber: number,
+    blockedBy: readonly unknown[] = [],
+  ) => ({
+    githubIssueNumber,
+    hasChildren: false,
+    blockedBy,
+  })
+
+  test("allows one or more open leaf children without unfinished work, including blocked", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [
-          { githubIssueNumber: 2, hasChildren: false, blockedBy: [] },
-        ],
+        openChildren: [leaf(2)],
+        directChildren: [leaf(2)],
         workItems: [],
         workItemsLoading: false,
       }),
@@ -21,35 +29,72 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
 
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [
-          { githubIssueNumber: 2, hasChildren: false, blockedBy: [] },
-          { githubIssueNumber: 3, hasChildren: false, blockedBy: [] },
-        ],
+        openChildren: [leaf(2), leaf(3)],
+        directChildren: [leaf(2), leaf(3)],
         workItems: [],
         workItemsLoading: false,
       }),
-    ).toBe(false)
+    ).toBe(true)
 
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [
-          {
-            githubIssueNumber: 2,
-            hasChildren: false,
-            blockedBy: [{ githubIssueNumber: 1 }],
-          },
-        ],
+        openChildren: [leaf(2, [{ githubIssueNumber: 1 }]), leaf(3)],
+        directChildren: [leaf(2, [{ githubIssueNumber: 1 }]), leaf(3)],
         workItems: [],
         workItemsLoading: false,
       }),
-    ).toBe(false)
+    ).toBe(true)
 
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [
-          { githubIssueNumber: 2, hasChildren: false, blockedBy: [] },
-        ],
+        openChildren: [leaf(2, [{ githubIssueNumber: 1 }])],
+        directChildren: [leaf(2, [{ githubIssueNumber: 1 }])],
+        workItems: [],
+        workItemsLoading: false,
+      }),
+    ).toBe(true)
+
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [leaf(2)],
+        directChildren: [leaf(2)],
         workItems: [{ githubIssueNumber: 2, state: "CREATE_WORKTREE" }],
+        workItemsLoading: false,
+      }),
+    ).toBe(false)
+  })
+
+  test("stays available when some open children already have unfinished work", () => {
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [leaf(2), leaf(3)],
+        directChildren: [leaf(2), leaf(3)],
+        workItems: [{ githubIssueNumber: 2, state: "CREATE_WORKTREE" }],
+        workItemsLoading: false,
+      }),
+    ).toBe(true)
+  })
+
+  test("hides unsupported hierarchy for open or closed direct children with children", () => {
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [
+          { githubIssueNumber: 2, hasChildren: true, blockedBy: [] },
+        ],
+        directChildren: [
+          { githubIssueNumber: 2, hasChildren: true, blockedBy: [] },
+        ],
+        workItems: [],
+        workItemsLoading: false,
+      }),
+    ).toBe(false)
+
+    // Closed mid-level child still fails server hierarchy; hide the action.
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [leaf(3)],
+        directChildren: [{ hasChildren: true }, { hasChildren: false }],
+        workItems: [],
         workItemsLoading: false,
       }),
     ).toBe(false)
@@ -58,9 +103,8 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
   test("blocks Needs Human (terminal, non-retryable) to match server unfinished rules", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [
-          { githubIssueNumber: 2, hasChildren: false, blockedBy: [] },
-        ],
+        openChildren: [leaf(2)],
+        directChildren: [leaf(2)],
         workItems: [{ githubIssueNumber: 2, state: "NEEDS_HUMAN" }],
         workItemsLoading: false,
       }),
@@ -71,9 +115,8 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
     for (const state of ["COMPLETE", "FAILED", "ABANDONED"] as const) {
       expect(
         isParentImplementAllWithAutoMergeEligible({
-          openChildren: [
-            { githubIssueNumber: 2, hasChildren: false, blockedBy: [] },
-          ],
+          openChildren: [leaf(2)],
+          directChildren: [leaf(2)],
           workItems: [{ githubIssueNumber: 2, state }],
           workItemsLoading: false,
         }),

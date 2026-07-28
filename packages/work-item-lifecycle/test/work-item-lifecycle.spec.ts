@@ -716,7 +716,7 @@ describe("WorkItemLifecycle", () => {
         }),
       ))
 
-    it("rejects missing, non-parent, multi-child, blocked, and unfinished cases", () =>
+    it("rejects missing, non-parent, no-open, unsupported hierarchy, and unfinished-only cases", () =>
       runTest(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
@@ -740,66 +740,6 @@ describe("WorkItemLifecycle", () => {
             lifecycle.implementAllWithAutoMerge(repository.id, 50),
           )
           expect(notParent).toBeInstanceOf(NotAParentIssueError)
-
-          yield* db.storeIssue({
-            repositoryId: repository.id,
-            githubIssueNumber: 102,
-            ...sampleIssueFields,
-            title: "Second child",
-            url: "https://github.com/acme/widgets/issues/102",
-            parent: {
-              githubIssueNumber: 100,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/100",
-            },
-            parentPosition: 1,
-          })
-          const multi = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(
-              repository.id,
-              parent.githubIssueNumber,
-            ),
-          )
-          expect(multi).toBeInstanceOf(
-            ImplementAllWithAutoMergeNotEligibleError,
-          )
-
-          // Single open child but blocked.
-          const blockedRepo = yield* db.addRepository({
-            ...sampleRepository,
-            localPath: "/repos/acme/widgets-blocked-parent.git",
-            githubRepo: "widgets-blocked-parent",
-          })
-          yield* db.storeIssue({
-            repositoryId: blockedRepo.id,
-            githubIssueNumber: 200,
-            ...sampleIssueFields,
-            title: "Blocked parent",
-            url: "https://github.com/acme/widgets/issues/200",
-            hasChildren: true,
-          })
-          yield* db.storeIssue({
-            repositoryId: blockedRepo.id,
-            githubIssueNumber: 201,
-            ...sampleIssueFields,
-            title: "Blocked child",
-            url: "https://github.com/acme/widgets/issues/201",
-            parent: {
-              githubIssueNumber: 200,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/200",
-            },
-            blockedBy: [
-              {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
-              },
-            ],
-          })
-          const blocked = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(blockedRepo.id, 200),
-          )
-          expect(blocked).toBeInstanceOf(
-            ImplementAllWithAutoMergeNotEligibleError,
-          )
 
           // Unsupported hierarchy (grandchild).
           const grandRepo = yield* db.addRepository({
@@ -832,20 +772,40 @@ describe("WorkItemLifecycle", () => {
           )
           expect(unsupported).toBeInstanceOf(UnsupportedIssueHierarchyError)
 
-          // Close second child so parent is eligible again, then leave unfinished.
+          // Parent with only closed children.
+          const closedOnlyRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-closed-parent.git",
+            githubRepo: "widgets-closed-parent",
+          })
           yield* db.storeIssue({
-            repositoryId: repository.id,
-            githubIssueNumber: 102,
+            repositoryId: closedOnlyRepo.id,
+            githubIssueNumber: 400,
             ...sampleIssueFields,
-            title: "Second child",
-            url: "https://github.com/acme/widgets/issues/102",
+            title: "Closed-only parent",
+            url: "https://github.com/acme/widgets/issues/400",
+            hasChildren: true,
+          })
+          yield* db.storeIssue({
+            repositoryId: closedOnlyRepo.id,
+            githubIssueNumber: 401,
+            ...sampleIssueFields,
+            title: "Closed child",
+            url: "https://github.com/acme/widgets/issues/401",
             state: "CLOSED",
             parent: {
-              githubIssueNumber: 100,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+              githubIssueNumber: 400,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/400",
             },
-            parentPosition: 1,
           })
+          const noOpen = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(closedOnlyRepo.id, 400),
+          )
+          expect(noOpen).toBeInstanceOf(
+            ImplementAllWithAutoMergeNotEligibleError,
+          )
+
+          // All open children already have unfinished Work Items.
           yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
             parent.githubIssueNumber,
@@ -860,6 +820,292 @@ describe("WorkItemLifecycle", () => {
             ImplementAllWithAutoMergeNotEligibleError,
           )
           expect(child.githubIssueNumber).toBe(101)
+        }),
+      ))
+
+    it("enrolls actionable, blocked, and skips closed children atomically", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-mixed-parent.git",
+            githubRepo: "widgets-mixed-parent",
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 500,
+            ...sampleIssueFields,
+            title: "Mixed parent",
+            url: "https://github.com/acme/widgets/issues/500",
+            hasChildren: true,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 501,
+            ...sampleIssueFields,
+            title: "Actionable child",
+            url: "https://github.com/acme/widgets/issues/501",
+            parent: {
+              githubIssueNumber: 500,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/500",
+            },
+            parentPosition: 0,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 502,
+            ...sampleIssueFields,
+            title: "Blocked child",
+            url: "https://github.com/acme/widgets/issues/502",
+            parent: {
+              githubIssueNumber: 500,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/500",
+            },
+            parentPosition: 1,
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 503,
+            ...sampleIssueFields,
+            title: "Closed child",
+            url: "https://github.com/acme/widgets/issues/503",
+            state: "CLOSED",
+            parent: {
+              githubIssueNumber: 500,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/500",
+            },
+            parentPosition: 2,
+          })
+
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            500,
+          )
+
+          expect(covered).toHaveLength(2)
+          const byIssue = new Map(
+            covered.map((item) => [item.githubIssueNumber, item]),
+          )
+
+          const actionable = byIssue.get(501)!
+          expect(actionable.mergeMode).toBe("always")
+          expect(actionable.waitingForBlockers).toBe(false)
+          expect(actionable.holdsWorkerSlot).toBe(true)
+          expect(actionable.stepRuns).toHaveLength(1)
+          expect(actionable.state).toBe("create_worktree")
+
+          const blocked = byIssue.get(502)!
+          expect(blocked.mergeMode).toBe("always")
+          expect(blocked.waitingForBlockers).toBe(true)
+          expect(blocked.holdsWorkerSlot).toBe(false)
+          expect(blocked.stepRuns).toHaveLength(0)
+          expect(blocked.waitingSince).toBeNull()
+
+          const closedItems = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            503,
+          )
+          expect(closedItems).toHaveLength(0)
+
+          const parentItems = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            500,
+          )
+          expect(parentItems).toHaveLength(0)
+        }),
+      ))
+
+    it("places excess unblocked children in Waiting for Worker Slot without rejecting", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const config = yield* db.getConfig
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 1,
+          })
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-slot-parent.git",
+            githubRepo: "widgets-slot-parent",
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 600,
+            ...sampleIssueFields,
+            title: "Slot parent",
+            url: "https://github.com/acme/widgets/issues/600",
+            hasChildren: true,
+          })
+          for (const number of [601, 602] as const) {
+            yield* db.storeIssue({
+              repositoryId: repository.id,
+              githubIssueNumber: number,
+              ...sampleIssueFields,
+              title: `Child ${number}`,
+              url: `https://github.com/acme/widgets/issues/${number}`,
+              parent: {
+                githubIssueNumber: 600,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/600",
+              },
+              parentPosition: number - 601,
+            })
+          }
+
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            600,
+          )
+          expect(covered).toHaveLength(2)
+          const admitted = covered.filter((item) => item.holdsWorkerSlot)
+          const waiting = covered.filter((item) => !item.holdsWorkerSlot)
+          expect(admitted).toHaveLength(1)
+          expect(waiting).toHaveLength(1)
+          expect(admitted[0]!.stepRuns).toHaveLength(1)
+          expect(waiting[0]!.stepRuns).toHaveLength(0)
+          expect(waiting[0]!.waitingSince).not.toBeNull()
+          expect(waiting[0]!.waitingForBlockers).toBe(false)
+          expect(covered.every((item) => item.mergeMode === "always")).toBe(
+            true,
+          )
+        }),
+      ))
+
+    it("rolls back every child enrollment when a later enqueue fails", () => {
+      let enqueueCalls = 0
+      const failingEnqueueQueue = stubQueueService({
+        enqueue: () => {
+          enqueueCalls += 1
+          if (enqueueCalls >= 2) {
+            return Effect.fail(
+              new EnqueueError({
+                queue: WORK_ITEM_LIFECYCLE_QUEUE,
+                message: "injected enqueue failure on second child",
+              }),
+            )
+          }
+          return Effect.succeed("qjob-01ARZ3NDEKTSV4RRFFQ69G5FAV" as JobId)
+        },
+      })
+
+      const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(SuccessfulStepsLive),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(
+          Layer.succeed(QueueService, QueueService.of(failingEnqueueQueue)),
+        ),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-rollback-parent.git",
+            githubRepo: "widgets-rollback-parent",
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 700,
+            ...sampleIssueFields,
+            title: "Rollback parent",
+            url: "https://github.com/acme/widgets/issues/700",
+            hasChildren: true,
+          })
+          for (const number of [701, 702] as const) {
+            yield* db.storeIssue({
+              repositoryId: repository.id,
+              githubIssueNumber: number,
+              ...sampleIssueFields,
+              title: `Child ${number}`,
+              url: `https://github.com/acme/widgets/issues/${number}`,
+              parent: {
+                githubIssueNumber: 700,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/700",
+              },
+              parentPosition: number - 701,
+            })
+          }
+
+          const error = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(repository.id, 700),
+          )
+          expect(error).toBeInstanceOf(EnqueueError)
+          expect(enqueueCalls).toBe(2)
+
+          const repoItems = yield* lifecycle.listWorkItemsForRepository(
+            repository.id,
+          )
+          expect(repoItems).toEqual([])
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("skips open children that already have unfinished Work Items", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, parent, child } =
+            yield* seedParentWithOneActionableChild
+
+          const first = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+          expect(first).toHaveLength(1)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 102,
+            ...sampleIssueFields,
+            title: "Later sibling",
+            url: "https://github.com/acme/widgets/issues/102",
+            parent: {
+              githubIssueNumber: 100,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+            },
+            parentPosition: 1,
+          })
+
+          const second = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+          expect(second).toHaveLength(1)
+          expect(second[0]!.githubIssueNumber).toBe(102)
+          expect(second[0]!.mergeMode).toBe("always")
+
+          const original = yield* lifecycle.getWorkItem(first[0]!.id)
+          expect(original.githubIssueNumber).toBe(child.githubIssueNumber)
+          expect(original.mergeMode).toBe("always")
+          // Existing unfinished Work Item is not duplicated.
+          const originalList = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            child.githubIssueNumber,
+          )
+          expect(originalList).toHaveLength(1)
         }),
       ))
 

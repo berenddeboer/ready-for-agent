@@ -115,14 +115,23 @@ const isServerUnfinishedWorkItemState = (state: string): boolean => {
 }
 
 /**
- * First-slice eligibility: Parent with exactly one open actionable Child Issue
- * (leaf, unblocked) and no unfinished Work Item for that child.
+ * Eligibility: Parent with one or more open leaf Child Issues that have no
+ * unfinished Work Item (blocked or unblocked). Unsupported hierarchy shapes
+ * (any direct child with children, including closed mid-level Issues) hide the
+ * action, matching the server Supported Issue Hierarchy check.
  */
 export function isParentImplementAllWithAutoMergeEligible(input: {
   readonly openChildren: readonly {
     readonly githubIssueNumber: number
     readonly hasChildren: boolean
     readonly blockedBy: readonly unknown[]
+  }[]
+  /**
+   * All direct children of the Parent (open and closed). Hierarchy rejection
+   * uses this full set so a closed intermediate child still hides the action.
+   */
+  readonly directChildren: readonly {
+    readonly hasChildren: boolean
   }[]
   readonly workItems: readonly {
     readonly githubIssueNumber: number
@@ -131,14 +140,16 @@ export function isParentImplementAllWithAutoMergeEligible(input: {
   readonly workItemsLoading: boolean
 }): boolean {
   if (input.workItemsLoading) return false
-  if (input.openChildren.length !== 1) return false
-  const [child] = input.openChildren
-  if (child === undefined) return false
-  if (child.hasChildren || child.blockedBy.length > 0) return false
-  const unfinished = input.workItems.some(
-    (workItem) =>
-      workItem.githubIssueNumber === child.githubIssueNumber &&
-      isServerUnfinishedWorkItemState(workItem.state),
-  )
-  return !unfinished
+  if (input.openChildren.length === 0) return false
+  // Match server: any direct child with children is unsupported hierarchy.
+  if (input.directChildren.some((child) => child.hasChildren)) return false
+
+  return input.openChildren.some((child) => {
+    const unfinished = input.workItems.some(
+      (workItem) =>
+        workItem.githubIssueNumber === child.githubIssueNumber &&
+        isServerUnfinishedWorkItemState(workItem.state),
+    )
+    return !unfinished
+  })
 }

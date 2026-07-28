@@ -482,9 +482,10 @@ type Mutation {
   """
   implementLocally(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
   """
-  Parent-level Implement all with auto-merge. First slice: Parent Issue with
-  exactly one open actionable Child Issue and no unfinished Work Item. Creates
-  that child's Work Item with Merge Mode ALWAYS. Returns covered child Work Items.
+  Parent-level Implement all with auto-merge. Snapshots open direct Child Issues
+  without an unfinished Work Item and creates ordinary Work Items with Merge Mode
+  ALWAYS atomically: unblocked children use Implement Now admission; blocked
+  children use Queue (Waiting for blockers). Returns covered child Work Items.
   Does not create a Parent Work Item.
   """
   implementAllWithAutoMerge(
