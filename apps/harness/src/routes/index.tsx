@@ -31,6 +31,7 @@ import {
   isParentImplementAllWithAutoMergeEligible,
 } from "../parent-issue-actions-menu.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
+import { followOpenPullRequestCountLive } from "../refresh-open-pull-request-count-live.js"
 import {
   committedPullRequestsCountQueryKeyPrefix,
   followRepositoryWorkItemsLive,
@@ -781,6 +782,19 @@ function RepositoryCards() {
       queries: {
         workItems: workItemsQuery,
       },
+      signal: controller.signal,
+    })
+    return () => controller.abort()
+  }, [queryClient])
+
+  // GitHub-authoritative open non-draft PR header counts: poll while visible
+  // and refetch immediately when a backgrounded tab returns (external PRs do
+  // not emit Work Item SSE events).
+  useEffect(() => {
+    const controller = new AbortController()
+    void followOpenPullRequestCountLive({
+      queryClient,
+      repositoriesQuery,
       signal: controller.signal,
     })
     return () => controller.abort()

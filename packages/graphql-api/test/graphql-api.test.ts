@@ -15,6 +15,11 @@ import {
   stubDbService,
 } from "@ready-for-agent/db-service/test"
 import {
+  GitHubRepositoryUnavailableError,
+  GitHubService,
+  type GitHubServiceShape,
+} from "@ready-for-agent/github-service"
+import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
@@ -152,6 +157,30 @@ const workItem = {
   ],
 } as WorkItemRecord
 
+const defaultGithub: GitHubServiceShape = {
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded",
+      terminalChecks: [],
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
+    }),
+  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+  getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "open" }),
+  markPullRequestReadyForReview: () => Effect.void,
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+  rerunWorkflowRun: () => Effect.void,
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  listReadyIssues: () => Effect.succeed([]),
+}
+
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
@@ -161,6 +190,7 @@ const makeRuntime = (
   localGitOverrides: Partial<{
     readonly inspect: (path: string) => Effect.Effect<LocalRepository, unknown>
   }> = {},
+  githubOverrides: Partial<GitHubServiceShape> = {},
 ) => {
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -322,6 +352,10 @@ const makeRuntime = (
       Layer.succeed(ActiveAgentBackend, activeBackend),
       Layer.succeed(QueueService, queue),
       Layer.succeed(WorkItemLifecycle, lifecycle),
+      Layer.succeed(GitHubService, {
+        ...defaultGithub,
+        ...githubOverrides,
+      }),
       localGit,
       directoryPicker,
     ),
@@ -1450,20 +1484,32 @@ describe("GraphQL API", () => {
 
   test("exposes scoped gate counts on Config and Repository", async () => {
     await runtime.dispose()
-    runtime = makeRuntime({
-      countUnfinishedWorkItems: Effect.succeed(3),
-      countBlockingUnfinishedForGlobalDefault: Effect.succeed(1),
-      countBlockingUnfinishedForRepository: (repositoryId) =>
-        Effect.succeed(repositoryId === repository.id ? 2 : 0),
-      countPullRequestsForRepository: (repositoryId) =>
-        Effect.succeed(repositoryId === repository.id ? 7 : 0),
-      listRepositories: Effect.succeed([
-        makeRepositoryRecord({
-          id: repository.id,
-          selectedAgentBackend: "grok",
-        }),
-      ]),
-    })
+    const counted: Array<{ owner: string; name: string }> = []
+    runtime = makeRuntime(
+      {
+        countUnfinishedWorkItems: Effect.succeed(3),
+        countBlockingUnfinishedForGlobalDefault: Effect.succeed(1),
+        countBlockingUnfinishedForRepository: (repositoryId) =>
+          Effect.succeed(repositoryId === repository.id ? 2 : 0),
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            id: repository.id,
+            selectedAgentBackend: "grok",
+          }),
+        ]),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: (repo) => {
+          counted.push(repo)
+          return Effect.succeed(7)
+        },
+      },
+    )
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
@@ -1498,6 +1544,78 @@ describe("GraphQL API", () => {
           },
         ],
       },
+    })
+    expect(counted).toEqual([
+      { owner: repository.githubOwner, name: repository.githubRepo },
+    ])
+  })
+
+  test("pullRequestCount uses GitHub open non-draft PRs including external ones", async () => {
+    await runtime.dispose()
+    let openNonDraft = 1
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository]),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: () => Effect.succeed(openNonDraft),
+      },
+    )
+
+    const query = {
+      query: `query {
+        repositories { id pullRequestCount }
+      }`,
+    }
+
+    const first = await createGraphqlApi(runtime).fetch(graphqlRequest(query))
+    expect(await first.json()).toEqual({
+      data: { repositories: [{ id: repository.id, pullRequestCount: 1 }] },
+    })
+
+    // Draft → ready and external open PRs are reflected via GitHub count.
+    openNonDraft = 3
+    const second = await createGraphqlApi(runtime).fetch(graphqlRequest(query))
+    expect(await second.json()).toEqual({
+      data: { repositories: [{ id: repository.id, pullRequestCount: 3 }] },
+    })
+
+    openNonDraft = 0
+    const third = await createGraphqlApi(runtime).fetch(graphqlRequest(query))
+    expect(await third.json()).toEqual({
+      data: { repositories: [{ id: repository.id, pullRequestCount: 0 }] },
+    })
+  })
+
+  test("pullRequestCount degrades to zero when GitHub is unavailable", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository]),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: (repo) =>
+          Effect.fail(new GitHubRepositoryUnavailableError(repo)),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query { repositories { pullRequestCount } }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: { repositories: [{ pullRequestCount: 0 }] },
     })
   })
 

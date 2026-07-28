@@ -255,9 +255,9 @@ type Repository {
   """
   blockingUnfinishedWorkItemCount: Int!
   """
-  Distinct open Work Item PRs for this Repository (unfinished Work Items only).
-  Terminal complete/failed/abandoned PRs are excluded. Does not apply Issue
-  relevance filters (label, author, hierarchy) or Jobs-card status partitions.
+  GitHub-authoritative count of currently open, non-draft pull requests for
+  this Repository. Includes PRs with no Work Item. Merged, closed-unmerged,
+  and draft PRs are excluded. Does not apply Issue relevance filters.
   """
   pullRequestCount: Int!
 }

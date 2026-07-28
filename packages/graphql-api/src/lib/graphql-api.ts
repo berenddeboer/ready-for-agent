@@ -21,6 +21,7 @@ import {
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
+import { GitHubService } from "@ready-for-agent/github-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
@@ -250,6 +251,7 @@ type ResetWorkItemArgs = WorkItemArgs
 
 export type GraphqlServices =
   | DbService
+  | GitHubService
   | KeymaxxerService
   | ActiveAgentBackend
   | QueueService
@@ -590,11 +592,27 @@ export const createGraphqlApi = (
                 ),
               ),
             ),
-          pullRequestCount: async (repository: { id: string }) =>
+          pullRequestCount: async (repository: {
+            githubOwner: string
+            githubRepo: string
+          }) =>
             runGraphql(
               Effect.gen(function* () {
-                const db = yield* DbService
-                return yield* db.countPullRequestsForRepository(repository.id)
+                const github = yield* GitHubService
+                // GitHub is authoritative: open non-draft PRs regardless of Work
+                // Item ownership. Credential/API failures degrade to zero so the
+                // repository list still renders.
+                return yield* github
+                  .countOpenNonDraftPullRequests({
+                    owner: repository.githubOwner,
+                    name: repository.githubRepo,
+                  })
+                  .pipe(
+                    Effect.catchTags({
+                      GitHubRepositoryUnavailableError: () => Effect.succeed(0),
+                      GitHubRequestError: () => Effect.succeed(0),
+                    }),
+                  )
               }).pipe(
                 Effect.withSpan("graphql-api.Repository.pullRequestCount"),
               ),

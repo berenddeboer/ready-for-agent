@@ -7,8 +7,10 @@ export const committedPullRequestsCountQueryKeyPrefix = [
 
 const configQueryKey = ["config"] as const
 /**
- * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) and open Work
- * Item PR count (`pullRequestCount`) live here.
+ * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) lives here.
+ * GitHub-authoritative open non-draft PR count (`pullRequestCount`) is kept
+ * live by {@link followOpenPullRequestCountLive}; Work Item events still
+ * refetch repositories as a secondary path when harness-owned PRs change.
  */
 const repositoriesQueryKey = ["repositories"] as const
 

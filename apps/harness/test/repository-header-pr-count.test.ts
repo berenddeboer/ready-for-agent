@@ -11,6 +11,12 @@ const refreshSource = () =>
     "utf8",
   )
 
+const openPrCountLiveSource = () =>
+  readFileSync(
+    join(import.meta.dir, "../src/refresh-open-pull-request-count-live.ts"),
+    "utf8",
+  )
+
 describe("repository header pull request count", () => {
   test("repositories query requests open pullRequestCount", () => {
     const source = homeSource()
@@ -46,10 +52,22 @@ describe("repository header pull request count", () => {
     expect(source).toContain("repository.pullRequestCount === 1")
   })
 
-  test("work-item live refresh keeps open repository PR counts current", () => {
+  test("uses GitHub-backed live refresh independent of Work Item SSE", () => {
+    const home = homeSource()
+    expect(home).toContain("followOpenPullRequestCountLive")
+    expect(home).toContain("repositoriesQuery")
+
+    const live = openPrCountLiveSource()
+    expect(live).toContain("OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS")
+    expect(live).toContain("visibilitychange")
+    expect(live).toContain("GitHub-authoritative")
+    expect(live).toContain("External PR changes do not emit Work Item SSE")
+  })
+
+  test("work-item live refresh still invalidates repositories as a secondary path", () => {
     const source = refreshSource()
     expect(source).toContain("pullRequestCount")
-    expect(source).toContain("open Work")
+    expect(source).toContain("followOpenPullRequestCountLive")
     expect(source).toContain('const repositoriesQueryKey = ["repositories"]')
   })
 })

@@ -106,6 +106,7 @@ const githubWith = (
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
     getOpenPullRequestNumber: () => Effect.succeed(1),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
     getPullRequestCheckStatus: () => Effect.succeed(status),
     getPrStatusCheckDiagnostics: () => Effect.succeed([]),
     getPullRequestLifecycleStatus: () =>
@@ -148,6 +149,7 @@ describe("PR status check steps", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: (_repository, branch) => {
         requestedBranch = branch
         return Effect.succeed({
@@ -325,6 +327,7 @@ describe("PR status check steps", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
@@ -413,6 +416,7 @@ describe("PR status check steps", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[2]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
@@ -564,6 +568,7 @@ describe("PR status check steps", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[2]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
@@ -657,6 +662,7 @@ describe("PR status check steps", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
@@ -709,6 +715,7 @@ describe("PR status check steps", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed(statuses[index++] ?? statuses[1]!),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),

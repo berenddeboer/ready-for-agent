@@ -139,6 +139,108 @@ describe("GitHubService live implementation", () => {
     })
   })
 
+  it("counts open non-draft pull requests across pages and excludes drafts", async () => {
+    const requests: unknown[] = []
+    const pages = [
+      {
+        repository: {
+          pullRequests: {
+            nodes: [
+              { isDraft: false },
+              { isDraft: true },
+              { isDraft: false },
+              null,
+            ],
+            pageInfo: { endCursor: "page-2", hasNextPage: true },
+          },
+        },
+      },
+      {
+        repository: {
+          pullRequests: {
+            nodes: [{ isDraft: false }, { isDraft: true }],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+      },
+    ]
+    const service = makeGitHubService({
+      query: (input) => {
+        requests.push(input)
+        return Promise.resolve(pages.shift()!) as never
+      },
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.countOpenNonDraftPullRequests(repository),
+      ),
+    ).toBe(3)
+    expect(requests).toEqual([
+      {
+        repository: {
+          __args: repository,
+          pullRequests: {
+            __args: {
+              first: 100,
+              states: ["OPEN"],
+            },
+            nodes: { isDraft: true },
+            pageInfo: { endCursor: true, hasNextPage: true },
+          },
+        },
+      },
+      {
+        repository: {
+          __args: repository,
+          pullRequests: {
+            __args: {
+              first: 100,
+              states: ["OPEN"],
+              after: "page-2",
+            },
+            nodes: { isDraft: true },
+            pageInfo: { endCursor: true, hasNextPage: true },
+          },
+        },
+      },
+    ])
+  })
+
+  it("returns zero open non-draft pull requests when GitHub has none", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            },
+          },
+        }) as never,
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.countOpenNonDraftPullRequests(repository),
+      ),
+    ).toBe(0)
+  })
+
+  it("fails when the repository is unavailable for open non-draft PR count", async () => {
+    const service = makeGitHubService({
+      query: () => Promise.resolve({ repository: null }) as never,
+    })
+
+    const result = await Effect.runPromise(
+      service.countOpenNonDraftPullRequests(repository).pipe(Effect.result),
+    )
+    expect(Result.isFailure(result)).toBe(true)
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(GitHubRepositoryUnavailableError)
+    }
+  })
+
   for (const [state, expected] of [
     ["PENDING", "pending"],
     ["EXPECTED", "expected"],

@@ -94,6 +94,7 @@ type Repository {
   issue(number: Int!): Issue
   pullRequests(
     first: Int
+    after: String
     states: [PullRequestState!]
     headRefName: String
   ): PullRequestConnection!
