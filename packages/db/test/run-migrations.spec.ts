@@ -99,7 +99,23 @@ describe("runMigrations", () => {
           { name: "20260725210211_wait_for_ready_for_review_checks" },
           { name: "20260726090000_waiting_for_blockers" },
           { name: "20260728120000_work_item_merge_mode" },
+          { name: "20260729120000_work_item_publication_copy" },
         ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("adds Work Item publication title and body columns", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* runMigrations(defaultMigrationsFolder)
+        const columns = (yield* sql.unsafe(
+          `PRAGMA table_info(work_item)`,
+        )) as readonly { readonly name: string }[]
+        const names = new Set(columns.map((column) => column.name))
+        expect(names.has("publication_title")).toBe(true)
+        expect(names.has("publication_body")).toBe(true)
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

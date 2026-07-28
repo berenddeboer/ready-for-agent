@@ -121,6 +121,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           } as const
 
@@ -182,6 +186,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           } as const
 
@@ -240,6 +248,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })
         }),
@@ -288,6 +300,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           } as const
 
@@ -334,6 +350,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           } as const
 
@@ -391,6 +411,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           } as const
 
@@ -459,6 +483,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })
         }),
@@ -521,6 +549,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),
@@ -565,6 +597,10 @@ describe("removeWorktree", () => {
             worktreePath: null,
             startingCommitOid: null,
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           }).pipe(Effect.flip)
         }),

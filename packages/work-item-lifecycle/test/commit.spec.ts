@@ -9,21 +9,33 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendTimeoutError,
 } from "@ready-for-agent/agent-backend"
+import { DatabaseTest } from "@ready-for-agent/db/test"
+import { DbServiceLive } from "@ready-for-agent/db-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CommitInvalidWorktreeContextError,
   CommitOpenCodeError,
   CommitPostconditionError,
+  CommitPublicationCopyError,
   CommitSessionContextMissingError,
   CommitStartingCommitMissingError,
   CommitWorktreeContextMissingError,
-  buildDeterministicCommitMessage,
   commit,
+  formatPublicationCommitMessage,
   makeWorkItemId,
+  normalizePublicationCopy,
+  parsePublicationCopyResult,
+  publicationCopyFromCommitMessage,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 const PlatformLayer = BunServices.layer
+
+const sampleCopy = {
+  publicationTitle: "feat: add widgets endpoint",
+  publicationBody:
+    "Adds the widgets HTTP endpoint used by the dashboard.\n\nVerified with unit tests.\n\nCloses #91",
+}
 
 const baseContext = (
   worktreePath: string | null,
@@ -41,6 +53,8 @@ const baseContext = (
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
+  publicationTitle: null,
+  publicationBody: null,
   sessionId: "ses_implement_session",
   ...overrides,
 })
@@ -52,7 +66,7 @@ const stubOpencode = (impl: {
     readonly model: string
     readonly thinkingLevel: string
     readonly timeout?: Duration.Input
-  }) => Effect.Effect<{ sessionId: string }, never>
+  }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
   readonly continueTurn?: (input: {
     readonly sessionId: string
     readonly prompt: string
@@ -60,7 +74,7 @@ const stubOpencode = (impl: {
     readonly model: string
     readonly thinkingLevel: string
     readonly timeout?: Duration.Input
-  }) => Effect.Effect<{ sessionId: string }, never>
+  }) => Effect.Effect<{ sessionId: string; assistantText: string }, never>
 }) =>
   Layer.succeed(
     AgentBackend,
@@ -87,7 +101,12 @@ const run = <A, E>(
   opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
 ): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(opencodeLayer), Effect.provide(PlatformLayer)),
+    effect.pipe(
+      Effect.provide(opencodeLayer),
+      Effect.provide(DbServiceLive),
+      Effect.provide(DatabaseTest),
+      Effect.provide(PlatformLayer),
+    ),
   )
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
@@ -131,23 +150,102 @@ const withTempRepo = async (
   }
 }
 
-describe("buildDeterministicCommitMessage", () => {
-  it("includes title and Closes reference", () => {
-    expect(
-      buildDeterministicCommitMessage({
-        githubIssueNumber: 91,
-        issueTitle: "Add widgets endpoint",
-      }),
-    ).toBe("Add widgets endpoint (#91)\n\nCloses #91")
+const publicationResultLine = (title: string, body: string) =>
+  `READY_FOR_AGENT_RESULT: PUBLICATION_COPY ${JSON.stringify({ title, body })}`
+
+describe("publication copy parsing", () => {
+  it("parses JSON on the result line and normalizes Closes", () => {
+    const parsed = parsePublicationCopyResult(
+      [
+        "Here is the copy.",
+        publicationResultLine(
+          "feat: widgets",
+          "Why we needed this.\n\nCloses #91",
+        ),
+      ].join("\n"),
+    )
+    expect(parsed).toEqual({
+      title: "feat: widgets",
+      body: "Why we needed this.\n\nCloses #91",
+    })
+    expect(normalizePublicationCopy(parsed!, 91)).toEqual({
+      title: "feat: widgets",
+      body: "Why we needed this.\n\nCloses #91",
+    })
   })
 
-  it("falls back when title is missing", () => {
+  it("rejects blank, generic, or missing results", () => {
+    expect(parsePublicationCopyResult("no marker")).toBeNull()
     expect(
-      buildDeterministicCommitMessage({
-        githubIssueNumber: 7,
-        issueTitle: null,
+      parsePublicationCopyResult(
+        `${publicationResultLine("t", "b")}\n${publicationResultLine("t2", "b2")}`,
+      ),
+    ).toBeNull()
+    expect(
+      normalizePublicationCopy(
+        {
+          title: "  ",
+          body: "something substantive enough",
+        },
+        1,
+      ),
+    ).toBeNull()
+    expect(
+      normalizePublicationCopy(
+        {
+          title: "feat: x",
+          body: "Automated draft pull request for GitHub issue #1.",
+        },
+        1,
+      ),
+    ).toBeNull()
+  })
+
+  it("formats commit message from title and body", () => {
+    expect(
+      formatPublicationCommitMessage({
+        title: "feat: x",
+        body: "Why\n\nCloses #1",
       }),
-    ).toContain("Closes #7")
+    ).toBe("feat: x\n\nWhy\n\nCloses #1")
+  })
+
+  it("seeds from a legacy commit body that is only Closes without doubling", () => {
+    const seeded = publicationCopyFromCommitMessage(
+      "prior commit\n\nCloses #91",
+      91,
+    )
+    expect(seeded).not.toBeNull()
+    expect(seeded!.title).toBe("prior commit")
+    // Body matches the commit body (single Closes); no invented prose.
+    expect(seeded!.body).toBe("Closes #91")
+    expect(seeded!.body.match(/Closes #91/g)?.length).toBe(1)
+    expect(formatPublicationCommitMessage(seeded!)).toBe(
+      "prior commit\n\nCloses #91",
+    )
+  })
+
+  it("strips trailing-period and list-form closing references when normalizing", () => {
+    const withPeriod = normalizePublicationCopy(
+      {
+        title: "feat: widgets",
+        body: "Adds widgets.\n\nCloses #7.",
+      },
+      7,
+    )
+    expect(withPeriod).not.toBeNull()
+    expect(withPeriod!.body.match(/Closes #7/g)?.length).toBe(1)
+    expect(withPeriod!.body).not.toContain("Closes #7.")
+
+    const listForm = normalizePublicationCopy(
+      {
+        title: "feat: widgets",
+        body: "Adds widgets.\n\n- Closes #7",
+      },
+      7,
+    )
+    expect(listForm).not.toBeNull()
+    expect(listForm!.body.match(/Closes #7/g)?.length).toBe(1)
   })
 })
 
@@ -175,9 +273,8 @@ describe("commit", () => {
       expect(error).toBeInstanceOf(CommitStartingCommitMissingError)
     }))
 
-  it("native commit succeeds without Agent Backend invocation", () =>
+  it("native commit uses persisted publication copy without a generation turn", () =>
     withTempRepo(async (root, startingOid) => {
-      // Common Commit path: no .ready-for-agent directory yet.
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
 
       let continued = 0
@@ -188,6 +285,9 @@ describe("commit", () => {
             sessionId: "ses_from_implement",
             githubIssueNumber: 2039,
             issueTitle: "Fix the widgets path",
+            publicationTitle: "fix: widgets path",
+            publicationBody:
+              "Corrects the widgets route used by the API.\n\nCloses #2039",
           }),
         ),
         stubOpencode({
@@ -202,6 +302,9 @@ describe("commit", () => {
       )
 
       expect(result.completion).toBe("native")
+      expect(result.publicationTitle).toBe("fix: widgets path")
+      expect(result.publicationBody).toContain("Corrects the widgets route")
+      expect(result.publicationBody).toContain("Closes #2039")
       expect(continued).toBe(0)
 
       const count = await git(root, [
@@ -211,9 +314,78 @@ describe("commit", () => {
       ])
       expect(count).toBe("1")
       const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message).toContain("fix: widgets path")
+      expect(message).toContain("Corrects the widgets route")
       expect(message).toContain("Closes #2039")
-      expect(message).toContain("Fix the widgets path")
+      expect(message).not.toContain("Automated draft pull request")
       expect(await git(root, ["status", "--porcelain"])).toBe("")
+    }))
+
+  it("generates publication copy once then commits natively", () =>
+    withTempRepo(async (root, startingOid) => {
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      const prompts: string[] = []
+
+      const result = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            githubIssueNumber: 42,
+            sessionId: "ses_from_implement",
+          }),
+        ),
+        stubOpencode({
+          continueTurn: (input) => {
+            prompts.push(input.prompt)
+            return Effect.succeed({
+              sessionId: input.sessionId,
+              assistantText: publicationResultLine(
+                "feat: implement widgets",
+                "Implements widgets as requested.\n\nVerified via local checks.",
+              ),
+            })
+          },
+        }),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(result.publicationTitle).toBe("feat: implement widgets")
+      expect(result.publicationBody).toContain("Implements widgets")
+      expect(result.publicationBody).toContain("Closes #42")
+      expect(prompts).toHaveLength(1)
+      expect(prompts[0]).toContain("Write copy only")
+      expect(prompts[0]).toContain("Do not edit files")
+      const message = await git(root, ["log", "-1", "--pretty=%B"])
+      expect(message.startsWith("feat: implement widgets")).toBe(true)
+      expect(message).toContain("Closes #42")
+    }))
+
+  it("retries generation once on malformed copy then fails without placeholder fallback", () =>
+    withTempRepo(async (root, startingOid) => {
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      let calls = 0
+      const error = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            githubIssueNumber: 9,
+          }),
+        ).pipe(Effect.flip),
+        stubOpencode({
+          continueTurn: () => {
+            calls += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "not a valid result",
+            })
+          },
+        }),
+      )
+      expect(error).toBeInstanceOf(CommitPublicationCopyError)
+      expect(calls).toBe(2)
+      expect(
+        await git(root, ["rev-list", "--count", `${startingOid}..HEAD`]),
+      ).toBe("0")
     }))
 
   it("native commit leaves untracked harness artifacts uncommitted", () =>
@@ -227,7 +399,10 @@ describe("commit", () => {
           baseContext(root, {
             startingCommitOid: startingOid,
             githubIssueNumber: 2039,
-            issueTitle: "Fix the widgets path",
+            ...sampleCopy,
+            publicationBody:
+              "Corrects the widgets route used by the API.\n\nCloses #2039",
+            publicationTitle: "fix: widgets path",
           }),
         ),
       )
@@ -243,7 +418,6 @@ describe("commit", () => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       await mkdir(join(root, ".ready-for-agent"), { recursive: true })
       await writeFile(join(root, ".ready-for-agent", "noise.log"), "harness\n")
-      // Simulate Pre-Commit staging the whole worktree.
       await git(root, ["add", "-A"])
 
       const result = await run(
@@ -251,7 +425,9 @@ describe("commit", () => {
           baseContext(root, {
             startingCommitOid: startingOid,
             githubIssueNumber: 12,
-            issueTitle: "Keep diagnostics out",
+            publicationTitle: "chore: keep diagnostics out",
+            publicationBody:
+              "Ensures harness artifacts stay uncommitted.\n\nCloses #12",
           }),
         ),
       )
@@ -264,7 +440,7 @@ describe("commit", () => {
       expect(status).toContain(".ready-for-agent/")
     }))
 
-  it("reuses an existing postcondition without committing again or calling the agent", () =>
+  it("reuses an existing postcondition and seeds copy from the commit when absent", () =>
     withTempRepo(async (root, startingOid) => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       await git(root, ["add", "feature.ts"])
@@ -295,11 +471,41 @@ describe("commit", () => {
       )
 
       expect(result.completion).toBe("native")
+      expect(result.publicationTitle).toBe("prior commit")
+      expect(result.publicationBody).toContain("Closes #91")
+      expect(result.publicationBody.match(/Closes #91/g)?.length).toBe(1)
       expect(continued).toBe(0)
       expect(await git(root, ["rev-parse", "HEAD"])).toBe(headBefore)
     }))
 
-  it("falls back to one Agent Turn when the commit-msg hook rejects the message", () =>
+  it("prefers HEAD over stale persisted copy when already committed", () =>
+    withTempRepo(async (root, startingOid) => {
+      await writeFile(join(root, "feature.ts"), "export const n = 1\n")
+      await git(root, ["add", "feature.ts"])
+      await git(root, [
+        "commit",
+        "--no-verify",
+        "-m",
+        "feat: actual head message\n\nPolicy-fixed body\n\nCloses #91",
+      ])
+
+      const result = await run(
+        commit(
+          baseContext(root, {
+            startingCommitOid: startingOid,
+            publicationTitle: "stale title from mid-persist",
+            publicationBody: "Stale body that must not win.\n\nCloses #91",
+          }),
+        ),
+      )
+
+      expect(result.completion).toBe("native")
+      expect(result.publicationTitle).toBe("feat: actual head message")
+      expect(result.publicationBody).toContain("Policy-fixed body")
+      expect(result.publicationBody).not.toContain("Stale body")
+    }))
+
+  it("falls back to one repair Agent Turn when the commit-msg hook rejects the message", () =>
     withTempRepo(async (root, startingOid) => {
       const hooks = join(root, ".git", "hooks")
       await mkdir(hooks, { recursive: true })
@@ -330,7 +536,8 @@ fi
             startingCommitOid: startingOid,
             sessionId: "ses_from_implement",
             githubIssueNumber: 2039,
-            issueTitle: "Add feature",
+            publicationTitle: "Add feature without conventional prefix",
+            publicationBody: "Adds the feature file.\n\nCloses #2039",
             model: "opencode/commit-model",
             thinkingLevel: "max",
             maxDuration: Duration.minutes(10),
@@ -341,7 +548,6 @@ fi
             Effect.gen(function* () {
               agentCalls += 1
               continued = input
-              // Agent repairs policy: conventional commit + closes issue.
               yield* Effect.tryPromise({
                 try: async () => {
                   await git(root, ["add", "feature.ts"])
@@ -349,7 +555,7 @@ fi
                     "commit",
                     "--no-verify",
                     "-m",
-                    "feat: add feature\n\nCloses #2039",
+                    "feat: add feature\n\nPolicy-fixed body\n\nCloses #2039",
                   ])
                 },
                 catch: (cause) => cause as Error,
@@ -368,17 +574,18 @@ fi
       expect(continued!.sessionId).toBe("ses_from_implement")
       expect(continued!.cwd).toBe(root)
       expect(continued!.prompt).toContain("commitlint")
-      expect(continued!.prompt).toContain("closes GitHub issue #2039")
+      expect(continued!.prompt).toContain("Prefer this exact commit message")
       expect(continued!.prompt).toContain("Bounded native failure diagnostics")
+      // Canonical copy updated from the agent-rewritten commit.
+      expect(result.publicationTitle).toBe("feat: add feature")
+      expect(result.publicationBody).toContain("Policy-fixed body")
       expect(
         await git(root, ["rev-list", "--count", `${startingOid}..HEAD`]),
       ).toBe("1")
     }))
 
-  it("does not invoke agent when native reports failure but the commit already exists", () =>
+  it("does not invoke agent when postcondition is already met", () =>
     withTempRepo(async (root, startingOid) => {
-      // Pre-create the implementation commit so postcondition is met after a
-      // would-be-native attempt path that first checks postcondition.
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
       await git(root, ["add", "feature.ts"])
       await git(root, [
@@ -393,6 +600,8 @@ fi
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
+            publicationTitle: "already committed",
+            publicationBody: "Seeded.\n\nCloses #91",
           }),
         ),
         stubOpencode({
@@ -433,11 +642,12 @@ exit 1
           baseContext(root, {
             startingCommitOid: startingOid,
             sessionId: "ses_from_implement",
+            publicationTitle: "feat: always fail",
+            publicationBody: "Will not commit.\n\nCloses #91",
           }),
         ).pipe(Effect.flip),
         stubOpencode({
           continueTurn: () =>
-            // Agent does not create a commit either.
             Effect.succeed({
               sessionId: "ses_from_implement",
               assistantText: "",
@@ -449,18 +659,9 @@ exit 1
       expect((error as CommitPostconditionError).worktreePath).toBe(root)
     }))
 
-  it("requires Session context only for agent fallback", () =>
+  it("requires Session context for copy generation and agent fallback", () =>
     withTempRepo(async (root, startingOid) => {
       await writeFile(join(root, "feature.ts"), "export const n = 1\n")
-      const hooks = join(root, ".git", "hooks")
-      await mkdir(hooks, { recursive: true })
-      await writeFile(
-        join(hooks, "commit-msg"),
-        `#!/bin/sh
-exit 1
-`,
-      )
-      await chmod(join(hooks, "commit-msg"), 0o755)
 
       const error = await run(
         commit(
@@ -490,6 +691,8 @@ exit 1
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
+            publicationTitle: "feat: x",
+            publicationBody: "Body text for failure path.\n\nCloses #91",
           }),
         ).pipe(Effect.flip),
         Layer.succeed(
@@ -533,6 +736,8 @@ exit 1
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
+            publicationTitle: "feat: x",
+            publicationBody: "Body text for timeout path.\n\nCloses #91",
           }),
         ).pipe(Effect.flip),
         Layer.succeed(
@@ -572,6 +777,8 @@ exit 1
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
+            publicationTitle: "feat: x",
+            publicationBody: "Body text for session path.\n\nCloses #91",
           }),
         ).pipe(Effect.flip),
         Layer.succeed(

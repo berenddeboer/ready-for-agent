@@ -836,6 +836,75 @@ const safeLogFileName = (externalId: string): string =>
 const workItemCompletionMarker = (workItemId: string): string =>
   `<!-- ready-for-agent:work-item:${workItemId} -->`
 
+type OpenPullRequestDetails = {
+  readonly id: string
+  readonly number: number
+  readonly isDraft: boolean
+  readonly title: string
+  readonly body: string
+}
+
+const findOpenPullRequestDetailsImpl = (
+  client: GitHubGraphqlClient,
+  repository: { readonly owner: string; readonly name: string },
+  headRefName: string,
+): Effect.Effect<
+  OpenPullRequestDetails | null,
+  GitHubRepositoryUnavailableError | GitHubRequestError
+> =>
+  Effect.gen(function* () {
+    const result = yield* githubQuery(
+      `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        client.query(
+          {
+            repository: {
+              __args: repository,
+              pullRequests: {
+                __args: {
+                  first: 1,
+                  states: ["OPEN"],
+                  headRefName,
+                },
+                nodes: {
+                  id: true,
+                  number: true,
+                  isDraft: true,
+                  title: true,
+                  body: true,
+                },
+              },
+            },
+          },
+          signal,
+        ),
+    )
+    if (result.repository === null) {
+      return yield* new GitHubRepositoryUnavailableError(repository)
+    }
+    const node = result.repository.pullRequests.nodes?.[0]
+    if (node === null || node === undefined) {
+      return null
+    }
+    const number = node.number
+    if (!Number.isSafeInteger(number) || Number(number) <= 0) {
+      return null
+    }
+    const id = typeof node.id === "string" ? node.id.trim() : ""
+    // id is required for updatePullRequest; callers that only need a number use
+    // findOpenPullRequestNumberImpl (number-only query).
+    if (id === "") {
+      return null
+    }
+    return {
+      id,
+      number: Number(number),
+      isDraft: node.isDraft === true,
+      title: typeof node.title === "string" ? node.title : "",
+      body: typeof node.body === "string" ? node.body : "",
+    }
+  })
+
 const findOpenPullRequestNumberImpl = (
   client: GitHubGraphqlClient,
   repository: { readonly owner: string; readonly name: string },
@@ -845,6 +914,7 @@ const findOpenPullRequestNumberImpl = (
   GitHubRepositoryUnavailableError | GitHubRequestError
 > =>
   Effect.gen(function* () {
+    // Number-only query: do not require GraphQL id (update paths use details).
     const result = yield* githubQuery(
       `Failed to find open pull request for ${repository.owner}/${repository.name}:${headRefName}`,
       (signal) =>
@@ -1190,6 +1260,54 @@ export const makeGitHubService = (
       return Number(number)
     },
   ),
+  updateOpenDraftPullRequestCopy: Effect.fn(
+    "GitHubService.updateOpenDraftPullRequestCopy",
+  )(function* (repository, headRefName, input) {
+    const details = yield* findOpenPullRequestDetailsImpl(
+      client,
+      repository,
+      headRefName,
+    )
+    if (details === null) {
+      return null
+    }
+    if (details.isDraft !== true) {
+      // Ready-for-review or human-edited non-draft: do not overwrite.
+      return details.number
+    }
+    if (details.title === input.title && details.body === input.body) {
+      return details.number
+    }
+    if (client.mutation === undefined) {
+      // Open draft exists; copy update is best-effort.
+      return details.number
+    }
+    const mutate = client.mutation
+    // Mutation failures must not hide an existing open draft: callers treat the
+    // returned number as postcondition success for Create PR reuse.
+    yield* githubRequest(
+      `Failed to update draft pull request #${details.number} for ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        mutate(
+          {
+            updatePullRequest: {
+              __args: {
+                input: {
+                  pullRequestId: details.id,
+                  title: input.title,
+                  body: input.body,
+                },
+              },
+              pullRequest: {
+                number: true,
+              },
+            },
+          },
+          signal,
+        ),
+    ).pipe(Effect.catch(() => Effect.void))
+    return details.number
+  }),
   countOpenNonDraftPullRequests: Effect.fn(
     "GitHubService.countOpenNonDraftPullRequests",
   )(function* (repository) {

@@ -173,6 +173,17 @@ export const ambientGitHubLayer = (options: {
             service.createDraftPullRequest(repository, input),
           ),
         ),
+        updateOpenDraftPullRequestCopy: Effect.fn(
+          "AmbientGitHub.updateOpenDraftPullRequestCopy",
+        )((repository, headRefName, input) =>
+          authenticated((service) =>
+            service.updateOpenDraftPullRequestCopy(
+              repository,
+              headRefName,
+              input,
+            ),
+          ),
+        ),
         getPullRequestCheckStatus: Effect.fn(
           "AmbientGitHub.getPullRequestCheckStatus",
         )((repository, headRefName) =>

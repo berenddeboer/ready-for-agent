@@ -32,9 +32,19 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
     review: () => Effect.succeed({ _tag: "clean" as const }),
-    commit: () => Effect.succeed({ completion: "native" as const }),
+    commit: () =>
+      Effect.succeed({
+        completion: "native" as const,
+        publicationTitle: "feat: test",
+        publicationBody: "Why\n\nCloses #1",
+      }),
     createPr: () =>
-      Effect.succeed({ pullRequestNumber: 101, completion: "native" as const }),
+      Effect.succeed({
+        pullRequestNumber: 101,
+        completion: "native" as const,
+        publicationTitle: "feat: test",
+        publicationBody: "Why\n\nCloses #1",
+      }),
     watchPrStatusChecks: () =>
       Effect.succeed({
         _tag: "succeeded" as const,

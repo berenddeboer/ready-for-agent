@@ -122,6 +122,22 @@ export interface GitHubServiceShape {
     number,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
+  /**
+   * When an open draft PR exists for the exact head branch, set its title and
+   * body to the provided values. Ready (non-draft) open PRs are left unchanged.
+   * Returns the open PR number when one exists, otherwise null.
+   */
+  readonly updateOpenDraftPullRequestCopy: (
+    repository: GitHubRepository,
+    headRefName: string,
+    input: {
+      readonly title: string
+      readonly body: string
+    },
+  ) => Effect.Effect<
+    number | null,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
   readonly markPullRequestReadyForReview: (
     repository: GitHubRepository,
     headRefName: string,

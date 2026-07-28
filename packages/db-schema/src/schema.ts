@@ -308,6 +308,16 @@ export const workItem = snakeCase.table(
      * Durable No-Change Outcome completion summary (Markdown); null until confirmed.
      */
     completionSummary: text(),
+    /**
+     * Canonical agent-authored publication title for git commit subject and PR title.
+     * Null until Commit generates or seeds it from an existing commit.
+     */
+    publicationTitle: text(),
+    /**
+     * Canonical agent-authored publication body (Markdown) for git commit body and PR body.
+     * Includes a normalized `Closes #<issue>` reference. Null until Commit generates or seeds it.
+     */
+    publicationBody: text(),
     sessionId: text(),
     failureCode: text(),
     failureMessage: text(),

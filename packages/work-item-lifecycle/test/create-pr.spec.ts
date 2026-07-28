@@ -59,6 +59,9 @@ const baseContext = (
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
+  publicationTitle: "feat: add widgets endpoint",
+  publicationBody:
+    "Adds the widgets HTTP endpoint used by the dashboard.\n\nVerified with unit tests.\n\nCloses #91",
   sessionId: "ses_implement_session",
   ...overrides,
 })
@@ -92,6 +95,7 @@ const stubGitHub = (
       getOpenPullRequestNumber: () => Effect.succeed(321),
       findOpenPullRequestNumber: () => Effect.succeed(null),
       createDraftPullRequest: () => Effect.succeed(321),
+      updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed({
@@ -231,9 +235,12 @@ describe("createPr", () => {
       let createCalls = 0
       let continueCalls = 0
       let resolvedBranch: string | null = null
+      let reconciledCopy: { title: string; body: string } | null = null
       const context = baseContext(root, {
         githubIssueNumber: 2039,
         workItemId: makeWorkItemId(),
+        publicationTitle: "feat: ship widgets",
+        publicationBody: "Ships widgets for the dashboard.\n\nCloses #2039",
       })
       const expectedBranch = workItemBranchName({
         githubOwner: "acme",
@@ -246,6 +253,10 @@ describe("createPr", () => {
         github: stubGitHub({
           findOpenPullRequestNumber: (_repository, branch) => {
             resolvedBranch = branch
+            return Effect.succeed(777)
+          },
+          updateOpenDraftPullRequestCopy: (_repository, _branch, input) => {
+            reconciledCopy = input
             return Effect.succeed(777)
           },
           createDraftPullRequest: () => {
@@ -269,6 +280,40 @@ describe("createPr", () => {
       expect(createCalls).toBe(0)
       expect(continueCalls).toBe(0)
       expect(resolvedBranch).toBe(expectedBranch)
+      expect(reconciledCopy).toEqual({
+        title: "feat: ship widgets",
+        body: "Ships widgets for the dashboard.\n\nCloses #2039",
+      })
+    }))
+
+  it("reuses an existing open PR when draft copy reconcile fails", () =>
+    withTemp(async (root) => {
+      let createCalls = 0
+      const result = await run(
+        createPr(
+          baseContext(root, {
+            githubIssueNumber: 55,
+            publicationTitle: "feat: x",
+            publicationBody: "Body for issue 55.\n\nCloses #55",
+          }),
+        ),
+        {
+          github: stubGitHub({
+            findOpenPullRequestNumber: () => Effect.succeed(55),
+            updateOpenDraftPullRequestCopy: () =>
+              Effect.fail(
+                new GitHubRequestError({ message: "mutation rate limited" }),
+              ),
+            createDraftPullRequest: () => {
+              createCalls += 1
+              return Effect.succeed(999)
+            },
+          }),
+        },
+      )
+      expect(result.pullRequestNumber).toBe(55)
+      expect(result.completion).toBe("native")
+      expect(createCalls).toBe(0)
     }))
 
   it("native create succeeds without Agent Backend invocation", () =>
@@ -303,6 +348,9 @@ describe("createPr", () => {
         const context = baseContext(root, {
           githubIssueNumber: 2039,
           issueTitle: "Ship widgets",
+          publicationTitle: "feat: ship widgets",
+          publicationBody:
+            "Ships the widgets feature end to end.\n\nCloses #2039",
           model: "opencode/create-pr-model",
           thinkingLevel: "max",
           maxDuration: Duration.minutes(12),
@@ -365,8 +413,10 @@ describe("createPr", () => {
         expect(createCalls).toBe(1)
         expect(createdInput).not.toBeNull()
         expect(createdInput!.headRefName).toBe(branch)
-        expect(createdInput!.title).toBe("Ship widgets")
+        expect(createdInput!.title).toBe("feat: ship widgets")
+        expect(createdInput!.body).toContain("Ships the widgets feature")
         expect(createdInput!.body).toContain("Closes #2039")
+        expect(createdInput!.body).not.toContain("Automated draft pull request")
       } finally {
         await rm(bare, { recursive: true, force: true })
       }
@@ -500,9 +550,11 @@ describe("createPr", () => {
             findSecret: () => Effect.die("must not inspect the vault"),
           }),
           github: stubGitHub({
+            // Existence uses findOpenPullRequestNumber (null until after create).
+            updateOpenDraftPullRequestCopy: () => Effect.succeed(888),
             findOpenPullRequestNumber: () => {
               findPhase += 1
-              // 1: initial lookup null, 2: after failed create — found
+              // 1: initial existence → none; later soft re-lookup after failed create → found.
               if (findPhase === 1) return Effect.succeed(null)
               return Effect.succeed(888)
             },
@@ -527,6 +579,7 @@ describe("createPr", () => {
         expect(result.pullRequestNumber).toBe(888)
         expect(result.completion).toBe("native")
         expect(continueCalls).toBe(0)
+        expect(findPhase).toBeGreaterThanOrEqual(2)
       } finally {
         await rm(bare, { recursive: true, force: true })
       }
@@ -582,6 +635,8 @@ describe("createPr", () => {
         "Bounded native failure diagnostics",
       )
       expect(continueInput!.prompt).toContain("createDraftPullRequest failed")
+      expect(continueInput!.prompt).toContain("Use this exact title and body")
+      expect(continueInput!.prompt).toContain(context.publicationTitle!)
       expect(continueInput!.prompt).toContain("Closes #2039")
       expect(continueInput!.prompt).toContain(
         "Use Keymaxxer secret GITHUB_TOKEN_ACME_WIDGETS via keymaxxer_run",

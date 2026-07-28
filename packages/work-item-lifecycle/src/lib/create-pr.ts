@@ -1,16 +1,17 @@
 import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
-  type AgentTurnGitHubAuth,
   AgentTurnGitHubCredentialMissingError,
   InvalidCapturedAgentBackendError,
   agentTurnGitHubCredentialGuidance,
   resolveAgentTurnGitHubAuth,
 } from "./agent-turn-github-auth.js"
+import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
   CreatePrCredentialError,
   CreatePrInvalidWorktreeContextError,
@@ -21,6 +22,12 @@ import {
   CreatePrWorktreeContextMissingError,
 } from "./create-pr-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import {
+  type PublicationCopy,
+  buildCreatePrFallbackPromptWithCopy,
+  normalizePublicationCopy,
+  publicationCopyFromCommitMessage,
+} from "./publication-copy.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleStepCompletion,
@@ -33,7 +40,21 @@ const NATIVE_PUSH_TIMEOUT_MS = 60_000
 export type CreatePrResult = {
   readonly pullRequestNumber: number
   readonly completion: LifecycleStepCompletion
+  /** Canonical copy used for this Create PR (may be HEAD-seeded). */
+  readonly publicationTitle: string
+  readonly publicationBody: string
 }
+
+const toCreatePrResult = (
+  pullRequestNumber: number,
+  completion: LifecycleStepCompletion,
+  copy: PublicationCopy,
+): CreatePrResult => ({
+  pullRequestNumber,
+  completion,
+  publicationTitle: copy.title,
+  publicationBody: copy.body,
+})
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
 
@@ -132,6 +153,10 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
     )
   })
 
+/**
+ * @deprecated Prefer Work Item publicationTitle/Body. Kept for test fixtures that
+ * still assert the pre-#546 Issue-title template shape.
+ */
 export const buildDeterministicPullRequestTitle = (input: {
   readonly githubIssueNumber: number
   readonly issueTitle: string | null
@@ -142,6 +167,10 @@ export const buildDeterministicPullRequestTitle = (input: {
   return input.issueTitle.trim()
 }
 
+/**
+ * @deprecated Prefer Work Item publicationTitle/Body. Kept for test fixtures that
+ * still assert the pre-#546 generic body shape.
+ */
 export const buildDeterministicPullRequestBody = (
   githubIssueNumber: number,
 ): string =>
@@ -149,29 +178,6 @@ export const buildDeterministicPullRequestBody = (
     `Automated draft pull request for GitHub issue #${githubIssueNumber}.`,
     "",
     `Closes #${githubIssueNumber}`,
-  ].join("\n")
-
-const buildCreatePrFallbackPrompt = (
-  githubIssueNumber: number,
-  branch: string,
-  auth: AgentTurnGitHubAuth,
-  diagnostics: string,
-) =>
-  [
-    "The harness attempted to open a draft pull request for the committed work in this worktree and failed.",
-    "Repair the underlying problem (authentication, push, repository PR templates, or content requirements) and create the draft PR.",
-    `The current Work Item branch is ${branch}. Keep this branch checked out and use it as the pull request head.`,
-    "Do not create or switch to another branch.",
-    "Push this exact branch if needed, then open a PR against the repository default base branch.",
-    "Create the pull request as a draft.",
-    `The PR must reference GitHub issue #${githubIssueNumber} (for example Closes #${githubIssueNumber}).`,
-    "Follow this repository's PR title and body conventions.",
-    `If a suitable open PR whose head is exactly ${branch} already exists, succeed without creating a duplicate.`,
-    "Do not merge the pull request.",
-    agentTurnGitHubCredentialGuidance(auth, "GitHub CLI or API access"),
-    "",
-    "Bounded native failure diagnostics:",
-    diagnostics,
   ].join("\n")
 
 /**
@@ -357,25 +363,20 @@ const attemptNativePush = (
   })
 
 const attemptNativeCreateDraft = (
-  context: LifecycleStepContext,
   githubOwner: string,
   githubRepo: string,
   branch: string,
+  copy: PublicationCopy,
 ) =>
   Effect.gen(function* () {
     const github = yield* GitHubService
-    const title = buildDeterministicPullRequestTitle({
-      githubIssueNumber: context.githubIssueNumber,
-      issueTitle: context.issueTitle,
-    })
-    const body = buildDeterministicPullRequestBody(context.githubIssueNumber)
     return yield* github
       .createDraftPullRequest(
         { owner: githubOwner, name: githubRepo },
         {
           headRefName: branch,
-          title,
-          body,
+          title: copy.title,
+          body: copy.body,
         },
       )
       .pipe(
@@ -392,6 +393,111 @@ const attemptNativeCreateDraft = (
           }),
         ),
       )
+  })
+
+/**
+ * Soft-persist publication copy when Create PR seeds from HEAD (in-flight
+ * upgrade). Soft-fails on SQL/update errors; unit tests either provide SqlClient
+ * or skip the seed path (pre-set publication fields).
+ */
+const softPersistPublicationCopy = (
+  workItemId: string,
+  copy: PublicationCopy,
+): Effect.Effect<void, never, SqlClient.SqlClient | DbService> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const db = yield* DbService
+    const now = Date.now()
+    yield* sql.unsafe(
+      `UPDATE work_item
+       SET publication_title = ?,
+           publication_body = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [copy.title, copy.body, now, workItemId],
+    )
+    const current = yield* CurrentStepRun
+    if (current !== null) {
+      yield* db.notifyWorkItemsChanged(current.repositoryId)
+    }
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning(
+        "Failed to persist publication copy mid-Create PR seed",
+        { error, workItemId },
+      ),
+    ),
+    Effect.asVoid,
+  )
+
+const softReconcileDraftCopy = (
+  githubOwner: string,
+  githubRepo: string,
+  branch: string,
+  copy: PublicationCopy,
+  pullRequestNumber: number,
+) =>
+  Effect.gen(function* () {
+    const github = yield* GitHubService
+    yield* github
+      .updateOpenDraftPullRequestCopy(
+        { owner: githubOwner, name: githubRepo },
+        branch,
+        { title: copy.title, body: copy.body },
+      )
+      .pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning(
+            "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
+            {
+              pullRequestNumber,
+              cause,
+            },
+          ).pipe(Effect.as(pullRequestNumber)),
+        ),
+      )
+  })
+
+const resolvePublicationCopyForCreatePr = (
+  context: LifecycleStepContext,
+  worktreePath: string,
+) =>
+  Effect.gen(function* () {
+    const title = context.publicationTitle?.trim() ?? ""
+    const body = context.publicationBody?.trim() ?? ""
+    if (title !== "" && body !== "") {
+      const normalized = normalizePublicationCopy(
+        { title, body },
+        context.githubIssueNumber,
+      )
+      if (normalized !== null) {
+        return normalized
+      }
+      return { title, body } satisfies PublicationCopy
+    }
+
+    // In-flight compatibility: seed from the Work Item commit when fields are absent.
+    const head = yield* runGitInWorktree(worktreePath, [
+      "log",
+      "-1",
+      "--pretty=%B",
+    ])
+    if (head.exitCode === 0) {
+      const seeded = publicationCopyFromCommitMessage(
+        head.stdout,
+        context.githubIssueNumber,
+      )
+      if (seeded !== null) {
+        yield* softPersistPublicationCopy(context.workItemId, seeded)
+        return seeded
+      }
+    }
+
+    return yield* new CreatePrPostconditionError({
+      repositoryId: context.repositoryId,
+      message:
+        "Create PR requires canonical publication copy from Commit (publication_title/body). None was persisted and the head commit message could not be seeded.",
+    })
   })
 
 const resolveRepositoryRecord = (context: LifecycleStepContext) =>
@@ -421,11 +527,12 @@ const resolveRepositoryRecord = (context: LifecycleStepContext) =>
 
 /**
  * Production Create PR Lifecycle Step.
- * Looks up an existing open PR for the exact Work Item branch, otherwise
- * pushes (harness credential path) and creates a draft through the harness-owned
- * GitHub service. Continues the Implement Session only when the native path
- * does not establish the postcondition (repair fallback). Success requires
- * resolving the open PR identity for persistence.
+ * Looks up an existing open PR for the exact Work Item branch (reconciling
+ * draft title/body to canonical copy), otherwise pushes (harness credential
+ * path) and creates a draft through the harness-owned GitHub service with the
+ * same publication copy as Commit. Continues the Implement Session only when
+ * the native path does not establish the postcondition (repair fallback).
+ * Success requires resolving the open PR identity for persistence.
  */
 export const createPr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -437,9 +544,12 @@ export const createPr = (context: LifecycleStepContext) =>
       githubIssueNumber: context.githubIssueNumber,
       workItemId: context.workItemId,
     })
+    const copy = yield* resolvePublicationCopyForCreatePr(context, worktreePath)
 
     // Reuse an existing exact-branch open PR (also covers Retry / indeterminate).
-    // Hard-fail here: without a reliable answer we should not create a duplicate.
+    // Hard-fail only on lookup: without a reliable answer we must not create a
+    // duplicate. Draft title/body reconcile is best-effort and must not fail
+    // the step when an open PR already exists.
     const existing = yield* findExistingOpenPr(
       context,
       repository.githubOwner,
@@ -447,10 +557,14 @@ export const createPr = (context: LifecycleStepContext) =>
       branch,
     )
     if (existing !== null) {
-      return {
-        pullRequestNumber: existing,
-        completion: "native",
-      } satisfies CreatePrResult
+      yield* softReconcileDraftCopy(
+        repository.githubOwner,
+        repository.githubRepo,
+        branch,
+        copy,
+        existing,
+      )
+      return toCreatePrResult(existing, "native", copy)
     }
 
     const pushTokenName = yield* resolveNativePushTokenName(
@@ -463,10 +577,10 @@ export const createPr = (context: LifecycleStepContext) =>
 
     if (push.ok) {
       const created = yield* attemptNativeCreateDraft(
-        context,
         repository.githubOwner,
         repository.githubRepo,
         branch,
+        copy,
       )
       if (created.ok) {
         // Soft-verify only: a successful create already establishes identity.
@@ -477,10 +591,15 @@ export const createPr = (context: LifecycleStepContext) =>
           repository.githubRepo,
           branch,
         )
-        return {
-          pullRequestNumber: verified ?? created.pullRequestNumber,
-          completion: "native",
-        } satisfies CreatePrResult
+        const pullRequestNumber = verified ?? created.pullRequestNumber
+        yield* softReconcileDraftCopy(
+          repository.githubOwner,
+          repository.githubRepo,
+          branch,
+          copy,
+          pullRequestNumber,
+        )
+        return toCreatePrResult(pullRequestNumber, "native", copy)
       }
       nativeDiagnostics = created.diagnostics
     }
@@ -494,10 +613,14 @@ export const createPr = (context: LifecycleStepContext) =>
       branch,
     )
     if (afterNative !== null) {
-      return {
-        pullRequestNumber: afterNative,
-        completion: "native",
-      } satisfies CreatePrResult
+      yield* softReconcileDraftCopy(
+        repository.githubOwner,
+        repository.githubRepo,
+        branch,
+        copy,
+        afterNative,
+      )
+      return toCreatePrResult(afterNative, "native", copy)
     }
 
     const auth = yield* resolveAgentTurnGitHubAuth({
@@ -533,12 +656,17 @@ export const createPr = (context: LifecycleStepContext) =>
     yield* agentBackend
       .continueTurn({
         sessionId,
-        prompt: buildCreatePrFallbackPrompt(
-          context.githubIssueNumber,
+        prompt: buildCreatePrFallbackPromptWithCopy({
+          githubIssueNumber: context.githubIssueNumber,
           branch,
-          auth,
+          title: copy.title,
+          body: copy.body,
+          credentialGuidance: agentTurnGitHubCredentialGuidance(
+            auth,
+            "GitHub CLI or API access",
+          ),
           diagnostics,
-        ),
+        }),
         cwd: worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
@@ -565,10 +693,14 @@ export const createPr = (context: LifecycleStepContext) =>
       branch,
     )
     if (afterFallback !== null) {
-      return {
-        pullRequestNumber: afterFallback,
-        completion: "agent_fallback",
-      } satisfies CreatePrResult
+      yield* softReconcileDraftCopy(
+        repository.githubOwner,
+        repository.githubRepo,
+        branch,
+        copy,
+        afterFallback,
+      )
+      return toCreatePrResult(afterFallback, "agent_fallback", copy)
     }
 
     const required = yield* Effect.result(
@@ -580,10 +712,14 @@ export const createPr = (context: LifecycleStepContext) =>
       ),
     )
     if (required._tag === "Success") {
-      return {
-        pullRequestNumber: required.success,
-        completion: "agent_fallback",
-      } satisfies CreatePrResult
+      yield* softReconcileDraftCopy(
+        repository.githubOwner,
+        repository.githubRepo,
+        branch,
+        copy,
+        required.success,
+      )
+      return toCreatePrResult(required.success, "agent_fallback", copy)
     }
 
     return yield* new CreatePrPostconditionError({

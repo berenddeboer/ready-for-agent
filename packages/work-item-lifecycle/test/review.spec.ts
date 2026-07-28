@@ -60,6 +60,10 @@ const baseContext = (
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
+
+  publicationTitle: null,
+
+  publicationBody: null,
   sessionId: "ses_implement_session",
   ...overrides,
 })

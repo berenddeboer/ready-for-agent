@@ -52,6 +52,14 @@ export class CommitPostconditionError extends Schema.TaggedErrorClass<CommitPost
   },
 ) {}
 
+export class CommitPublicationCopyError extends Schema.TaggedErrorClass<CommitPublicationCopyError>()(
+  "CommitPublicationCopyError",
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
 export type CommitError =
   | CommitWorktreeContextMissingError
   | CommitInvalidWorktreeContextError
@@ -59,3 +67,4 @@ export type CommitError =
   | CommitStartingCommitMissingError
   | CommitOpenCodeError
   | CommitPostconditionError
+  | CommitPublicationCopyError

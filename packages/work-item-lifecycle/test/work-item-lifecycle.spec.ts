@@ -108,9 +108,19 @@ describe("WorkItemLifecycle", () => {
     assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
     review: () => Effect.succeed({ _tag: "clean" as const }),
-    commit: () => Effect.succeed({ completion: "native" as const }),
+    commit: () =>
+      Effect.succeed({
+        completion: "native" as const,
+        publicationTitle: "feat: test",
+        publicationBody: "Why\n\nCloses #1",
+      }),
     createPr: () =>
-      Effect.succeed({ pullRequestNumber: 101, completion: "native" as const }),
+      Effect.succeed({
+        pullRequestNumber: 101,
+        completion: "native" as const,
+        publicationTitle: "feat: test",
+        publicationBody: "Why\n\nCloses #1",
+      }),
     watchPrStatusChecks: () => Effect.succeed(watchResult("succeeded")),
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
@@ -5454,13 +5464,19 @@ describe("WorkItemLifecycle", () => {
         },
         commit: (context) => {
           seen.push(context)
-          return Effect.succeed({ completion: "native" as const })
+          return Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          })
         },
         createPr: (context) => {
           seen.push(context)
           return Effect.succeed({
             pullRequestNumber: 101,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           })
         },
         watchPrStatusChecks: (context) => {
@@ -9455,6 +9471,10 @@ describe("WorkItemLifecycle", () => {
             worktreePath: "/tmp/worktrees/reset-me",
             startingCommitOid: "abc123",
             completionSummary: null,
+
+            publicationTitle: null,
+
+            publicationBody: null,
             sessionId: null,
           })
         }),

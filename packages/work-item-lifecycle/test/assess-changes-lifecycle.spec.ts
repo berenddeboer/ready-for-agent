@@ -79,11 +79,18 @@ describe("Assess Changes lifecycle routes", () => {
           return Effect.void
         },
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.succeed({ completion: "native" as const }),
+        commit: () =>
+          Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          }),
         createPr: () =>
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -230,11 +237,18 @@ describe("Assess Changes lifecycle routes", () => {
           assessChanges(context).pipe(Effect.provide(PlatformLayer)),
         preCommit: () => Effect.void,
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.succeed({ completion: "native" as const }),
+        commit: () =>
+          Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          }),
         createPr: () =>
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -351,11 +365,18 @@ describe("Assess Changes lifecycle routes", () => {
           }).pipe(Effect.provide(PlatformLayer)),
         preCommit: () => Effect.die("pre-commit must not run"),
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.succeed({ completion: "native" as const }),
+        commit: () =>
+          Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          }),
         createPr: () =>
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -497,13 +518,19 @@ describe("Assess Changes lifecycle routes", () => {
         },
         commit: () => {
           commitCalls += 1
-          return Effect.succeed({ completion: "native" as const })
+          return Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          })
         },
         createPr: () => {
           createPrCalls += 1
           return Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           })
         },
         watchPrStatusChecks: () =>
@@ -672,11 +699,18 @@ describe("Assess Changes lifecycle routes", () => {
         },
         preCommit: () => Effect.void,
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.succeed({ completion: "native" as const }),
+        commit: () =>
+          Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          }),
         createPr: () =>
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -796,11 +830,18 @@ describe("Assess Changes lifecycle routes", () => {
           ),
         preCommit: () => Effect.die("pre-commit must not run"),
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.succeed({ completion: "native" as const }),
+        commit: () =>
+          Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          }),
         createPr: () =>
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -933,6 +974,8 @@ describe("Assess Changes lifecycle routes", () => {
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -1083,11 +1126,18 @@ describe("Assess Changes lifecycle routes", () => {
           }),
         preCommit: () => Effect.void,
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.succeed({ completion: "native" as const }),
+        commit: () =>
+          Effect.succeed({
+            completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
+          }),
         createPr: () =>
           Effect.succeed({
             pullRequestNumber: 1,
             completion: "native" as const,
+            publicationTitle: "feat: test",
+            publicationBody: "Why\n\nCloses #1",
           }),
         watchPrStatusChecks: () =>
           Effect.succeed({

@@ -29,6 +29,10 @@ const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
   worktreePath,
   startingCommitOid: null,
   completionSummary: null,
+
+  publicationTitle: null,
+
+  publicationBody: null,
   sessionId: null,
 })
 

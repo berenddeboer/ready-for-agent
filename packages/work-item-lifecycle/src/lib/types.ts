@@ -122,6 +122,16 @@ export interface WorkItemRecord {
   readonly startingCommitOid: string | null
   /** Durable No-Change Outcome completion summary (Markdown). */
   readonly completionSummary: string | null
+  /**
+   * Canonical agent-authored publication title for Commit subject and PR title.
+   * Null until Commit generates or seeds it.
+   */
+  readonly publicationTitle: string | null
+  /**
+   * Canonical agent-authored publication body for Commit body and PR body.
+   * Null until Commit generates or seeds it.
+   */
+  readonly publicationBody: string | null
   readonly sessionId: string | null
   readonly failureCode: string | null
   readonly failureMessage: string | null
@@ -164,6 +174,9 @@ export const REVIEW_PRE_COMMIT_MESSAGE = "pre-commit"
 
 /** Operator-visible Review phase while Review Rerun Assessment runs. */
 export const REVIEW_ASSESSING_RERUN_MESSAGE = "assessing rerun"
+
+/** Operator-visible Commit phase while the publication-copy Agent Turn runs. */
+export const COMMIT_COPY_GENERATION_MESSAGE = "generating publication copy"
 
 export const WORK_ITEM_LIFECYCLE_QUEUE = "jobs"
 
@@ -355,6 +368,11 @@ export const STEP_RUN_REASON = {
    * the native path did not establish the postcondition.
    */
   agentFallback: "agent_fallback",
+  /**
+   * Mid-run: Commit is generating shared publication copy via an Agent Turn
+   * before the native git commit attempt.
+   */
+  copyGeneration: "copy_generation",
 } as const
 
 export type StepRunReasonCode =
@@ -372,7 +390,7 @@ export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
   assess_changes: Duration.hours(1),
   pre_commit: Duration.hours(2),
   review: Duration.hours(1),
-  commit: Duration.minutes(5),
+  commit: Duration.minutes(30),
   create_pr: Duration.minutes(10),
   watch_pr_status_checks: Duration.minutes(5),
   resolve_pr_merge_conflict: Duration.hours(2),

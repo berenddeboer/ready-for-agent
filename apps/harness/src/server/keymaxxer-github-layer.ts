@@ -440,6 +440,59 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             ),
           ),
+        updateOpenDraftPullRequestCopy: (repository, headRefName, input) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "update open draft pull request copy",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const payload = encodeArgument(
+              JSON.stringify({
+                headRefName,
+                title: input.title,
+                body: input.body,
+              }),
+            )
+            const result = yield* runGitHubBin(
+              tokenName,
+              "update-open-draft-pull-request-copy",
+              [owner, name, payload],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "update open draft pull request copy",
+                result.stderr || result.stdout,
+              )
+            }
+            const trimmed = result.stdout.trim()
+            if (trimmed === "" || trimmed === "null") {
+              return null
+            }
+            const number = Number(trimmed)
+            if (!Number.isSafeInteger(number) || number <= 0) {
+              return yield* requestError(
+                repository,
+                "decode updated draft pull request number",
+                result.stdout,
+              )
+            }
+            return number
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "update open draft pull request copy"),
+              ),
+            ),
+          ),
         countOpenNonDraftPullRequests: (repository) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

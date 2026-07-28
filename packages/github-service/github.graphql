@@ -19,6 +19,7 @@ type Mutation {
   ): MarkPullRequestReadyForReviewPayload
   mergePullRequest(input: MergePullRequestInput!): MergePullRequestPayload
   createPullRequest(input: CreatePullRequestInput!): CreatePullRequestPayload
+  updatePullRequest(input: UpdatePullRequestInput!): UpdatePullRequestPayload
   addComment(input: AddCommentInput!): AddCommentPayload
   closeIssue(input: CloseIssueInput!): CloseIssuePayload
 }
@@ -34,6 +35,18 @@ input CreatePullRequestInput {
 }
 
 type CreatePullRequestPayload {
+  clientMutationId: String
+  pullRequest: PullRequest
+}
+
+input UpdatePullRequestInput {
+  pullRequestId: ID!
+  title: String
+  body: String
+  clientMutationId: String
+}
+
+type UpdatePullRequestPayload {
   clientMutationId: String
   pullRequest: PullRequest
 }
@@ -130,6 +143,8 @@ type PullRequestConnection {
 type PullRequest {
   id: ID!
   number: Int!
+  title: String!
+  body: String!
   url: URI!
   state: PullRequestState!
   merged: Boolean!
