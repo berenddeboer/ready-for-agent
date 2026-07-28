@@ -34,6 +34,7 @@ import {
   CloseIssueEligibilityError,
   CommitOpenCodeError,
   CreatePrOpenCodeError,
+  ImplementAllWithAutoMergeNotEligibleError,
   IssueBlockedError,
   IssueNotBlockedError,
   IssueNotFoundError,
@@ -43,6 +44,7 @@ import {
   LifecycleSteps,
   type LifecycleStepsShape,
   NonTransactionalQueueError,
+  NotAParentIssueError,
   ParentIssueError,
   PrStatusChecksUnresolvedError,
   PreCommitHookFailedError,
@@ -51,6 +53,7 @@ import {
   RetryNotEligibleError,
   STEP_RUN_REASON,
   UnfinishedWorkItemExistsError,
+  UnsupportedIssueHierarchyError,
   WORK_ITEM_LIFECYCLE_QUEUE,
   WorkItemHasRunningStepError,
   WorkItemLifecycle,
@@ -638,6 +641,404 @@ describe("WorkItemLifecycle", () => {
           })
         }),
       ))
+  })
+
+  describe("implementAllWithAutoMerge and Merge Mode Always", () => {
+    const seedParentWithOneActionableChild = Effect.gen(function* () {
+      const db = yield* DbService
+      yield* seedHarnessBuildModel
+      const repository = yield* db.addRepository({
+        ...sampleRepository,
+        localPath: "/repos/acme/widgets-parent.git",
+        githubRepo: "widgets-parent",
+      })
+      const parent = yield* db.storeIssue({
+        repositoryId: repository.id,
+        githubIssueNumber: 100,
+        ...sampleIssueFields,
+        title: "Parent feature",
+        url: "https://github.com/acme/widgets/issues/100",
+        hasChildren: true,
+      })
+      const child = yield* db.storeIssue({
+        repositoryId: repository.id,
+        githubIssueNumber: 101,
+        ...sampleIssueFields,
+        title: "Child work",
+        url: "https://github.com/acme/widgets/issues/101",
+        parent: {
+          githubIssueNumber: 100,
+          githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+        },
+        parentPosition: 0,
+        hasChildren: false,
+      })
+      return { repository, parent, child }
+    })
+
+    it("creates one child Work Item with Merge Mode Always and no Parent Work Item", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, parent, child } =
+            yield* seedParentWithOneActionableChild
+
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+
+          expect(covered).toHaveLength(1)
+          expect(covered[0]!.githubIssueNumber).toBe(child.githubIssueNumber)
+          expect(covered[0]!.mergeMode).toBe("always")
+          expect(covered[0]!.state).toBe("create_worktree")
+          expect(covered[0]!.holdsWorkerSlot).toBe(true)
+          expect(covered[0]!.stepRuns).toHaveLength(1)
+
+          const parentItems = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+          expect(parentItems).toHaveLength(0)
+        }),
+      ))
+
+    it("defaults new ordinary Work Items to Merge Mode ordinary", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const workItem = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          expect(workItem.mergeMode).toBe("ordinary")
+        }),
+      ))
+
+    it("rejects missing, non-parent, multi-child, blocked, and unfinished cases", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, parent, child } =
+            yield* seedParentWithOneActionableChild
+
+          const missing = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(repository.id, 999),
+          )
+          expect(missing).toBeInstanceOf(IssueNotFoundError)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 50,
+            ...sampleIssueFields,
+            url: "https://github.com/acme/widgets/issues/50",
+            hasChildren: false,
+          })
+          const notParent = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(repository.id, 50),
+          )
+          expect(notParent).toBeInstanceOf(NotAParentIssueError)
+
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 102,
+            ...sampleIssueFields,
+            title: "Second child",
+            url: "https://github.com/acme/widgets/issues/102",
+            parent: {
+              githubIssueNumber: 100,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+            },
+            parentPosition: 1,
+          })
+          const multi = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(
+              repository.id,
+              parent.githubIssueNumber,
+            ),
+          )
+          expect(multi).toBeInstanceOf(
+            ImplementAllWithAutoMergeNotEligibleError,
+          )
+
+          // Single open child but blocked.
+          const blockedRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-blocked-parent.git",
+            githubRepo: "widgets-blocked-parent",
+          })
+          yield* db.storeIssue({
+            repositoryId: blockedRepo.id,
+            githubIssueNumber: 200,
+            ...sampleIssueFields,
+            title: "Blocked parent",
+            url: "https://github.com/acme/widgets/issues/200",
+            hasChildren: true,
+          })
+          yield* db.storeIssue({
+            repositoryId: blockedRepo.id,
+            githubIssueNumber: 201,
+            ...sampleIssueFields,
+            title: "Blocked child",
+            url: "https://github.com/acme/widgets/issues/201",
+            parent: {
+              githubIssueNumber: 200,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/200",
+            },
+            blockedBy: [
+              {
+                githubIssueNumber: 1,
+                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+              },
+            ],
+          })
+          const blocked = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(blockedRepo.id, 200),
+          )
+          expect(blocked).toBeInstanceOf(
+            ImplementAllWithAutoMergeNotEligibleError,
+          )
+
+          // Unsupported hierarchy (grandchild).
+          const grandRepo = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-grand.git",
+            githubRepo: "widgets-grand",
+          })
+          yield* db.storeIssue({
+            repositoryId: grandRepo.id,
+            githubIssueNumber: 300,
+            ...sampleIssueFields,
+            title: "Grand parent",
+            url: "https://github.com/acme/widgets/issues/300",
+            hasChildren: true,
+          })
+          yield* db.storeIssue({
+            repositoryId: grandRepo.id,
+            githubIssueNumber: 301,
+            ...sampleIssueFields,
+            title: "Mid child with children",
+            url: "https://github.com/acme/widgets/issues/301",
+            parent: {
+              githubIssueNumber: 300,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/300",
+            },
+            hasChildren: true,
+          })
+          const unsupported = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(grandRepo.id, 300),
+          )
+          expect(unsupported).toBeInstanceOf(UnsupportedIssueHierarchyError)
+
+          // Close second child so parent is eligible again, then leave unfinished.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 102,
+            ...sampleIssueFields,
+            title: "Second child",
+            url: "https://github.com/acme/widgets/issues/102",
+            state: "CLOSED",
+            parent: {
+              githubIssueNumber: 100,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+            },
+            parentPosition: 1,
+          })
+          yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+          const unfinished = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(
+              repository.id,
+              parent.githubIssueNumber,
+            ),
+          )
+          expect(unfinished).toBeInstanceOf(
+            ImplementAllWithAutoMergeNotEligibleError,
+          )
+          expect(child.githubIssueNumber).toBe(101)
+        }),
+      ))
+
+    it("persists Merge Mode Always across a harness restart", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "rfa-merge-mode-"))
+      const dbPath = join(dir, "restart.db")
+      try {
+        const createLayer = makeRestartTestLayer(successfulSteps, dbPath)
+        const workItemId = await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            const { repository, parent } =
+              yield* seedParentWithOneActionableChild
+            const covered = yield* lifecycle.implementAllWithAutoMerge(
+              repository.id,
+              parent.githubIssueNumber,
+            )
+            return covered[0]!.id
+          }).pipe(Effect.provide(createLayer)),
+        )
+
+        const reloaded = await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            return yield* lifecycle.getWorkItem(workItemId)
+          }).pipe(
+            Effect.provide(makeRestartTestLayer(successfulSteps, dbPath)),
+          ),
+        )
+        expect(reloaded.mergeMode).toBe("always")
+        expect(reloaded.id).toBe(workItemId)
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
+    })
+
+    for (const autoMerge of [false, true] as const) {
+      it(`skips Decide PR Merge for Always when Repository Auto-merge is ${autoMerge ? "enabled" : "disabled"}`, () => {
+        let decideCalls = 0
+        const steps: LifecycleStepsShape = {
+          ...successfulSteps,
+          decidePrMerge: () => {
+            decideCalls += 1
+            return Effect.succeed({ _tag: "clanker_merge" })
+          },
+        }
+
+        return runWithSteps(
+          steps,
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            const db = yield* DbService
+            const queue = yield* QueueService
+            const { repository, parent } =
+              yield* seedParentWithOneActionableChild
+            yield* db.updateRepositorySettings({
+              repositoryId: repository.id,
+              paused: true,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              autoMerge,
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+            })
+
+            const covered = yield* lifecycle.implementAllWithAutoMerge(
+              repository.id,
+              parent.githubIssueNumber,
+            )
+            const workItemId = covered[0]!.id
+
+            const claimAndRunPending = Effect.gen(function* () {
+              const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+              expect(Option.isSome(claimed)).toBe(true)
+              if (Option.isNone(claimed)) {
+                return yield* Effect.die("expected a queued lifecycle job")
+              }
+              return yield* lifecycle.runStep(
+                (claimed.value.payload as { stepRunId: string }).stepRunId,
+              )
+            })
+            const makeQueuedJobsAvailable = Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              yield* sql.unsafe(`UPDATE job_queue SET available_at = 0`)
+            })
+
+            // create…create_pr (8 steps)
+            for (let index = 0; index < 8; index += 1) {
+              yield* makeQueuedJobsAvailable
+              const result = yield* claimAndRunPending
+              expect(result._tag).toBe("processed")
+            }
+            yield* forgetCreatePrDraftProvenance(workItemId)
+
+            // Watch settles past Check-Start Deadline → Merge PR (not Decide).
+            yield* makeQueuedJobsAvailable
+            const afterWatch = yield* claimAndRunPending
+            expect(afterWatch._tag).toBe("processed")
+            if (afterWatch._tag === "processed") {
+              expect(afterWatch.workItem.state).toBe("merge_pr")
+            }
+
+            yield* makeQueuedJobsAvailable
+            const afterMerge = yield* claimAndRunPending
+            expect(afterMerge._tag).toBe("processed")
+            if (afterMerge._tag === "processed") {
+              expect(afterMerge.workItem.state).toBe("local_cleanup")
+            }
+
+            expect(decideCalls).toBe(0)
+            const final = yield* lifecycle.getWorkItem(workItemId)
+            expect(
+              final.stepRuns.some((run) => run.step === "decide_pr_merge"),
+            ).toBe(false)
+            expect(final.stepRuns.some((run) => run.step === "merge_pr")).toBe(
+              true,
+            )
+          }),
+        )
+      })
+    }
+
+    it("keeps No-Change Outcome Close Issue path for Always Work Items", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        assessChanges: () =>
+          Effect.succeed({
+            _tag: "no_change" as const,
+            completionSummary: "Findings only.",
+          }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, parent } = yield* seedParentWithOneActionableChild
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+          const workItemId = covered[0]!.id
+
+          const claimAndRunPending = Effect.gen(function* () {
+            yield* SqlClient.SqlClient.pipe(
+              Effect.flatMap((sql) =>
+                sql.unsafe(`UPDATE job_queue SET available_at = 0`),
+              ),
+            )
+            const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+            expect(Option.isSome(claimed)).toBe(true)
+            if (Option.isNone(claimed)) {
+              return yield* Effect.die("expected a queued lifecycle job")
+            }
+            return yield* lifecycle.runStep(
+              (claimed.value.payload as { stepRunId: string }).stepRunId,
+            )
+          })
+
+          // create_worktree, install, implement, assess → close_issue
+          for (let index = 0; index < 4; index += 1) {
+            const result = yield* claimAndRunPending
+            expect(result._tag).toBe("processed")
+          }
+          const afterAssess = yield* lifecycle.getWorkItem(workItemId)
+          expect(afterAssess.state).toBe("close_issue")
+          expect(afterAssess.mergeMode).toBe("always")
+          expect(
+            afterAssess.stepRuns.some((run) => run.step === "merge_pr"),
+          ).toBe(false)
+          expect(
+            afterAssess.stepRuns.some((run) => run.step === "decide_pr_merge"),
+          ).toBe(false)
+        }),
+      )
+    })
   })
 
   describe("getWorkItem and listWorkItemsForIssue", () => {

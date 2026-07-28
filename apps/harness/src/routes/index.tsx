@@ -26,6 +26,10 @@ import {
   localCommittedPullRequestDayBounds,
   msUntilNextLocalMidnight,
 } from "../local-day-bounds.js"
+import {
+  ParentIssueActionsMenu,
+  isParentImplementAllWithAutoMergeEligible,
+} from "../parent-issue-actions-menu.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import {
   committedPullRequestsCountQueryKeyPrefix,
@@ -387,6 +391,7 @@ const workItemFields = {
   issueTitle: true,
   githubPullRequestNumber: true,
   agentBackend: { id: true, label: true },
+  mergeMode: true,
   state: true,
   stateLabel: true,
   status: true,
@@ -2422,61 +2427,131 @@ function RepositoryIssues({
           (child) => child.state === "CLOSED",
         ).length
         return (
-          <li className="min-w-0" key={issue.id}>
-            <details
-              className="group -mx-2 border border-rule-2 bg-panel px-2 py-1"
-              open
-            >
-              <summary className="grid cursor-pointer list-none grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2 py-1.5 marker:content-none">
-                <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
-                  #{issue.githubIssueNumber}
-                </span>
-                <span className="min-w-0">
-                  <a
-                    className="font-serif text-[0.95rem] font-semibold text-ink hover:text-oxblood hover:underline"
-                    href={issue.url}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    {issue.title}
-                  </a>
-                  {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
-                    <span className="mt-0.5 block font-mono text-xs text-ink-faint">
-                      {issue.issueAuthor}
-                    </span>
-                  )}
-                </span>
-                <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.1em] text-ink-faint uppercase">
-                  {closedChildren}/{children.length} closed
-                  <svg
-                    aria-hidden="true"
-                    className="size-3.5 transition-transform group-open:rotate-180"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="m6 9 6 6 6-6" />
-                  </svg>
-                </span>
-              </summary>
-              <ul className="relative m-0 grid list-none gap-1 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2 before:w-px before:bg-rule-2">
-                {children.map((child) => (
-                  <RepositoryIssueRow
-                    issue={child}
-                    key={child.id}
-                    repository={repository}
-                    workItems={workItems}
-                    workItemsLoading={workItemsLoading}
-                  />
-                ))}
-              </ul>
-            </details>
-          </li>
+          <ParentIssueGroup
+            key={issue.id}
+            parent={issue}
+            childIssues={children}
+            closedChildren={closedChildren}
+            repository={repository}
+            workItems={workItems}
+            workItemsLoading={workItemsLoading}
+          />
         )
       })}
     </ul>
+  )
+}
+
+function ParentIssueGroup({
+  parent,
+  childIssues,
+  closedChildren,
+  repository,
+  workItems,
+  workItemsLoading,
+}: {
+  parent: RepositoryIssue
+  childIssues: readonly RepositoryIssue[]
+  closedChildren: number
+  repository: Repository
+  workItems: readonly WorkItem[]
+  workItemsLoading: boolean
+}) {
+  const queryClient = useQueryClient()
+  const query = workItemsQuery(parent.repositoryId)
+  const openChildren = childIssues.filter((child) => child.state === "OPEN")
+  const canImplementAll = isParentImplementAllWithAutoMergeEligible({
+    openChildren,
+    workItems,
+    workItemsLoading,
+  })
+  const implementAll = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        implementAllWithAutoMerge: {
+          __args: {
+            repositoryId: parent.repositoryId,
+            githubIssueNumber: parent.githubIssueNumber,
+          },
+          ...workItemFields,
+        },
+      })
+      return result.implementAllWithAutoMerge
+    },
+    onSuccess: (created) => {
+      queryClient.setQueryData<readonly WorkItem[]>(
+        query.queryKey,
+        (current) => [...(current ?? []), ...created],
+      )
+    },
+  })
+
+  return (
+    <li className="min-w-0">
+      <details
+        className="group -mx-2 border border-rule-2 bg-panel px-2 py-1"
+        open
+      >
+        <summary className="grid cursor-pointer list-none grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2 py-1.5 marker:content-none">
+          <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
+            #{parent.githubIssueNumber}
+          </span>
+          <span className="min-w-0">
+            <a
+              className="font-serif text-[0.95rem] font-semibold text-ink hover:text-oxblood hover:underline"
+              href={parent.url}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {parent.title}
+            </a>
+            {parent.issueAuthor !== null && parent.issueAuthor !== "" && (
+              <span className="mt-0.5 block font-mono text-xs text-ink-faint">
+                {parent.issueAuthor}
+              </span>
+            )}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.1em] text-ink-faint uppercase">
+            {closedChildren}/{childIssues.length} closed
+            {canImplementAll && (
+              <ParentIssueActionsMenu
+                parentGithubIssueNumber={parent.githubIssueNumber}
+                menuId={parent.id}
+                pending={implementAll.isPending}
+                errorMessage={
+                  implementAll.isError
+                    ? "Could not start Implement all with auto-merge. Refresh the issues and try again."
+                    : null
+                }
+                onImplementAllWithAutoMerge={() => implementAll.mutate()}
+              />
+            )}
+            <svg
+              aria-hidden="true"
+              className="size-3.5 transition-transform group-open:rotate-180"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </span>
+        </summary>
+        <ul className="relative m-0 grid list-none gap-1 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2 before:w-px before:bg-rule-2">
+          {childIssues.map((child) => (
+            <RepositoryIssueRow
+              issue={child}
+              key={child.id}
+              repository={repository}
+              workItems={workItems}
+              workItemsLoading={workItemsLoading}
+            />
+          ))}
+        </ul>
+      </details>
+    </li>
   )
 }
 

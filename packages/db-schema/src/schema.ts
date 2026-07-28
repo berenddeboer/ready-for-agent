@@ -264,6 +264,14 @@ export const workItem = snakeCase.table(
      */
     waitingForBlockers: integer({ mode: "boolean" }).notNull().default(false),
     /**
+     * Durable merge policy for this Work Item.
+     * `ordinary` follows Repository Auto-merge and Decide PR Merge.
+     * `always` skips Decide PR Merge and advances to Merge PR after checks settle.
+     */
+    mergeMode: text({ enum: ["ordinary", "always"] })
+      .notNull()
+      .default("ordinary"),
+    /**
      * Whether this Work Item currently occupies a Worker Slot (Admitted).
      */
     holdsWorkerSlot: integer({ mode: "boolean" }).notNull().default(false),

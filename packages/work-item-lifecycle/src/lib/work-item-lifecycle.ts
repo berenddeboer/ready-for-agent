@@ -47,17 +47,20 @@ import {
   ActiveStepRunExistsError,
   AgentBackendUnavailableError,
   type BuildModelNotConfiguredError,
+  ImplementAllWithAutoMergeNotEligibleError,
   IssueBlockedError,
   IssueNotBlockedError,
   IssueNotFoundError,
   IssueNotOpenError,
   NeedsHumanHandoffNotEligibleError,
   NonTransactionalQueueError,
+  NotAParentIssueError,
   ParentIssueError,
   ResetCleanupError,
   RetryNotEligibleError,
   StepRunNotFoundError,
   UnfinishedWorkItemExistsError,
+  UnsupportedIssueHierarchyError,
   WorkItemHasRunningStepError,
   WorkItemLifecycleDatabaseError,
   WorkItemNotFoundError,
@@ -86,6 +89,7 @@ import { computeProductiveElapsedMs } from "./step-run-productive-time.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
+  type MergeMode,
   type OperationalLifecycleStep,
   STEP_RUN_REASON,
   type StepRunId,
@@ -259,6 +263,7 @@ type WorkItemRow = {
   readonly paused: boolean | number
   readonly waiting_since: number | null
   readonly waiting_for_blockers: boolean | number
+  readonly merge_mode: string | null
   readonly holds_worker_slot: boolean | number
   readonly pause_before_step: OperationalLifecycleStep | null
   readonly worktree_path: string | null
@@ -275,6 +280,17 @@ type WorkItemRow = {
   readonly created_at: number
   readonly updated_at: number
 }
+
+const decodeMergeMode = (value: string | null | undefined): MergeMode =>
+  value === "always" ? "always" : "ordinary"
+
+/**
+ * After pre-merge lifecycle settles: Always skips Decide PR Merge.
+ */
+const nextStateAfterReadyForMerge = (
+  mergeMode: string | null | undefined,
+): "decide_pr_merge" | "merge_pr" =>
+  decodeMergeMode(mergeMode) === "always" ? "merge_pr" : "decide_pr_merge"
 
 type StepRunRow = {
   readonly id: string
@@ -345,6 +361,7 @@ const toWorkItemRecord = (
       ? null
       : new Date(row.waiting_since),
   waitingForBlockers: Boolean(row.waiting_for_blockers),
+  mergeMode: decodeMergeMode(row.merge_mode),
   holdsWorkerSlot: Boolean(row.holds_worker_slot),
   pauseBeforeStep: row.pause_before_step,
   worktreePath: row.worktree_path,
@@ -360,7 +377,8 @@ const toWorkItemRecord = (
 })
 
 const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend,
-                   state, state_ready_at, paused, waiting_since, waiting_for_blockers, holds_worker_slot,
+                   state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
+                   holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary, session_id,
                    github_pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
@@ -492,6 +510,23 @@ export type ImplementNowError =
   | EnqueueError
   | InvalidQueueNameError
 
+export type ImplementAllWithAutoMergeError =
+  | IssueNotFoundError
+  | NotAParentIssueError
+  | UnsupportedIssueHierarchyError
+  | ImplementAllWithAutoMergeNotEligibleError
+  | IssueNotOpenError
+  | ParentIssueError
+  | IssueBlockedError
+  | UnfinishedWorkItemExistsError
+  | BuildModelNotConfiguredError
+  | AgentBackendUnavailableError
+  | WorkItemLifecycleDatabaseError
+  | RepositoryNotFoundError
+  | DatabaseError
+  | EnqueueError
+  | InvalidQueueNameError
+
 export type QueueError =
   | IssueNotFoundError
   | IssueNotOpenError
@@ -606,6 +641,15 @@ export interface WorkItemLifecycleShape {
     repositoryId: string,
     githubIssueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
+  /**
+   * Parent-level Implement all with auto-merge (first slice: exactly one open
+   * actionable Child Issue with no unfinished Work Item). Creates that child's
+   * ordinary Work Item with Merge Mode Always. No Parent Work Item.
+   */
+  readonly implementAllWithAutoMerge: (
+    repositoryId: string,
+    parentGithubIssueNumber: number,
+  ) => Effect.Effect<readonly WorkItemRecord[], ImplementAllWithAutoMergeError>
   /**
    * Queue a Relevant open leaf Issue that has listed blockers: creates a Work
    * Item in Waiting for blockers (no Worker Slot, no Step Run).
@@ -1940,11 +1984,14 @@ export const makeWorkItemLifecycleLive = (
                     if (skipReadyPhaseStartupWait) {
                       return {
                         transition: {
-                          nextState: "decide_pr_merge" as const,
+                          nextState: nextStateAfterReadyForMerge(
+                            workItem.merge_mode,
+                          ),
                         },
                       }
                     }
-                    // Ready phase waits for the Check-Start Deadline, then Decide.
+                    // Ready phase waits for the Check-Start Deadline, then Decide
+                    // (or Merge PR when Merge Mode is Always).
                     if (!pastDeadline) {
                       return {
                         transition: {
@@ -1955,7 +2002,9 @@ export const makeWorkItemLifecycleLive = (
                     }
                     return {
                       transition: {
-                        nextState: "decide_pr_merge" as const,
+                        nextState: nextStateAfterReadyForMerge(
+                          workItem.merge_mode,
+                        ),
                       },
                     }
                   }
@@ -1964,7 +2013,7 @@ export const makeWorkItemLifecycleLive = (
                       nextState: isDraft
                         ? ("mark_pr_ready_for_review" as const)
                         : isReady
-                          ? ("decide_pr_merge" as const)
+                          ? nextStateAfterReadyForMerge(workItem.merge_mode)
                           : ("watch_pr_status_checks" as const),
                     },
                   }
@@ -2073,7 +2122,9 @@ export const makeWorkItemLifecycleLive = (
                     return {
                       checkStartLastObservedIsDraft: 0 as const,
                       transition: {
-                        nextState: "decide_pr_merge" as const,
+                        nextState: nextStateAfterReadyForMerge(
+                          workItem.merge_mode,
+                        ),
                       },
                     }
                   }
@@ -2091,6 +2142,13 @@ export const makeWorkItemLifecycleLive = (
               ),
             )
           case "decide_pr_merge":
+            // Defensive: Always should never enter this step; if it does, skip
+            // the agent risk decision and advance to Merge PR.
+            if (decodeMergeMode(workItem.merge_mode) === "always") {
+              return Effect.succeed({
+                transition: { nextState: "merge_pr" as const },
+              })
+            }
             return steps.decidePrMerge(context).pipe(
               Effect.map((result) =>
                 result._tag === "clanker_merge"
@@ -4629,6 +4687,7 @@ export const makeWorkItemLifecycleLive = (
         githubIssueNumber: number,
         options: {
           readonly pauseBeforeStep: OperationalLifecycleStep | null
+          readonly mergeMode?: MergeMode
         },
       ): Effect.Effect<WorkItemRecord, ImplementNowError> =>
         Effect.gen(function* () {
@@ -4685,6 +4744,8 @@ export const makeWorkItemLifecycleLive = (
             )
           }
 
+          const mergeMode: MergeMode = options.mergeMode ?? "ordinary"
+
           // Coordinate with Config hot-activate so provenance cannot be captured
           // while Selected is already switching Active. Fail-fast model resolve
           // runs inside the same section so it matches the backend that is stamped.
@@ -4739,10 +4800,10 @@ export const makeWorkItemLifecycleLive = (
                       `INSERT INTO work_item (
                  id, repository_id, github_issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
-                  waiting_since, waiting_for_blockers, holds_worker_slot,
+                  waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`,
                       [
                         workItemId,
                         repositoryId,
@@ -4752,6 +4813,7 @@ export const makeWorkItemLifecycleLive = (
                         step,
                         now,
                         admit ? null : now,
+                        mergeMode,
                         admit ? 1 : 0,
                         options.pauseBeforeStep,
                         now,
@@ -4834,6 +4896,104 @@ export const makeWorkItemLifecycleLive = (
           })
         },
       )
+
+      /**
+       * First-slice parent command: exactly one open actionable child, no
+       * unfinished Work Item. Creates one child Work Item with Merge Mode Always.
+       */
+      const implementAllWithAutoMerge = Effect.fn(
+        "WorkItemLifecycle.implementAllWithAutoMerge",
+      )(function* (repositoryId: string, parentGithubIssueNumber: number) {
+        const issues = yield* db.listIssues(repositoryId)
+        const parent = issues.find(
+          (candidate) =>
+            candidate.githubIssueNumber === parentGithubIssueNumber,
+        )
+
+        if (!parent) {
+          return yield* new IssueNotFoundError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+          })
+        }
+
+        if (!parent.hasChildren) {
+          return yield* new NotAParentIssueError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+          })
+        }
+
+        const children = issues.filter(
+          (candidate) =>
+            candidate.parent !== null &&
+            candidate.parent.githubIssueNumber === parentGithubIssueNumber,
+        )
+
+        if (children.some((child) => child.hasChildren)) {
+          return yield* new UnsupportedIssueHierarchyError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+            message: `Issue #${parentGithubIssueNumber} has grandchildren and is not a Supported Issue Hierarchy`,
+          })
+        }
+
+        const openChildren = children.filter((child) => child.state === "OPEN")
+        if (openChildren.length !== 1) {
+          return yield* new ImplementAllWithAutoMergeNotEligibleError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+            reason:
+              openChildren.length === 0
+                ? `Parent Issue #${parentGithubIssueNumber} has no open Child Issues`
+                : `Parent Issue #${parentGithubIssueNumber} has ${openChildren.length} open Child Issues; this slice supports exactly one`,
+          })
+        }
+
+        const [child] = openChildren
+        if (child === undefined) {
+          return yield* new ImplementAllWithAutoMergeNotEligibleError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+            reason: `Parent Issue #${parentGithubIssueNumber} has no open Child Issues`,
+          })
+        }
+        if (child.blockedBy.length > 0) {
+          return yield* new ImplementAllWithAutoMergeNotEligibleError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+            reason: `Child Issue #${child.githubIssueNumber} is blocked; this slice requires an actionable child`,
+          })
+        }
+
+        const existing = yield* listWorkItemsForIssue(
+          repositoryId,
+          child.githubIssueNumber,
+        )
+        const unfinished = existing.find(
+          (item) =>
+            item.state !== "complete" &&
+            item.state !== "failed" &&
+            item.state !== "abandoned",
+        )
+        if (unfinished) {
+          return yield* new ImplementAllWithAutoMergeNotEligibleError({
+            repositoryId,
+            githubIssueNumber: parentGithubIssueNumber,
+            reason: `Child Issue #${child.githubIssueNumber} already has an unfinished Work Item`,
+          })
+        }
+
+        const created = yield* createWorkItem(
+          repositoryId,
+          child.githubIssueNumber,
+          {
+            pauseBeforeStep: null,
+            mergeMode: "always",
+          },
+        )
+        return [created] as const
+      })
 
       const queueIssue = Effect.fn("WorkItemLifecycle.queue")(function* (
         repositoryId: string,
@@ -4934,10 +5094,10 @@ export const makeWorkItemLifecycleLive = (
                     `INSERT INTO work_item (
                  id, repository_id, github_issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
-                  waiting_since, waiting_for_blockers, holds_worker_slot,
+                  waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
                   failure_message, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'ordinary', 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
                     [
                       workItemId,
                       repositoryId,
@@ -5005,6 +5165,7 @@ export const makeWorkItemLifecycleLive = (
         interruptRunningStepRunsFromPriorWorker,
         implementNow,
         implementLocally,
+        implementAllWithAutoMerge,
         queue: queueIssue,
         runStep,
         retry,

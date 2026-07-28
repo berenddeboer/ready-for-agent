@@ -65,6 +65,23 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         `Issue #${error.githubIssueNumber} has child issues and must target a leaf Issue`,
         "ISSUE_IS_PARENT",
       )
+    case "NotAParentIssueError":
+      return gql(
+        `Issue #${error.githubIssueNumber} is not a Parent Issue`,
+        "ISSUE_NOT_PARENT",
+      )
+    case "UnsupportedIssueHierarchyError":
+      return gql(
+        error.message ??
+          `Issue #${error.githubIssueNumber} is not a Supported Issue Hierarchy`,
+        "UNSUPPORTED_ISSUE_HIERARCHY",
+      )
+    case "ImplementAllWithAutoMergeNotEligibleError":
+      return gql(
+        error.reason ??
+          `Parent Issue #${error.githubIssueNumber} is not eligible for Implement all with auto-merge`,
+        "IMPLEMENT_ALL_WITH_AUTO_MERGE_NOT_ELIGIBLE",
+      )
     case "IssueBlockedError":
       return gql(
         `Issue #${error.githubIssueNumber} is blocked by ${error.blockerCount} issue(s)`,

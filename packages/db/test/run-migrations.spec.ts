@@ -98,7 +98,62 @@ describe("runMigrations", () => {
           { name: "20260725180000_repository_agent_backend_override" },
           { name: "20260725210211_wait_for_ready_for_review_checks" },
           { name: "20260726090000_waiting_for_blockers" },
+          { name: "20260728120000_work_item_merge_mode" },
         ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("backfills Work Item Merge Mode ordinary and accepts Always", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260728120000_work_item_merge_mode/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE work_item (
+            id text PRIMARY KEY,
+            repository_id text NOT NULL,
+            github_issue_number integer NOT NULL,
+            state text NOT NULL
+          )
+        `)
+        yield* sql.unsafe(
+          `INSERT INTO work_item VALUES
+            ('wi-existing', 'repo-1', 1, 'implement'),
+            ('wi-other', 'repo-1', 2, 'complete')`,
+        )
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        const backfilled = yield* sql.unsafe(
+          `SELECT id, merge_mode FROM work_item ORDER BY id`,
+        )
+        expect(backfilled).toEqual([
+          { id: "wi-existing", merge_mode: "ordinary" },
+          { id: "wi-other", merge_mode: "ordinary" },
+        ])
+
+        yield* sql.unsafe(
+          `INSERT INTO work_item (id, repository_id, github_issue_number, state, merge_mode)
+           VALUES ('wi-always', 'repo-1', 3, 'merge_pr', 'always')`,
+        )
+        const always = yield* sql.unsafe(
+          `SELECT merge_mode FROM work_item WHERE id = 'wi-always'`,
+        )
+        expect(always).toEqual([{ merge_mode: "always" }])
       }).pipe(Effect.provide(SqliteTest)),
     )
   })
