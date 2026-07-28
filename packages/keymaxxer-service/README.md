@@ -31,6 +31,12 @@ result; transport, protocol, and execution failures use `KeymaxxerError`.
   Once unlocked, metadata-only `keymaxxer_list` may proceed while a dialog
   operation waits for secret-use approval. Side-effecting failures are not
   replayed; transport failures invalidate the upstream for the next request.
+  Operator logs cover vault unlock (and wrong-passphrase retries) only; the
+  facade does **not** emit a per-call "may require operator interaction" line
+  for every `keymaxxer_run` / `keymaxxer_add`, because it cannot know whether
+  Keymaxxer will show a dialog after Allow-session is set. Dialog-capable
+  ops still share one serialized dialog lane (concurrent already-approved
+  runs are not implemented yet; many GitHub helper calls queue on that lane).
 - `runKeymaxxerSidecarProcess()` — sidecar process body (listen, bootstrap URL,
   signals). Uses zod only for MCP SDK tool `inputSchema` registration; Effect
   client payloads use Schema.
