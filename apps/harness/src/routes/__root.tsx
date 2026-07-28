@@ -688,9 +688,9 @@ function SettingsButton() {
             </p>
             {showUnconfiguredGuidance && (
               <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
-                Select a default build model before the harness can create work
-                on Repositories that inherit this default. Repositories with a
-                fully configured Agent Backend override can still create work.
+                Select a default agent backend, and default build model.
+                Optionally select a different review model (recommended). You
+                can override this per configured repo.
               </p>
             )}
             {!backendChanging &&

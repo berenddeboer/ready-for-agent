@@ -34,9 +34,13 @@ describe("Harness settings Agent Backend change", () => {
     expect(source).toContain("Active Agent Backends")
     expect(source).toContain("Repositories inheriting the harness default")
     expect(source).toContain("Default Agent Backend")
-    // First-run guidance is about the default build model, not a hard fleet freeze.
+    // First-run guidance covers default backend/model setup and per-repo overrides.
     expect(source).toContain(
-      "fully configured Agent Backend override can still create work",
+      "Select a default agent backend, and default build model",
     )
+    expect(source).toContain(
+      "Optionally select a different review model (recommended)",
+    )
+    expect(source).toContain("override this per configured repo")
   })
 })
