@@ -320,7 +320,9 @@ export const startKeymaxxerFacade = async (
           return unlockResult
         }
       }
-      log(`[facade] ${name} may require operator interaction`)
+      // No preemptive per-call "may require operator interaction" log: the facade
+      // cannot know if Keymaxxer will dialog, and that line spam looks stuck after
+      // Allow-session (#547). Unlock waits stay in unlockProbe only.
       return callUpstream(name, args)
     })
   }

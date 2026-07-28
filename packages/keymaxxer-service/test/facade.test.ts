@@ -661,6 +661,63 @@ describe("Keymaxxer MCP facade security surface", () => {
     }
   })
 
+  test("does not spam operator-interaction lines for successful post-unlock runs", async () => {
+    const logs: string[] = []
+    const burst = 8
+    const facade = await startKeymaxxerFacade({
+      host: "127.0.0.1",
+      port: 0,
+      createUpstream: async () => mockUpstream(),
+      onBootstrapUrl: () => {},
+      log: (message) => {
+        logs.push(message)
+      },
+    })
+
+    try {
+      const connection = await connectClient(facade.url)
+      try {
+        const unlock = await connection.client.callTool({
+          name: "keymaxxer_list",
+          arguments: {},
+        })
+        expect(unlock.isError).not.toBe(true)
+        expect(
+          logs.filter((line) => line.includes("waiting for vault unlock")),
+        ).toHaveLength(1)
+
+        const results = await Promise.all(
+          Array.from({ length: burst }, () =>
+            connection.client.callTool({
+              name: "keymaxxer_run",
+              arguments: { command: "true", secrets: ["DEMO"] },
+            }),
+          ),
+        )
+        for (const result of results) {
+          expect(result.isError).not.toBe(true)
+          expect(toolText(result)).toContain("exit_code: 0")
+        }
+
+        const interactionLines = logs.filter(
+          (line) =>
+            /may require operator interaction/i.test(line) ||
+            /waiting for secret-use approval/i.test(line) ||
+            /operator interaction/i.test(line),
+        )
+        expect(interactionLines).toEqual([])
+        // Unlock probe stays visible; successful runs must not add more facade noise.
+        expect(logs.filter((line) => line.startsWith("[facade]"))).toEqual([
+          "[facade] waiting for vault unlock",
+        ])
+      } finally {
+        await connection.transport.close()
+      }
+    } finally {
+      await facade.stop()
+    }
+  })
+
   test("does not replay a side-effecting request after transport failure", async () => {
     let upstreamSpawns = 0
     let runCalls = 0
