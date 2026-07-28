@@ -62,6 +62,8 @@ import {
   WorkItemTerminalError,
   WorkItemWaitingForBlockersError,
   filterWorkItemsByListKind,
+  formatIssueClosedPrClosedUnmergedMessage,
+  formatIssueClosedPrStatusIndeterminateMessage,
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
@@ -6050,27 +6052,238 @@ describe("WorkItemLifecycle", () => {
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
 
+          // Issue missing (or closed) + PR closed unmerged → Pause with
+          // closed-unmerged reason, not silent Succeeded park and not Abandon
+          // (Abandon remains merge-related Needs Human only; ADR 0020).
           yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
           expect(afterInvestigate._tag).toBe("processed")
           if (afterInvestigate._tag === "processed") {
+            const expectedReason = formatIssueClosedPrClosedUnmergedMessage(
+              issue.githubIssueNumber,
+              101,
+            )
             expect(afterInvestigate.workItem.state).toBe(
               "investigate_pr_status_checks",
             )
             expect(afterInvestigate.workItem.paused).toBe(true)
-            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
-            expect(afterInvestigate.workItem.failureMessage).toContain(
-              "closed without merge",
+            expect(afterInvestigate.workItem.failureCode).toBeNull()
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              expectedReason,
             )
+            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
+            expect(afterInvestigate.workItem.state).not.toBe("abandoned")
+            expect(afterInvestigate.workItem.state).not.toBe("complete")
+            expect(afterInvestigate.workItem.state).not.toBe("failed")
             const investigateRun = afterInvestigate.workItem.stepRuns.find(
               (run) =>
                 run.step === "investigate_pr_status_checks" &&
                 run.status === "succeeded",
             )
+            expect(investigateRun).toBeDefined()
             expect(investigateRun?.reasonCode).toBe(
               STEP_RUN_REASON.issueClosedPrClosedUnmerged,
             )
+            expect(investigateRun?.reasonMessage).toBe(expectedReason)
+          }
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("pauses when Issue is closed in store and owned PR is closed unmerged", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(steps, {
+        getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "closed" }),
+      })
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          // issue_not_open (still in store, not OPEN) uses the same seam.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+            state: "CLOSED",
+          })
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.paused).toBe(true)
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              formatIssueClosedPrClosedUnmergedMessage(
+                issue.githubIssueNumber,
+                101,
+              ),
+            )
+            expect(
+              afterInvestigate.workItem.stepRuns.find(
+                (run) =>
+                  run.step === "investigate_pr_status_checks" &&
+                  run.status === "succeeded",
+              )?.reasonCode,
+            ).toBe(STEP_RUN_REASON.issueClosedPrClosedUnmerged)
+          }
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("pauses when Issue revalidation fails and owned PR status is indeterminate (not_found)", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(steps, {
+        getPullRequestLifecycleStatus: () =>
+          Effect.succeed({ _tag: "not_found" }),
+      })
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            const expectedReason =
+              formatIssueClosedPrStatusIndeterminateMessage(
+                issue.githubIssueNumber,
+                101,
+              )
+            expect(afterInvestigate.workItem.state).toBe(
+              "investigate_pr_status_checks",
+            )
+            expect(afterInvestigate.workItem.paused).toBe(true)
+            expect(afterInvestigate.workItem.failureCode).toBeNull()
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              expectedReason,
+            )
+            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
+            const investigateRun = afterInvestigate.workItem.stepRuns.find(
+              (run) =>
+                run.step === "investigate_pr_status_checks" &&
+                run.status === "succeeded",
+            )
+            // Fail closed uses the open/indeterminate reason code (never silent park).
+            expect(investigateRun?.reasonCode).toBe(
+              STEP_RUN_REASON.issueClosedWhilePrOpen,
+            )
+            expect(investigateRun?.reasonMessage).toBe(expectedReason)
+          }
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("pauses when Issue revalidation fails and owned PR lifecycle lookup fails", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(steps, {
+        getPullRequestLifecycleStatus: () =>
+          Effect.fail(new Error("GitHub unavailable")),
+      })
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.paused).toBe(true)
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              formatIssueClosedPrStatusIndeterminateMessage(
+                issue.githubIssueNumber,
+                101,
+              ),
+            )
+            expect(
+              afterInvestigate.workItem.stepRuns.find(
+                (run) =>
+                  run.step === "investigate_pr_status_checks" &&
+                  run.status === "succeeded",
+              )?.reasonCode,
+            ).toBe(STEP_RUN_REASON.issueClosedWhilePrOpen)
           }
           expect(
             Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
