@@ -105,7 +105,7 @@ export function ParentIssueActionsMenu({
  * Needs Human remains unfinished (blocks Implement all), even though GraphQL
  * marks it terminal with canRetry false.
  */
-export const isServerUnfinishedWorkItemState = (state: string): boolean => {
+const isServerUnfinishedWorkItemState = (state: string): boolean => {
   const normalized = state.toLowerCase()
   return (
     normalized !== "complete" &&
