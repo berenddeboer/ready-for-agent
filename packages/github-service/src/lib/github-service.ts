@@ -84,12 +84,40 @@ export interface GitHubServiceShape {
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
   /**
+   * Soft lookup of an open pull request for the exact head branch.
+   * Returns null when no open PR exists (does not fail).
+   */
+  readonly findOpenPullRequestNumber: (
+    repository: GitHubRepository,
+    headRefName: string,
+  ) => Effect.Effect<
+    number | null,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
+  /**
    * Count currently open, non-draft pull requests for the Repository.
    * Author, branch, labels, and Work Item ownership are ignored. Merged,
    * closed-unmerged, and draft PRs are excluded.
    */
   readonly countOpenNonDraftPullRequests: (
     repository: GitHubRepository,
+  ) => Effect.Effect<
+    number,
+    GitHubRepositoryUnavailableError | GitHubRequestError
+  >
+  /**
+   * Create a draft pull request for head against the Repository default base
+   * (or an explicit base). Returns the new PR number. Does not push the head
+   * branch; the caller must ensure the remote head exists.
+   */
+  readonly createDraftPullRequest: (
+    repository: GitHubRepository,
+    input: {
+      readonly headRefName: string
+      readonly title: string
+      readonly body: string
+      readonly baseRefName?: string
+    },
   ) => Effect.Effect<
     number,
     GitHubRepositoryUnavailableError | GitHubRequestError

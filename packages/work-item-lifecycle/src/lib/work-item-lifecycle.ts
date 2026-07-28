@@ -1746,14 +1746,25 @@ export const makeWorkItemLifecycleLive = (
               }),
             )
           case "commit":
-            return steps.commit(context).pipe(Effect.as({}))
+            return steps.commit(context).pipe(
+              Effect.map((result) => ({
+                stepRunReasonCode:
+                  result.completion === "native"
+                    ? STEP_RUN_REASON.native
+                    : STEP_RUN_REASON.agentFallback,
+              })),
+            )
           case "create_pr":
             return steps.createPr(context).pipe(
-              Effect.map((githubPullRequestNumber) => ({
-                githubPullRequestNumber,
+              Effect.map((result) => ({
+                githubPullRequestNumber: result.pullRequestNumber,
                 // Create PR opens a draft; persist so an external ready before
                 // the first Watch poll still gets a ready-phase anchor.
                 checkStartLastObservedIsDraft: 1,
+                stepRunReasonCode:
+                  result.completion === "native"
+                    ? STEP_RUN_REASON.native
+                    : STEP_RUN_REASON.agentFallback,
               })),
             )
           case "watch_pr_status_checks":
@@ -3214,6 +3225,7 @@ export const makeWorkItemLifecycleLive = (
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
                 githubIssueNumber: workItem.github_issue_number,
+                issueTitle: workItem.issue_title,
                 agentBackend: workItem.agent_backend,
                 model: selection.model,
                 thinkingLevel: selection.thinkingLevel,
@@ -3689,6 +3701,7 @@ export const makeWorkItemLifecycleLive = (
         workItemId: row.id as WorkItemId,
         repositoryId: row.repository_id,
         githubIssueNumber: row.github_issue_number,
+        issueTitle: row.issue_title,
         agentBackend: row.agent_backend,
         model: models.model,
         thinkingLevel: models.thinkingLevel,

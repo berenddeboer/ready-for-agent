@@ -341,6 +341,105 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             ),
           ),
+        findOpenPullRequestNumber: (repository, headRefName) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "find open pull request number",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const head = encodeArgument(headRefName)
+            const result = yield* runGitHubBin(
+              tokenName,
+              "find-open-pr-number",
+              [owner, name, head],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "find open pull request number",
+                result.stderr || result.stdout,
+              )
+            }
+            const trimmed = result.stdout.trim()
+            if (trimmed === "" || trimmed === "null") {
+              return null
+            }
+            const number = Number(trimmed)
+            if (!Number.isSafeInteger(number) || number <= 0) {
+              return yield* requestError(
+                repository,
+                "decode open pull request number",
+                result.stdout,
+              )
+            }
+            return number
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "find open pull request number"),
+              ),
+            ),
+          ),
+        createDraftPullRequest: (repository, input) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "create draft pull request",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const payload = encodeArgument(
+              JSON.stringify({
+                headRefName: input.headRefName,
+                title: input.title,
+                body: input.body,
+                ...(input.baseRefName === undefined
+                  ? {}
+                  : { baseRefName: input.baseRefName }),
+              }),
+            )
+            const result = yield* runGitHubBin(
+              tokenName,
+              "create-draft-pull-request",
+              [owner, name, payload],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "create draft pull request",
+                result.stderr || result.stdout,
+              )
+            }
+            const number = Number(result.stdout.trim())
+            if (!Number.isSafeInteger(number) || number <= 0) {
+              return yield* requestError(
+                repository,
+                "decode created draft pull request number",
+                result.stdout,
+              )
+            }
+            return number
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "create draft pull request"),
+              ),
+            ),
+          ),
         countOpenNonDraftPullRequests: (repository) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

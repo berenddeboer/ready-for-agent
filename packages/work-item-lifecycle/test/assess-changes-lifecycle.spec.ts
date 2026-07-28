@@ -78,8 +78,12 @@ describe("Assess Changes lifecycle routes", () => {
           return Effect.void
         },
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.void,
-        createPr: () => Effect.succeed(1),
+        commit: () => Effect.succeed({ completion: "native" as const }),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,
@@ -224,8 +228,12 @@ describe("Assess Changes lifecycle routes", () => {
           assessChanges(context).pipe(Effect.provide(PlatformLayer)),
         preCommit: () => Effect.void,
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.void,
-        createPr: () => Effect.succeed(1),
+        commit: () => Effect.succeed({ completion: "native" as const }),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,
@@ -340,8 +348,12 @@ describe("Assess Changes lifecycle routes", () => {
           }).pipe(Effect.provide(PlatformLayer)),
         preCommit: () => Effect.die("pre-commit must not run"),
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.void,
-        createPr: () => Effect.succeed(1),
+        commit: () => Effect.succeed({ completion: "native" as const }),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,
@@ -481,11 +493,14 @@ describe("Assess Changes lifecycle routes", () => {
         },
         commit: () => {
           commitCalls += 1
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
         createPr: () => {
           createPrCalls += 1
-          return Effect.succeed(1)
+          return Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          })
         },
         watchPrStatusChecks: () =>
           Effect.succeed({
@@ -652,8 +667,12 @@ describe("Assess Changes lifecycle routes", () => {
         },
         preCommit: () => Effect.void,
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.void,
-        createPr: () => Effect.succeed(1),
+        commit: () => Effect.succeed({ completion: "native" as const }),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,
@@ -771,8 +790,12 @@ describe("Assess Changes lifecycle routes", () => {
           ),
         preCommit: () => Effect.die("pre-commit must not run"),
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.void,
-        createPr: () => Effect.succeed(1),
+        commit: () => Effect.succeed({ completion: "native" as const }),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,
@@ -899,7 +922,11 @@ describe("Assess Changes lifecycle routes", () => {
         preCommit: () => Effect.die("pre-commit must not run"),
         review: () => Effect.succeed({ _tag: "clean" as const }),
         commit: () => Effect.die("commit must not run"),
-        createPr: () => Effect.succeed(1),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,
@@ -1048,8 +1075,12 @@ describe("Assess Changes lifecycle routes", () => {
           }),
         preCommit: () => Effect.void,
         review: () => Effect.succeed({ _tag: "clean" as const }),
-        commit: () => Effect.void,
-        createPr: () => Effect.succeed(1),
+        commit: () => Effect.succeed({ completion: "native" as const }),
+        createPr: () =>
+          Effect.succeed({
+            pullRequestNumber: 1,
+            completion: "native" as const,
+          }),
         watchPrStatusChecks: () =>
           Effect.succeed({
             _tag: "succeeded" as const,

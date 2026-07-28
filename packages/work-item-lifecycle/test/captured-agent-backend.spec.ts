@@ -44,8 +44,9 @@ const successfulSteps: LifecycleStepsShape = {
   assessChanges: () => Effect.succeed({ _tag: "changes" }),
   preCommit: () => Effect.void,
   review: () => Effect.succeed({ _tag: "clean" as const }),
-  commit: () => Effect.void,
-  createPr: () => Effect.succeed(101),
+  commit: () => Effect.succeed({ completion: "native" as const }),
+  createPr: () =>
+    Effect.succeed({ pullRequestNumber: 101, completion: "native" as const }),
   watchPrStatusChecks: () =>
     Effect.succeed({
       _tag: "succeeded",

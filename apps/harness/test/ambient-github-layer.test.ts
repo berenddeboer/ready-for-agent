@@ -20,6 +20,8 @@ const serviceWithList = (
   listReadyIssues,
   getAuthenticatedUserLogin: () => Effect.die("not used"),
   getOpenPullRequestNumber: () => Effect.die("not used"),
+  findOpenPullRequestNumber: () => Effect.die("not used"),
+  createDraftPullRequest: () => Effect.die("not used"),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
   getPullRequestCheckStatus: () => Effect.die("not used"),
   getPrStatusCheckDiagnostics: () => Effect.die("not used"),

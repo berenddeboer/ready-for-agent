@@ -25,6 +25,14 @@ export class CommitSessionContextMissingError extends Schema.TaggedErrorClass<Co
   },
 ) {}
 
+export class CommitStartingCommitMissingError extends Schema.TaggedErrorClass<CommitStartingCommitMissingError>()(
+  "CommitStartingCommitMissingError",
+  {
+    workItemId: Schema.String,
+    message: Schema.String,
+  },
+) {}
+
 export class CommitOpenCodeError extends Schema.TaggedErrorClass<CommitOpenCodeError>()(
   "CommitOpenCodeError",
   {
@@ -35,8 +43,19 @@ export class CommitOpenCodeError extends Schema.TaggedErrorClass<CommitOpenCodeE
   },
 ) {}
 
+export class CommitPostconditionError extends Schema.TaggedErrorClass<CommitPostconditionError>()(
+  "CommitPostconditionError",
+  {
+    message: Schema.String,
+    worktreePath: Schema.String,
+    diagnostics: Schema.optional(Schema.String),
+  },
+) {}
+
 export type CommitError =
   | CommitWorktreeContextMissingError
   | CommitInvalidWorktreeContextError
   | CommitSessionContextMissingError
+  | CommitStartingCommitMissingError
   | CommitOpenCodeError
+  | CommitPostconditionError

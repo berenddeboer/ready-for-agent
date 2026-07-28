@@ -236,7 +236,7 @@ One build-model pass that interprets Review Findings and changes the worktree, p
 _Avoid_: Implement redo, unbounded fix loop
 
 **Commit**:
-The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. It stages and commits only; it does not implement Review Findings or other rework.
+The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. It stages and commits only; it does not implement Review Findings or other rework. The harness attempts a deterministic git commit first and continues the Work Item Session only as a repair fallback when the native path does not establish the postcondition.
 _Avoid_: Create PR, git commit hook, Pre-Commit
 
 **Close Issue**:

@@ -139,6 +139,82 @@ describe("GitHubService live implementation", () => {
     })
   })
 
+  it("soft-finds an open pull request number or null", async () => {
+    const missing = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: { pullRequests: { nodes: [] } },
+        }) as never,
+    })
+    expect(
+      await Effect.runPromise(
+        missing.findOpenPullRequestNumber(repository, "rfa/issue-42"),
+      ),
+    ).toBeNull()
+
+    const present = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: { pullRequests: { nodes: [{ number: 99 }] } },
+        }) as never,
+    })
+    expect(
+      await Effect.runPromise(
+        present.findOpenPullRequestNumber(repository, "rfa/issue-42"),
+      ),
+    ).toBe(99)
+  })
+
+  it("creates a draft pull request against the repository default base", async () => {
+    const queries: unknown[] = []
+    const mutations: unknown[] = []
+    const service = makeGitHubService({
+      query: (input) => {
+        queries.push(input)
+        return Promise.resolve({
+          repository: {
+            id: "repo-node-1",
+            defaultBranchRef: { name: "main" },
+          },
+        }) as never
+      },
+      mutation: (input) => {
+        mutations.push(input)
+        return Promise.resolve({
+          createPullRequest: {
+            pullRequest: { number: 4242 },
+          },
+        }) as never
+      },
+    })
+
+    expect(
+      await Effect.runPromise(
+        service.createDraftPullRequest(repository, {
+          headRefName: "rfa/issue-42",
+          title: "Ship widgets",
+          body: "Closes #42",
+        }),
+      ),
+    ).toBe(4242)
+    expect(mutations).toHaveLength(1)
+    expect(mutations[0]).toMatchObject({
+      createPullRequest: {
+        __args: {
+          input: {
+            repositoryId: "repo-node-1",
+            baseRefName: "main",
+            headRefName: "rfa/issue-42",
+            title: "Ship widgets",
+            body: "Closes #42",
+            draft: true,
+          },
+        },
+      },
+    })
+    expect(queries).toHaveLength(1)
+  })
+
   it("counts open non-draft pull requests across pages and excludes drafts", async () => {
     const requests: unknown[] = []
     const pages = [

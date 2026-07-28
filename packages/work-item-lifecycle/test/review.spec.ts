@@ -51,6 +51,7 @@ const baseContext = (
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
   githubIssueNumber: 91,
+  issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",
   thinkingLevel: "high",

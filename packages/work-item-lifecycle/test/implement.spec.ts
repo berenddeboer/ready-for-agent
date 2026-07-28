@@ -34,6 +34,7 @@ const baseContext = (
   workItemId: makeWorkItemId(),
   repositoryId: "repo-missing",
   githubIssueNumber: 80,
+  issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",
   thinkingLevel: "high",
@@ -197,6 +198,7 @@ describe("implement", () => {
             baseContext(root, {
               repositoryId: repository.id,
               githubIssueNumber: 80,
+              issueTitle: null,
               agentBackend: "opencode",
               model: "opencode/implement-model",
               thinkingLevel: "max",
@@ -294,6 +296,7 @@ describe("implement", () => {
             baseContext(root, {
               repositoryId: repository.id,
               githubIssueNumber: 80,
+              issueTitle: null,
               agentBackend: "opencode",
               model: "opencode/implement-model",
               thinkingLevel: "max",

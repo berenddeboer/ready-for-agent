@@ -104,8 +104,9 @@ describe("WorkItemLifecycle", () => {
     assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
     review: () => Effect.succeed({ _tag: "clean" as const }),
-    commit: () => Effect.void,
-    createPr: () => Effect.succeed(101),
+    commit: () => Effect.succeed({ completion: "native" as const }),
+    createPr: () =>
+      Effect.succeed({ pullRequestNumber: 101, completion: "native" as const }),
     watchPrStatusChecks: () => Effect.succeed(watchResult("succeeded")),
     resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
     investigatePrStatusChecks: () =>
@@ -5439,11 +5440,14 @@ describe("WorkItemLifecycle", () => {
         },
         commit: (context) => {
           seen.push(context)
-          return Effect.void
+          return Effect.succeed({ completion: "native" as const })
         },
         createPr: (context) => {
           seen.push(context)
-          return Effect.succeed(101)
+          return Effect.succeed({
+            pullRequestNumber: 101,
+            completion: "native" as const,
+          })
         },
         watchPrStatusChecks: (context) => {
           seen.push(context)
@@ -8776,6 +8780,7 @@ describe("WorkItemLifecycle", () => {
             workItemId: created.id,
             repositoryId: repository.id,
             githubIssueNumber: issue.githubIssueNumber,
+            issueTitle: issue.title,
             agentBackend: "opencode",
             model: "",
             thinkingLevel: null,

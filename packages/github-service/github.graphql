@@ -18,8 +18,24 @@ type Mutation {
     input: MarkPullRequestReadyForReviewInput!
   ): MarkPullRequestReadyForReviewPayload
   mergePullRequest(input: MergePullRequestInput!): MergePullRequestPayload
+  createPullRequest(input: CreatePullRequestInput!): CreatePullRequestPayload
   addComment(input: AddCommentInput!): AddCommentPayload
   closeIssue(input: CloseIssueInput!): CloseIssuePayload
+}
+
+input CreatePullRequestInput {
+  repositoryId: ID!
+  baseRefName: String!
+  headRefName: String!
+  title: String!
+  body: String
+  draft: Boolean
+  clientMutationId: String
+}
+
+type CreatePullRequestPayload {
+  clientMutationId: String
+  pullRequest: PullRequest
 }
 
 input AddCommentInput {
@@ -89,7 +105,9 @@ type MergePullRequestPayload {
 }
 
 type Repository {
+  id: ID!
   nameWithOwner: String!
+  defaultBranchRef: Ref
   issues(first: Int, after: String, labels: [String!]): IssueConnection!
   issue(number: Int!): Issue
   pullRequests(
@@ -98,6 +116,10 @@ type Repository {
     states: [PullRequestState!]
     headRefName: String
   ): PullRequestConnection!
+}
+
+type Ref {
+  name: String!
 }
 
 type PullRequestConnection {

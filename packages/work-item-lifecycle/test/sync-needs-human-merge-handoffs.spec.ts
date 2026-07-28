@@ -32,8 +32,9 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     assessChanges: () => Effect.succeed({ _tag: "changes" }),
     preCommit: () => Effect.void,
     review: () => Effect.succeed({ _tag: "clean" as const }),
-    commit: () => Effect.void,
-    createPr: () => Effect.succeed(101),
+    commit: () => Effect.succeed({ completion: "native" as const }),
+    createPr: () =>
+      Effect.succeed({ pullRequestNumber: 101, completion: "native" as const }),
     watchPrStatusChecks: () =>
       Effect.succeed({
         _tag: "succeeded" as const,
@@ -62,6 +63,8 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       getOpenPullRequestNumber: () => Effect.succeed(1),
+      findOpenPullRequestNumber: () => Effect.succeed(1),
+      createDraftPullRequest: () => Effect.succeed(1),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
         Effect.succeed({

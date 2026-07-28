@@ -285,6 +285,9 @@ export const filterWorkItemsByListKind = <
   )
 }
 
+/** How a conditionally agent-using step completed its postcondition. */
+export type LifecycleStepCompletion = "native" | "agent_fallback"
+
 export const STEP_RUN_REASON = {
   handlerFailed: "handler_failed",
   handlerDefect: "handler_defect",
@@ -328,6 +331,16 @@ export const STEP_RUN_REASON = {
    * (human or external merge) before this step could finish its work.
    */
   prMerged: "pr_merged",
+  /**
+   * Conditionally agent-using step completed via harness-owned native path
+   * (no Agent Turn).
+   */
+  native: "native",
+  /**
+   * Conditionally agent-using step completed via one repair Agent Turn after
+   * the native path did not establish the postcondition.
+   */
+  agentFallback: "agent_fallback",
 } as const
 
 export type StepRunReasonCode =
