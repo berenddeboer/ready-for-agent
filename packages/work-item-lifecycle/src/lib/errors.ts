@@ -58,8 +58,7 @@ export class UnsupportedIssueHierarchyError extends Schema.TaggedErrorClass<Unsu
 
 /**
  * Parent Issue is not eligible for Implement all with auto-merge (no open
- * Child Issues without an unfinished Work Item, or concurrent enrollment
- * conflict).
+ * Child Issues, or concurrent enrollment conflict).
  */
 export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedErrorClass<ImplementAllWithAutoMergeNotEligibleError>()(
   "ImplementAllWithAutoMergeNotEligibleError",

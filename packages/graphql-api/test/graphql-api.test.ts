@@ -3650,8 +3650,7 @@ describe("GraphQL API", () => {
             _tag: "ImplementAllWithAutoMergeNotEligibleError",
             repositoryId: repository.id,
             githubIssueNumber: 10,
-            reason:
-              "Parent Issue #10 has no open Child Issues without an unfinished Work Item",
+            reason: "Parent Issue #10 has no open Child Issues",
           } as never),
       },
     )
@@ -3677,9 +3676,7 @@ describe("GraphQL API", () => {
     expect(body.errors[0]?.extensions.code).toBe(
       "IMPLEMENT_ALL_WITH_AUTO_MERGE_NOT_ELIGIBLE",
     )
-    expect(body.errors[0]?.message).toContain(
-      "no open Child Issues without an unfinished Work Item",
-    )
+    expect(body.errors[0]?.message).toContain("no open Child Issues")
   })
 
   test("queues a blocked Issue Work Item", async () => {
