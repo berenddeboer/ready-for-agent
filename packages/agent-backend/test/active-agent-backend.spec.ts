@@ -251,14 +251,15 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         expect(openTelemetry.availability).toBe("available")
         expect(openTelemetry.model?.providerId).toBe("opencode")
 
-        // Grok Build does not support SessionTelemetry; dispatch still scopes
-        // the response to the requested backend id.
+        // Grok Build supports SessionTelemetry; dispatch scopes the response
+        // to the requested backend id (file-backed live read in production).
         const grokTelemetry = yield* active.getSessionTelemetry({
           backendId: AGENT_BACKEND_IDS.grok,
           sessionId: "ses_g",
         })
         expect(grokTelemetry.backend.id).toBe("grok")
-        expect(grokTelemetry.availability).toBe("unsupported")
+        expect(grokTelemetry.availability).toBe("available")
+        expect(grokTelemetry.model?.providerId).toBe("grok")
       }).pipe(Effect.provide(layer)),
     )
   })

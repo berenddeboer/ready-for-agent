@@ -28,7 +28,7 @@ const GROK_REGISTRATION: AgentBackendRegistration = {
     label: "Grok Build",
   },
   capabilities: [
-    { _tag: "SessionTelemetry", supported: false },
+    { _tag: "SessionTelemetry", supported: true },
     { _tag: "KeymaxxerMcp", supported: false },
   ],
 }

@@ -38,7 +38,7 @@ describe("Agent Backend registry", () => {
 
     const grok = getBuiltInAgentBackend(AGENT_BACKEND_IDS.grok)
     expect(grok).toBeDefined()
-    expect(capabilitySupported(grok!, "SessionTelemetry")).toBe(false)
+    expect(capabilitySupported(grok!, "SessionTelemetry")).toBe(true)
     expect(capabilitySupported(grok!, "KeymaxxerMcp")).toBe(false)
   })
 })
