@@ -319,6 +319,11 @@ export const STEP_RUN_REASON = {
   /** Successful Merge PR run that returned to Watch for fresh validation. */
   mergeRevalidation: "merge_revalidation",
   /**
+   * Green-only Status Check Handoff completed without an Agent Turn because
+   * harness-owned GitHub observation found no positive automated-review evidence.
+   */
+  greenNoReviewEvidence: "green-no-review-evidence",
+  /**
    * Step Run superseded because the Work Item PR was confirmed merged
    * (human or external merge) before this step could finish its work.
    */

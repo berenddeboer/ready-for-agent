@@ -97,6 +97,11 @@ const stubGitHub = (
           isDraft: null,
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      observeAutomatedReviewEvidence: () =>
+        Effect.succeed({
+          _tag: "ambiguous" as const,
+          reason: "Automated review evidence observation is not configured",
+        }),
       getPullRequestLifecycleStatus: () =>
         Effect.succeed({ _tag: "open" as const }),
       markPullRequestReadyForReview: () => Effect.void,

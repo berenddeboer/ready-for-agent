@@ -1,4 +1,5 @@
 export { githubServiceBinScriptPath } from "./bin-script-path.js"
+export * from "./lib/automated-review-evidence.js"
 export * from "./lib/errors.js"
 export * from "./lib/github-helper-process.js"
 export * from "./lib/github-service.js"

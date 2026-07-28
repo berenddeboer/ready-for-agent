@@ -4,6 +4,7 @@ import { ulid } from "ulidx"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
+  GREEN_NO_REVIEW_EVIDENCE_REASON,
   GitHubService,
   type PrStatusCheckDiagnostic,
   type TerminalPrStatusCheck,
@@ -15,7 +16,11 @@ import {
   resolveAgentTurnGitHubAuth,
 } from "./agent-turn-github-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
-import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
+import {
+  DEFAULT_LIFECYCLE_MAX_DURATIONS,
+  STEP_RUN_REASON,
+  type StepRunReasonCode,
+} from "./types.js"
 import { workItemBranchName } from "./worktree-names.js"
 
 export class PrStatusChecksContextError extends Schema.TaggedErrorClass<PrStatusChecksContextError>()(
@@ -76,7 +81,13 @@ export type PrStatusCheckResult =
     } & PrStatusCheckTimingEvidence)
 
 export type PrStatusCheckInvestigationResult =
-  | { readonly _tag: "processed"; readonly handledCheckIds: readonly string[] }
+  | {
+      readonly _tag: "processed"
+      readonly handledCheckIds: readonly string[]
+      /** Optional operator-visible reason when handled without an Agent Turn. */
+      readonly reasonCode?: StepRunReasonCode
+      readonly reasonNote?: string
+    }
   | {
       readonly _tag: "checks_triggered"
       readonly handledCheckIds: readonly string[]
@@ -601,6 +612,52 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         handledCheckIds: [],
       } satisfies PrStatusCheckInvestigationResult
     }
+    const redChecks = unhandled.filter((check) => check.outcome === "red")
+    // Green-only handoffs: skip the Agent Turn when harness-owned observation
+    // proves there is no positive automated-review evidence.
+    if (redChecks.length === 0) {
+      const github = yield* GitHubService
+      const evidence = yield* github
+        .observeAutomatedReviewEvidence(
+          { owner: repository.githubOwner, name: repository.githubRepo },
+          branch,
+          unhandled.map((check) => ({
+            externalId: check.external_id,
+            name: check.name,
+          })),
+        )
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.succeed({
+              _tag: "ambiguous" as const,
+              reason:
+                "message" in cause &&
+                typeof cause.message === "string" &&
+                cause.message.trim() !== ""
+                  ? cause.message
+                  : "Failed to observe automated review evidence",
+            }),
+          ),
+        )
+      if (evidence._tag === "none") {
+        const handledCheckIds = unhandled.map((check) => check.id)
+        yield* Effect.logInfo(
+          "Status Check Handoff fast path: no automated-review evidence",
+          {
+            reason: GREEN_NO_REVIEW_EVIDENCE_REASON,
+            workItemId: context.workItemId,
+            handledCheckCount: handledCheckIds.length,
+          },
+        )
+        return {
+          _tag: "processed",
+          handledCheckIds,
+          reasonCode: STEP_RUN_REASON.greenNoReviewEvidence,
+          reasonNote: GREEN_NO_REVIEW_EVIDENCE_REASON,
+        } satisfies PrStatusCheckInvestigationResult
+      }
+      // Positive or ambiguous evidence falls through to the Agent Turn path.
+    }
     const auth = yield* resolveAgentTurnGitHubAuth({
       githubOwner: repository.githubOwner,
       githubRepo: repository.githubRepo,
@@ -617,7 +674,6 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         })
       }),
     )
-    const redChecks = unhandled.filter((check) => check.outcome === "red")
     let diagnostics: readonly PrStatusCheckDiagnostic[] = []
     if (redChecks.length > 0) {
       const github = yield* GitHubService

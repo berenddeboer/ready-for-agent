@@ -1041,6 +1041,200 @@ describe("GitHubService live implementation", () => {
     ])
   })
 
+  it("observes no automated-review evidence for ordinary green CI and skipped recognized reviewers", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("/pulls?") && url.includes("state=open")) {
+        return new Response(JSON.stringify([{ number: 42 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/issues/42/comments")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/pulls/42/comments")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/pulls/42/reviews")) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/actions/jobs/100")) {
+        return new Response(
+          JSON.stringify({
+            id: 100,
+            name: "claude-review",
+            conclusion: "skipped",
+            steps: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      if (url.includes("/actions/jobs/101")) {
+        throw new Error("should not load ordinary CI job steps")
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeAutomatedReviewEvidence(
+        repository,
+        "rfa/acme-widgets/42/wi-1",
+        [
+          {
+            externalId: "actions-job:100",
+            name: "Claude Code Review/claude-review",
+          },
+          { externalId: "actions-job:101", name: "PR Review/main" },
+        ],
+      ),
+    )
+
+    expect(observation).toEqual({
+      _tag: "none",
+      reason: "green-no-review-evidence",
+    })
+  })
+
+  it("observes positive evidence when a recognized reviewer job executed steps", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("/pulls?") && url.includes("state=open")) {
+        return new Response(JSON.stringify([{ number: 7 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (
+        url.includes("/issues/7/comments") ||
+        url.includes("/pulls/7/comments") ||
+        url.includes("/pulls/7/reviews")
+      ) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/actions/jobs/300")) {
+        return new Response(
+          JSON.stringify({
+            id: 300,
+            name: "claude-review",
+            conclusion: "success",
+            steps: [
+              { name: "Checkout", conclusion: "success" },
+              { name: "Run Claude", conclusion: "success" },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeAutomatedReviewEvidence(repository, "feature/review", [
+        {
+          externalId: "actions-job:300",
+          name: "Claude Code Review/claude-review",
+        },
+      ]),
+    )
+
+    expect(observation._tag).toBe("positive")
+    if (observation._tag === "positive") {
+      expect(observation.kind).toBe("executed_reviewer_job")
+    }
+  })
+
+  it("treats recognized reviewer success without job steps as ambiguous", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("/pulls?") && url.includes("state=open")) {
+        return new Response(JSON.stringify([{ number: 8 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (
+        url.includes("/issues/8/comments") ||
+        url.includes("/pulls/8/comments") ||
+        url.includes("/pulls/8/reviews")
+      ) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/actions/jobs/301")) {
+        return new Response(
+          JSON.stringify({
+            id: 301,
+            name: "claude-review",
+            conclusion: "success",
+            steps: [],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeAutomatedReviewEvidence(repository, "feature/no-steps", [
+        {
+          externalId: "actions-job:301",
+          name: "Claude Code Review/claude-review",
+        },
+      ]),
+    )
+
+    expect(observation._tag).toBe("ambiguous")
+    if (observation._tag === "ambiguous") {
+      expect(observation.reason).toContain("without inspectable steps")
+    }
+  })
+
+  it("observes positive evidence from a recognized automated-review comment", async () => {
+    const service = makeGitHubServiceFromToken("token", async (input) => {
+      const url = String(input)
+      if (url.includes("/pulls?") && url.includes("state=open")) {
+        return new Response(JSON.stringify([{ number: 9 }]), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.includes("/issues/9/comments")) {
+        return new Response(
+          JSON.stringify([{ user: { login: "claude[bot]" } }]),
+          { status: 200, headers: { "content-type": "application/json" } },
+        )
+      }
+      return new Response("not found", { status: 404, statusText: "Not Found" })
+    })
+
+    const observation = await Effect.runPromise(
+      service.observeAutomatedReviewEvidence(repository, "feature/comment", [
+        { externalId: "actions-job:1", name: "lint" },
+      ]),
+    )
+
+    expect(observation).toEqual({
+      _tag: "positive",
+      kind: "review_comment",
+      detail: "Issue comment from claude[bot]",
+    })
+  })
+
   it("loads only the latest commit status for each context", async () => {
     const service = makeGitHubServiceFromToken("token", async (input) => {
       const url = String(input)

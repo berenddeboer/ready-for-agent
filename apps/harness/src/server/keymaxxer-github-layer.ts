@@ -101,6 +101,23 @@ const SerializedPrStatusCheckDiagnostics = Schema.Array(
   SerializedPrStatusCheckDiagnostic,
 )
 
+const SerializedAutomatedReviewEvidenceObservation = Schema.Union([
+  Schema.TaggedStruct("none", {
+    reason: Schema.Literals(["green-no-review-evidence"]),
+  }),
+  Schema.TaggedStruct("positive", {
+    kind: Schema.Literals([
+      "executed_reviewer_job",
+      "review_comment",
+      "pull_request_review",
+    ]),
+    detail: Schema.String,
+  }),
+  Schema.TaggedStruct("ambiguous", {
+    reason: Schema.String,
+  }),
+])
+
 const SerializedPullRequestCheckStatusFields = {
   mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
   baseRefName: Schema.NullOr(Schema.String),
@@ -472,6 +489,61 @@ export const keymaxxerGitHubLayer = (options: {
             Effect.catchTag("KeymaxxerError", () =>
               Effect.fail(
                 requestError(repository, "get PR Status Check diagnostics"),
+              ),
+            ),
+          ),
+        observeAutomatedReviewEvidence: (repository, headRefName, checks) =>
+          Effect.gen(function* () {
+            const tokenName = yield* ensureToken(repository)
+            if (tokenName === null) {
+              return yield* requestError(
+                repository,
+                "observe automated review evidence",
+              )
+            }
+            const owner = encodeArgument(repository.owner)
+            const name = encodeArgument(repository.name)
+            const head = encodeArgument(headRefName)
+            const checksArg = encodeArgument(
+              JSON.stringify(
+                checks.map((check) => ({
+                  externalId: check.externalId,
+                  name: check.name,
+                })),
+              ),
+            )
+            const result = yield* runGitHubBin(
+              tokenName,
+              "observe-automated-review-evidence",
+              [owner, name, head, checksArg],
+            )
+            if (result.exitCode === 2) {
+              return yield* new GitHubRepositoryUnavailableError(repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                repository,
+                "observe automated review evidence",
+                result.stderr || result.stdout,
+              )
+            }
+            return yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(
+                SerializedAutomatedReviewEvidenceObservation,
+              ),
+            )(result.stdout).pipe(
+              Effect.mapError(() =>
+                requestError(
+                  repository,
+                  "decode automated review evidence",
+                  result.stdout,
+                ),
+              ),
+            )
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(
+                requestError(repository, "observe automated review evidence"),
               ),
             ),
           ),
