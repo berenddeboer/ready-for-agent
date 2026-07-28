@@ -716,13 +716,12 @@ describe("WorkItemLifecycle", () => {
         }),
       ))
 
-    it("rejects missing, non-parent, no-open, unsupported hierarchy, and unfinished-only cases", () =>
+    it("rejects missing, non-parent, no-open, and unsupported hierarchy cases", () =>
       runTest(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const db = yield* DbService
-          const { repository, parent, child } =
-            yield* seedParentWithOneActionableChild
+          const { repository } = yield* seedParentWithOneActionableChild
 
           const missing = yield* Effect.flip(
             lifecycle.implementAllWithAutoMerge(repository.id, 999),
@@ -804,22 +803,6 @@ describe("WorkItemLifecycle", () => {
           expect(noOpen).toBeInstanceOf(
             ImplementAllWithAutoMergeNotEligibleError,
           )
-
-          // All open children already have unfinished Work Items.
-          yield* lifecycle.implementAllWithAutoMerge(
-            repository.id,
-            parent.githubIssueNumber,
-          )
-          const unfinished = yield* Effect.flip(
-            lifecycle.implementAllWithAutoMerge(
-              repository.id,
-              parent.githubIssueNumber,
-            ),
-          )
-          expect(unfinished).toBeInstanceOf(
-            ImplementAllWithAutoMergeNotEligibleError,
-          )
-          expect(child.githubIssueNumber).toBe(101)
         }),
       ))
 
@@ -1062,7 +1045,7 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("skips open children that already have unfinished Work Items", () =>
+    it("adopts unfinished children and enrolls later-added open children without duplication", () =>
       runTest(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
@@ -1070,12 +1053,28 @@ describe("WorkItemLifecycle", () => {
           const { repository, parent, child } =
             yield* seedParentWithOneActionableChild
 
+          // Ordinary unfinished Work Item created outside the parent command.
+          const ordinary = yield* lifecycle.implementNow(
+            repository.id,
+            child.githubIssueNumber,
+          )
+          expect(ordinary.mergeMode).toBe("ordinary")
+          const stepRunCount = ordinary.stepRuns.length
+          const ordinaryState = ordinary.state
+          const holdsSlot = ordinary.holdsWorkerSlot
+
           const first = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
             parent.githubIssueNumber,
           )
           expect(first).toHaveLength(1)
+          expect(first[0]!.id).toBe(ordinary.id)
+          expect(first[0]!.mergeMode).toBe("always")
+          expect(first[0]!.state).toBe(ordinaryState)
+          expect(first[0]!.holdsWorkerSlot).toBe(holdsSlot)
+          expect(first[0]!.stepRuns).toHaveLength(stepRunCount)
 
+          // Child added after the first accepted snapshot is not yet enrolled.
           yield* db.storeIssue({
             repositoryId: repository.id,
             githubIssueNumber: 102,
@@ -1093,19 +1092,364 @@ describe("WorkItemLifecycle", () => {
             repository.id,
             parent.githubIssueNumber,
           )
-          expect(second).toHaveLength(1)
-          expect(second[0]!.githubIssueNumber).toBe(102)
-          expect(second[0]!.mergeMode).toBe("always")
+          expect(second).toHaveLength(2)
+          const byIssue = new Map(
+            second.map((item) => [item.githubIssueNumber, item]),
+          )
+          const adopted = byIssue.get(child.githubIssueNumber)!
+          expect(adopted.id).toBe(ordinary.id)
+          expect(adopted.mergeMode).toBe("always")
+          expect(adopted.state).toBe(ordinaryState)
+          expect(adopted.stepRuns).toHaveLength(stepRunCount)
 
-          const original = yield* lifecycle.getWorkItem(first[0]!.id)
-          expect(original.githubIssueNumber).toBe(child.githubIssueNumber)
-          expect(original.mergeMode).toBe("always")
-          // Existing unfinished Work Item is not duplicated.
+          const later = byIssue.get(102)!
+          expect(later.mergeMode).toBe("always")
+          expect(later.id).not.toBe(ordinary.id)
+
+          // No duplicate unfinished Work Item for the original child.
           const originalList = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
             child.githubIssueNumber,
           )
           expect(originalList).toHaveLength(1)
+        }),
+      ))
+
+    it("preserves identity, progress, Session, worktree, and PR when adopting", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, parent, child } =
+            yield* seedParentWithOneActionableChild
+
+          const ordinary = yield* lifecycle.implementNow(
+            repository.id,
+            child.githubIssueNumber,
+          )
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET state = 'implement',
+                 session_id = 'ses_adopt_preserve',
+                 worktree_path = '/tmp/worktrees/adopt-preserve',
+                 github_pull_request_number = 77,
+                 starting_commit_oid = 'deadbeef'
+             WHERE id = ?`,
+            [ordinary.id],
+          )
+
+          const before = yield* lifecycle.getWorkItem(ordinary.id)
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+
+          expect(covered).toHaveLength(1)
+          const adopted = covered[0]!
+          expect(adopted.id).toBe(before.id)
+          expect(adopted.mergeMode).toBe("always")
+          expect(adopted.state).toBe("implement")
+          expect(adopted.sessionId).toBe("ses_adopt_preserve")
+          expect(adopted.worktreePath).toBe("/tmp/worktrees/adopt-preserve")
+          expect(adopted.githubPullRequestNumber).toBe(77)
+          expect(adopted.startingCommitOid).toBe("deadbeef")
+          expect(adopted.holdsWorkerSlot).toBe(before.holdsWorkerSlot)
+          expect(adopted.stepRuns.map((run) => run.id)).toEqual(
+            before.stepRuns.map((run) => run.id),
+          )
+        }),
+      ))
+
+    it("leaves merge-related Needs Human stopped when setting Merge Mode Always", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
+          const { repository, parent, child } =
+            yield* seedParentWithOneActionableChild
+
+          const ordinary = yield* lifecycle.implementNow(
+            repository.id,
+            child.githubIssueNumber,
+          )
+          // Simulate a merge-related Needs Human handoff with ordinary mode.
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET state = 'needs_human',
+                 merge_mode = 'ordinary',
+                 github_pull_request_number = 88,
+                 failure_code = 'needs_human',
+                 failure_message = 'Human merge required',
+                 holds_worker_slot = 0,
+                 waiting_since = NULL
+             WHERE id = ?`,
+            [ordinary.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'succeeded',
+                 step = 'decide_pr_merge',
+                 finished_at = ?
+             WHERE work_item_id = ?`,
+            [Date.now(), ordinary.id],
+          )
+
+          const before = yield* lifecycle.getWorkItem(ordinary.id)
+          expect(before.state).toBe("needs_human")
+          expect(before.mergeMode).toBe("ordinary")
+
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+
+          expect(covered).toHaveLength(1)
+          const adopted = covered[0]!
+          expect(adopted.id).toBe(ordinary.id)
+          expect(adopted.mergeMode).toBe("always")
+          expect(adopted.state).toBe("needs_human")
+          expect(adopted.failureCode).toBe("needs_human")
+          expect(adopted.failureMessage).toBe("Human merge required")
+          expect(adopted.githubPullRequestNumber).toBe(88)
+          expect(adopted.holdsWorkerSlot).toBe(false)
+          // No Merge PR (or other) Step Run enqueued by the adopt path.
+          expect(adopted.stepRuns.every((run) => run.status !== "queued")).toBe(
+            true,
+          )
+          expect(adopted.stepRuns.some((run) => run.step === "merge_pr")).toBe(
+            false,
+          )
+        }),
+      ))
+
+    it("rolls back Merge Mode changes when a later create enqueue fails", () => {
+      let enqueueCalls = 0
+      const failingEnqueueQueue = stubQueueService({
+        enqueue: () => {
+          enqueueCalls += 1
+          return Effect.fail(
+            new EnqueueError({
+              queue: WORK_ITEM_LIFECYCLE_QUEUE,
+              message: "injected enqueue failure on new child",
+            }),
+          )
+        },
+      })
+
+      const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(SuccessfulStepsLive),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(
+          Layer.succeed(QueueService, QueueService.of(failingEnqueueQueue)),
+        ),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-mixed-rollback.git",
+            githubRepo: "widgets-mixed-rollback",
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 800,
+            ...sampleIssueFields,
+            title: "Mixed rollback parent",
+            url: "https://github.com/acme/widgets/issues/800",
+            hasChildren: true,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 801,
+            ...sampleIssueFields,
+            title: "Existing child",
+            url: "https://github.com/acme/widgets/issues/801",
+            parent: {
+              githubIssueNumber: 800,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/800",
+            },
+            parentPosition: 0,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 802,
+            ...sampleIssueFields,
+            title: "New child",
+            url: "https://github.com/acme/widgets/issues/802",
+            parent: {
+              githubIssueNumber: 800,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/800",
+            },
+            parentPosition: 1,
+          })
+
+          // Existing ordinary unfinished Work Item (adopt target).
+          // implementNow enqueues; use direct insert to avoid the failing queue.
+          const sql = yield* SqlClient.SqlClient
+          const existingId = "wi-01ARZ3NDEKTSV4RRFFQ69G5FAV"
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, github_issue_number, agent_backend,
+               issue_title, state, state_ready_at, paused,
+               waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
+               pause_before_step, worktree_path, session_id, failure_code,
+               failure_message, created_at, updated_at
+             ) VALUES (?, ?, ?, 'opencode', ?, 'create_worktree', ?, 0, NULL, 0, 'ordinary', 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+            [existingId, repository.id, 801, "Existing child", now, now, now],
+          )
+
+          const error = yield* Effect.flip(
+            lifecycle.implementAllWithAutoMerge(repository.id, 800),
+          )
+          expect(error).toBeInstanceOf(EnqueueError)
+          expect(enqueueCalls).toBe(1)
+
+          const existing = yield* lifecycle.getWorkItem(existingId)
+          expect(existing.mergeMode).toBe("ordinary")
+          expect(existing.state).toBe("create_worktree")
+
+          const newChildItems = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            802,
+          )
+          expect(newChildItems).toEqual([])
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("maps concurrent parent and child Implement Now to all-or-nothing without duplicates", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-concurrent-parent.git",
+            githubRepo: "widgets-concurrent-parent",
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 900,
+            ...sampleIssueFields,
+            title: "Concurrent parent",
+            url: "https://github.com/acme/widgets/issues/900",
+            hasChildren: true,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 901,
+            ...sampleIssueFields,
+            title: "Child A",
+            url: "https://github.com/acme/widgets/issues/901",
+            parent: {
+              githubIssueNumber: 900,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/900",
+            },
+            parentPosition: 0,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 902,
+            ...sampleIssueFields,
+            title: "Child B",
+            url: "https://github.com/acme/widgets/issues/902",
+            parent: {
+              githubIssueNumber: 900,
+              githubIssueUrl: "https://github.com/acme/widgets/issues/900",
+            },
+            parentPosition: 1,
+          })
+
+          // Child-level Implement Now wins first for A.
+          const childA = yield* lifecycle.implementNow(repository.id, 901)
+          expect(childA.mergeMode).toBe("ordinary")
+
+          // Parent command adopts A and creates B.
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            900,
+          )
+          expect(covered).toHaveLength(2)
+          const byIssue = new Map(
+            covered.map((item) => [item.githubIssueNumber, item]),
+          )
+          expect(byIssue.get(901)!.id).toBe(childA.id)
+          expect(byIssue.get(901)!.mergeMode).toBe("always")
+          expect(byIssue.get(902)!.mergeMode).toBe("always")
+
+          // Second Implement Now on A is rejected (one unfinished invariant).
+          const conflict = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, 901),
+          )
+          expect(conflict).toBeInstanceOf(UnfinishedWorkItemExistsError)
+
+          const listA = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            901,
+          )
+          expect(listA).toHaveLength(1)
+          const listB = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            902,
+          )
+          expect(listB).toHaveLength(1)
+
+          // Idempotent re-run: no new Work Items or Step Runs.
+          const stepRunsBBefore = listB[0]!.stepRuns.length
+          const again = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            900,
+          )
+          expect(again).toHaveLength(2)
+          expect(new Set(again.map((item) => item.id))).toEqual(
+            new Set(covered.map((item) => item.id)),
+          )
+          const listBAfter = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            902,
+          )
+          expect(listBAfter[0]!.stepRuns).toHaveLength(stepRunsBBefore)
+        }),
+      ))
+
+    it("creates a new Work Item after terminal history without erasing it", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, parent, child } =
+            yield* seedParentWithOneActionableChild
+
+          const first = yield* lifecycle.implementNow(
+            repository.id,
+            child.githubIssueNumber,
+          )
+          yield* lifecycle.abandon(first.id)
+          expect(first.mergeMode).toBe("ordinary")
+
+          const covered = yield* lifecycle.implementAllWithAutoMerge(
+            repository.id,
+            parent.githubIssueNumber,
+          )
+          expect(covered).toHaveLength(1)
+          expect(covered[0]!.id).not.toBe(first.id)
+          expect(covered[0]!.mergeMode).toBe("always")
+
+          const history = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            child.githubIssueNumber,
+          )
+          expect(history).toHaveLength(2)
+          expect(history[0]!.id).toBe(first.id)
+          expect(history[0]!.state).toBe("abandoned")
+          expect(history[1]!.id).toBe(covered[0]!.id)
         }),
       ))
 

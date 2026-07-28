@@ -483,10 +483,13 @@ type Mutation {
   implementLocally(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
   """
   Parent-level Implement all with auto-merge. Snapshots open direct Child Issues
-  without an unfinished Work Item and creates ordinary Work Items with Merge Mode
-  ALWAYS atomically: unblocked children use Implement Now admission; blocked
-  children use Queue (Waiting for blockers). Returns covered child Work Items.
-  Does not create a Parent Work Item.
+  and atomically enrolls them: creates ordinary Work Items with Merge Mode ALWAYS
+  for children without an unfinished Work Item (unblocked → Implement Now
+  admission; blocked → Queue / Waiting for blockers); sets Merge Mode ALWAYS on
+  each existing unfinished child Work Item without resetting lifecycle state,
+  history, admission, Session, worktree, or PR. A merge-related Needs Human
+  handoff stays stopped. Returns covered child Work Items. Does not create a
+  Parent Work Item.
   """
   implementAllWithAutoMerge(
     repositoryId: ID!

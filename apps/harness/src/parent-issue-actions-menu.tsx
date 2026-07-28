@@ -100,25 +100,12 @@ export function ParentIssueActionsMenu({
 }
 
 /**
- * Matches server unfinished uniqueness for Work Item creation: only
- * complete / failed / abandoned free the Issue for a new attempt.
- * Needs Human remains unfinished (blocks Implement all), even though GraphQL
- * marks it terminal with canRetry false.
- */
-const isServerUnfinishedWorkItemState = (state: string): boolean => {
-  const normalized = state.toLowerCase()
-  return (
-    normalized !== "complete" &&
-    normalized !== "failed" &&
-    normalized !== "abandoned"
-  )
-}
-
-/**
- * Eligibility: Parent with one or more open leaf Child Issues that have no
- * unfinished Work Item (blocked or unblocked). Unsupported hierarchy shapes
- * (any direct child with children, including closed mid-level Issues) hide the
- * action, matching the server Supported Issue Hierarchy check.
+ * Eligibility: Parent with one or more open leaf Child Issues under a Supported
+ * Issue Hierarchy. Available even when open children already have unfinished
+ * Work Items (the command adopts them and sets Merge Mode Always). Unsupported
+ * hierarchy shapes (any direct child with children, including closed mid-level
+ * Issues) hide the action, matching the server check. Work Item rows are not
+ * required for eligibility once loading finishes — repeated invocation is safe.
  */
 export function isParentImplementAllWithAutoMergeEligible(input: {
   readonly openChildren: readonly {
@@ -143,13 +130,5 @@ export function isParentImplementAllWithAutoMergeEligible(input: {
   if (input.openChildren.length === 0) return false
   // Match server: any direct child with children is unsupported hierarchy.
   if (input.directChildren.some((child) => child.hasChildren)) return false
-
-  return input.openChildren.some((child) => {
-    const unfinished = input.workItems.some(
-      (workItem) =>
-        workItem.githubIssueNumber === child.githubIssueNumber &&
-        isServerUnfinishedWorkItemState(workItem.state),
-    )
-    return !unfinished
-  })
+  return true
 }

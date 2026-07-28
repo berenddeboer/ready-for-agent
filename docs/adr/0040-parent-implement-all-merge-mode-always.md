@@ -8,4 +8,5 @@ Merge Mode `always` skips only Decide PR Merge after the normal pre-merge lifecy
 
 - Child Work Items remain independent under the global Worker Slot limit; siblings may run concurrently.
 - Enrollment is atomic: failure creates no partial Work Items or Merge Mode updates.
-- Open children without unfinished Work Items are enrolled together (Implement Now or Queue); adopting existing unfinished child Work Items remains a later product slice.
+- Open children without unfinished Work Items are enrolled together (Implement Now or Queue); existing unfinished child Work Items are adopted in the same atomic request by setting Merge Mode Always without reset or duplication.
+- A merge-related Needs Human handoff on an adopted Work Item remains stopped; setting Merge Mode Always does not clear the handoff or enqueue Merge PR.

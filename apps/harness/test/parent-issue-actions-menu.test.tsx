@@ -17,7 +17,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
     blockedBy,
   })
 
-  test("allows one or more open leaf children without unfinished work, including blocked", () => {
+  test("allows one or more open leaf children, including blocked and unfinished", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
@@ -54,6 +54,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       }),
     ).toBe(true)
 
+    // Existing unfinished Work Items are adopted; action stays available.
     expect(
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
@@ -61,15 +62,27 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
         workItems: [{ githubIssueNumber: 2, state: "CREATE_WORKTREE" }],
         workItemsLoading: false,
       }),
-    ).toBe(false)
+    ).toBe(true)
   })
 
-  test("stays available when some open children already have unfinished work", () => {
+  test("stays available when some or all open children already have unfinished work", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2), leaf(3)],
         directChildren: [leaf(2), leaf(3)],
         workItems: [{ githubIssueNumber: 2, state: "CREATE_WORKTREE" }],
+        workItemsLoading: false,
+      }),
+    ).toBe(true)
+
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [leaf(2), leaf(3)],
+        directChildren: [leaf(2), leaf(3)],
+        workItems: [
+          { githubIssueNumber: 2, state: "CREATE_WORKTREE" },
+          { githubIssueNumber: 3, state: "IMPLEMENT" },
+        ],
         workItemsLoading: false,
       }),
     ).toBe(true)
@@ -100,7 +113,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
     ).toBe(false)
   })
 
-  test("blocks Needs Human (terminal, non-retryable) to match server unfinished rules", () => {
+  test("stays available for Needs Human unfinished children (adopt Merge Mode Only)", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
@@ -108,7 +121,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
         workItems: [{ githubIssueNumber: 2, state: "NEEDS_HUMAN" }],
         workItemsLoading: false,
       }),
-    ).toBe(false)
+    ).toBe(true)
   })
 
   test("allows complete, failed, and abandoned child history", () => {
@@ -122,6 +135,26 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
         }),
       ).toBe(true)
     }
+  })
+
+  test("hides while work items are loading and when there are no open children", () => {
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [leaf(2)],
+        directChildren: [leaf(2)],
+        workItems: [],
+        workItemsLoading: true,
+      }),
+    ).toBe(false)
+
+    expect(
+      isParentImplementAllWithAutoMergeEligible({
+        openChildren: [],
+        directChildren: [{ hasChildren: false }],
+        workItems: [],
+        workItemsLoading: false,
+      }),
+    ).toBe(false)
   })
 })
 

@@ -2458,7 +2458,6 @@ function ParentIssueGroup({
   workItemsLoading: boolean
 }) {
   const queryClient = useQueryClient()
-  const query = workItemsQuery(parent.repositoryId)
   const openChildren = childIssues.filter((child) => child.state === "OPEN")
   const canImplementAll = isParentImplementAllWithAutoMergeEligible({
     openChildren,
@@ -2479,11 +2478,39 @@ function ParentIssueGroup({
       })
       return result.implementAllWithAutoMerge
     },
-    onSuccess: (created) => {
-      queryClient.setQueryData<readonly WorkItem[]>(
-        query.queryKey,
-        (current) => [...(current ?? []), ...created],
-      )
+    // Covered rows may be newly created or adopted (same id, updated mergeMode).
+    // Update matching ids in every work-items cache; only append missing ids
+    // into the default Issues list and Jobs WORKING (never Failed/Completed).
+    onSuccess: (covered) => {
+      const byId = new Map(covered.map((item) => [item.id, item]))
+      for (const [queryKey] of queryClient.getQueriesData<readonly WorkItem[]>({
+        queryKey: ["work-items", parent.repositoryId],
+      })) {
+        // queryKey: ["work-items", repositoryId, listKind | null, limit | null]
+        const listKind = queryKey[2]
+        const allowAppend = listKind === null || listKind === "WORKING"
+        queryClient.setQueryData<readonly WorkItem[]>(queryKey, (current) => {
+          const next: WorkItem[] = []
+          const seen = new Set<string>()
+          for (const item of current ?? []) {
+            const updated = byId.get(item.id)
+            if (updated !== undefined) {
+              next.push(updated)
+              seen.add(item.id)
+            } else {
+              next.push(item)
+            }
+          }
+          if (allowAppend) {
+            for (const item of covered) {
+              if (!seen.has(item.id)) {
+                next.push(item)
+              }
+            }
+          }
+          return next
+        })
+      }
     },
   })
 
