@@ -58,7 +58,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     removeWorktree: () => Effect.void,
   }
 
-  const githubWith = (status: PullRequestLifecycleStatus) =>
+  const githubWith = (getStatus: () => PullRequestLifecycleStatus) =>
     Layer.succeed(GitHubService, {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
@@ -83,7 +83,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           _tag: "ambiguous" as const,
           reason: "Automated review evidence observation is not configured",
         }),
-      getPullRequestLifecycleStatus: () => Effect.succeed(status),
+      getPullRequestLifecycleStatus: () => Effect.succeed(getStatus()),
       markPullRequestReadyForReview: () => Effect.void,
       mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
       rerunWorkflowRun: () => Effect.void,
@@ -93,12 +93,17 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   const makeLayer = (
     status: PullRequestLifecycleStatus,
     steps: LifecycleStepsShape = successfulSteps,
+  ) => makeLayerWithStatus(() => status, steps)
+
+  const makeLayerWithStatus = (
+    getStatus: () => PullRequestLifecycleStatus,
+    steps: LifecycleStepsShape = successfulSteps,
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       // githubWith alone satisfies WorkItemLifecycle's GitHubService requirement
       // and controls PR lifecycle for syncNeedsHumanMergeHandoffs.
-      Layer.provideMerge(githubWith(status)),
+      Layer.provideMerge(githubWith(getStatus)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -499,6 +504,216 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           ),
         ).toBe(false)
       }).pipe(Effect.provide(makeLayer({ _tag: "merged" }, steps))),
+    )
+  })
+
+  it("completes cleanup via Refresh after external merge of a Work Item paused for closed Issue + open PR", async () => {
+    let prStatus: PullRequestLifecycleStatus = { _tag: "open" }
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      watchPrStatusChecks: () =>
+        Effect.succeed({
+          _tag: "handoff_needed" as const,
+          createdAt: new Date(0),
+          headSha: "settled-head",
+          headPushedAt: new Date(0),
+          isDraft: false,
+        }),
+      investigatePrStatusChecks: () =>
+        Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+    }
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const queue = yield* QueueService
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "low",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        const repository = yield* db.addRepository({
+          githubOwner: "acme",
+          githubRepo: "widgets",
+          localPath: "/repos/acme/widgets.git",
+          isBare: true,
+        })
+        yield* db.storeIssue({
+          repositoryId: repository.id,
+          githubIssueNumber: 532,
+          title: "Paused then externally merged",
+          body: "Issue body",
+          url: "https://github.com/acme/widgets/issues/532",
+          state: "OPEN",
+          githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        const created = yield* lifecycle.implementNow(repository.id, 532)
+        for (let index = 0; index < 8; index += 1) {
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+        }
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
+          [created.id],
+        )
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+        expect((yield* lifecycle.getWorkItem(created.id)).state).toBe(
+          "investigate_pr_status_checks",
+        )
+
+        // Open-PR pause setup from the closed-Issue path (#529).
+        prStatus = { _tag: "open" }
+        yield* db.deleteIssue(repository.id, 532)
+        yield* makeQueuedJobsAvailable
+        const afterInvestigate = yield* claimAndRunPending
+        expect(afterInvestigate._tag).toBe("processed")
+        if (afterInvestigate._tag !== "processed") return
+        expect(afterInvestigate.workItem.paused).toBe(true)
+        expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
+        expect(afterInvestigate.workItem.failureMessage).toContain("still open")
+        expect(
+          Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+        ).toBe(true)
+
+        // External merge later; Refresh must supersede pause → cleanup → Complete.
+        prStatus = { _tag: "merged" }
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("local_cleanup")
+        expect(advanced.paused).toBe(false)
+        expect(advanced.failureCode).toBeNull()
+        expect(advanced.failureMessage).toBeNull()
+        expect(advanced.holdsWorkerSlot).toBe(true)
+        expect(advanced.waitingSince).toBeNull()
+
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+        const completed = yield* lifecycle.getWorkItem(created.id)
+        expect(completed.state).toBe("complete")
+        expect(completed.paused).toBe(false)
+        expect(completed.failureMessage).toBeNull()
+        expect(completed.holdsWorkerSlot).toBe(false)
+        expect(completed.worktreePath).toBeNull()
+      }).pipe(Effect.provide(makeLayerWithStatus(() => prStatus, steps))),
+    )
+  })
+
+  it("does not auto-Start a paused closed-Issue Work Item when Refresh sees the Issue open again without merge", async () => {
+    let prStatus: PullRequestLifecycleStatus = { _tag: "open" }
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      watchPrStatusChecks: () =>
+        Effect.succeed({
+          _tag: "handoff_needed" as const,
+          createdAt: new Date(0),
+          headSha: "settled-head",
+          headPushedAt: new Date(0),
+          isDraft: false,
+        }),
+      investigatePrStatusChecks: () =>
+        Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+    }
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const queue = yield* QueueService
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+          defaultThinkingLevel: "low",
+          reviewModel: null,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        const repository = yield* db.addRepository({
+          githubOwner: "acme",
+          githubRepo: "widgets",
+          localPath: "/repos/acme/widgets.git",
+          isBare: true,
+        })
+        yield* db.storeIssue({
+          repositoryId: repository.id,
+          githubIssueNumber: 532,
+          title: "Paused until operator Start",
+          body: "Issue body",
+          url: "https://github.com/acme/widgets/issues/532",
+          state: "OPEN",
+          githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        const created = yield* lifecycle.implementNow(repository.id, 532)
+        for (let index = 0; index < 8; index += 1) {
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+        }
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
+          [created.id],
+        )
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+
+        prStatus = { _tag: "open" }
+        yield* db.deleteIssue(repository.id, 532)
+        yield* makeQueuedJobsAvailable
+        const paused = yield* claimAndRunPending
+        expect(paused._tag).toBe("processed")
+        if (paused._tag !== "processed") return
+        expect(paused.workItem.paused).toBe(true)
+        const pauseReason = paused.workItem.failureMessage
+        const stepRunCount = paused.workItem.stepRuns.length
+
+        // Reconciliation restores the open Issue; PR remains open.
+        yield* db.storeIssue({
+          repositoryId: repository.id,
+          githubIssueNumber: 532,
+          title: "Paused until operator Start",
+          body: "Issue body",
+          url: "https://github.com/acme/widgets/issues/532",
+          state: "OPEN",
+          githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+          issueAuthor: null,
+          parent: null,
+          parentPosition: null,
+          hasChildren: false,
+          blockedBy: [],
+        })
+        prStatus = { _tag: "open" }
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        expect(yield* lifecycle.releaseWaitingForBlockers(repository.id)).toBe(
+          0,
+        )
+
+        const still = yield* lifecycle.getWorkItem(created.id)
+        expect(still.paused).toBe(true)
+        expect(still.failureMessage).toBe(pauseReason)
+        expect(still.state).toBe("investigate_pr_status_checks")
+        expect(still.holdsWorkerSlot).toBe(false)
+        expect(still.stepRuns).toHaveLength(stepRunCount)
+        expect(
+          Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+        ).toBe(true)
+      }).pipe(Effect.provide(makeLayerWithStatus(() => prStatus, steps))),
     )
   })
 })
