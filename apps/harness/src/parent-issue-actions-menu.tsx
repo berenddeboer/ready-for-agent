@@ -70,7 +70,7 @@ export function ParentIssueActionsMenu({
       {menuOpen && (
         <div
           role="menu"
-          className="absolute top-full right-0 z-10 mt-1 min-w-56 border border-rule-2 bg-panel py-1 shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
+          className="absolute top-full right-0 z-10 mt-1 min-w-56 border border-rule-2 bg-panel py-1 font-sans normal-case tracking-normal shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
         >
           <button
             type="button"
@@ -89,7 +89,7 @@ export function ParentIssueActionsMenu({
       )}
       {errorMessage !== null && (
         <p
-          className="absolute top-full right-0 z-10 mt-1 w-56 border border-rule-2 bg-panel px-2 py-1.5 text-xs text-oxblood-deep normal-case tracking-normal"
+          className="absolute top-full right-0 z-10 mt-1 w-56 border border-rule-2 bg-panel px-2 py-1.5 font-sans text-xs font-normal text-oxblood-deep normal-case tracking-normal"
           role="alert"
         >
           {errorMessage}

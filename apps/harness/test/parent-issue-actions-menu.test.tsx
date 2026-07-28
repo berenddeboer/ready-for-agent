@@ -205,4 +205,52 @@ describe("ParentIssueActionsMenu", () => {
     expect(source).not.toContain('"Queue"')
     expect(source.match(/role="menuitem"/g)?.length).toBe(1)
   })
+
+  test("menu shell resets inherited mono/uppercase styles to match other app menus", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../src/parent-issue-actions-menu.tsx"),
+      "utf8",
+    )
+    // Other menus (leaf issue, repository card) use plain sans menuitems.
+    // Explicit resets keep the kebab menu correct if a parent stamp/label wraps it.
+    expect(source).toMatch(
+      /role="menu"[\s\S]*?font-sans[\s\S]*?normal-case[\s\S]*?tracking-normal/,
+    )
+    expect(source).toContain(
+      'className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"',
+    )
+  })
+})
+
+describe("ParentIssueGroup control order", () => {
+  test("chevron sits left of kebab; kebab is rightmost control", () => {
+    // Parent row lives in the dashboard route; lock DOM order without a browser.
+    const source = readFileSync(
+      join(import.meta.dir, "../src/routes/index.tsx"),
+      "utf8",
+    )
+    const groupStart = source.indexOf("function ParentIssueGroup")
+    expect(groupStart).toBeGreaterThanOrEqual(0)
+    const groupEnd = source.indexOf("function RepositoryIssueRow", groupStart)
+    expect(groupEnd).toBeGreaterThan(groupStart)
+    const group = source.slice(groupStart, groupEnd)
+
+    // Anchor on the UI closed-count label, not the closedChildren prop name.
+    const closedLabel = group.indexOf("childIssues.length} closed")
+    const chevron = group.indexOf("group-open:rotate-180")
+    const kebab = group.indexOf("<ParentIssueActionsMenu")
+    expect(closedLabel).toBeGreaterThanOrEqual(0)
+    expect(chevron).toBeGreaterThan(closedLabel)
+    expect(kebab).toBeGreaterThan(chevron)
+
+    // Stamp mono/uppercase applies only to the closed count, not the controls.
+    // Chevron keeps text-ink-faint for currentColor without re-wrapping the menu.
+    expect(group).toMatch(
+      /font-mono text-xs font-semibold tracking-\[0\.1em\] text-ink-faint uppercase[\s\S]*?closed/,
+    )
+    expect(group).toContain(
+      "size-3.5 text-ink-faint transition-transform group-open:rotate-180",
+    )
+    expect(group).not.toMatch(/flex shrink-0 items-center gap-1\.5 font-mono/)
+  })
 })

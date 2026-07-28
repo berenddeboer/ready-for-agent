@@ -2552,8 +2552,22 @@ function ParentIssueGroup({
               </span>
             )}
           </span>
-          <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs font-semibold tracking-[0.1em] text-ink-faint uppercase">
-            {closedChildren}/{childIssues.length} closed
+          <span className="flex shrink-0 items-center gap-1.5">
+            <span className="font-mono text-xs font-semibold tracking-[0.1em] text-ink-faint uppercase">
+              {closedChildren}/{childIssues.length} closed
+            </span>
+            <svg
+              aria-hidden="true"
+              className="size-3.5 text-ink-faint transition-transform group-open:rotate-180"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
             {canImplementAll && (
               <ParentIssueActionsMenu
                 parentGithubIssueNumber={parent.githubIssueNumber}
@@ -2567,18 +2581,6 @@ function ParentIssueGroup({
                 onImplementAllWithAutoMerge={() => implementAll.mutate()}
               />
             )}
-            <svg
-              aria-hidden="true"
-              className="size-3.5 transition-transform group-open:rotate-180"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="m6 9 6 6 6-6" />
-            </svg>
           </span>
         </summary>
         <ul className="relative m-0 grid list-none gap-1 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2 before:w-px before:bg-rule-2">
