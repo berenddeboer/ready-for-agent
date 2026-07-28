@@ -61,6 +61,14 @@ export const StepRunStatus = Schema.Literals([
 ])
 export type StepRunStatus = typeof StepRunStatus.Type
 
+/**
+ * Durable Work Item merge policy.
+ * `ordinary` follows Repository Auto-merge and Decide PR Merge.
+ * `always` skips Decide PR Merge after pre-merge lifecycle settles.
+ */
+export const MergeMode = Schema.Literals(["ordinary", "always"])
+export type MergeMode = typeof MergeMode.Type
+
 export interface StepRunRecord {
   readonly id: StepRunId
   readonly workItemId: WorkItemId
@@ -101,6 +109,10 @@ export interface WorkItemRecord {
    * Slot, no Step Run, and Pause/Start are rejected until the hold lifts.
    */
   readonly waitingForBlockers: boolean
+  /**
+   * Durable merge policy. `always` skips Decide PR Merge; `ordinary` does not.
+   */
+  readonly mergeMode: MergeMode
   /** Whether this Work Item currently occupies a Worker Slot (Admitted). */
   readonly holdsWorkerSlot: boolean
   /** When set, advancement into this step auto-pauses (no Step Run enqueued). */

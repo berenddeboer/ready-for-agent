@@ -25,8 +25,12 @@ Harness-wide operator preferences stored as a single config row: the default Age
 _Avoid_: Default model seed, product default model
 
 **Auto-merge**:
-A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge. It applies only when a Work Item has a pull request and does not gate Close Issue for a No-Change Outcome.
+A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge. It applies only when a Work Item has a pull request and does not gate Close Issue for a No-Change Outcome. Distinct from Merge Mode Always on a Work Item.
 _Avoid_: Automerge (GitHub product), auto-approve
+
+**Merge Mode**:
+Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, GitHub requirements, or technical Needs Human outcomes. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts.
+_Avoid_: Auto-merge (Repository setting), force merge, skip checks
 
 **Include all Issue Authors**:
 A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, the Issue Reconciler keeps only Issues whose Issue Author matches the Operator GitHub User (case-insensitive); missing or ghost authors never match. When true, author does not filter relevance.
@@ -176,8 +180,12 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns. Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns, and a durable Merge Mode (ordinary by default). Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
+
+**Implement All with Auto-merge**:
+A Parent Issue operator command that enrolls open Child Issues as ordinary independent Work Items with Merge Mode Always. It creates no Parent Work Item, batch, or parent lifecycle and never updates or closes the Parent Issue. First slice: only when the Parent has exactly one open actionable Child Issue with no unfinished Work Item.
+_Avoid_: Parent batch, implement parent, bulk implement without auto-merge
 
 **Implement**:
 The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective. Completion may change repository files, produce findings, create or update GitHub artifacts, or perform other work required by the Issue; repository changes are not required.

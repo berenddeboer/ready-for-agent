@@ -121,6 +121,7 @@ const workItem = {
   paused: false,
   waitingSince: null,
   waitingForBlockers: false,
+  mergeMode: "ordinary",
   holdsWorkerSlot: true,
   pauseBeforeStep: null,
   worktreePath: null,
@@ -231,6 +232,7 @@ const makeRuntime = (
     },
     implementNow: unused,
     implementLocally: unused,
+    implementAllWithAutoMerge: unused,
     queue: unused,
     recoverOrphanedStepRuns: Effect.succeed(0),
     interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
@@ -3565,6 +3567,97 @@ describe("GraphQL API", () => {
       },
     })
     expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+  })
+
+  test("implements all with auto-merge for a Parent Issue child", async () => {
+    let receivedArgs: readonly [string, number] | undefined
+    const alwaysWorkItem = {
+      ...workItem,
+      mergeMode: "always" as const,
+      githubIssueNumber: 43,
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementAllWithAutoMerge: (repositoryId, githubIssueNumber) => {
+          receivedArgs = [repositoryId, githubIssueNumber]
+          return Effect.succeed([alwaysWorkItem])
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $githubIssueNumber: Int!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id githubIssueNumber mergeMode state
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: 10,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        implementAllWithAutoMerge: [
+          {
+            id: workItem.id,
+            githubIssueNumber: 43,
+            mergeMode: "ALWAYS",
+            state: "CREATE_WORKTREE",
+          },
+        ],
+      },
+    })
+    expect(receivedArgs).toEqual([repository.id, 10])
+  })
+
+  test("maps Implement all with auto-merge domain failures", async () => {
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        implementAllWithAutoMerge: () =>
+          Effect.fail({
+            _tag: "ImplementAllWithAutoMergeNotEligibleError",
+            repositoryId: repository.id,
+            githubIssueNumber: 10,
+            reason:
+              "Parent Issue #10 has 2 open Child Issues; this slice supports exactly one",
+          } as never),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $githubIssueNumber: Int!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+            id
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          githubIssueNumber: 10,
+        },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors: Array<{ message: string; extensions: { code: string } }>
+    }
+    expect(body.errors).toHaveLength(1)
+    expect(body.errors[0]?.extensions.code).toBe(
+      "IMPLEMENT_ALL_WITH_AUTO_MERGE_NOT_ELIGIBLE",
+    )
+    expect(body.errors[0]?.message).toContain("exactly one")
   })
 
   test("queues a blocked Issue Work Item", async () => {

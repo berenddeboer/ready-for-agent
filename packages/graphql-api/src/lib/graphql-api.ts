@@ -603,6 +603,8 @@ export const createGraphqlApi = (
         WorkItem: {
           agentBackend: (workItem: WorkItemRecord) =>
             toGraphqlBackend(resolveWorkItemBackend(workItem.agentBackend)),
+          mergeMode: (workItem: { mergeMode: string }) =>
+            workItem.mergeMode.toUpperCase(),
           state: (workItem: { state: string }) => workItem.state.toUpperCase(),
           stateLabel: (workItem: WorkItemRecord) =>
             workItemStateLabel(workItem),
@@ -1131,6 +1133,19 @@ export const createGraphqlApi = (
                   args.githubIssueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementLocally")),
+            ),
+          implementAllWithAutoMerge: async (
+            _parent: unknown,
+            args: ImplementNowArgs,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                return yield* lifecycle.implementAllWithAutoMerge(
+                  args.repositoryId,
+                  args.githubIssueNumber,
+                )
+              }).pipe(Effect.withSpan("graphql-api.implementAllWithAutoMerge")),
             ),
           queue: async (_parent: unknown, args: ImplementNowArgs) =>
             runGraphql(

@@ -35,6 +35,40 @@ export class ParentIssueError extends Schema.TaggedErrorClass<ParentIssueError>(
   },
 ) {}
 
+/** The Issue is not a Parent Issue (no children). */
+export class NotAParentIssueError extends Schema.TaggedErrorClass<NotAParentIssueError>()(
+  "NotAParentIssueError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+  },
+) {}
+
+/**
+ * The Issue hierarchy is not a Supported Issue Hierarchy (e.g. grandchildren).
+ */
+export class UnsupportedIssueHierarchyError extends Schema.TaggedErrorClass<UnsupportedIssueHierarchyError>()(
+  "UnsupportedIssueHierarchyError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+    message: Schema.String,
+  },
+) {}
+
+/**
+ * Parent Issue is outside the current Implement all with auto-merge eligibility
+ * slice (open-child count, actionability, unfinished Work Item, etc.).
+ */
+export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedErrorClass<ImplementAllWithAutoMergeNotEligibleError>()(
+  "ImplementAllWithAutoMergeNotEligibleError",
+  {
+    repositoryId: Schema.String,
+    githubIssueNumber: Schema.Finite,
+    reason: Schema.String,
+  },
+) {}
+
 export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError>()(
   "IssueBlockedError",
   {
