@@ -704,9 +704,12 @@ export interface WorkItemLifecycleShape {
   ) => Effect.Effect<number, ListWorkItemsError>
   /**
    * Advance after a confirmed Work Item PR outcome from Refresh.
-   * `merged` supersedes any unfinished step (including Needs Human) that owns
-   * a Work Item PR: interrupt/cancel active Step Runs, then local cleanup.
-   * `closed_unmerged` remains limited to merge-related Needs Human handoffs.
+   * `merged` supersedes any unfinished step (including Needs Human and Work
+   * Items paused for closed Issue + open/indeterminate PR) that owns a Work
+   * Item PR: interrupt/cancel active Step Runs, clear pause and operator
+   * reason, re-acquire a Worker Slot (or wait if none free), then local
+   * cleanup toward Complete. `closed_unmerged` remains limited to merge-related
+   * Needs Human handoffs.
    */
   readonly continueAfterHumanPrOutcome: (
     workItemId: string,

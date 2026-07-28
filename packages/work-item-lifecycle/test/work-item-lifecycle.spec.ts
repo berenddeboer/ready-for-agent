@@ -5943,19 +5943,203 @@ describe("WorkItemLifecycle", () => {
             expect(retryBlocked.reason).toBe("paused")
           }
 
-          // Confirmed merge via Refresh path still Completes even while paused.
+          // Confirmed merge via Refresh path still Completes even while paused
+          // (#532): pause flag and operator reason clear; Worker Slot re-acquired.
           const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
             created.id,
             "merged",
           )
           expect(advanced.state).toBe("local_cleanup")
           expect(advanced.paused).toBe(false)
+          expect(advanced.failureCode).toBeNull()
+          expect(advanced.failureMessage).toBeNull()
+          expect(advanced.holdsWorkerSlot).toBe(true)
+          expect(advanced.waitingSince).toBeNull()
+          expect(
+            advanced.stepRuns.some(
+              (run) => run.step === "local_cleanup" && run.status === "queued",
+            ),
+          ).toBe(true)
           yield* makeQueuedJobsAvailable
           const afterCleanup = yield* claimAndRunPending
           expect(afterCleanup._tag).toBe("processed")
           if (afterCleanup._tag === "processed") {
             expect(afterCleanup.workItem.state).toBe("complete")
+            expect(afterCleanup.workItem.paused).toBe(false)
+            expect(afterCleanup.workItem.failureMessage).toBeNull()
+            expect(afterCleanup.workItem.holdsWorkerSlot).toBe(false)
           }
+        }),
+      )
+    })
+
+    it("waits for a Worker Slot when Refresh merges a paused closed-Issue Work Item and none are free", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const config = yield* db.getConfig
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 1,
+          })
+
+          const repository = yield* db.addRepository({
+            ...sampleRepository,
+            localPath: "/repos/acme/widgets-paused-merge-slot.git",
+            githubRepo: "widgets-paused-merge-slot",
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 42,
+            ...sampleIssueFields,
+          })
+          const pausedItem = yield* lifecycle.implementNow(repository.id, 42)
+          yield* driveThroughCreatePrAlreadyReady(pausedItem.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+          yield* db.deleteIssue(repository.id, 42)
+          yield* makeQueuedJobsAvailable
+          const afterPause = yield* claimAndRunPending
+          expect(afterPause._tag).toBe("processed")
+          if (afterPause._tag !== "processed") return
+          expect(afterPause.workItem.paused).toBe(true)
+          expect(afterPause.workItem.holdsWorkerSlot).toBe(false)
+
+          // Occupy the only Worker Slot with another Work Item.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: 43,
+            ...sampleIssueFields,
+            title: "Occupies the only slot",
+            url: "https://github.com/acme/widgets/issues/43",
+          })
+          const occupant = yield* lifecycle.implementNow(repository.id, 43)
+          expect(occupant.holdsWorkerSlot).toBe(true)
+
+          const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
+            pausedItem.id,
+            "merged",
+          )
+          expect(advanced.state).toBe("local_cleanup")
+          expect(advanced.paused).toBe(false)
+          expect(advanced.failureMessage).toBeNull()
+          expect(advanced.holdsWorkerSlot).toBe(false)
+          expect(advanced.waitingSince).not.toBeNull()
+          expect(
+            advanced.stepRuns.some(
+              (run) =>
+                run.step === "local_cleanup" &&
+                (run.status === "queued" || run.status === "running"),
+            ),
+          ).toBe(false)
+
+          // Free the slot by Reset (cancels occupant jobs). Reset admits waiters.
+          yield* lifecycle.reset(occupant.id)
+          const afterAdmit = yield* lifecycle.getWorkItem(pausedItem.id)
+          expect(afterAdmit.holdsWorkerSlot).toBe(true)
+          expect(afterAdmit.waitingSince).toBeNull()
+          expect(afterAdmit.state).toBe("local_cleanup")
+          const cleanupRun = afterAdmit.stepRuns.find(
+            (run) => run.step === "local_cleanup" && run.status === "queued",
+          )
+          expect(cleanupRun).toBeDefined()
+
+          yield* makeQueuedJobsAvailable
+          const afterCleanup = yield* lifecycle.runStep(cleanupRun!.id)
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag === "processed") {
+            expect(afterCleanup.workItem.id).toBe(pausedItem.id)
+            expect(afterCleanup.workItem.state).toBe("complete")
+          }
+        }),
+      )
+    })
+
+    it("does not auto-Start a closed-Issue+open-PR paused Work Item when the Issue reopens without merge", () => {
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      return runWithSteps(
+        steps,
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.githubIssueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* makeQueuedJobsAvailable
+          const paused = yield* claimAndRunPending
+          expect(paused._tag).toBe("processed")
+          if (paused._tag !== "processed") return
+          expect(paused.workItem.paused).toBe(true)
+          const pauseReason = paused.workItem.failureMessage
+          expect(pauseReason).not.toBeNull()
+          const stepRunCount = paused.workItem.stepRuns.length
+
+          // Issue reappears open (Refresh / reconciliation). PR still open —
+          // merge seam must not fire, and no other Refresh effect auto-Starts.
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            githubIssueNumber: issue.githubIssueNumber,
+            ...sampleIssueFields,
+          })
+          const blockersReleased = yield* lifecycle.releaseWaitingForBlockers(
+            repository.id,
+          )
+          expect(blockersReleased).toBe(0)
+          const admitted = yield* lifecycle.admitWaitingWorkItems
+          expect(admitted).toBe(0)
+
+          const still = yield* lifecycle.getWorkItem(created.id)
+          expect(still.paused).toBe(true)
+          expect(still.failureMessage).toBe(pauseReason)
+          expect(still.state).toBe("investigate_pr_status_checks")
+          expect(still.holdsWorkerSlot).toBe(false)
+          expect(still.stepRuns).toHaveLength(stepRunCount)
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
         }),
       )
     })
