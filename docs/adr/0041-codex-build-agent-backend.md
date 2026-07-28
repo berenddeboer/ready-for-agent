@@ -1,0 +1,13 @@
+# Codex Build Agent Backend
+
+Codex Build is the third built-in Agent Backend, with stable ID `codex`, delivered as a `packages/codex` adapter on the shared `@ready-for-agent/agent-backend` contract (ADR 0031), following the Grok adapter's shape. Turns run as `codex exec --json`; the Session ID is the Codex `thread_id`, captured from the early `thread.started` stream event and continued across turns and Harness restarts with `codex exec resume <thread_id>`. The `/review` Agent Command is prompt-prefixed, as in the Grok adapter. Authentication is ambient (ChatGPT OAuth via `codex login`, or `OPENAI_API_KEY`), with ambient `gh` for Agent GitHub Access and no Keymaxxer integration; readiness inspection is binary presence plus `codex login status`.
+
+Three deliberate deviations from the existing adapters are part of this decision:
+
+- **Static model catalog.** The Codex CLI has no one-shot models command (open feature request: openai/codex#23279), so the "instance-wide Agent Model catalog through atomic readiness inspection" requirement of ADR 0031 is met with an adapter-bundled static catalog rather than a CLI-reported one. The catalog lists only current-generation models — gpt-5.5 and up — with each model's reasoning efforts as Thinking Levels; legacy models are excluded even when an operator's account can still access them. Adding a newly released OpenAI model requires a Harness release. When openai/codex#23279 ships a supported non-interactive models command, the catalog source migrates to CLI-reported with no adapter contract change. The Codex App Server's `model/list` JSON-RPC method was rejected: it would introduce a long-lived server process into readiness inspection, breaking the atomic inspection shape.
+- **Unsandboxed turns.** Turns run with `--sandbox danger-full-access` because Codex's OS-level sandbox defaults (read-only, and network-blocked under `workspace-write`) would break shell, git, and `gh` work mid-turn in ways that surface as confusing Step Run failures. This is parity with the OpenCode and Grok adapters, which run unsandboxed; containment remains the git worktree plus operator trust in the backend.
+- **No Session Telemetry in v1.** Per the Grok precedent (ADR 0033), the adapter ships without telemetry even though `turn.completed` carries token usage; telemetry can be added later without a contract change.
+
+## Consequences
+
+New OpenAI models are unavailable to operators until a Harness release updates the static catalog, and an OpenAI-side model deprecation surfaces as an ordinary Step Run failure until the operator selects a newer model. The static catalog and sandbox stance should be revisited if OpenAI ships a one-shot models command or if the Harness later adopts a general backend-sandboxing story.

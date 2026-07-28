@@ -91,6 +91,10 @@ _Avoid_: Single instance-wide backend only, Selected vs Active limbo, dual backe
 The supported xAI coding Agent Backend with the stable ID `grok`. Distinct from a Grok Agent Model.
 _Avoid_: Grok (when referring to the backend), grok-build (as the config ID)
 
+**Codex Build**:
+The supported OpenAI coding Agent Backend with the stable ID `codex`. Distinct from a Codex Agent Model.
+_Avoid_: Codex (when referring to the backend), codex-build (as the config ID)
+
 **Agent Backend Unavailable**:
 A per-backend degraded state established by failed startup inspection, failed hot-activation on Save, or Recheck Agent Backend when that Agent Backend cannot execute Agent Turns or report its Agent Models. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available. New Agent Turns and Work Item creation that need the Unavailable backend are blocked until a Recheck (or successful re-activation) for that backend succeeds; other backends are unaffected. Runtime Agent Turn failures fail only their Step Run, and the Harness never silently falls back to another backend. Unavailable does not block changing selections while the applicable idle gate allows.
 _Avoid_: Startup failure, automatic fallback, harness-wide block when another backend is healthy, Paused Repository, restart required
