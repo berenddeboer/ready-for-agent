@@ -664,8 +664,8 @@ describe("GraphQL API", () => {
       _tag: "refresh-repository",
       repositoryId: repository.id,
     })
-    expect(ensured[0]?.delayMs).toBeGreaterThanOrEqual(120_000)
-    expect(ensured[0]?.delayMs).toBeLessThanOrEqual(150_000)
+    expect(ensured[0]?.delayMs).toBeGreaterThanOrEqual(60_000)
+    expect(ensured[0]?.delayMs).toBeLessThanOrEqual(90_000)
     expect(enqueued).toEqual([
       {
         queue: "issue-refresh",
