@@ -3569,12 +3569,22 @@ describe("GraphQL API", () => {
     expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
   })
 
-  test("implements all with auto-merge for a Parent Issue child", async () => {
+  test("implements all with auto-merge for a Parent Issue's covered children", async () => {
     let receivedArgs: readonly [string, number] | undefined
-    const alwaysWorkItem = {
+    const actionableChild = {
       ...workItem,
+      id: makeWorkItemId(),
       mergeMode: "always" as const,
       githubIssueNumber: 43,
+    }
+    const blockedChild = {
+      ...workItem,
+      id: makeWorkItemId(),
+      mergeMode: "always" as const,
+      githubIssueNumber: 44,
+      waitingForBlockers: true,
+      holdsWorkerSlot: false,
+      stepRuns: [],
     }
     await runtime.dispose()
     runtime = makeRuntime(
@@ -3584,7 +3594,7 @@ describe("GraphQL API", () => {
       {
         implementAllWithAutoMerge: (repositoryId, githubIssueNumber) => {
           receivedArgs = [repositoryId, githubIssueNumber]
-          return Effect.succeed([alwaysWorkItem])
+          return Effect.succeed([actionableChild, blockedChild])
         },
       },
     )
@@ -3593,7 +3603,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $githubIssueNumber: Int!) {
           implementAllWithAutoMerge(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            id githubIssueNumber mergeMode state
+            id githubIssueNumber mergeMode state status statusLabel
           }
         }`,
         variables: {
@@ -3607,10 +3617,20 @@ describe("GraphQL API", () => {
       data: {
         implementAllWithAutoMerge: [
           {
-            id: workItem.id,
+            id: actionableChild.id,
             githubIssueNumber: 43,
             mergeMode: "ALWAYS",
             state: "CREATE_WORKTREE",
+            status: "RUNNING",
+            statusLabel: "Running",
+          },
+          {
+            id: blockedChild.id,
+            githubIssueNumber: 44,
+            mergeMode: "ALWAYS",
+            state: "CREATE_WORKTREE",
+            status: "WAITING_FOR_BLOCKERS",
+            statusLabel: "Waiting for blockers",
           },
         ],
       },
@@ -3631,7 +3651,7 @@ describe("GraphQL API", () => {
             repositoryId: repository.id,
             githubIssueNumber: 10,
             reason:
-              "Parent Issue #10 has 2 open Child Issues; this slice supports exactly one",
+              "Parent Issue #10 has no open Child Issues without an unfinished Work Item",
           } as never),
       },
     )
@@ -3657,7 +3677,9 @@ describe("GraphQL API", () => {
     expect(body.errors[0]?.extensions.code).toBe(
       "IMPLEMENT_ALL_WITH_AUTO_MERGE_NOT_ELIGIBLE",
     )
-    expect(body.errors[0]?.message).toContain("exactly one")
+    expect(body.errors[0]?.message).toContain(
+      "no open Child Issues without an unfinished Work Item",
+    )
   })
 
   test("queues a blocked Issue Work Item", async () => {

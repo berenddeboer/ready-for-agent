@@ -515,10 +515,6 @@ export type ImplementAllWithAutoMergeError =
   | NotAParentIssueError
   | UnsupportedIssueHierarchyError
   | ImplementAllWithAutoMergeNotEligibleError
-  | IssueNotOpenError
-  | ParentIssueError
-  | IssueBlockedError
-  | UnfinishedWorkItemExistsError
   | BuildModelNotConfiguredError
   | AgentBackendUnavailableError
   | WorkItemLifecycleDatabaseError
@@ -642,9 +638,11 @@ export interface WorkItemLifecycleShape {
     githubIssueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
   /**
-   * Parent-level Implement all with auto-merge (first slice: exactly one open
-   * actionable Child Issue with no unfinished Work Item). Creates that child's
-   * ordinary Work Item with Merge Mode Always. No Parent Work Item.
+   * Parent-level Implement all with auto-merge. Snapshots open direct Child
+   * Issues without an unfinished Work Item and creates ordinary Work Items with
+   * Merge Mode Always atomically: unblocked children follow Implement Now
+   * admission; blocked children follow Queue (Waiting for blockers). No Parent
+   * Work Item.
    */
   readonly implementAllWithAutoMerge: (
     repositoryId: string,
@@ -4898,8 +4896,9 @@ export const makeWorkItemLifecycleLive = (
       )
 
       /**
-       * First-slice parent command: exactly one open actionable child, no
-       * unfinished Work Item. Creates one child Work Item with Merge Mode Always.
+       * Parent command: enroll every open direct child without an unfinished
+       * Work Item. Unblocked → Implement Now admission; blocked → Queue.
+       * All creations, Step Runs, and lifecycle jobs are one atomic unit.
        */
       const implementAllWithAutoMerge = Effect.fn(
         "WorkItemLifecycle.implementAllWithAutoMerge",
@@ -4938,61 +4937,217 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
-        const openChildren = children.filter((child) => child.state === "OPEN")
-        if (openChildren.length !== 1) {
-          return yield* new ImplementAllWithAutoMergeNotEligibleError({
-            repositoryId,
-            githubIssueNumber: parentGithubIssueNumber,
-            reason:
-              openChildren.length === 0
-                ? `Parent Issue #${parentGithubIssueNumber} has no open Child Issues`
-                : `Parent Issue #${parentGithubIssueNumber} has ${openChildren.length} open Child Issues; this slice supports exactly one`,
+        // Snapshot open direct children at acceptance; closed children and
+        // children added later are out of scope for this request.
+        const openChildren = children
+          .filter((child) => child.state === "OPEN")
+          .slice()
+          .sort((a, b) => {
+            const aPos = a.parentPosition ?? Number.MAX_SAFE_INTEGER
+            const bPos = b.parentPosition ?? Number.MAX_SAFE_INTEGER
+            if (aPos !== bPos) return aPos - bPos
+            return a.githubIssueNumber - b.githubIssueNumber
           })
-        }
 
-        const [child] = openChildren
-        if (child === undefined) {
+        if (openChildren.length === 0) {
           return yield* new ImplementAllWithAutoMergeNotEligibleError({
             repositoryId,
             githubIssueNumber: parentGithubIssueNumber,
             reason: `Parent Issue #${parentGithubIssueNumber} has no open Child Issues`,
           })
         }
-        if (child.blockedBy.length > 0) {
-          return yield* new ImplementAllWithAutoMergeNotEligibleError({
-            repositoryId,
-            githubIssueNumber: parentGithubIssueNumber,
-            reason: `Child Issue #${child.githubIssueNumber} is blocked; this slice requires an actionable child`,
-          })
-        }
 
-        const existing = yield* listWorkItemsForIssue(
-          repositoryId,
-          child.githubIssueNumber,
-        )
-        const unfinished = existing.find(
-          (item) =>
+        // Existing unfinished Work Items are not adopted here (later ticket);
+        // only children that still need a new Work Item are enrolled.
+        const repositoryWorkItems =
+          yield* listWorkItemsForRepository(repositoryId)
+        const unfinishedByIssue = new Map<number, WorkItemId>()
+        for (const item of repositoryWorkItems) {
+          if (
             item.state !== "complete" &&
             item.state !== "failed" &&
-            item.state !== "abandoned",
+            item.state !== "abandoned"
+          ) {
+            unfinishedByIssue.set(item.githubIssueNumber, item.id)
+          }
+        }
+
+        const toEnroll = openChildren.filter(
+          (child) => !unfinishedByIssue.has(child.githubIssueNumber),
         )
-        if (unfinished) {
+
+        if (toEnroll.length === 0) {
           return yield* new ImplementAllWithAutoMergeNotEligibleError({
             repositoryId,
             githubIssueNumber: parentGithubIssueNumber,
-            reason: `Child Issue #${child.githubIssueNumber} already has an unfinished Work Item`,
+            reason: `Parent Issue #${parentGithubIssueNumber} has no open Child Issues without an unfinished Work Item`,
           })
         }
 
-        const created = yield* createWorkItem(
-          repositoryId,
-          child.githubIssueNumber,
-          {
-            pauseBeforeStep: null,
-            mergeMode: "always",
-          },
+        const createdIds = yield* activeAgentBackend.withConfigCoordination(
+          Effect.gen(function* () {
+            const harnessConfig = yield* db.getConfig
+            const repositories = yield* db.listRepositories
+            const repository = repositories.find(
+              ({ id }) => id === repositoryId,
+            )
+            const rawCaptureBackendId =
+              repository?.selectedAgentBackend ??
+              harnessConfig.selectedAgentBackend
+            if (!isSelectableAgentBackendId(rawCaptureBackendId)) {
+              return yield* new AgentBackendUnavailableError({
+                message: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+                reason: `Unknown or unsupported Agent Backend: ${rawCaptureBackendId}`,
+              })
+            }
+            const captureBackendId = rawCaptureBackendId
+            yield* activeAgentBackend
+              .requireAgentTurnsAllowed(captureBackendId)
+              .pipe(
+                Effect.mapError(
+                  (error) =>
+                    new AgentBackendUnavailableError({
+                      message: error.message,
+                      reason: error.reason,
+                    }),
+                ),
+              )
+            yield* resolveModelsForBackend(repositoryId, captureBackendId)
+            const activeRegistration =
+              yield* activeAgentBackend.getRegistration(captureBackendId)
+            const agentBackendId = activeRegistration.descriptor.id
+            const now = yield* Clock.currentTimeMillis
+            const step: OperationalLifecycleStep = "create_worktree"
+
+            return yield* sql
+              .withTransaction(
+                Effect.gen(function* () {
+                  const limit = yield* maxWorkerSlots()
+                  let occupied = yield* countOccupiedWorkerSlots()
+                  const workItemIds: WorkItemId[] = []
+
+                  for (const child of toEnroll) {
+                    const workItemId = makeWorkItemId()
+                    const blocked = child.blockedBy.length > 0
+
+                    if (blocked) {
+                      yield* sql.unsafe(
+                        `INSERT INTO work_item (
+                     id, repository_id, github_issue_number, agent_backend,
+                      issue_title, state, state_ready_at, paused,
+                      waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
+                      pause_before_step, worktree_path, session_id, failure_code,
+                      failure_message, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, 'always', 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+                        [
+                          workItemId,
+                          repositoryId,
+                          child.githubIssueNumber,
+                          agentBackendId,
+                          child.title,
+                          step,
+                          now,
+                          now,
+                          now,
+                        ],
+                      )
+                    } else {
+                      const admit = occupied < limit
+                      yield* sql.unsafe(
+                        `INSERT INTO work_item (
+                     id, repository_id, github_issue_number, agent_backend,
+                      issue_title, state, state_ready_at, paused,
+                      waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
+                      pause_before_step, worktree_path, session_id, failure_code,
+                      failure_message, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'always', ?, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
+                        [
+                          workItemId,
+                          repositoryId,
+                          child.githubIssueNumber,
+                          agentBackendId,
+                          child.title,
+                          step,
+                          now,
+                          admit ? null : now,
+                          admit ? 1 : 0,
+                          now,
+                          now,
+                        ],
+                      )
+                      if (admit) {
+                        occupied += 1
+                        yield* enqueueStepRunForWorkItem(workItemId, step, now)
+                      }
+                    }
+
+                    workItemIds.push(workItemId)
+                  }
+
+                  return workItemIds
+                }),
+              )
+              .pipe(
+                Effect.catch(
+                  (
+                    error,
+                  ): Effect.Effect<never, ImplementAllWithAutoMergeError> => {
+                    if (error instanceof WorkItemLifecycleDatabaseError) {
+                      return Effect.fail(error)
+                    }
+                    if (error instanceof EnqueueError) {
+                      return Effect.fail(error)
+                    }
+                    if (error instanceof InvalidQueueNameError) {
+                      return Effect.fail(error)
+                    }
+                    if (
+                      typeof error === "object" &&
+                      error !== null &&
+                      "_tag" in error &&
+                      (error as { _tag: string })._tag === "SqlError"
+                    ) {
+                      const sqlError = error as SqlError
+                      if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
+                        return Effect.fail(
+                          new ImplementAllWithAutoMergeNotEligibleError({
+                            repositoryId,
+                            githubIssueNumber: parentGithubIssueNumber,
+                            reason: `A concurrent request enrolled a Child Issue of Parent Issue #${parentGithubIssueNumber}`,
+                          }),
+                        )
+                      }
+                      return Effect.fail(toDatabaseError(sqlError))
+                    }
+                    return Effect.fail(
+                      new WorkItemLifecycleDatabaseError({
+                        message: `Unexpected transaction failure: ${String(error)}`,
+                        cause: error,
+                      }),
+                    )
+                  },
+                ),
+              )
+          }),
         )
-        return [created] as const
+
+        const covered = yield* Effect.forEach(
+          createdIds,
+          (workItemId) =>
+            getWorkItem(workItemId).pipe(
+              Effect.catchTag(
+                "WorkItemNotFoundError",
+                (error) =>
+                  new WorkItemLifecycleDatabaseError({
+                    message: `Work Item missing after implement-all create: ${error.workItemId}`,
+                    cause: error,
+                  }),
+              ),
+            ),
+          { concurrency: 1 },
+        )
+        yield* notifyWorkItemsChanged(repositoryId)
+        return covered
       })
 
       const queueIssue = Effect.fn("WorkItemLifecycle.queue")(function* (

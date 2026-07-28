@@ -184,7 +184,7 @@ A durable record of one operator-requested attempt to complete a Leaf Issue's ob
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement All with Auto-merge**:
-A Parent Issue operator command that enrolls open Child Issues as ordinary independent Work Items with Merge Mode Always. It creates no Parent Work Item, batch, or parent lifecycle and never updates or closes the Parent Issue. First slice: only when the Parent has exactly one open actionable Child Issue with no unfinished Work Item.
+A Parent Issue operator command that atomically enrolls every current open Child Issue without an unfinished Work Item as an ordinary independent Work Item with Merge Mode Always. Unblocked children follow Implement Now and Worker Slot admission; blocked children follow Queue and enter Waiting for blockers. Siblings may run concurrently under the global Worker Slot limit; parent order does not invent dependencies. It creates no Parent Work Item, batch, or parent lifecycle and never updates or closes the Parent Issue. Children with existing unfinished Work Items are not adopted by this command until a later product slice.
 _Avoid_: Parent batch, implement parent, bulk implement without auto-merge
 
 **Implement**:

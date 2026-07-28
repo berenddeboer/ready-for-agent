@@ -8,4 +8,4 @@ Merge Mode `always` skips only Decide PR Merge after the normal pre-merge lifecy
 
 - Child Work Items remain independent under the global Worker Slot limit; siblings may run concurrently.
 - Enrollment is atomic: failure creates no partial Work Items or Merge Mode updates.
-- First product slice supports a Parent with exactly one open actionable child; later tickets widen enrollment without replacing the Merge Mode or bulk-command model.
+- Open children without unfinished Work Items are enrolled together (Implement Now or Queue); adopting existing unfinished child Work Items remains a later product slice.

@@ -2462,6 +2462,7 @@ function ParentIssueGroup({
   const openChildren = childIssues.filter((child) => child.state === "OPEN")
   const canImplementAll = isParentImplementAllWithAutoMergeEligible({
     openChildren,
+    directChildren: childIssues,
     workItems,
     workItemsLoading,
   })
