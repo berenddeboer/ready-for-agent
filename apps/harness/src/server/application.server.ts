@@ -30,6 +30,7 @@ import { Grok, GrokSessionTelemetryLive } from "@ready-for-agent/grok"
 import { IssueReconcilerLive } from "@ready-for-agent/issue-reconciler"
 import {
   KeymaxxerService,
+  type SidecarLayerOptions,
   disabledKeymaxxerLayer,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
@@ -60,6 +61,7 @@ export interface Application {
 
 export interface CreateApplicationOptions {
   readonly startWorker?: boolean
+  readonly sidecarLayerOptions?: SidecarLayerOptions
 }
 
 type PlatformServices =
@@ -146,7 +148,7 @@ export const createApplication = async (
   const keymaxxerLayer =
     sidecarUrl === undefined
       ? disabledKeymaxxerLayer
-      : sidecarKeymaxxerLayer(sidecarUrl)
+      : sidecarKeymaxxerLayer(sidecarUrl, options.sidecarLayerOptions)
   const toolCwd = config.hostToolCwd
   const platformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),

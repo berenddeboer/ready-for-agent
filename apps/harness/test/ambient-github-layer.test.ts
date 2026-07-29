@@ -1,7 +1,8 @@
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   GitHubRequestError,
   GitHubService,
@@ -13,6 +14,12 @@ import { expect, test } from "bun:test"
 const processLayer = BunChildProcessSpawner.layer.pipe(
   Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
 )
+
+const repository = {
+  forge: "github" as const,
+  forgeHost: "github.com",
+  projectPath: "acme/widgets",
+}
 
 const serviceWithList = (
   listReadyIssues: GitHubServiceShape["listReadyIssues"],
@@ -36,6 +43,47 @@ const serviceWithList = (
   mergePullRequest: () => Effect.die("not used"),
   rerunWorkflowRun: () => Effect.void,
   ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+})
+
+const controlledTokenProcess = () => {
+  let complete: (token: string) => void = () => undefined
+  let interruptCount = 0
+  let startCount = 0
+  let started: () => void = () => undefined
+  const start = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  const string = () => {
+    return Effect.callback<string>((resume) => {
+      startCount += 1
+      started()
+      complete = (token) => resume(Effect.succeed(token))
+      return Effect.sync(() => {
+        interruptCount += 1
+      })
+    })
+  }
+  const service = ChildProcessSpawner.ChildProcessSpawner.of({
+    spawn: () => Effect.never,
+    exitCode: () => Effect.never,
+    streamString: () => Stream.never,
+    streamLines: () => Stream.never,
+    lines: () => Effect.never,
+    string,
+  })
+
+  return {
+    complete: (token: string) => complete(token),
+    interrupted: () => interruptCount,
+    layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service),
+    startCount: () => startCount,
+    started: start,
+  }
+}
+
+const listReadyIssues = Effect.gen(function* () {
+  const github = yield* GitHubService
+  return yield* github.listReadyIssues(repository)
 })
 
 test("ambient GitHub authentication is resolved once", async () => {
@@ -104,6 +152,56 @@ test("ambient GitHub authentication refreshes once after a 401", async () => {
   )
 
   expect(resolutions).toBe(2)
+})
+
+test("application scope interrupts in-flight ambient authentication", async () => {
+  const process = controlledTokenProcess()
+  const runtime = ManagedRuntime.make(
+    ambientGitHubLayer({
+      workspaceRoot: "/workspace",
+      makeService: () => serviceWithList(() => Effect.succeed([])),
+    }).pipe(Layer.provide(process.layer)),
+  )
+  await runtime.context()
+  const pending = runtime.runPromise(listReadyIssues).catch(() => undefined)
+
+  await process.started
+  try {
+    await runtime.dispose()
+    await pending
+    expect(process.interrupted()).toBe(1)
+  } finally {
+    process.complete("late-token")
+  }
+})
+
+test("canceling the first requester keeps shared authentication alive", async () => {
+  const process = controlledTokenProcess()
+  const runtime = ManagedRuntime.make(
+    ambientGitHubLayer({
+      workspaceRoot: "/workspace",
+      makeService: () => serviceWithList(() => Effect.succeed([])),
+    }).pipe(Layer.provide(process.layer)),
+  )
+  await runtime.context()
+  const controller = new AbortController()
+  const first = runtime
+    .runPromise(listReadyIssues, { signal: controller.signal })
+    .catch(() => undefined)
+
+  await process.started
+  controller.abort()
+  await first
+  const second = runtime.runPromise(listReadyIssues)
+  process.complete("shared-token")
+
+  try {
+    expect(await second).toEqual([])
+    expect(process.startCount()).toBe(1)
+    expect(process.interrupted()).toBe(0)
+  } finally {
+    await runtime.dispose()
+  }
 })
 
 test("concurrent 401 responses share one refreshed token", async () => {

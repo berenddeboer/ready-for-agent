@@ -29,6 +29,7 @@ export const ambientGitHubLayer = (options: {
     GitHubService,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const layerScope = yield* Effect.scope
       const makeService = options.makeService ?? makeGitHubServiceFromToken
       const tokenCache = yield* Ref.make<
         Deferred.Deferred<string, GitHubRequestError> | undefined
@@ -98,7 +99,7 @@ export const ambientGitHubLayer = (options: {
                   ),
                 ),
               ),
-              Effect.forkDetach({ startImmediately: true }),
+              Effect.forkIn(layerScope, { startImmediately: true }),
             )
           }
 

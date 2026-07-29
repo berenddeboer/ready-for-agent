@@ -73,13 +73,18 @@ export const sidecarKeymaxxerLayer = (
     KeymaxxerService,
     Effect.gen(function* () {
       const parsed = yield* parseSidecarUrlEffect(value)
-      const managed = makeKeymaxxerClientService({
-        createClient:
-          options.createClient ??
-          (() => createStreamableHttpClient(parsed.url)),
-        failureMessage: () => "Keymaxxer sidecar request failed",
-        initialize: waitForTcp(parsed, options),
-      })
+      const managed = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          makeKeymaxxerClientService({
+            createClient:
+              options.createClient ??
+              (() => createStreamableHttpClient(parsed.url)),
+            failureMessage: () => "Keymaxxer sidecar request failed",
+            initialize: waitForTcp(parsed, options),
+          }),
+        ),
+        (managed) => managed.close,
+      )
       return managed.service
     }),
   )
