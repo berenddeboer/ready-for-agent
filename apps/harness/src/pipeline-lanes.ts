@@ -49,14 +49,14 @@ export function pipelineLaneFor(workItem: PipelineWorkItem): PipelineLaneId {
 
   if (
     workItem.status === "QUEUED" ||
-    workItem.status === "WAITING_FOR_WORKER_SLOT" ||
-    workItem.state === "CREATE_WORKTREE" ||
-    workItem.state === "INSTALL_DEPENDENCIES"
+    workItem.status === "WAITING_FOR_WORKER_SLOT"
   ) {
     return "queue"
   }
 
   if (
+    workItem.state === "CREATE_WORKTREE" ||
+    workItem.state === "INSTALL_DEPENDENCIES" ||
     workItem.state === "IMPLEMENT" ||
     workItem.state === "ASSESS_CHANGES" ||
     workItem.state === "PRE_COMMIT"
