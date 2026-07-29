@@ -57,6 +57,10 @@ export type RepositoryRecord = typeof RepositoryRecord.Type
 
 export const UpdateRepositorySettingsInput = Schema.Struct({
   repositoryId: Schema.String,
+  /** Omitted identity fields leave the persisted Forge identity unchanged. */
+  forge: Schema.optionalKey(Forge),
+  forgeHost: Schema.optionalKey(Schema.String),
+  projectPath: Schema.optionalKey(Schema.String),
   paused: Schema.Boolean,
   /**
    * Null clears the override (inherit harness default). Omitted leaves the

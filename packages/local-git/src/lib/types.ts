@@ -1,6 +1,6 @@
 export interface LocalRepository {
-  readonly forge: "github"
-  readonly forgeHost: "github.com"
+  readonly forge: "github" | "gitlab"
+  readonly forgeHost: string
   readonly projectPath: string
   readonly localPath: string
   readonly isBare: boolean
@@ -10,4 +10,10 @@ export interface LocalRepository {
 export type GitHubRemote = {
   readonly owner: string
   readonly repo: string
+}
+
+export type ForgeRemote = {
+  readonly forge: "github" | "gitlab"
+  readonly forgeHost: string
+  readonly projectPath: string
 }

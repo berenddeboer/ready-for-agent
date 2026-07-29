@@ -1,4 +1,4 @@
-import { Console, Effect } from "effect"
+import { Console, Effect, Option } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { GraphqlApi } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
@@ -14,6 +14,20 @@ const noOpenFlag = Flag.boolean("no-open").pipe(
   ),
 )
 
+const forgeHostFlag = Flag.string("forge-host").pipe(
+  Flag.withDescription(
+    "Correct the forge host inferred from the repository remote",
+  ),
+  Flag.optional,
+)
+
+const projectPathFlag = Flag.string("project-path").pipe(
+  Flag.withDescription(
+    "Correct the forge project path inferred from the repository remote",
+  ),
+  Flag.optional,
+)
+
 const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
   noOpen: boolean,
 ) {
@@ -23,10 +37,23 @@ const startHarnessWorkflow = Effect.fn("Cli.startHarness")(function* (
 
 const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
   path: string,
+  corrections: {
+    readonly forgeHost?: string
+    readonly projectPath?: string
+  },
 ) {
   const localGit = yield* LocalGit
   const graphqlApi = yield* GraphqlApi
-  const repository = yield* localGit.inspect(path)
+  const inspected = yield* localGit.inspect(path)
+  const repository = {
+    ...inspected,
+    ...(corrections.forgeHost === undefined
+      ? {}
+      : { forgeHost: corrections.forgeHost }),
+    ...(corrections.projectPath === undefined
+      ? {}
+      : { projectPath: corrections.projectPath }),
+  }
   const added = yield* graphqlApi.addRepository(repository)
 
   yield* Console.log(`Added repository ${added.projectPath}`)
@@ -46,9 +73,23 @@ const startCommand = Command.make(
   ),
 )
 
-const addCommand = Command.make("add", { path: pathArg }, ({ path }) =>
-  addRepositoryWorkflow(path),
-).pipe(Command.withDescription("Add a local repository to the harness"))
+const addCommand = Command.make(
+  "add",
+  {
+    path: pathArg,
+    forgeHost: forgeHostFlag,
+    projectPath: projectPathFlag,
+  },
+  ({ path, forgeHost, projectPath }) =>
+    addRepositoryWorkflow(path, {
+      forgeHost: Option.getOrUndefined(forgeHost),
+      projectPath: Option.getOrUndefined(projectPath),
+    }),
+).pipe(
+  Command.withDescription(
+    "Inspect and add a local repository; inferred GitLab identity can be corrected with flags",
+  ),
+)
 
 export const cli = Command.make(
   "ready-for-agent",

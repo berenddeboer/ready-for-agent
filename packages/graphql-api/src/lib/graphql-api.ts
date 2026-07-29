@@ -20,12 +20,9 @@ import {
   listBuiltInAgentBackends,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
-import {
-  DbService,
-  InvalidRepositoryInputError,
-  RepositoryNotFoundError,
-} from "@ready-for-agent/db-service"
+import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
@@ -109,6 +106,9 @@ type UpdateConfigArgs = {
 type UpdateRepositorySettingsArgs = {
   input: {
     repositoryId: string
+    forge?: "github" | "gitlab"
+    forgeHost?: string
+    projectPath?: string
     paused: boolean
     /**
      * Undefined when the client omits the field (leave override unchanged).
@@ -257,6 +257,7 @@ type ResetWorkItemArgs = WorkItemArgs
 export type GraphqlServices =
   | DbService
   | GitHubService
+  | GitLabService
   | KeymaxxerService
   | ActiveAgentBackend
   | QueueService
@@ -273,6 +274,18 @@ const isSameOriginRequest = (request: Request): boolean => {
   const origin = request.headers.get("origin")
   return origin === null || origin === new URL(request.url).origin
 }
+
+const verifyRepositoryIdentity = Effect.fn(
+  "graphql-api.verifyRepositoryIdentity",
+)(function* (identity: {
+  readonly forge: "github" | "gitlab"
+  readonly forgeHost: string
+  readonly projectPath: string
+}) {
+  if (identity.forge !== "gitlab") return
+  const gitlab = yield* GitLabService
+  yield* gitlab.verifyProject(identity)
+})
 
 const toNativeResponse = (response: unknown): Response => {
   if (response instanceof Response) return response
@@ -368,24 +381,47 @@ export const createGraphqlApi = (
                 const repositories = yield* db.listRepositories
                 const keymaxxer = yield* KeymaxxerService
                 const ambientAuthentication = keymaxxer.enabled === false
-                const tokenNames = ambientAuthentication
-                  ? repositories.map(() => null)
-                  : yield* withKeymaxxerMetadataTimeout(
-                      keymaxxer.findSecrets(
-                        repositories.map((repository) => ({
-                          provider: "github",
-                          account: repository.projectPath,
-                        })),
+                const githubRepositories = repositories.filter(
+                  ({ forge }) => forge === "github",
+                )
+                const githubTokenNames = ambientAuthentication
+                  ? githubRepositories.map(() => null)
+                  : githubRepositories.length === 0
+                    ? []
+                    : yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecrets(
+                          githubRepositories.map((repository) => ({
+                            provider: "github",
+                            account: repository.projectPath,
+                          })),
+                        ),
+                        keymaxxerMetadataTimeout,
+                        "findSecrets",
+                      )
+                const gitlab = yield* GitLabService
+                let githubIndex = 0
+                return yield* Effect.forEach(
+                  repositories,
+                  (repository) => {
+                    if (repository.forge === "gitlab") {
+                      return gitlab
+                        .hasCredentials(repository)
+                        .pipe(
+                          Effect.map((configured) =>
+                            repositoryCredential(repository, null, configured),
+                          ),
+                        )
+                    }
+                    const tokenName = githubTokenNames[githubIndex++] ?? null
+                    return Effect.succeed(
+                      repositoryCredential(
+                        repository,
+                        tokenName,
+                        ambientAuthentication || tokenName !== null,
                       ),
-                      keymaxxerMetadataTimeout,
-                      "findSecrets",
                     )
-                return repositories.map((repository, index) =>
-                  repositoryCredential(
-                    repository,
-                    tokenNames[index] ?? null,
-                    ambientAuthentication || tokenNames[index] != null,
-                  ),
+                  },
+                  { concurrency: "unbounded" },
                 )
               }).pipe(Effect.withSpan("graphql-api.repositoryCredentials")),
             ),
@@ -604,6 +640,7 @@ export const createGraphqlApi = (
           }) =>
             runGraphql(
               Effect.gen(function* () {
+                if (repository.forge !== "github") return 0
                 const github = yield* GitHubService
                 // GitHub is authoritative: open non-draft PRs regardless of Work
                 // Item ownership. Credential/API failures degrade to zero so the
@@ -857,12 +894,43 @@ export const createGraphqlApi = (
               Effect.gen(function* () {
                 const db = yield* DbService
                 const active = yield* ActiveAgentBackend
+                const repositories = yield* db.listRepositories
+                const repository = repositories.find(
+                  ({ id }) => id === args.input.repositoryId,
+                )
+                if (repository === undefined) {
+                  return yield* new RepositoryNotFoundError({
+                    repositoryId: args.input.repositoryId,
+                  })
+                }
+                const nextIdentity = {
+                  forge: args.input.forge ?? repository.forge,
+                  forgeHost: args.input.forgeHost ?? repository.forgeHost,
+                  projectPath: args.input.projectPath ?? repository.projectPath,
+                }
+                const identityChanging =
+                  nextIdentity.forge !== repository.forge ||
+                  nextIdentity.forgeHost !== repository.forgeHost ||
+                  nextIdentity.projectPath.toLowerCase() !==
+                    repository.projectPath.toLowerCase()
+                if (identityChanging) {
+                  yield* verifyRepositoryIdentity(nextIdentity)
+                }
                 // Coordinate with Work Item creation when the effective backend
                 // may change so Implement Now cannot capture a pre-activate id.
-                return yield* active.withConfigCoordination(
+                const updated = yield* active.withConfigCoordination(
                   Effect.gen(function* () {
                     const updated = yield* db.updateRepositorySettings({
                       repositoryId: args.input.repositoryId,
+                      ...(args.input.forge === undefined
+                        ? {}
+                        : { forge: args.input.forge }),
+                      ...(args.input.forgeHost === undefined
+                        ? {}
+                        : { forgeHost: args.input.forgeHost }),
+                      ...(args.input.projectPath === undefined
+                        ? {}
+                        : { projectPath: args.input.projectPath }),
                       paused: args.input.paused,
                       ...(args.input.selectedAgentBackend !== undefined
                         ? {
@@ -897,6 +965,22 @@ export const createGraphqlApi = (
                     return updated
                   }),
                 )
+                if (identityChanging) {
+                  yield* suspendRepositoryPolling(updated.id).pipe(
+                    Effect.andThen(
+                      activatePollingIfCredentialed(updated, {
+                        metadataTimeout: keymaxxerMetadataTimeout,
+                      }),
+                    ),
+                    Effect.catch((error) =>
+                      Effect.logWarning(
+                        "Repository polling was not updated after Forge identity correction",
+                        { repositoryId: updated.id, error },
+                      ),
+                    ),
+                  )
+                }
+                return updated
               }).pipe(Effect.withSpan("graphql-api.updateRepositorySettings")),
             ),
           pauseRepository: async (
@@ -922,12 +1006,7 @@ export const createGraphqlApi = (
           addRepository: async (_parent: unknown, args: AddRepositoryArgs) =>
             runGraphql(
               Effect.gen(function* () {
-                if (args.input.forge !== "github") {
-                  return yield* new InvalidRepositoryInputError({
-                    field: "forge",
-                    message: `Adding ${args.input.forge} repositories is not supported`,
-                  })
-                }
+                yield* verifyRepositoryIdentity(args.input)
                 const db = yield* DbService
                 const added = yield* db.addRepository(args.input)
                 yield* activatePollingIfCredentialed(added, {
@@ -963,6 +1042,7 @@ export const createGraphqlApi = (
                 const localGit = yield* LocalGit
                 const db = yield* DbService
                 const inspected = yield* localGit.inspect(path)
+                yield* verifyRepositoryIdentity(inspected)
                 const added = yield* db.addRepository({
                   forge: inspected.forge,
                   forgeHost: inspected.forgeHost,
@@ -985,6 +1065,24 @@ export const createGraphqlApi = (
                 )
                 return added
               }).pipe(Effect.withSpan("graphql-api.addLocalRepository")),
+            ),
+          inspectLocalRepository: async (
+            _parent: unknown,
+            args: AddLocalRepositoryArgs,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const path = args.path.trim()
+                if (path.length === 0) {
+                  return yield* Effect.fail(
+                    new GraphQLError("Path is required", {
+                      extensions: { code: "BAD_USER_INPUT" },
+                    }),
+                  )
+                }
+                const localGit = yield* LocalGit
+                return yield* localGit.inspect(path)
+              }).pipe(Effect.withSpan("graphql-api.inspectLocalRepository")),
             ),
           pickLocalDirectory: async () =>
             runGraphql(

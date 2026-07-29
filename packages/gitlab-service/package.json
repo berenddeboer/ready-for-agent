@@ -1,5 +1,5 @@
 {
-  "name": "@ready-for-agent/issue-reconciler",
+  "name": "@ready-for-agent/gitlab-service",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -16,9 +16,7 @@
     }
   },
   "dependencies": {
-    "@ready-for-agent/db-service": "workspace:*",
     "@ready-for-agent/github-service": "workspace:*",
-    "@ready-for-agent/gitlab-service": "workspace:*",
     "effect": "^4.0.0-beta.97",
     "tslib": "^2.3.0"
   },

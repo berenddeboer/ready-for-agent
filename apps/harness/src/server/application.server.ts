@@ -45,6 +45,7 @@ import {
 } from "@ready-for-agent/work-item-lifecycle"
 import type { ApplicationRequestContext } from "../application-request-context.js"
 import { ambientGitHubLayer } from "./ambient-github-layer.js"
+import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
 import {
   environmentConfigLayer,
   loadApplicationConfig,
@@ -158,9 +159,14 @@ export const createApplication = async (
       : keymaxxerGitHubLayer({ workspaceRoot: toolCwd }).pipe(
           Layer.provide(keymaxxerLayer),
         )
+  const gitlabLayer = ambientGitLabLayer({
+    workspaceRoot: toolCwd,
+    environment,
+  }).pipe(Layer.provide(platformLayer))
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),
+    Layer.provideMerge(gitlabLayer),
   )
   const queueLayer = SqliteQueueServiceLive.pipe(
     Layer.provideMerge(databaseLayer),
@@ -225,6 +231,7 @@ export const createApplication = async (
     Layer.provideMerge(reconcilerLayer),
     Layer.provideMerge(lifecycleLayer),
     Layer.provideMerge(keymaxxerLayer),
+    Layer.provideMerge(gitlabLayer),
   )
   const loggingLayer = Logger.layer([Logger.consolePretty({ colors: false })])
   const localGitLayer = LocalGit.layer.pipe(Layer.provide(platformLayer))
@@ -237,6 +244,7 @@ export const createApplication = async (
           reconcilerLayer,
           queueLayer,
           keymaxxerLayer,
+          gitlabLayer,
           activeLayer,
           lifecycleLayer,
           localGitLayer,
@@ -248,6 +256,7 @@ export const createApplication = async (
           workerLayer,
           queueLayer,
           keymaxxerLayer,
+          gitlabLayer,
           activeLayer,
           lifecycleLayer,
           localGitLayer,

@@ -62,6 +62,50 @@ describe("LocalGit.inspect", () => {
     expect(inspected.localPath).toContain("repo")
   })
 
+  test("guesses GitLab identity from a nested-project SSH remote", async () => {
+    const repoDir = join(tempRoot, "gitlab-repo")
+    mkdirSync(repoDir)
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: repoDir, encoding: "utf8" })
+    expect(git(["init"]).status).toBe(0)
+    expect(
+      git([
+        "remote",
+        "add",
+        "origin",
+        "git@git.drupalcode.org:project/oauth_client.git",
+      ]).status,
+    ).toBe(0)
+
+    const inspected = await runInspect(repoDir)
+    expect(inspected).toMatchObject({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      isBare: false,
+      paused: true,
+    })
+  })
+
+  test("keeps an SSH alias as a correctable GitLab Forge Host guess", async () => {
+    const repoDir = join(tempRoot, "gitlab-alias")
+    mkdirSync(repoDir)
+    const git = (args: string[]) =>
+      spawnSync("git", args, { cwd: repoDir, encoding: "utf8" })
+    expect(git(["init"]).status).toBe(0)
+    expect(
+      git(["remote", "add", "origin", "git@git.drupal.org:project/mod.git"])
+        .status,
+    ).toBe(0)
+
+    const inspected = await runInspect(repoDir)
+    expect(inspected).toMatchObject({
+      forge: "gitlab",
+      forgeHost: "git.drupal.org",
+      projectPath: "project/mod",
+    })
+  })
+
   test("fails when path does not exist", async () => {
     const error = await runInspectFail(join(tempRoot, "missing"))
     expect(error._tag).toBe("PathNotFound")
@@ -74,18 +118,15 @@ describe("LocalGit.inspect", () => {
     expect(error._tag).toBe("NotAGitRepository")
   })
 
-  test("fails when git repo has no GitHub remote", async () => {
+  test("fails when git repo has no supported Forge remote", async () => {
     const repoDir = join(tempRoot, "no-gh")
     mkdirSync(repoDir)
     const git = (args: string[]) =>
       spawnSync("git", args, { cwd: repoDir, encoding: "utf8" })
     expect(git(["init"]).status).toBe(0)
-    expect(
-      git(["remote", "add", "origin", "git@gitlab.com:acme/widgets.git"])
-        .status,
-    ).toBe(0)
+    expect(git(["remote", "add", "origin", "../widgets.git"]).status).toBe(0)
 
     const error = await runInspectFail(repoDir)
-    expect(error._tag).toBe("NoGitHubRemote")
+    expect(error._tag).toBe("NoForgeRemote")
   })
 })

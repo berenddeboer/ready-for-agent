@@ -95,6 +95,60 @@ describe("operator binary CLI seam", () => {
     }
   })
 
+  test("add lets the operator correct a guessed GitLab identity", async () => {
+    let added:
+      | {
+          readonly forgeHost: string
+          readonly projectPath: string
+        }
+      | undefined
+    const gitlabLocalGit = Layer.succeed(LocalGit, {
+      inspect: (path) =>
+        Effect.succeed({
+          forge: "gitlab" as const,
+          forgeHost: "git.drupal.org",
+          projectPath: "project/oauth_client",
+          localPath: path,
+          isBare: false,
+          paused: true as const,
+        }),
+    })
+    const layer = mockStart.pipe(
+      Layer.provideMerge(gitlabLocalGit),
+      Layer.provideMerge(
+        Layer.succeed(GraphqlApi, {
+          addRepository: (repository) =>
+            Effect.sync(() => {
+              added = repository
+              return {
+                id: "repo-1",
+                ...repository,
+              }
+            }),
+        }),
+      ),
+    )
+
+    await Effect.runPromise(
+      runOperator(
+        [
+          "add",
+          "--forge-host",
+          "git.drupalcode.org",
+          "--project-path",
+          "project/oauth_client",
+          "/tmp/repo",
+        ],
+        layer,
+      ),
+    )
+
+    expect(added).toMatchObject({
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    })
+  })
+
   test("binary help lists start, add, and --no-open", () => {
     const result = spawnSync(
       "bun",

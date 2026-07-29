@@ -24,6 +24,10 @@ import {
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
+import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
 import { createGraphqlApi } from "@ready-for-agent/graphql-api"
 import {
   IssueReconciler,
@@ -133,38 +137,48 @@ const keymaxxerLayer = (
     runWithSecrets: () => Effect.die("not used"),
   })
 
-const defaultGithubLayer = Layer.succeed(GitHubService, {
-  getOpenPullRequestNumber: () => Effect.succeed(1),
-  findOpenPullRequestNumber: () => Effect.succeed(1),
-  createDraftPullRequest: () => Effect.succeed(1),
-  updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
-  countOpenNonDraftPullRequests: () => Effect.succeed(0),
-  getPullRequestCheckStatus: () =>
-    Effect.succeed({
-      _tag: "succeeded",
-      terminalChecks: [],
-      mergeability: "mergeable",
-      baseRefName: "main",
-      headPushedAt: null,
-      headSha: null,
-      createdAt: null,
-      isDraft: null,
-    }),
-  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
-  observeAutomatedReviewEvidence: () =>
-    Effect.succeed({
-      _tag: "ambiguous" as const,
-      reason: "Automated review evidence observation is not configured",
-    }),
-  getPullRequestLifecycleStatus: () =>
-    Effect.succeed({ _tag: "open" as const }),
-  markPullRequestReadyForReview: () => Effect.void,
-  mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
-  rerunWorkflowRun: () => Effect.void,
-  ensureIssueCompletedWithSummary: () => Effect.void,
+const defaultGitlabLayer = Layer.succeed(GitLabService, {
+  verifyProject: () => Effect.void,
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
-} satisfies GitHubServiceShape)
+  hasCredentials: () => Effect.succeed(true),
+} satisfies GitLabServiceShape)
+
+const defaultGithubLayer = Layer.merge(
+  Layer.succeed(GitHubService, {
+    getOpenPullRequestNumber: () => Effect.succeed(1),
+    findOpenPullRequestNumber: () => Effect.succeed(1),
+    createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    getPullRequestCheckStatus: () =>
+      Effect.succeed({
+        _tag: "succeeded",
+        terminalChecks: [],
+        mergeability: "mergeable",
+        baseRefName: "main",
+        headPushedAt: null,
+        headSha: null,
+        createdAt: null,
+        isDraft: null,
+      }),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    observeAutomatedReviewEvidence: () =>
+      Effect.succeed({
+        _tag: "ambiguous" as const,
+        reason: "Automated review evidence observation is not configured",
+      }),
+    getPullRequestLifecycleStatus: () =>
+      Effect.succeed({ _tag: "open" as const }),
+    markPullRequestReadyForReview: () => Effect.void,
+    mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+    rerunWorkflowRun: () => Effect.void,
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    listReadyIssues: () => Effect.succeed([]),
+  } satisfies GitHubServiceShape),
+  defaultGitlabLayer,
+)
 
 const queueLayer = (
   jobs: RawJob[],
@@ -455,6 +469,7 @@ describe("Job worker", () => {
     const reconciler = IssueReconcilerLive.pipe(
       Layer.provideMerge(database),
       Layer.provideMerge(github),
+      Layer.provideMerge(defaultGitlabLayer),
     )
     const layer = Layer.mergeAll(
       database,
@@ -1422,6 +1437,59 @@ describe("Job worker", () => {
             }),
         }),
         keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("polls a credentialed GitLab Repository while Paused", async () => {
+    const pausedGitlab = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      paused: true,
+    })
+    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, pausedGitlab.id)
+    const postponed = await Effect.runPromise(Deferred.make<string>())
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({
+          idlePollInterval: Duration.zero,
+          samplePollingDelay: Effect.succeed(Duration.seconds(125)),
+        }).pipe(Effect.forkScoped({ startImmediately: true }))
+        expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+      }),
+      Layer.mergeAll(
+        defaultGithubLayer,
+        queueLayer(
+          [job],
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          (jobId) => Deferred.succeed(postponed, jobId),
+        ),
+        dbLayer([pausedGitlab]),
+        Layer.succeed(IssueReconciler, {
+          reconcile: (repo) =>
+            Effect.sync(() => {
+              expect(repo.forge).toBe("gitlab")
+              expect(repo.paused).toBe(true)
+              return {
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }
+            }),
+        }),
+        // GitHub has no credential, proving GitLab ambient auth owns this
+        // Repository's polling eligibility.
+        keymaxxerLayer(new Set()),
       ),
     )
   })

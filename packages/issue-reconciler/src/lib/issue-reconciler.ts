@@ -12,6 +12,11 @@ import {
   GitHubService,
   type ReadyLabeledIssue,
 } from "@ready-for-agent/github-service"
+import {
+  type GitLabProjectUnavailableError,
+  type GitLabRequestError,
+  GitLabService,
+} from "@ready-for-agent/gitlab-service"
 
 export const ReconciliationSummary = Schema.Struct({
   fetched: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -46,6 +51,8 @@ export class ReconciliationMutationError extends Schema.TaggedErrorClass<Reconci
 export type ReconciliationError =
   | GitHubRepositoryUnavailableError
   | GitHubRequestError
+  | GitLabProjectUnavailableError
+  | GitLabRequestError
   | ReconciliationMutationError
   | RepositoryNotFoundError
   | DatabaseError
@@ -83,9 +90,10 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
 
 const isActiveClosingPullRequest = (
   pullRequest: ReadyLabeledIssue["closingPullRequests"][number],
+  forge: RepositoryRecord["forge"],
 ): boolean =>
   pullRequest.state === "MERGED" ||
-  (pullRequest.state === "OPEN" && !pullRequest.isDraft)
+  (pullRequest.state === "OPEN" && (forge === "gitlab" || !pullRequest.isDraft))
 
 const matchesOperatorAuthor = (
   issueAuthor: string | null,
@@ -96,6 +104,7 @@ const matchesOperatorAuthor = (
 
 const isRelevant = (
   issue: ReadyLabeledIssue,
+  forge: RepositoryRecord["forge"],
   repositoryName: string,
   workItemPullRequestNumbers: ReadonlySet<number>,
   authorScope:
@@ -103,20 +112,25 @@ const isRelevant = (
     | { readonly includeAll: false; readonly operatorLogin: string },
 ): boolean => {
   const activeClosingPullRequests = issue.closingPullRequests.filter(
-    isActiveClosingPullRequest,
+    (pullRequest) => isActiveClosingPullRequest(pullRequest, forge),
   )
-  const hierarchyAndClosingPrs =
-    issue.hierarchySupported &&
-    (issue.parent === null
+  const supportedStructure = issue.hierarchySupported
+    ? issue.parent === null
       ? issue.state === "OPEN"
-      : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled) &&
+      : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled
+    : forge === "gitlab" &&
+      issue.state === "OPEN" &&
+      issue.parent === null &&
+      !issue.hasChildren
+  const structureAndClosingPrs =
+    supportedStructure &&
     (activeClosingPullRequests.length === 0 ||
       activeClosingPullRequests.some(
         (pullRequest) =>
           pullRequest.repository.toLowerCase() === repositoryName &&
           workItemPullRequestNumbers.has(pullRequest.number),
       ))
-  if (!hierarchyAndClosingPrs) {
+  if (!structureAndClosingPrs) {
     return false
   }
   if (authorScope.includeAll) {
@@ -130,11 +144,12 @@ export const IssueReconcilerLive = Layer.effect(
   Effect.gen(function* () {
     const db = yield* DbService
     const github = yield* GitHubService
+    const gitlab = yield* GitLabService
 
     const reconcile = Effect.fn("IssueReconciler.reconcile")(function* (
       repository: RepositoryRecord,
     ) {
-      const githubRepository = {
+      const forgeRepository = {
         forge: repository.forge,
         forgeHost: repository.forgeHost,
         projectPath: repository.projectPath,
@@ -143,14 +158,15 @@ export const IssueReconcilerLive = Layer.effect(
       const workItemPullRequests = yield* db.listWorkItemPullRequests(
         repository.id,
       )
+      const issueSource = repository.forge === "gitlab" ? gitlab : github
       const authorScope = repository.includeAllIssueAuthors
         ? ({ includeAll: true } as const)
         : ({
             includeAll: false,
             operatorLogin:
-              yield* github.getAuthenticatedUserLogin(githubRepository),
+              yield* issueSource.getAuthenticatedUserLogin(forgeRepository),
           } as const)
-      const remoteIssues = yield* github.listReadyIssues(githubRepository)
+      const remoteIssues = yield* issueSource.listReadyIssues(forgeRepository)
       const repositoryName = repository.projectPath.toLowerCase()
 
       const localByNumber = new Map(
@@ -172,6 +188,7 @@ export const IssueReconcilerLive = Layer.effect(
           .filter((issue) =>
             isRelevant(
               issue,
+              repository.forge,
               repositoryName,
               workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
               authorScope,

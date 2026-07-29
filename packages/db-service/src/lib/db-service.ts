@@ -13,6 +13,7 @@ import {
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
   RepositoryHasRunningStepError,
+  RepositoryIdentityChangeBlockedError,
   RepositoryNotFoundError,
 } from "./errors.js"
 import {
@@ -142,6 +143,22 @@ const normalizeOptionalSetting = (
     return Effect.succeed(null)
   }
   return Effect.succeed(trimmed)
+}
+
+const normalizeRequiredRepositorySetting = (
+  value: string,
+  field: "forgeHost" | "projectPath",
+): Effect.Effect<string, InvalidRepositorySettingsError> => {
+  const trimmed = value.trim()
+  if (trimmed.length === 0) {
+    return Effect.fail(
+      new InvalidRepositorySettingsError({
+        field,
+        message: `${field} cannot be empty`,
+      }),
+    )
+  }
+  return Effect.succeed(field === "forgeHost" ? trimmed.toLowerCase() : trimmed)
 }
 
 const normalizeOptionalConfigSetting = (
@@ -354,6 +371,8 @@ export interface DbServiceShape {
     RepositoryRecord,
     | InvalidRepositorySettingsError
     | AgentBackendChangeBlockedError
+    | RepositoryIdentityChangeBlockedError
+    | RepositoryAlreadyExistsError
     | RepositoryNotFoundError
     | DatabaseError
   >
@@ -1011,6 +1030,20 @@ export const DbServiceLive = Layer.effect(
     const updateRepositorySettings = Effect.fn(
       "DbService.updateRepositorySettings",
     )(function* (input: UpdateRepositorySettingsInput) {
+      const requestedForgeHost =
+        input.forgeHost === undefined
+          ? undefined
+          : yield* normalizeRequiredRepositorySetting(
+              input.forgeHost,
+              "forgeHost",
+            )
+      const requestedProjectPath =
+        input.projectPath === undefined
+          ? undefined
+          : yield* normalizeRequiredRepositorySetting(
+              input.projectPath,
+              "projectPath",
+            )
       const defaultModel = yield* normalizeOptionalSetting(input.defaultModel)
       const defaultThinkingLevel = yield* normalizeOptionalSetting(
         input.defaultThinkingLevel,
@@ -1046,7 +1079,10 @@ export const DbServiceLive = Layer.effect(
               )?.selectedAgentBackend ?? "opencode"
             const existingRows = yield* sql
               .unsafe(
-                `SELECT selected_agent_backend AS selectedAgentBackend,
+                `SELECT forge,
+                        forge_host AS forgeHost,
+                        project_path AS projectPath,
+                        selected_agent_backend AS selectedAgentBackend,
                         backend_model_prefs AS backendModelPrefs
                  FROM repository WHERE id = ?`,
                 [input.repositoryId],
@@ -1056,12 +1092,67 @@ export const DbServiceLive = Layer.effect(
               | {
                   readonly selectedAgentBackend: string | null
                   readonly backendModelPrefs: string
+                  readonly forge: RepositoryRecord["forge"]
+                  readonly forgeHost: string
+                  readonly projectPath: string
                 }
               | undefined
             if (!existing) {
               return yield* new RepositoryNotFoundError({
                 repositoryId: input.repositoryId,
               })
+            }
+            const nextForge = input.forge ?? existing.forge
+            const nextForgeHost = requestedForgeHost ?? existing.forgeHost
+            const nextProjectPath = requestedProjectPath ?? existing.projectPath
+            const identityChanging =
+              nextForge !== existing.forge ||
+              nextForgeHost !== existing.forgeHost ||
+              nextProjectPath.toLowerCase() !==
+                existing.projectPath.toLowerCase()
+            if (identityChanging) {
+              const workItemRows = (yield* sql
+                .unsafe(
+                  `SELECT COUNT(*) AS count FROM work_item
+                   WHERE repository_id = ?`,
+                  [input.repositoryId],
+                )
+                .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                readonly count: number
+              }[]
+              const workItemCount = readCount(workItemRows)
+              if (workItemCount > 0) {
+                return yield* new RepositoryIdentityChangeBlockedError({
+                  repositoryId: input.repositoryId,
+                  workItemCount,
+                  message: `Cannot change Repository Forge identity while ${workItemCount} Work Item(s) exist on this Repository`,
+                })
+              }
+              const duplicateRows = (yield* sql
+                .unsafe(
+                  `SELECT id FROM repository
+                   WHERE forge = ?
+                     AND forge_host = ?
+                     AND lower(project_path) = lower(?)
+                     AND id <> ?
+                   LIMIT 1`,
+                  [
+                    nextForge,
+                    nextForgeHost,
+                    nextProjectPath,
+                    input.repositoryId,
+                  ],
+                )
+                .pipe(Effect.mapError(toDatabaseError))) as readonly {
+                readonly id: string
+              }[]
+              if (duplicateRows.length > 0) {
+                return yield* new RepositoryAlreadyExistsError({
+                  forge: nextForge,
+                  forgeHost: nextForgeHost,
+                  projectPath: nextProjectPath,
+                })
+              }
             }
             const previousOverride = existing.selectedAgentBackend ?? null
             const nextOverride =
@@ -1103,7 +1194,10 @@ export const DbServiceLive = Layer.effect(
             return yield* sql
               .unsafe(
                 `UPDATE repository
-             SET paused = ?,
+             SET forge = ?,
+                 forge_host = ?,
+                 project_path = ?,
+                 paused = ?,
                  selected_agent_backend = ?,
                  default_model = ?,
                  default_thinking_level = ?,
@@ -1117,6 +1211,9 @@ export const DbServiceLive = Layer.effect(
              WHERE id = ?
              RETURNING ${repositorySelectColumns}`,
                 [
+                  nextForge,
+                  nextForgeHost,
+                  nextProjectPath,
                   input.paused,
                   nextOverride,
                   defaultModel,
@@ -1146,14 +1243,25 @@ export const DbServiceLive = Layer.effect(
                 tag === "RepositoryNotFoundError" ||
                 tag === "DatabaseError" ||
                 tag === "AgentBackendChangeBlockedError" ||
+                tag === "RepositoryIdentityChangeBlockedError" ||
+                tag === "RepositoryAlreadyExistsError" ||
                 tag === "InvalidRepositorySettingsError"
               ) {
                 return error as
                   | RepositoryNotFoundError
                   | DatabaseError
                   | AgentBackendChangeBlockedError
+                  | RepositoryIdentityChangeBlockedError
+                  | RepositoryAlreadyExistsError
                   | InvalidRepositorySettingsError
               }
+            }
+            if (isUniqueConstraint(error as SqlError)) {
+              return new RepositoryAlreadyExistsError({
+                forge: input.forge ?? "github",
+                forgeHost: requestedForgeHost ?? "",
+                projectPath: requestedProjectPath ?? "",
+              })
             }
             return toDatabaseError(error as SqlError)
           }),

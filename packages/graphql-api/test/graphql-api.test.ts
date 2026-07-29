@@ -20,6 +20,11 @@ import {
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
 import {
+  GitLabProjectUnavailableError,
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
@@ -191,6 +196,13 @@ const defaultGithub: GitHubServiceShape = {
   listReadyIssues: () => Effect.succeed([]),
 }
 
+const defaultGitlab: GitLabServiceShape = {
+  verifyProject: () => Effect.void,
+  getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+  listReadyIssues: () => Effect.succeed([]),
+  hasCredentials: () => Effect.succeed(true),
+}
+
 const makeRuntime = (
   dbOverrides: Partial<DbServiceShape> = {},
   keymaxxerOverrides: Partial<KeymaxxerServiceShape> = {},
@@ -201,6 +213,7 @@ const makeRuntime = (
     readonly inspect: (path: string) => Effect.Effect<LocalRepository, unknown>
   }> = {},
   githubOverrides: Partial<GitHubServiceShape> = {},
+  gitlabOverrides: Partial<GitLabServiceShape> = {},
 ) => {
   const db = stubDbService({
     getConfig: Effect.succeed(config),
@@ -367,6 +380,10 @@ const makeRuntime = (
         ...defaultGithub,
         ...githubOverrides,
       }),
+      Layer.succeed(GitLabService, {
+        ...defaultGitlab,
+        ...gitlabOverrides,
+      }),
       localGit,
       directoryPicker,
     ),
@@ -429,15 +446,30 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("rejects unsupported forges before adding a repository", async () => {
-    let addRepositoryCalled = false
+  test("verifies a GitLab project before adding the repository", async () => {
+    const actions: string[] = []
     await runtime.dispose()
-    runtime = makeRuntime({
-      addRepository: () => {
-        addRepositoryCalled = true
-        return Effect.succeed(repository)
+    runtime = makeRuntime(
+      {
+        addRepository: (input) => {
+          actions.push(`add:${input.forgeHost}/${input.projectPath}`)
+          return Effect.succeed({ ...repository, ...input })
+        },
       },
-    })
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: ({ forgeHost, projectPath }) =>
+          Effect.sync(() => {
+            actions.push(`verify:${forgeHost}/${projectPath}`)
+          }),
+        hasCredentials: () => Effect.succeed(false),
+      },
+    )
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
@@ -456,18 +488,64 @@ describe("GraphQL API", () => {
       }),
     )
 
-    const body = (await response.json()) as {
-      errors?: ReadonlyArray<{
-        message: string
-        extensions?: { code?: string; field?: string }
-      }>
-    }
-    expect(body.errors?.[0]).toMatchObject({
-      message: "Adding gitlab repositories is not supported",
-      extensions: {
-        code: "INVALID_REPOSITORY_INPUT",
-        field: "forge",
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          id: repository.id,
+        },
       },
+    })
+    expect(actions).toEqual([
+      "verify:gitlab.com/acme/widgets",
+      "add:gitlab.com/acme/widgets",
+    ])
+  })
+
+  test("rejects an unknown GitLab project before saving", async () => {
+    let addRepositoryCalled = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: () => {
+          addRepositoryCalled = true
+          return Effect.succeed(repository)
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: (identity) =>
+          Effect.fail(new GitLabProjectUnavailableError(identity)),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            forge: "gitlab",
+            forgeHost: "gitlab.example",
+            projectPath: "missing/project",
+            localPath: "/tmp/missing-project",
+            isBare: false,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toMatchObject({
+      errors: [
+        {
+          extensions: { code: "GITLAB_PROJECT_UNAVAILABLE" },
+        },
+      ],
     })
     expect(addRepositoryCalled).toBe(false)
   })
@@ -579,6 +657,47 @@ describe("GraphQL API", () => {
       })
     } finally {
       await addRuntime.dispose()
+    }
+  })
+
+  test("inspectLocalRepository returns the guessed identity without saving", async () => {
+    let addRepositoryCalled = false
+    const inspectRuntime = makeRuntime({
+      addRepository: () => {
+        addRepositoryCalled = true
+        return Effect.succeed(repository)
+      },
+    })
+
+    try {
+      const response = await createGraphqlApi(inspectRuntime).fetch(
+        graphqlRequest({
+          query: `mutation {
+            inspectLocalRepository(path: "/tmp/fixture-repo") {
+              forge
+              forgeHost
+              projectPath
+              localPath
+              isBare
+            }
+          }`,
+        }),
+      )
+
+      expect(await response.json()).toEqual({
+        data: {
+          inspectLocalRepository: {
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: "/tmp/fixture-repo",
+            isBare: repository.isBare,
+          },
+        },
+      })
+      expect(addRepositoryCalled).toBe(false)
+    } finally {
+      await inspectRuntime.dispose()
     }
   })
 
@@ -757,6 +876,66 @@ describe("GraphQL API", () => {
 
     expect(response.status).toBe(200)
     expect((await response.json()).data.addRepository.id).toBe(repository.id)
+    expect(ensured).toBe(true)
+    expect(enqueued).toBe(true)
+  })
+
+  test("activates Issue Polling when ambient GitLab authentication resolves", async () => {
+    let ensured = false
+    let enqueued = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: (input) =>
+          Effect.succeed({ ...repository, ...input, paused: true }),
+      },
+      {
+        findSecret: () => Effect.die("must not inspect GitHub credentials"),
+      },
+      {
+        ensureKeyed: () => {
+          ensured = true
+          return Effect.succeed({ jobId: makeJobId(), created: true })
+        },
+        enqueue: () => {
+          enqueued = true
+          return Effect.succeed(makeJobId())
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        hasCredentials: () => Effect.succeed(true),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { id paused }
+        }`,
+        variables: {
+          input: {
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            localPath: "/tmp/oauth_client",
+            isBare: false,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepository: {
+          id: repository.id,
+          paused: true,
+        },
+      },
+    })
     expect(ensured).toBe(true)
     expect(enqueued).toBe(true)
   })
@@ -1547,6 +1726,72 @@ describe("GraphQL API", () => {
     expect(settingsCalls[0]).toEqual({ selectedAgentBackend: undefined })
   })
 
+  test("updates Project Path display casing without re-verifying Forge identity", async () => {
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "gitlab.example",
+      projectPath: "Group/Widgets",
+    })
+    let verifications = 0
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+        updateRepositorySettings: (input) =>
+          Effect.succeed({
+            ...gitlabRepository,
+            projectPath: input.projectPath ?? gitlabRepository.projectPath,
+          }),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: () => {
+          verifications += 1
+          return Effect.void
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) { projectPath }
+        }`,
+        variables: {
+          input: {
+            repositoryId: gitlabRepository.id,
+            forge: "gitlab",
+            forgeHost: "gitlab.example",
+            projectPath: "group/widgets",
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          projectPath: "group/widgets",
+        },
+      },
+    })
+    expect(verifications).toBe(0)
+  })
+
   test("exposes scoped gate counts on Config and Repository", async () => {
     await runtime.dispose()
     const counted: Array<{
@@ -1621,6 +1866,52 @@ describe("GraphQL API", () => {
         projectPath: repository.projectPath,
       },
     ])
+  })
+
+  test("reports ambient GitLab credential status without consulting Keymaxxer", async () => {
+    const gitlabRepository = {
+      ...repository,
+      forge: "gitlab" as const,
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+      },
+      {
+        findSecrets: () =>
+          Effect.die("must not inspect GitHub credentials for GitLab"),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        hasCredentials: () => Effect.succeed(true),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials { repositoryId configured }
+        }`,
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        repositoryCredentials: [
+          {
+            repositoryId: repository.id,
+            configured: true,
+          },
+        ],
+      },
+    })
   })
 
   test("pullRequestCount uses GitHub open non-draft PRs including external ones", async () => {

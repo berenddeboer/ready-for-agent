@@ -68,6 +68,9 @@
     },
     {
       "path": "./packages/release-versioning"
+    },
+    {
+      "path": "./packages/gitlab-service"
     }
   ]
 }
