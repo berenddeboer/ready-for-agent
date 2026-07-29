@@ -238,7 +238,7 @@ export const repositoriesQuery = {
  * Independent of {@link repositoriesQuery}: a slow or failed count must not
  * cancel or block the Configured Repositories projection.
  */
-export const openPullRequestCountsQuery = {
+const openPullRequestCountsQuery = {
   queryKey: openPullRequestCountsQueryKey,
   queryFn: async (): Promise<Readonly<Record<string, number>>> => {
     const result = await graphql.query({

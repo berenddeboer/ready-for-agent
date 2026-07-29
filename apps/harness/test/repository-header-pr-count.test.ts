@@ -27,7 +27,7 @@ describe("repository header pull request count", () => {
       "export const repositoriesQuery = {",
     )
     const openCountsStart = source.indexOf(
-      "export const openPullRequestCountsQuery = {",
+      "const openPullRequestCountsQuery = {",
     )
     expect(repositoriesQueryStart).toBeGreaterThan(-1)
     expect(openCountsStart).toBeGreaterThan(repositoriesQueryStart)
@@ -40,10 +40,12 @@ describe("repository header pull request count", () => {
 
   test("dedicated openPullRequestCountsQuery requests pullRequestCount", () => {
     const source = homeSource()
-    expect(source).toContain("export const openPullRequestCountsQuery")
+    // Module-local (not exported): knip treats an unused export as a failure.
+    expect(source).toContain("const openPullRequestCountsQuery = {")
+    expect(source).not.toContain("export const openPullRequestCountsQuery")
     expect(source).toContain("openPullRequestCountsQueryKey")
     const openCountsStart = source.indexOf(
-      "export const openPullRequestCountsQuery = {",
+      "const openPullRequestCountsQuery = {",
     )
     const openCountsEnd = source.indexOf(
       "export type Repository",
