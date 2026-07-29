@@ -44,6 +44,7 @@ export class Opencode {
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
         const environment = yield* makeOpencodeEnvironment({
           keymaxxerMcpUrl: options.keymaxxerMcpUrl,
+          environment: options.environment,
         }).pipe(
           Effect.mapError(
             (error) =>
@@ -53,7 +54,6 @@ export class Opencode {
               }),
           ),
         )
-
         const inspect = Effect.fn("Opencode.inspect")(function* (
           input: InspectInput,
         ) {

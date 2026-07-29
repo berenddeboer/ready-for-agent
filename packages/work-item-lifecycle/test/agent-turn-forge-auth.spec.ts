@@ -7,9 +7,10 @@ import {
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
   InvalidCapturedAgentBackendError,
+  agentTurnForgeCredentialGuidance,
   agentTurnGitHubCredentialGuidance,
   isAgentTurnKeymaxxerEffective,
-  resolveAgentTurnGitHubAuth,
+  resolveAgentTurnForgeAuth,
   stubActiveAgentBackendLayer,
   stubGrokActiveAgentBackendLayer,
 } from "../src/index.js"
@@ -34,10 +35,10 @@ describe("isAgentTurnKeymaxxerEffective", () => {
   })
 })
 
-describe("resolveAgentTurnGitHubAuth", () => {
+describe("resolveAgentTurnForgeAuth", () => {
   it("returns keymaxxer auth for a capable backend when the vault is enabled", async () => {
     const auth = await Effect.runPromise(
-      resolveAgentTurnGitHubAuth({
+      resolveAgentTurnForgeAuth({
         forge: "github",
         forgeHost: "github.com",
         projectPath: "acme/widgets",
@@ -56,7 +57,7 @@ describe("resolveAgentTurnGitHubAuth", () => {
   it("returns ambient auth when the backend lacks KeymaxxerMcp", async () => {
     let findSecretCalled = false
     const auth = await Effect.runPromise(
-      resolveAgentTurnGitHubAuth({
+      resolveAgentTurnForgeAuth({
         forge: "github",
         forgeHost: "github.com",
         projectPath: "acme/widgets",
@@ -87,7 +88,7 @@ describe("resolveAgentTurnGitHubAuth", () => {
   it("fails closed when ambient capture is set but not selectable", async () => {
     const error = await Effect.runPromise(
       Effect.flip(
-        resolveAgentTurnGitHubAuth({
+        resolveAgentTurnForgeAuth({
           forge: "github",
           forgeHost: "github.com",
           projectPath: "acme/widgets",
@@ -108,7 +109,7 @@ describe("resolveAgentTurnGitHubAuth", () => {
   it("fails closed when capture is missing during an in-flight Step Run", async () => {
     const error = await Effect.runPromise(
       Effect.flip(
-        resolveAgentTurnGitHubAuth({
+        resolveAgentTurnForgeAuth({
           forge: "github",
           forgeHost: "github.com",
           projectPath: "acme/widgets",
@@ -132,7 +133,7 @@ describe("resolveAgentTurnGitHubAuth", () => {
 
   it("returns ambient auth when Keymaxxer is disabled on a capable backend", async () => {
     const auth = await Effect.runPromise(
-      resolveAgentTurnGitHubAuth({
+      resolveAgentTurnForgeAuth({
         forge: "github",
         forgeHost: "github.com",
         projectPath: "acme/widgets",
@@ -156,6 +157,48 @@ describe("resolveAgentTurnGitHubAuth", () => {
     )
     expect(auth).toEqual({ _tag: "ambient" })
   })
+
+  it("uses the Repository-scoped GitLab credential when Keymaxxer is effective", async () => {
+    const findSecretCalls: {
+      readonly provider: string
+      readonly account: string
+    }[] = []
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth({
+        forge: "gitlab",
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(true),
+              findSecret: (input) => {
+                findSecretCalls.push(input)
+                return Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT")
+              },
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({
+      _tag: "keymaxxer",
+      tokenName: "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT",
+    })
+    expect(findSecretCalls).toEqual([
+      {
+        provider: "gitlab",
+        account: "git.drupalcode.org/project/oauth_client",
+      },
+    ])
+  })
 })
 
 describe("agentTurnGitHubCredentialGuidance", () => {
@@ -172,5 +215,61 @@ describe("agentTurnGitHubCredentialGuidance", () => {
     )
     expect(ambient.toLowerCase()).not.toContain("keymaxxer")
     expect(ambient).toContain("ambient authentication")
+  })
+})
+
+describe("agentTurnForgeCredentialGuidance", () => {
+  it("preserves GitHub guidance", () => {
+    expect(
+      agentTurnForgeCredentialGuidance(
+        {
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+        },
+        { _tag: "ambient" },
+        "GitHub CLI or API access",
+      ),
+    ).toBe(
+      "Use the gh CLI with the existing ambient authentication for any GitHub CLI or API access.",
+    )
+  })
+
+  it("guides GitLab turns to curl or glab with the Repository credential and never gh", () => {
+    const guidance = agentTurnForgeCredentialGuidance(
+      {
+        forge: "gitlab",
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+      },
+      { _tag: "ambient" },
+      "GitLab Issue or API access",
+    )
+    expect(guidance).toContain("curl")
+    expect(guidance).toContain("https://git.drupalcode.org/api/v4")
+    expect(guidance).toContain("GITLAB_TOKEN")
+    expect(guidance).toContain("PRIVATE-TOKEN")
+    expect(guidance).toContain("glab")
+    expect(guidance).not.toMatch(/\bgh\b/i)
+  })
+
+  it("guides vault-backed GitLab turns to run curl through Keymaxxer", () => {
+    const guidance = agentTurnForgeCredentialGuidance(
+      {
+        forge: "gitlab",
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+      },
+      {
+        _tag: "keymaxxer",
+        tokenName: "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT",
+      },
+      "GitLab Issue or API access",
+    )
+    expect(guidance).toContain("keymaxxer_run")
+    expect(guidance).toContain("$GITLAB_TOKEN_PROJECT_OAUTH_CLIENT")
+    expect(guidance).toContain("PRIVATE-TOKEN")
+    expect(guidance).toContain("https://git.drupalcode.org/api/v4")
+    expect(guidance).not.toMatch(/\bgh\b/i)
   })
 })

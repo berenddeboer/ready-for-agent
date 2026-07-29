@@ -33,7 +33,7 @@ bunx nx run ready-for-agent:compile --args=--platform=linux-x64
 
 The compiled binary boots the production Harness in-process (no monorepo, Nx,
 Vite, or external Bun). With Keymaxxer unavailable or `KEYMAXXER_ENABLED=false`,
-it uses ambient GitHub authentication.
+it uses ambient Forge authentication.
 
 Then the launcher runs that binary without Bun on `PATH`:
 
@@ -60,11 +60,12 @@ This boots the full Harness (UI + backend) on the existing monorepo dev path
 (`harness:dev`), including the Keymaxxer sidecar when available.
 
 Before start, the binary checks that required host tools are on `PATH`: `git`,
-`gh`, and the selected Agent Backend executable (`opencode` by default, or
-`grok` when Grok Build is selected). Missing tools fail immediately with install
-hints. Keymaxxer is optional (`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH);
-ambient GitHub auth still works without it. Grok Build Agent Turns always use
-ambient `gh` and do not configure Keymaxxer MCP.
+the selected Agent Backend executable (`opencode` by default), plus `gh` when a
+GitHub Repository exists and `curl` when a GitLab Repository exists. `glab` is
+an optional ambient GitLab credential source. Missing required tools fail
+immediately with install hints. Keymaxxer is optional
+(`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH); ambient Forge auth still works
+without it.
 
 On successful start the default browser opens to the local UI
 (`http://127.0.0.1:6056/` by default). Disable with:
@@ -103,8 +104,8 @@ bun run ready-for-agent add /path/to/local/repo
 
 The command inspects the local git repository, calls the harness GraphQL
 endpoint at `http://127.0.0.1:6056/graphql`, and prints the persisted Repository
-fields. The path must be a git repository with a GitHub remote, and new
-Repositories are reported as paused.
+fields. The path must be a git repository with a GitHub or GitLab remote, and
+new Repositories are reported as paused.
 
 Override the endpoint when the harness is available elsewhere:
 

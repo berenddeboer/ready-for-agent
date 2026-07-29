@@ -22,6 +22,7 @@ import {
 import {
   AUTOMATED_REVIEW_RERUN_LIMIT,
   type LifecycleStepContext,
+  PrStatusChecksContextError,
   automatedReviewRerunLimitReason,
   investigatePrStatusChecks,
   makeWorkItemId,
@@ -66,6 +67,16 @@ const context: LifecycleStepContext = {
 const db = stubDbServiceLayer({
   listRepositories: Effect.succeed([repository]),
 })
+const gitlabRepository = makeRepositoryRecord({
+  id: repository.id,
+  forge: "gitlab",
+  forgeHost: "git.drupalcode.org",
+  projectPath: "project/oauth_client",
+  localPath: "/repos/oauth_client",
+})
+const gitlabDb = stubDbServiceLayer({
+  listRepositories: Effect.succeed([gitlabRepository]),
+})
 
 const keymaxxerService = Layer.succeed(KeymaxxerService, {
   initialize: Effect.void,
@@ -79,6 +90,20 @@ const keymaxxerService = Layer.succeed(KeymaxxerService, {
 /** Vault-enabled Keymaxxer plus capable (OpenCode) Active Agent Backend. */
 const keymaxxer = Layer.mergeAll(
   keymaxxerService,
+  stubActiveAgentBackendLayer(),
+)
+
+const keymaxxerDisabled = Layer.mergeAll(
+  Layer.succeed(KeymaxxerService, {
+    enabled: false,
+    initialize: Effect.void,
+    hasSecret: () => Effect.succeed(false),
+    findSecret: () => Effect.die("must not inspect the vault"),
+    findSecrets: () => Effect.succeed([]),
+    addSecret: () => Effect.succeed(false),
+    runWithSecrets: () =>
+      Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+  } satisfies KeymaxxerServiceShape),
   stubActiveAgentBackendLayer(),
 )
 
@@ -102,6 +127,33 @@ const seedWorkItem = Effect.gen(function* () {
     [context.workItemId, repository.id, now, now, now],
   )
 })
+
+const seedStatusCheck = (input: {
+  readonly id: string
+  readonly externalId: string
+  readonly name: string
+  readonly outcome: "green" | "red"
+}) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const now = Date.now()
+    yield* sql.unsafe(
+      `INSERT INTO pr_status_check (
+         id, work_item_id, external_id, name, outcome,
+         handled_at, observed_at, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+      [
+        input.id,
+        context.workItemId,
+        input.externalId,
+        input.name,
+        input.outcome,
+        now,
+        now,
+        now,
+      ],
+    )
+  })
 
 const githubWith = (
   status: PullRequestCheckStatus,
@@ -992,6 +1044,101 @@ describe("PR status check steps", () => {
     )
   })
 
+  it("uses GitLab curl/glab credential guidance for investigate and never mentions gh", async () => {
+    const prompts: string[] = []
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* seedStatusCheck({
+          id: "psc-gitlab-lint",
+          externalId: "gitlab-job:1",
+          name: "lint",
+          outcome: "red",
+        })
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            gitlabDb,
+            githubWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [],
+              },
+              {
+                getPullRequestCheckStatus: () =>
+                  Effect.die("must not inspect GitHub status"),
+                getPrStatusCheckDiagnostics: () =>
+                  Effect.die("must not inspect GitHub diagnostics"),
+                observeAutomatedReviewEvidence: () =>
+                  Effect.die("must not inspect GitHub review evidence"),
+                rerunWorkflowRun: () =>
+                  Effect.die("must not rerun a GitHub workflow"),
+              },
+            ),
+            keymaxxerDisabled,
+            opencodeWith(
+              ["fixed and pushed\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
+              (prompt) => prompts.push(prompt),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result._tag).toBe("checks_triggered")
+    expect(prompts).toHaveLength(1)
+    expect(prompts[0]).toContain("GitLab pipeline-job traces")
+    expect(prompts[0]).toContain("curl")
+    expect(prompts[0]).toContain("https://git.drupalcode.org/api/v4")
+    expect(prompts[0]).toContain("GITLAB_TOKEN")
+    expect(prompts[0]).toContain("PRIVATE-TOKEN")
+    expect(prompts[0]).toContain("glab")
+    expect(prompts[0]).not.toMatch(/\bgh\b/i)
+    expect(prompts[0]).not.toContain("GitHub")
+  })
+
+  it("fails closed instead of watching GitHub checks for a GitLab Repository", async () => {
+    let githubCalled = false
+    const exit = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        return yield* Effect.result(watchPrStatusChecks(context))
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            gitlabDb,
+            githubWith(
+              {
+                _tag: "pending",
+                ...mergeable,
+                terminalChecks: [],
+              },
+              {
+                getPullRequestCheckStatus: () => {
+                  githubCalled = true
+                  return Effect.die("must not query GitHub")
+                },
+              },
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      expect(exit.failure).toBeInstanceOf(PrStatusChecksContextError)
+      expect(exit.failure.message).toContain(
+        "refusing to query GitHub for a GitLab Repository",
+      )
+    }
+    expect(githubCalled).toBe(false)
+  })
+
   it("makes a focused recovery attempt after FAILED and accepts recovered progress", async () => {
     const prompts: string[] = []
     const result = await Effect.runPromise(
@@ -1869,25 +2016,12 @@ describe("PR status check steps", () => {
 
   it("uses ambient gh guidance for merge-conflict when Keymaxxer is disabled", async () => {
     const prompts: string[] = []
-    const disabled = Layer.mergeAll(
-      Layer.succeed(KeymaxxerService, {
-        enabled: false,
-        initialize: Effect.void,
-        hasSecret: () => Effect.succeed(false),
-        findSecret: () => Effect.die("must not inspect the vault"),
-        findSecrets: () => Effect.succeed([]),
-        addSecret: () => Effect.succeed(false),
-        runWithSecrets: () =>
-          Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
-      } satisfies KeymaxxerServiceShape),
-      stubActiveAgentBackendLayer(),
-    )
     const result = await Effect.runPromise(
       resolvePrMergeConflict(context).pipe(
         Effect.provide(
           Layer.mergeAll(
             db,
-            disabled,
+            keymaxxerDisabled,
             opencodeWith(
               [
                 "rebased, verified, and pushed\nREADY_FOR_AGENT_RESULT: PROCESSED",

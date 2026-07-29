@@ -33,6 +33,15 @@ export class ImplementIssueContextMissingError extends Schema.TaggedErrorClass<I
   },
 ) {}
 
+export class ImplementForgeCredentialError extends Schema.TaggedErrorClass<ImplementForgeCredentialError>()(
+  "ImplementForgeCredentialError",
+  {
+    repositoryId: Schema.String,
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export class ImplementOpenCodeError extends Schema.TaggedErrorClass<ImplementOpenCodeError>()(
   "ImplementOpenCodeError",
   {
@@ -47,4 +56,5 @@ export type ImplementError =
   | ImplementInvalidWorktreeContextError
   | ImplementRepositoryNotFoundError
   | ImplementIssueContextMissingError
+  | ImplementForgeCredentialError
   | ImplementOpenCodeError

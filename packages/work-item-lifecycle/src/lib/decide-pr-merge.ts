@@ -2,11 +2,11 @@ import { Effect, Schema } from "effect"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
-  AgentTurnGitHubCredentialMissingError,
+  AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
-  agentTurnGitHubCredentialGuidance,
-  resolveAgentTurnGitHubAuth,
-} from "./agent-turn-github-auth.js"
+  agentTurnForgeCredentialGuidance,
+  resolveAgentTurnForgeAuth,
+} from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
@@ -103,18 +103,16 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
         reason: "Auto-merge is disabled for this repository",
       }
     }
-    const auth = yield* resolveAgentTurnGitHubAuth({
-      projectPath: repository.projectPath,
-    }).pipe(
+    const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
       Effect.mapError((cause) => {
         if (
-          cause instanceof AgentTurnGitHubCredentialMissingError ||
+          cause instanceof AgentTurnForgeCredentialMissingError ||
           cause instanceof InvalidCapturedAgentBackendError
         ) {
           return new DecidePrMergeContextError({ message: cause.message })
         }
         return new DecidePrMergeContextError({
-          message: "Failed to resolve the repository GitHub credential",
+          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
         })
       }),
     )
@@ -122,7 +120,13 @@ export const decidePrMerge = (context: LifecycleStepContext) =>
       "Assess whether this pull request is low enough risk for an automated agent (clanker) to merge, or whether a human must merge it.",
       "Base the decision on risk: blast radius, security or auth changes, data migrations, irreversible operations, ambiguous requirements, incomplete verification, or anything that needs human judgment.",
       "Inspect the PR and its checks if needed. Do not merge the pull request.",
-      agentTurnGitHubCredentialGuidance(auth, "GitHub CLI or API access"),
+      agentTurnForgeCredentialGuidance(
+        repository,
+        auth,
+        repository.forge === "github"
+          ? "GitHub CLI or API access"
+          : "GitLab API access",
+      ),
       "End your final response with exactly one machine-readable result line:",
       "READY_FOR_AGENT_RESULT: CLANKER_MERGE",
       "or, only when a human must merge:",

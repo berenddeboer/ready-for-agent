@@ -139,57 +139,61 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     return yield* lifecycle.runStep(payload.stepRunId)
   })
 
-  const driveToNeedsHuman = Effect.gen(function* () {
-    const db = yield* DbService
-    const lifecycle = yield* WorkItemLifecycle
-    yield* db.updateConfig({
-      selectedAgentBackend: "opencode",
-      defaultModel: "opencode/deepseek-v4-flash-free",
-      defaultThinkingLevel: "low",
-      reviewModel: null,
-      reviewThinkingLevel: null,
-      maxConcurrentAgentTurns: 2,
-      maxConcurrentWorkItems: 5,
+  const driveToNeedsHuman = (forge: "github" | "gitlab" = "github") =>
+    Effect.gen(function* () {
+      const db = yield* DbService
+      const lifecycle = yield* WorkItemLifecycle
+      yield* db.updateConfig({
+        selectedAgentBackend: "opencode",
+        defaultModel: "opencode/deepseek-v4-flash-free",
+        defaultThinkingLevel: "low",
+        reviewModel: null,
+        reviewThinkingLevel: null,
+        maxConcurrentAgentTurns: 2,
+        maxConcurrentWorkItems: 5,
+      })
+      const repository = yield* db.addRepository({
+        forge,
+        forgeHost: forge === "github" ? "github.com" : "git.drupalcode.org",
+        projectPath: "acme/widgets",
+        localPath: "/repos/acme/widgets.git",
+        isBare: true,
+      })
+      yield* db.storeIssue({
+        repositoryId: repository.id,
+        issueNumber: 42,
+        title: "Implement feature",
+        body: "Issue body",
+        url:
+          forge === "github"
+            ? "https://github.com/acme/widgets/issues/42"
+            : "https://git.drupalcode.org/acme/widgets/-/issues/42",
+        state: "OPEN",
+        githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+        issueAuthor: null,
+        parent: null,
+        parentPosition: null,
+        hasChildren: false,
+        blockedBy: [],
+      })
+      const created = yield* lifecycle.implementNow(repository.id, 42)
+      for (let index = 0; index < 8; index += 1) {
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+      }
+      const sql = yield* SqlClient.SqlClient
+      yield* sql.unsafe(
+        `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
+        [created.id],
+      )
+      for (let index = 0; index < 2; index += 1) {
+        yield* makeQueuedJobsAvailable
+        yield* claimAndRunPending
+      }
+      const needsHuman = yield* lifecycle.getWorkItem(created.id)
+      expect(needsHuman.state).toBe("needs_human")
+      return { repository, created, lifecycle }
     })
-    const repository = yield* db.addRepository({
-      forge: "github",
-      forgeHost: "github.com",
-      projectPath: "acme/widgets",
-      localPath: "/repos/acme/widgets.git",
-      isBare: true,
-    })
-    yield* db.storeIssue({
-      repositoryId: repository.id,
-      issueNumber: 42,
-      title: "Implement feature",
-      body: "Issue body",
-      url: "https://github.com/acme/widgets/issues/42",
-      state: "OPEN",
-      githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
-      issueAuthor: null,
-      parent: null,
-      parentPosition: null,
-      hasChildren: false,
-      blockedBy: [],
-    })
-    const created = yield* lifecycle.implementNow(repository.id, 42)
-    for (let index = 0; index < 8; index += 1) {
-      yield* makeQueuedJobsAvailable
-      yield* claimAndRunPending
-    }
-    const sql = yield* SqlClient.SqlClient
-    yield* sql.unsafe(
-      `UPDATE work_item SET check_start_last_observed_is_draft = NULL WHERE id = ?`,
-      [created.id],
-    )
-    for (let index = 0; index < 2; index += 1) {
-      yield* makeQueuedJobsAvailable
-      yield* claimAndRunPending
-    }
-    const needsHuman = yield* lifecycle.getWorkItem(created.id)
-    expect(needsHuman.state).toBe("needs_human")
-    return { repository, created, lifecycle }
-  })
 
   const driveToMergeNeedsHuman = Effect.gen(function* () {
     const db = yield* DbService
@@ -247,7 +251,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   it("resumes local cleanup when GitHub reports the PR merged", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
-        const { repository, created, lifecycle } = yield* driveToNeedsHuman
+        const { repository, created, lifecycle } = yield* driveToNeedsHuman()
         const advanced = yield* syncNeedsHumanMergeHandoffs(repository.id)
         expect(advanced).toBe(1)
         const resumed = yield* lifecycle.getWorkItem(created.id)
@@ -260,7 +264,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   it("leaves Needs Human alone when the PR is still open", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
-        const { repository, created, lifecycle } = yield* driveToNeedsHuman
+        const { repository, created, lifecycle } = yield* driveToNeedsHuman()
         const advanced = yield* syncNeedsHumanMergeHandoffs(repository.id)
         expect(advanced).toBe(0)
         const still = yield* lifecycle.getWorkItem(created.id)
@@ -272,13 +276,36 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   it("abandons when GitHub reports the PR closed unmerged", async () => {
     await Effect.runPromise(
       Effect.gen(function* () {
-        const { repository, created, lifecycle } = yield* driveToNeedsHuman
+        const { repository, created, lifecycle } = yield* driveToNeedsHuman()
         const advanced = yield* syncNeedsHumanMergeHandoffs(repository.id)
         expect(advanced).toBe(1)
         const abandoned = yield* lifecycle.getWorkItem(created.id)
         expect(abandoned.state).toBe("abandoned")
         expect(abandoned.worktreePath).toBeNull()
       }).pipe(Effect.provide(makeLayer({ _tag: "closed" }))),
+    )
+  })
+
+  it("skips GitHub PR reconciliation for persisted GitLab Work Items", async () => {
+    let githubCalls = 0
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToNeedsHuman("gitlab")
+        expect(
+          (yield* lifecycle.getWorkItem(created.id)).pullRequestNumber,
+        ).toBe(101)
+
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        expect(githubCalls).toBe(0)
+      }).pipe(
+        Effect.provide(
+          makeLayerWithStatus(() => {
+            githubCalls += 1
+            return { _tag: "merged" }
+          }),
+        ),
+      ),
     )
   })
 

@@ -9,6 +9,58 @@ describe("host tools preflight", () => {
     expect(result.ok).toBe(true)
   })
 
+  test("requires no Forge tool before the first Repository is added", () => {
+    const result = checkHostTools(
+      (command) => ["git", "opencode"].includes(command),
+      { repositoryForges: [] },
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  test("requires gh only when a GitHub Repository exists", () => {
+    const githubOnly = checkHostTools(
+      (command) => ["git", "gh", "opencode"].includes(command),
+      { repositoryForges: ["github"] },
+    )
+    expect(githubOnly.ok).toBe(true)
+
+    const missing = checkHostTools(
+      (command) => ["git", "curl", "opencode"].includes(command),
+      { repositoryForges: ["github"] },
+    )
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.missing.map((tool) => tool.name)).toEqual(["gh"])
+    expect(missing.message).not.toContain("Install curl")
+  })
+
+  test("requires curl but not gh when only GitLab Repositories exist", () => {
+    const gitlabOnly = checkHostTools(
+      (command) => ["git", "curl", "opencode"].includes(command),
+      { repositoryForges: ["gitlab"] },
+    )
+    expect(gitlabOnly.ok).toBe(true)
+
+    const missing = checkHostTools(
+      (command) => ["git", "gh", "opencode"].includes(command),
+      { repositoryForges: ["gitlab"] },
+    )
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.missing.map((tool) => tool.name)).toEqual(["curl"])
+    expect(missing.message).toContain("https://curl.se/download.html")
+    expect(missing.message).not.toContain("Install GitHub CLI")
+    expect(missing.message).not.toContain("glab")
+  })
+
+  test("requires both Forge tools for a mixed Repository fleet", () => {
+    const result = checkHostTools(
+      (command) => ["git", "gh", "curl", "opencode"].includes(command),
+      { repositoryForges: ["gitlab", "github"] },
+    )
+    expect(result.ok).toBe(true)
+  })
+
   test("requires grok instead of opencode when only Grok Build is selected", () => {
     const withGrok = checkHostTools(
       (command) => ["git", "gh", "grok"].includes(command),

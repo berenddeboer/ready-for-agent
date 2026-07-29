@@ -36,6 +36,13 @@ export const closeIssue = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
+    if (repository.forge === "gitlab") {
+      return yield* new CloseIssueContextError({
+        workItemId: context.workItemId,
+        message:
+          "GitLab Close Issue requires GitLab issue lifecycle support; refusing to query GitHub for a GitLab Repository",
+      })
+    }
 
     const issues = yield* db.listIssues(context.repositoryId)
     const issue = issues.find(

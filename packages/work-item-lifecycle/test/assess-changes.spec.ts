@@ -88,16 +88,21 @@ const withTempGit = async (
   }
 }
 
-const opencodeLayer = (assistantText: string) =>
+const opencodeLayer = (
+  assistantText: string,
+  onPrompt?: (prompt: string) => void,
+) =>
   Layer.succeed(
     AgentBackend,
     AgentBackend.of({
       startTurn: () => Effect.die("unused"),
-      continueTurn: () =>
-        Effect.succeed({
+      continueTurn: (input) => {
+        onPrompt?.(input.prompt)
+        return Effect.succeed({
           sessionId: "ses_implement",
           assistantText,
-        }),
+        })
+      },
       inspect: () =>
         Effect.succeed({
           backend: { id: "opencode" as const, label: "OpenCode" },
@@ -109,10 +114,11 @@ const opencodeLayer = (assistantText: string) =>
 const runWithAgentBackend = <A, E>(
   effect: Effect.Effect<A, E, AgentBackend>,
   assistantText: string,
+  onPrompt?: (prompt: string) => void,
 ) =>
   Effect.runPromise(
     effect.pipe(
-      Effect.provide(opencodeLayer(assistantText)),
+      Effect.provide(opencodeLayer(assistantText, onPrompt)),
       Effect.provide(PlatformLayer),
     ),
   )
@@ -246,14 +252,20 @@ describe("assessChanges", () => {
 
   it("confirms clean worktree NO_CHANGES via OpenCode", async () => {
     await withTempGit(async (root, startingOid) => {
+      let prompt = ""
       const result = await runWithAgentBackend(
         assessChanges(baseContext(root, { startingCommitOid: startingOid })),
         "Investigated without edits.\nREADY_FOR_AGENT_RESULT: NO_CHANGES",
+        (value) => {
+          prompt = value
+        },
       )
       expect(result).toEqual({
         _tag: "no_changes",
         completionSummary: "Investigated without edits.",
       })
+      expect(prompt).toContain("completion summary for the Issue")
+      expect(prompt).not.toContain("GitHub Issue")
     })
   })
 

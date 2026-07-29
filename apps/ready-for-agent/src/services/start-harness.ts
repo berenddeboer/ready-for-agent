@@ -7,7 +7,10 @@ import {
   shouldOpenBrowser,
 } from "../browser-open.ts"
 import { checkHostTools } from "../host-tools-preflight.ts"
-import { peekSelectedAgentBackendIds } from "../peek-selected-agent-backend.ts"
+import {
+  peekRepositoryForges,
+  peekSelectedAgentBackendIds,
+} from "../peek-selected-agent-backend.ts"
 import { bootStandaloneProduction } from "../standalone-boot.ts"
 import { ApplicationConfig } from "./application-config.ts"
 
@@ -82,9 +85,10 @@ export class StartHarness extends Context.Service<
         const selectedAgentBackendIds = peekSelectedAgentBackendIds(
           config.databasePath,
         )
+        const repositoryForges = peekRepositoryForges(config.databasePath)
         const result = checkHostTools(
           (command) => Bun.which(command) !== null,
-          { selectedAgentBackendIds },
+          { selectedAgentBackendIds, repositoryForges },
         )
         if (!result.ok) {
           return yield* new StartHarnessFailed({ detail: result.message })

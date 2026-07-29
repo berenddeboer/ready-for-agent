@@ -92,6 +92,79 @@ const initBareRepository = async (root: string) => {
 }
 
 describe("removeWorktree", () => {
+  it("fails closed before local or GitHub cleanup for a GitLab Repository", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-gitlab-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      let keymaxxerCalls = 0
+
+      const { error, path, branch } = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = {
+            workItemId,
+            repositoryId: repository.id,
+            issueNumber: 42,
+            issueTitle: null,
+            agentBackend: "opencode",
+            model: "opencode/test",
+            thinkingLevel: "low",
+            reviewModel: "opencode/test",
+            reviewThinkingLevel: "low",
+            worktreePath: null,
+            startingCommitOid: null,
+            completionSummary: null,
+            publicationTitle: null,
+            publicationBody: null,
+            sessionId: null,
+          } as const
+          const created = yield* createWorktree(context)
+          const error = yield* removeWorktree({
+            ...context,
+            worktreePath: created.worktreePath,
+          }).pipe(Effect.flip)
+          return {
+            error,
+            path: created.worktreePath,
+            branch: workItemBranchName({
+              projectPath: "project/widgets",
+              issueNumber: 42,
+              workItemId,
+            }),
+          }
+        }),
+        stubKeymaxxer({
+          findSecret: () => {
+            keymaxxerCalls += 1
+            return Effect.succeed("GITHUB_TOKEN_PROJECT_WIDGETS")
+          },
+          runWithSecrets: () => {
+            keymaxxerCalls += 1
+            return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
+          },
+        }),
+      )
+
+      expect(error).toBeInstanceOf(RemoveWorktreeRemoteError)
+      expect((error as RemoveWorktreeRemoteError).message).toContain(
+        "refusing to invoke GitHub cleanup for a GitLab Repository",
+      )
+      expect(await Bun.file(join(path, "README.md")).exists()).toBe(true)
+      expect(await git(bare, ["branch", "--list", branch])).toContain(branch)
+      expect(keymaxxerCalls).toBe(0)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("locally removes the worktree and branch without remote cleanup", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-local-cleanup-"))
     try {

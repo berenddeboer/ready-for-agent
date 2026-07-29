@@ -8,9 +8,10 @@ covers monorepo development of Ready for Agent.
 ## Prerequisites
 
 1. [Bun](https://bun.sh/) (workspace package manager and runtime)
-2. Host tools from the product README: `git`, `gh`, and the selected Agent
-   Backend on PATH (`opencode` by default; `grok` when developing against Grok
-   Build). Authenticate Grok with `grok login` or `XAI_API_KEY` for live runs.
+2. Host tools from the product README: `git`, the selected Agent Backend on
+   PATH (`opencode` by default), plus `gh` for GitHub Repositories and `curl`
+   for GitLab Repositories. Authenticate Grok with `grok login` or
+   `XAI_API_KEY` when developing against Grok Build.
 3. Optional: `keymaxxer` on PATH, or `KEYMAXXER_ENTRYPOINT` pointing at an
   existing entrypoint (no hardcoded machine path). Not used by Grok Build
   Agent Turns.

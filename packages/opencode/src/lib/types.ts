@@ -10,4 +10,5 @@ export interface OpencodeLayerOptions {
   readonly binary?: string
   readonly defaultTimeout?: Duration.Input
   readonly keymaxxerMcpUrl?: string
+  readonly environment?: Readonly<Record<string, string | undefined>>
 }

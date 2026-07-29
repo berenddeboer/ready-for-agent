@@ -61,7 +61,8 @@ export const keymaxxerEnvironment = (
       ([name, value]) =>
         value !== undefined &&
         name !== "GITHUB_TOKEN" &&
-        !name.startsWith("GITHUB_TOKEN_"),
+        !name.startsWith("GITHUB_TOKEN_") &&
+        !name.startsWith("GITLAB_TOKEN"),
     ),
   ) as Record<string, string>
 

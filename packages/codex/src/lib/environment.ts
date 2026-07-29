@@ -5,9 +5,9 @@ export type MakeCodexEnvironmentOptions = {
 }
 
 /**
- * Codex Build Agent Turns use ambient `gh` only: inherit process env
- * (including ambient GitHub tokens and OPENAI_API_KEY). Codex does not support
- * KeymaxxerMcp, so tokens are never stripped.
+ * Codex Build Agent Turns use ambient Forge authentication: inherit process
+ * env (including ambient Forge tokens and OPENAI_API_KEY). Codex does not
+ * support KeymaxxerMcp, so tokens are never stripped.
  */
 export const makeCodexEnvironment = (
   options: MakeCodexEnvironmentOptions = {},
@@ -15,6 +15,6 @@ export const makeCodexEnvironment = (
   const environment =
     options.environment ?? (process.env as Record<string, string | undefined>)
   return sanitizeInheritedEnvironment(environment, {
-    stripGitHubTokens: false,
+    stripForgeTokens: false,
   })
 }

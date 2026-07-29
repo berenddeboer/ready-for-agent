@@ -55,6 +55,43 @@ const startTurn = (
   )
 
 describe("Opencode AgentBackend adapter", () => {
+  it("strips Forge token variables from vault-enabled Agent Turns", async () => {
+    await withExecutable(
+      [
+        '[ -z "$GITHUB_TOKEN" ] || exit 8',
+        '[ -z "$GITLAB_TOKEN" ] || exit 9',
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_sanitized"}'`,
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.startTurn({
+              cwd: process.cwd(),
+              prompt: "test",
+              model: "test/model",
+              thinkingLevel: "test",
+              timeout: "2 seconds",
+            })
+          }).pipe(
+            Effect.provide(
+              Opencode.layer({
+                binary,
+                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                environment: {
+                  GITHUB_TOKEN: "github-token",
+                  GITLAB_TOKEN: "gitlab-token",
+                },
+              }).pipe(Layer.provide(BunServices.layer)),
+            ),
+          ),
+        )
+
+        expect(result.sessionId).toBe("ses_sanitized")
+      },
+    )
+  })
+
   it("collects structured output from a scoped child process", async () => {
     await withExecutable(
       [

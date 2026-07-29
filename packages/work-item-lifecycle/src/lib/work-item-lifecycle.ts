@@ -2323,6 +2323,9 @@ export const makeWorkItemLifecycleLive = (
           if (repository === undefined) {
             return null
           }
+          if (repository.forge !== "github") {
+            return null
+          }
           const headRefName = workItemBranchName({
             projectPath: repository.projectPath,
             issueNumber: row.issue_number,

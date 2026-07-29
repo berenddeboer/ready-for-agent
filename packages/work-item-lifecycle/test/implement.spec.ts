@@ -5,6 +5,7 @@ import { BunServices } from "@effect/platform-bun"
 import { Duration, Effect, Fiber, Layer } from "effect"
 import { SqlClient } from "effect/unstable/sql"
 import {
+  type ActiveAgentBackend,
   AgentBackend,
   AgentBackendExitError,
   AgentBackendSessionIdMissingError,
@@ -13,6 +14,10 @@ import {
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
+import {
+  KeymaxxerService,
+  type KeymaxxerServiceShape,
+} from "@ready-for-agent/keymaxxer-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   ImplementInvalidWorktreeContextError,
@@ -22,6 +27,7 @@ import {
   ImplementWorktreeContextMissingError,
   implement,
   makeWorkItemId,
+  stubActiveAgentBackendLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -86,6 +92,20 @@ const stubOpencode = (impl: {
     }),
   )
 
+const keymaxxerDisabled = Layer.mergeAll(
+  Layer.succeed(KeymaxxerService, {
+    enabled: false,
+    initialize: Effect.void,
+    hasSecret: () => Effect.succeed(false),
+    findSecret: () => Effect.die("must not inspect the vault"),
+    findSecrets: () => Effect.succeed([]),
+    addSecret: () => Effect.succeed(false),
+    runWithSecrets: () =>
+      Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+  } satisfies KeymaxxerServiceShape),
+  stubActiveAgentBackendLayer(),
+)
+
 const run = <A, E>(
   effect: Effect.Effect<
     A,
@@ -94,12 +114,20 @@ const run = <A, E>(
     | Layer.Layer.Success<typeof DbServiceLive>
     | Layer.Layer.Success<typeof DatabaseTest>
     | AgentBackend
+    | ActiveAgentBackend
+    | KeymaxxerService
   >,
   opencodeLayer: Layer.Layer<AgentBackend, never, never> = stubOpencode({}),
+  forgeAuthLayer: Layer.Layer<
+    ActiveAgentBackend | KeymaxxerService,
+    never,
+    never
+  > = keymaxxerDisabled,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(opencodeLayer),
+      Effect.provide(forgeAuthLayer),
       Effect.provide(DbServiceLive),
       Effect.provide(DatabaseTest),
       Effect.provide(PlatformLayer),
@@ -139,13 +167,22 @@ const withTemp = async (assert: (root: string) => Promise<void>) => {
   }
 }
 
-const seedRepository = (localPath: string) =>
+const seedRepository = (
+  localPath: string,
+  identity: {
+    readonly forge: "github" | "gitlab"
+    readonly forgeHost: string
+    readonly projectPath: string
+  } = {
+    forge: "github",
+    forgeHost: "github.com",
+    projectPath: "acme/widgets",
+  },
+) =>
   Effect.gen(function* () {
     const db = yield* DbService
     return yield* db.addRepository({
-      forge: "github",
-      forgeHost: "github.com",
-      projectPath: "acme/widgets",
+      ...identity,
       localPath,
       isBare: true,
     })
@@ -242,6 +279,112 @@ describe("implement", () => {
       expect(started!.prompt).toContain("run appropriate verification")
       expect(started!.prompt).toContain("Do not merely propose a plan")
       expect(continued).toBe(false)
+    }))
+
+  it("starts a GitLab Implement turn with curl/glab credential guidance and no gh guidance", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+          })
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              issueNumber: 3601642,
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_gitlab_implement",
+              assistantText: "",
+            })
+          },
+        }),
+      )
+
+      expect(sessionId).toBe("ses_gitlab_implement")
+      expect(prompt).toContain(
+        "GitLab issue project/oauth_client#3601642 on git.drupalcode.org",
+      )
+      expect(prompt).toContain("Inspect the current GitLab Issue")
+      expect(prompt).toContain("curl")
+      expect(prompt).toContain("https://git.drupalcode.org/api/v4")
+      expect(prompt).toContain("GITLAB_TOKEN")
+      expect(prompt).toContain("PRIVATE-TOKEN")
+      expect(prompt).toContain("glab")
+      expect(prompt).not.toMatch(/\bgh\b/i)
+      expect(prompt).not.toContain("GitHub")
+    }))
+
+  it("uses the Repository-scoped Keymaxxer credential for a GitLab Implement turn", () =>
+    withTemp(async (root) => {
+      let prompt = ""
+      const findSecretCalls: {
+        readonly provider: string
+        readonly account: string
+      }[] = []
+      const vaultAuth = Layer.mergeAll(
+        Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          hasSecret: () => Effect.succeed(true),
+          findSecret: (input) => {
+            findSecretCalls.push(input)
+            return Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT")
+          },
+          findSecrets: () => Effect.succeed([]),
+          addSecret: () => Effect.succeed(true),
+          runWithSecrets: () =>
+            Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+        } satisfies KeymaxxerServiceShape),
+        stubActiveAgentBackendLayer(),
+      )
+      const sessionId = await run(
+        Effect.gen(function* () {
+          const repository = yield* seedRepository(root, {
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+          })
+          return yield* implement(
+            baseContext(root, {
+              repositoryId: repository.id,
+              issueNumber: 3601642,
+            }),
+          )
+        }),
+        stubOpencode({
+          startTurn: (input) => {
+            prompt = input.prompt
+            return Effect.succeed({
+              sessionId: "ses_gitlab_vault_implement",
+              assistantText: "",
+            })
+          },
+        }),
+        vaultAuth,
+      )
+
+      expect(sessionId).toBe("ses_gitlab_vault_implement")
+      expect(findSecretCalls).toEqual([
+        {
+          provider: "gitlab",
+          account: "git.drupalcode.org/project/oauth_client",
+        },
+      ])
+      expect(prompt).toContain(
+        "use Keymaxxer secret GITLAB_TOKEN_PROJECT_OAUTH_CLIENT via keymaxxer_run",
+      )
+      expect(prompt).toContain("$GITLAB_TOKEN_PROJECT_OAUTH_CLIENT")
+      expect(prompt).toContain("PRIVATE-TOKEN")
+      expect(prompt).not.toContain("ambient GITLAB_TOKEN")
+      expect(prompt).not.toMatch(/\bgh\b/i)
     }))
 
   it("starts a fresh Session when session_id is blank", () =>

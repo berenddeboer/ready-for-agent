@@ -57,13 +57,15 @@ const parseSimpleLine = (line: string) => {
 }
 
 describe("sanitizeInheritedEnvironment", () => {
-  it("strips GitHub token variables and keeps others", () => {
+  it("strips Forge token variables and keeps others", () => {
     expect(
       sanitizeInheritedEnvironment({
         PATH: "/usr/bin",
         GH_TOKEN: "secret",
         GITHUB_TOKEN: "secret2",
         GITHUB_TOKEN_WORK: "secret3",
+        GITLAB_TOKEN: "secret4",
+        GITLAB_TOKEN_WORK: "secret5",
         OPENAI_API_KEY: "keep",
         EMPTY: undefined,
       }),
