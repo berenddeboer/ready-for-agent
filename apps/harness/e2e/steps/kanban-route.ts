@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test"
+import { type Page, expect } from "@playwright/test"
 import { Then, When } from "./fixtures.ts"
 
 const PIPELINE_LANE_HEADERS = [
@@ -17,10 +17,10 @@ const COMMITTED_PULL_REQUEST_PERIODS = [
   "Last week",
 ] as const
 
-When("I navigate to the Kanban board", async ({ page }) => {
-  await page.goto("/kanban")
-  await expect(page).toHaveURL(/\/kanban$/)
+const primaryNav = (page: Page) =>
+  page.getByRole("navigation", { name: "Primary" })
 
+const dismissFirstRunSettings = async (page: Page) => {
   // The isolated E2E database has no default build model, so first-run
   // Settings opens automatically. Dismiss it to exercise the route beneath.
   const settingsDialog = page.getByRole("dialog", {
@@ -29,6 +29,30 @@ When("I navigate to the Kanban board", async ({ page }) => {
   await expect(settingsDialog).toBeVisible()
   await settingsDialog.getByRole("button", { name: "Cancel" }).click()
   await expect(settingsDialog).toBeHidden()
+}
+
+When("I navigate to the Kanban board", async ({ page }) => {
+  await page.goto("/kanban")
+  await expect(page).toHaveURL(/\/kanban$/)
+  await dismissFirstRunSettings(page)
+})
+
+When("I open the Home dashboard", async ({ page }) => {
+  await page.goto("/")
+  await expect(page).toHaveURL(/\/$/)
+  await dismissFirstRunSettings(page)
+})
+
+When("I click the Kanban top nav control", async ({ page }) => {
+  await primaryNav(page)
+    .getByRole("link", { name: "Kanban", exact: true })
+    .click()
+})
+
+When("I click the Home top nav control", async ({ page }) => {
+  await primaryNav(page)
+    .getByRole("link", { name: "Home", exact: true })
+    .click()
 })
 
 Then("all six pipeline lane headers are visible", async ({ page }) => {
@@ -87,3 +111,52 @@ Then(
     )
   },
 )
+
+Then("the Home top nav control is active", async ({ page }) => {
+  const home = primaryNav(page).getByRole("link", { name: "Home", exact: true })
+  await expect(home).toBeVisible()
+  await expect(home).toHaveAttribute("aria-current", "page")
+})
+
+Then("the Kanban top nav control is active", async ({ page }) => {
+  const kanban = primaryNav(page).getByRole("link", {
+    name: "Kanban",
+    exact: true,
+  })
+  await expect(kanban).toBeVisible()
+  await expect(kanban).toHaveAttribute("aria-current", "page")
+})
+
+Then("the Home top nav control is not active", async ({ page }) => {
+  const home = primaryNav(page).getByRole("link", { name: "Home", exact: true })
+  await expect(home).toBeVisible()
+  await expect(home).not.toHaveAttribute("aria-current", "page")
+})
+
+Then("the Kanban top nav control is not active", async ({ page }) => {
+  const kanban = primaryNav(page).getByRole("link", {
+    name: "Kanban",
+    exact: true,
+  })
+  await expect(kanban).toBeVisible()
+  await expect(kanban).not.toHaveAttribute("aria-current", "page")
+})
+
+Then("I am on the Kanban board", async ({ page }) => {
+  await expect(page).toHaveURL(/\/kanban$/)
+  await expect(
+    page.getByRole("region", { name: "Lifecycle pipeline" }),
+  ).toBeVisible()
+})
+
+Then("I am on the Home dashboard", async ({ page }) => {
+  await expect(page).toHaveURL(/\/$/)
+  // Home-only landmark present with zero or more Repositories (stable across
+  // the shared live-e2e database after other features add a checkout).
+  await expect(
+    page.getByRole("region", { name: "Add a repository" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Lifecycle pipeline" }),
+  ).toHaveCount(0)
+})
