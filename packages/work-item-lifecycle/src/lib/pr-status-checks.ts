@@ -7,8 +7,10 @@ import {
   GREEN_NO_REVIEW_EVIDENCE_REASON,
   GitHubService,
   type PrStatusCheckDiagnostic,
+  type PullRequestCheckStatus,
   type TerminalPrStatusCheck,
 } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
@@ -236,14 +238,15 @@ const timingEvidence = (status: {
 export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
+    let status: PullRequestCheckStatus
+    // Forge dispatch: GitLab head-pipeline jobs vs GitHub Checks/statuses.
     if (repository.forge === "gitlab") {
-      return yield* new PrStatusChecksContextError({
-        message:
-          "GitLab PR Status Checks require GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
-      })
+      const gitlab = yield* GitLabService
+      status = yield* gitlab.getPullRequestCheckStatus(repository, branch)
+    } else {
+      const github = yield* GitHubService
+      status = yield* github.getPullRequestCheckStatus(repository, branch)
     }
-    const github = yield* GitHubService
-    const status = yield* github.getPullRequestCheckStatus(repository, branch)
     const evidence = timingEvidence(status)
     const terminalChecks =
       status._tag === "pending" ||
@@ -484,6 +487,9 @@ const sourceLabel = (externalId: string): string => {
   if (externalId.startsWith("status:")) {
     return "commit status"
   }
+  if (externalId.startsWith("gitlab-job:")) {
+    return "GitLab pipeline job"
+  }
   return "unknown source"
 }
 
@@ -635,32 +641,10 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
     }
     const redChecks = unhandled.filter((check) => check.outcome === "red")
     // Green-only handoffs: skip the Agent Turn when harness-owned observation
-    // proves there is no positive automated-review evidence.
-    if (redChecks.length === 0 && repository.forge === "github") {
-      const github = yield* GitHubService
-      const evidence = yield* github
-        .observeAutomatedReviewEvidence(
-          repository,
-          branch,
-          unhandled.map((check) => ({
-            externalId: check.external_id,
-            name: check.name,
-          })),
-        )
-        .pipe(
-          Effect.catch((cause) =>
-            Effect.succeed({
-              _tag: "ambiguous" as const,
-              reason:
-                "message" in cause &&
-                typeof cause.message === "string" &&
-                cause.message.trim() !== ""
-                  ? cause.message
-                  : "Failed to observe automated review evidence",
-            }),
-          ),
-        )
-      if (evidence._tag === "none") {
+    // proves there is no positive automated-review evidence. GitLab starts with
+    // an empty recognized-reviewer set, so green-only is always this fast path.
+    if (redChecks.length === 0) {
+      if (repository.forge === "gitlab") {
         const handledCheckIds = unhandled.map((check) => check.id)
         yield* Effect.logInfo(
           "Status Check Handoff fast path: no automated-review evidence",
@@ -668,6 +652,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
             reason: GREEN_NO_REVIEW_EVIDENCE_REASON,
             workItemId: context.workItemId,
             handledCheckCount: handledCheckIds.length,
+            forge: "gitlab",
           },
         )
         return {
@@ -677,7 +662,49 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           reasonNote: GREEN_NO_REVIEW_EVIDENCE_REASON,
         } satisfies PrStatusCheckInvestigationResult
       }
-      // Positive or ambiguous evidence falls through to the Agent Turn path.
+      if (repository.forge === "github") {
+        const github = yield* GitHubService
+        const evidence = yield* github
+          .observeAutomatedReviewEvidence(
+            repository,
+            branch,
+            unhandled.map((check) => ({
+              externalId: check.external_id,
+              name: check.name,
+            })),
+          )
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.succeed({
+                _tag: "ambiguous" as const,
+                reason:
+                  "message" in cause &&
+                  typeof cause.message === "string" &&
+                  cause.message.trim() !== ""
+                    ? cause.message
+                    : "Failed to observe automated review evidence",
+              }),
+            ),
+          )
+        if (evidence._tag === "none") {
+          const handledCheckIds = unhandled.map((check) => check.id)
+          yield* Effect.logInfo(
+            "Status Check Handoff fast path: no automated-review evidence",
+            {
+              reason: GREEN_NO_REVIEW_EVIDENCE_REASON,
+              workItemId: context.workItemId,
+              handledCheckCount: handledCheckIds.length,
+            },
+          )
+          return {
+            _tag: "processed",
+            handledCheckIds,
+            reasonCode: STEP_RUN_REASON.greenNoReviewEvidence,
+            reasonNote: GREEN_NO_REVIEW_EVIDENCE_REASON,
+          } satisfies PrStatusCheckInvestigationResult
+        }
+        // Positive or ambiguous evidence falls through to the Agent Turn path.
+      }
     }
     const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
       Effect.mapError((cause) => {
@@ -693,37 +720,47 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       }),
     )
     let diagnostics: readonly PrStatusCheckDiagnostic[] = []
-    if (redChecks.length > 0 && repository.forge === "github") {
-      const github = yield* GitHubService
+    if (redChecks.length > 0) {
       const logDirectory = `${worktreePath}/.ready-for-agent/status-check-logs`
-      diagnostics = yield* github
-        .getPrStatusCheckDiagnostics(
-          repository,
-          redChecks.map((check) => ({
-            externalId: check.external_id,
-            name: check.name,
-          })),
-          { logDirectory },
-        )
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new PrStatusChecksContextError({
-                message:
-                  "message" in cause &&
-                  typeof cause.message === "string" &&
-                  cause.message.trim() !== ""
-                    ? `Failed to load PR Status Check diagnostics: ${cause.message}`
-                    : "Failed to load PR Status Check diagnostics for red PR Status Checks",
-              }),
-          ),
-        )
+      const diagnosticRequests = redChecks.map((check) => ({
+        externalId: check.external_id,
+        name: check.name,
+      }))
+      const mapDiagnosticError = (cause: unknown) =>
+        new PrStatusChecksContextError({
+          message:
+            cause !== null &&
+            typeof cause === "object" &&
+            "message" in cause &&
+            typeof cause.message === "string" &&
+            cause.message.trim() !== ""
+              ? `Failed to load PR Status Check diagnostics: ${cause.message}`
+              : "Failed to load PR Status Check diagnostics for red PR Status Checks",
+        })
+      if (repository.forge === "gitlab") {
+        const gitlab = yield* GitLabService
+        diagnostics = yield* gitlab
+          .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
+            logDirectory,
+          })
+          .pipe(Effect.mapError(mapDiagnosticError))
+      } else {
+        const github = yield* GitHubService
+        diagnostics = yield* github
+          .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
+            logDirectory,
+          })
+          .pipe(Effect.mapError(mapDiagnosticError))
+      }
     }
     const agentBackend = yield* AgentBackend
     const timeout =
       context.maxDuration ??
       DEFAULT_LIFECYCLE_MAX_DURATIONS.investigate_pr_status_checks
-    const missingOutcomeMessage = `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN`
+    const missingOutcomeMessage =
+      repository.forge === "gitlab"
+        ? `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, FAILED, or NEEDS_HUMAN`
+        : `${agentBackendLabel(context.agentBackend)} did not report CHECKS_TRIGGERED, PROCESSED, RERUN_REVIEW, FAILED, or NEEDS_HUMAN`
 
     const continueInvestigationTurn = (
       prompt: string,
@@ -913,7 +950,8 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       typeof investigation !== "string" && investigation._tag === "failed"
         ? investigation.reason
         : "Unknown investigation outcome"
+    const forgeLabel = repository.forge === "gitlab" ? "GitLab" : "GitHub"
     return yield* new PrStatusChecksUnresolvedError({
-      message: `Manual fixing may be required. ${failedReason}. Please fix or rerun the checks on GitHub, then click Retry checks.`,
+      message: `Manual fixing may be required. ${failedReason}. Please fix or rerun the checks on ${forgeLabel}, then click Retry checks.`,
     })
   })

@@ -8,8 +8,11 @@ import {
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
 import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   type LifecycleStepContext,
-  MarkPrReadyForReviewContextError,
   makeWorkItemId,
   markPrReadyForReview,
 } from "../src/index.js"
@@ -132,8 +135,9 @@ describe("markPrReadyForReview", () => {
     expect(exit._tag).toBe("Failure")
   })
 
-  it("fails closed before GitHub access for a GitLab Repository", async () => {
+  it("marks a GitLab draft MR ready for review without querying GitHub", async () => {
     let githubCalls = 0
+    let gitlabBranch = ""
     const gitlabRepository = makeRepositoryRecord({
       id: repository.id,
       forge: "gitlab",
@@ -150,18 +154,20 @@ describe("markPrReadyForReview", () => {
         return Effect.void
       },
     } as GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      markPullRequestReadyForReview: (_repository, branch) => {
+        gitlabBranch = branch
+        return Effect.void
+      },
+    } as GitLabServiceShape)
 
-    const error = await Effect.runPromise(
+    await Effect.runPromise(
       markPrReadyForReview(context).pipe(
-        Effect.flip,
-        Effect.provide(Layer.merge(gitlabDb, github)),
+        Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab)),
       ),
     )
 
-    expect(error).toBeInstanceOf(MarkPrReadyForReviewContextError)
-    expect(error.message).toContain(
-      "refusing to query GitHub for a GitLab Repository",
-    )
     expect(githubCalls).toBe(0)
+    expect(gitlabBranch).toBe(`rfa/project-widgets/42/${context.workItemId}`)
   })
 })

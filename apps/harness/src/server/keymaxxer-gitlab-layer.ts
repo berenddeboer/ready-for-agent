@@ -94,6 +94,79 @@ const SerializedIssue = Schema.Struct({
 
 const SerializedIssues = Schema.Array(SerializedIssue)
 
+const SerializedTerminalPrStatusCheck = Schema.Struct({
+  externalId: Schema.String,
+  name: Schema.String,
+  outcome: Schema.Literals(["green", "red"]),
+})
+
+const SerializedPrStatusCheckLogFetch = Schema.Union([
+  Schema.TaggedStruct("ok", {
+    excerpt: Schema.String,
+    localPath: Schema.NullOr(Schema.String),
+  }),
+  Schema.TaggedStruct("unavailable", {
+    reason: Schema.String,
+  }),
+])
+
+const SerializedPrStatusCheckDiagnostic = Schema.Struct({
+  externalId: Schema.String,
+  name: Schema.String,
+  source: Schema.Literals(["actions-job", "status", "gitlab-job", "unknown"]),
+  htmlUrl: Schema.NullOr(Schema.String),
+  logFetch: SerializedPrStatusCheckLogFetch,
+})
+
+const SerializedPrStatusCheckDiagnostics = Schema.Array(
+  SerializedPrStatusCheckDiagnostic,
+)
+
+const SerializedPullRequestCheckStatusFields = {
+  mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
+  baseRefName: Schema.NullOr(Schema.String),
+  headPushedAt: Schema.NullOr(Schema.String),
+  headSha: Schema.NullOr(Schema.String),
+  createdAt: Schema.NullOr(Schema.String),
+  isDraft: Schema.NullOr(Schema.Boolean),
+} as const
+
+const SerializedPullRequestCheckStatus = Schema.Union([
+  Schema.TaggedStruct("pending", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+  Schema.TaggedStruct("expected", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+  Schema.TaggedStruct("no_checks", {
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+  Schema.TaggedStruct("succeeded", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+  Schema.TaggedStruct("failed", {
+    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+  Schema.TaggedStruct("closed", {
+    ...SerializedPullRequestCheckStatusFields,
+  }),
+])
+
+const decodeOptionalInstant = (value: string | null): Date | null => {
+  if (value === null) {
+    return null
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+  return parsed
+}
+
 const requestError = (
   repository: GitLabRepository,
   operation: string,
@@ -544,6 +617,108 @@ export const keymaxxerGitLabLayer = (options: {
               ),
             (ambientService) =>
               ambientService.countOpenNonDraftPullRequests(repository),
+          ),
+        ),
+        getPullRequestCheckStatus: Effect.fn(
+          "KeymaxxerGitLab.getPullRequestCheckStatus",
+        )((repository, headRefName) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "get-pr-check-status",
+                (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(SerializedPullRequestCheckStatus),
+                  )(stdout).pipe(
+                    Effect.map((status) => ({
+                      ...status,
+                      headPushedAt: decodeOptionalInstant(status.headPushedAt),
+                      createdAt: decodeOptionalInstant(status.createdAt),
+                    })),
+                    Effect.mapError(() =>
+                      requestError(
+                        repository,
+                        "decode pull request check status",
+                        stdout,
+                      ),
+                    ),
+                  ),
+                "get pull request check status",
+                [encodeArgument(headRefName)],
+              ),
+            (ambientService) =>
+              ambientService.getPullRequestCheckStatus(repository, headRefName),
+          ),
+        ),
+        getPrStatusCheckDiagnostics: Effect.fn(
+          "KeymaxxerGitLab.getPrStatusCheckDiagnostics",
+        )((repository, checks, options = {}) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) => {
+              const checksArg = encodeArgument(
+                JSON.stringify(
+                  checks.map((check) => ({
+                    externalId: check.externalId,
+                    name: check.name,
+                  })),
+                ),
+              )
+              const logDirectory =
+                typeof options.logDirectory === "string" &&
+                options.logDirectory.trim() !== ""
+                  ? encodeArgument(options.logDirectory)
+                  : ""
+              return runVaultHelper(
+                repository,
+                tokenName,
+                "get-pr-status-check-diagnostics",
+                (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(SerializedPrStatusCheckDiagnostics),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError(
+                        repository,
+                        "decode PR Status Check diagnostics",
+                        stdout,
+                      ),
+                    ),
+                  ),
+                "get PR Status Check diagnostics",
+                logDirectory === "" ? [checksArg] : [checksArg, logDirectory],
+              )
+            },
+            (ambientService) =>
+              ambientService.getPrStatusCheckDiagnostics(
+                repository,
+                checks,
+                options,
+              ),
+          ),
+        ),
+        markPullRequestReadyForReview: Effect.fn(
+          "KeymaxxerGitLab.markPullRequestReadyForReview",
+        )((repository, headRefName) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "mark-pr-ready-for-review",
+                () => Effect.void,
+                "mark pull request ready for review",
+                [encodeArgument(headRefName)],
+              ),
+            (ambientService) =>
+              ambientService.markPullRequestReadyForReview(
+                repository,
+                headRefName,
+              ),
           ),
         ),
         ensureIssueCompletedWithSummary: Effect.fn(

@@ -16,13 +16,16 @@ import {
   type PullRequestCheckStatus,
 } from "@ready-for-agent/github-service"
 import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
 import {
   AUTOMATED_REVIEW_RERUN_LIMIT,
   type LifecycleStepContext,
-  PrStatusChecksContextError,
   automatedReviewRerunLimitReason,
   investigatePrStatusChecks,
   makeWorkItemId,
@@ -181,6 +184,30 @@ const githubWith = (
     ensureIssueCompletedWithSummary: () => Effect.void,
     ...overrides,
   } satisfies GitHubServiceShape)
+
+const gitlabWith = (
+  status: PullRequestCheckStatus,
+  overrides: Partial<GitLabServiceShape> = {},
+) =>
+  Layer.succeed(GitLabService, {
+    verifyProject: () => Effect.void,
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    hasCredentials: () => Effect.succeed(true),
+    hasAmbientCredentials: () => Effect.succeed(true),
+    getOpenPullRequestNumber: () => Effect.succeed(1),
+    findOpenPullRequestNumber: () => Effect.succeed(1),
+    createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    getPullRequestCheckStatus: () => Effect.succeed(status),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    markPullRequestReadyForReview: () => Effect.void,
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    closeOpenPullRequestsForBranch: () => Effect.void,
+    deleteBranch: () => Effect.void,
+    ...overrides,
+  } satisfies GitLabServiceShape)
 
 const opencodeWith = (
   outputs: readonly string[],
@@ -1077,6 +1104,36 @@ describe("PR status check steps", () => {
                   Effect.die("must not rerun a GitHub workflow"),
               },
             ),
+            gitlabWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                terminalChecks: [
+                  {
+                    externalId: "gitlab-job:1",
+                    name: "lint",
+                    outcome: "red",
+                  },
+                ],
+              },
+              {
+                getPrStatusCheckDiagnostics: () =>
+                  Effect.succeed([
+                    {
+                      externalId: "gitlab-job:1",
+                      name: "lint",
+                      source: "gitlab-job" as const,
+                      htmlUrl:
+                        "https://git.drupalcode.org/project/oauth_client/-/jobs/1",
+                      logFetch: {
+                        _tag: "ok" as const,
+                        excerpt: "ERROR: lint failed",
+                        localPath: null,
+                      },
+                    },
+                  ]),
+              },
+            ),
             keymaxxerDisabled,
             opencodeWith(
               ["fixed and pushed\nREADY_FOR_AGENT_RESULT: CHECKS_TRIGGERED"],
@@ -1091,6 +1148,7 @@ describe("PR status check steps", () => {
     expect(result._tag).toBe("checks_triggered")
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain("GitLab pipeline-job traces")
+    expect(prompts[0]).toContain("ERROR: lint failed")
     expect(prompts[0]).toContain("curl")
     expect(prompts[0]).toContain("https://git.drupalcode.org/api/v4")
     expect(prompts[0]).toContain("GITLAB_TOKEN")
@@ -1100,12 +1158,13 @@ describe("PR status check steps", () => {
     expect(prompts[0]).not.toContain("GitHub")
   })
 
-  it("fails closed instead of watching GitHub checks for a GitLab Repository", async () => {
+  it("watches GitLab head-pipeline jobs without querying GitHub", async () => {
     let githubCalled = false
-    const exit = await Effect.runPromise(
+    let gitlabBranch = ""
+    const status = await Effect.runPromise(
       Effect.gen(function* () {
         yield* seedWorkItem
-        return yield* Effect.result(watchPrStatusChecks(context))
+        return yield* watchPrStatusChecks(context)
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1123,20 +1182,114 @@ describe("PR status check steps", () => {
                 },
               },
             ),
+            gitlabWith(
+              {
+                _tag: "failed",
+                ...mergeable,
+                isDraft: true,
+                headSha: "abc123",
+                terminalChecks: [
+                  {
+                    externalId: "gitlab-job:9",
+                    name: "phpunit",
+                    outcome: "red",
+                  },
+                  {
+                    externalId: "gitlab-job:10",
+                    name: "lint",
+                    outcome: "green",
+                  },
+                ],
+              },
+              {
+                getPullRequestCheckStatus: (_repository, branch) => {
+                  gitlabBranch = branch
+                  return Effect.succeed({
+                    _tag: "failed" as const,
+                    ...mergeable,
+                    isDraft: true,
+                    headSha: "abc123",
+                    terminalChecks: [
+                      {
+                        externalId: "gitlab-job:9",
+                        name: "phpunit",
+                        outcome: "red" as const,
+                      },
+                      {
+                        externalId: "gitlab-job:10",
+                        name: "lint",
+                        outcome: "green" as const,
+                      },
+                    ],
+                  })
+                },
+              },
+            ),
             DatabaseTest,
           ),
         ),
       ),
     )
 
-    expect(exit._tag).toBe("Failure")
-    if (exit._tag === "Failure") {
-      expect(exit.failure).toBeInstanceOf(PrStatusChecksContextError)
-      expect(exit.failure.message).toContain(
-        "refusing to query GitHub for a GitLab Repository",
-      )
-    }
     expect(githubCalled).toBe(false)
+    expect(gitlabBranch).toContain("project-oauth-client")
+    expect(status._tag).toBe("handoff_needed")
+    expect(status.isDraft).toBe(true)
+  })
+
+  it("completes a GitLab green-only handoff without an Agent Turn", async () => {
+    let continueCalled = false
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* seedStatusCheck({
+          id: "psc-gitlab-green",
+          externalId: "gitlab-job:3",
+          name: "lint",
+          outcome: "green",
+        })
+        return yield* investigatePrStatusChecks(context)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            gitlabDb,
+            githubWith(
+              {
+                _tag: "succeeded",
+                ...mergeable,
+                terminalChecks: [],
+              },
+              {
+                observeAutomatedReviewEvidence: () =>
+                  Effect.die("must not observe GitHub review evidence"),
+              },
+            ),
+            gitlabWith({
+              _tag: "succeeded",
+              ...mergeable,
+              terminalChecks: [
+                {
+                  externalId: "gitlab-job:3",
+                  name: "lint",
+                  outcome: "green",
+                },
+              ],
+            }),
+            keymaxxerDisabled,
+            opencodeWith([], () => {
+              continueCalled = true
+            }),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(result).toMatchObject({
+      _tag: "processed",
+      reasonNote: "green-no-review-evidence",
+    })
+    expect(continueCalled).toBe(false)
   })
 
   it("makes a focused recovery attempt after FAILED and accepts recovered progress", async () => {

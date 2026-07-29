@@ -25,6 +25,19 @@ const gitlabLifecycleStub = {
   createDraftPullRequest: () => Effect.succeed(1),
   updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  getPullRequestCheckStatus: () =>
+    Effect.succeed({
+      _tag: "succeeded" as const,
+      terminalChecks: [],
+      mergeability: "mergeable" as const,
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: null,
+      createdAt: null,
+      isDraft: null,
+    }),
+  getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+  markPullRequestReadyForReview: () => Effect.void,
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,
@@ -469,5 +482,182 @@ describe("Keymaxxer-backed GitLab layer", () => {
 
     expect(error).toBeInstanceOf(GitLabRequestError)
     expect(error.message).toContain("list Ready-labeled Issues")
+  })
+
+  test("checks a merge-request branch through the vault secret and rehydrates dates", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: ({ account }) =>
+        Effect.succeed(
+          account === vaultAccount ? "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT" : null,
+        ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            _tag: "failed",
+            mergeability: "mergeable",
+            baseRefName: "1.0.x",
+            headPushedAt: "2026-07-20T10:04:00.000Z",
+            headSha: "deadbeef",
+            createdAt: "2026-07-20T10:00:00.000Z",
+            isDraft: true,
+            terminalChecks: [
+              {
+                externalId: "gitlab-job:2",
+                name: "phpunit",
+                outcome: "red",
+              },
+            ],
+          }),
+          stderr: "",
+        })
+      },
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const status = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.getPullRequestCheckStatus(
+          repository,
+          "rfa/project-oauth-client/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(status).toEqual({
+      _tag: "failed",
+      mergeability: "mergeable",
+      baseRefName: "1.0.x",
+      headPushedAt: new Date("2026-07-20T10:04:00.000Z"),
+      headSha: "deadbeef",
+      createdAt: new Date("2026-07-20T10:00:00.000Z"),
+      isDraft: true,
+      terminalChecks: [
+        {
+          externalId: "gitlab-job:2",
+          name: "phpunit",
+          outcome: "red",
+        },
+      ],
+    })
+    expect(runs[0]?.command).toContain("get-pr-check-status")
+    expect(runs[0]?.command).toContain('GITLAB_TOKEN="$')
+    expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
+  })
+
+  test("loads PR Status Check diagnostics through the vault secret", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: ({ account }) =>
+        Effect.succeed(
+          account === vaultAccount ? "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT" : null,
+        ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              externalId: "gitlab-job:2",
+              name: "phpunit",
+              source: "gitlab-job",
+              htmlUrl:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/2",
+              logFetch: {
+                _tag: "ok",
+                excerpt: "FAIL: expected true\n",
+                localPath: null,
+              },
+            },
+          ]),
+          stderr: "",
+        })
+      },
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const diagnostics = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.getPrStatusCheckDiagnostics(
+          repository,
+          [{ externalId: "gitlab-job:2", name: "phpunit" }],
+          { logDirectory: "/tmp/worktree/.ready-for-agent/status-check-logs" },
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(diagnostics).toEqual([
+      {
+        externalId: "gitlab-job:2",
+        name: "phpunit",
+        source: "gitlab-job",
+        htmlUrl: "https://git.drupalcode.org/project/oauth_client/-/jobs/2",
+        logFetch: {
+          _tag: "ok",
+          excerpt: "FAIL: expected true\n",
+          localPath: null,
+        },
+      },
+    ])
+    expect(runs[0]?.command).toContain("get-pr-status-check-diagnostics")
+    expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
+  })
+
+  test("marks a merge request ready for review through the vault secret", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: ({ account }) =>
+        Effect.succeed(
+          account === vaultAccount ? "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT" : null,
+        ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({ _tag: "ready" }),
+          stderr: "",
+        })
+      },
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        yield* gitlab.markPullRequestReadyForReview(
+          repository,
+          "rfa/project-oauth-client/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(runs[0]?.command).toContain("mark-pr-ready-for-review")
+    expect(runs[0]?.command).toContain('GITLAB_TOKEN="$')
+    expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
   })
 })

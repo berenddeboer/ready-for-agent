@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import type { PullRequestCheckStatus } from "@ready-for-agent/github-service"
 import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
 import { GitLabService } from "./gitlab-service.js"
 import type { GitLabReadyLabeledIssue, GitLabRepository } from "./types.js"
@@ -9,6 +10,7 @@ export interface GitLabServiceTestFixture {
   readonly operatorLogin?: string
   readonly openPullRequestByBranch?: Readonly<Record<string, number>>
   readonly openNonDraftPullRequestCount?: number
+  readonly pullRequestCheckStatus?: PullRequestCheckStatus
   readonly error?: GitLabRequestError
 }
 
@@ -84,6 +86,25 @@ export const makeGitLabServiceTest = (
       failOr(repository, (fixture) =>
         Effect.succeed(fixture.openNonDraftPullRequestCount ?? 0),
       ),
+    getPullRequestCheckStatus: (repository) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(
+          fixture.pullRequestCheckStatus ?? {
+            _tag: "succeeded" as const,
+            terminalChecks: [],
+            mergeability: "mergeable" as const,
+            baseRefName: "main",
+            headPushedAt: null,
+            headSha: null,
+            createdAt: null,
+            isDraft: null,
+          },
+        ),
+      ),
+    getPrStatusCheckDiagnostics: (repository) =>
+      failOr(repository, () => Effect.succeed([])),
+    markPullRequestReadyForReview: (repository) =>
+      failOr(repository, () => Effect.void),
     ensureIssueCompletedWithSummary: (repository) =>
       failOr(repository, () => Effect.void),
     closeOpenPullRequestsForBranch: (repository) =>

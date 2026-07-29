@@ -30,6 +30,11 @@ const fakeFetch = (
       responses[`${method} ${pathKey}`] ??
       (method === "GET" ? responses[pathKey] : undefined)
     if (response === undefined) {
+      // Bridge listing is optional in fixtures; empty is a valid default when
+      // a test only registers ordinary /jobs.
+      if (method === "GET" && pathKey.includes("/bridges?")) {
+        return json([])
+      }
       throw new Error(`Unexpected request: ${method} ${pathKey}`)
     }
     return response instanceof Response ? response : json(response)
@@ -359,7 +364,7 @@ describe("GitLab draft MR and Close Issue adapter", () => {
     const service = makeGitLabServiceFromToken(
       "test-token",
       fakeFetch({
-        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fissue-1&per_page=100&page=1":
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fissue-1&order_by=updated_at&sort=desc&per_page=100&page=1":
           [{ iid: 17, draft: true, title: "Draft", description: "body" }],
         "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&wip=no&per_page=100&page=1":
           [
@@ -573,5 +578,1003 @@ describe("GitLab draft MR and Close Issue adapter", () => {
     await expect(
       Effect.runPromise(service.deleteBranch(repository, "gone")),
     ).resolves.toBeUndefined()
+  })
+})
+
+describe("GitLab PR status checks and ready-for-review", () => {
+  test("maps head-pipeline jobs with allow_failure, manual, and canceled rules", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: true, title: "Draft: fix" }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: true,
+          title: "Draft: fix",
+          created_at: "2026-07-20T10:00:00.000Z",
+          sha: "deadbeef",
+          target_branch: "1.0.x",
+          detailed_merge_status: "ci_still_running",
+          merge_status: "can_be_merged",
+          head_pipeline: {
+            id: 99,
+            status: "running",
+            sha: "deadbeef",
+            created_at: "2026-07-20T10:05:00.000Z",
+          },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/deadbeef": {
+          id: "deadbeef",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/99/jobs?per_page=100&page=1":
+          [
+            {
+              id: 1,
+              name: "lint",
+              status: "success",
+              allow_failure: false,
+              web_url:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/1",
+            },
+            {
+              id: 2,
+              name: "phpunit",
+              status: "failed",
+              allow_failure: false,
+              web_url:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/2",
+            },
+            {
+              id: 3,
+              name: "style",
+              status: "failed",
+              allow_failure: true,
+              web_url:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/3",
+            },
+            {
+              id: 4,
+              name: "deploy",
+              status: "manual",
+              allow_failure: true,
+              web_url:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/4",
+            },
+            {
+              id: 5,
+              name: "optional",
+              status: "canceled",
+              allow_failure: false,
+              web_url:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/5",
+            },
+            {
+              id: 6,
+              name: "build",
+              status: "running",
+              allow_failure: false,
+              web_url:
+                "https://git.drupalcode.org/project/oauth_client/-/jobs/6",
+            },
+          ],
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+
+    expect(status._tag).toBe("pending")
+    if (status._tag !== "pending") return
+    expect(status.mergeability).toBe("mergeable")
+    expect(status.baseRefName).toBe("1.0.x")
+    expect(status.headSha).toBe("deadbeef")
+    expect(status.isDraft).toBe(true)
+    expect(status.createdAt).toEqual(new Date("2026-07-20T10:00:00.000Z"))
+    expect(status.headPushedAt).toEqual(new Date("2026-07-20T10:04:00.000Z"))
+    expect(status.terminalChecks).toEqual([
+      { externalId: "gitlab-job:1", name: "lint", outcome: "green" },
+      { externalId: "gitlab-job:2", name: "phpunit", outcome: "red" },
+    ])
+  })
+
+  test("reports no_checks when the head pipeline is not visible yet", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: true }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: true,
+          title: "Draft: fix",
+          created_at: "2026-07-20T10:00:00.000Z",
+          sha: "deadbeef",
+          target_branch: "main",
+          detailed_merge_status: "checking",
+          merge_status: "checking",
+          head_pipeline: null,
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/deadbeef": {
+          id: "deadbeef",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status).toMatchObject({
+      _tag: "no_checks",
+      mergeability: "unknown",
+      headSha: "deadbeef",
+      isDraft: true,
+    })
+  })
+
+  test("never reports Expected PR Status Checks for GitLab", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          head_pipeline: { id: 1, status: "success", sha: "abc" },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [
+            {
+              id: 7,
+              name: "lint",
+              status: "success",
+              allow_failure: false,
+            },
+          ],
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("succeeded")
+    expect(status).not.toMatchObject({ _tag: "expected" })
+  })
+
+  test("loads job traces as diagnostics for red gitlab-job ids", async () => {
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname === "/api/v4/projects/project%2Foauth_client/jobs/2"
+      ) {
+        return json({
+          id: 2,
+          name: "phpunit",
+          status: "failed",
+          web_url: "https://git.drupalcode.org/project/oauth_client/-/jobs/2",
+        })
+      }
+      if (
+        method === "GET" &&
+        url.pathname === "/api/v4/projects/project%2Foauth_client/jobs/2/trace"
+      ) {
+        return new Response("FAIL: expected true\n", {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        })
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`)
+    }) as typeof fetch)
+
+    const diagnostics = await Effect.runPromise(
+      service.getPrStatusCheckDiagnostics(repository, [
+        { externalId: "gitlab-job:2", name: "phpunit" },
+      ]),
+    )
+
+    expect(diagnostics).toEqual([
+      {
+        externalId: "gitlab-job:2",
+        name: "phpunit",
+        source: "gitlab-job",
+        htmlUrl: "https://git.drupalcode.org/project/oauth_client/-/jobs/2",
+        logFetch: {
+          _tag: "ok",
+          excerpt: "FAIL: expected true\n",
+          localPath: null,
+        },
+      },
+    ])
+  })
+
+  test("marks a draft MR ready for review by clearing draft and title prefix", async () => {
+    const mutations: unknown[] = []
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname ===
+          "/api/v4/projects/project%2Foauth_client/merge_requests" &&
+        url.search.includes("source_branch=rfa%2Fbranch")
+      ) {
+        return json([{ iid: 12, draft: true, title: "Draft: fix lint" }])
+      }
+      if (
+        method === "GET" &&
+        url.pathname ===
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12"
+      ) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: true,
+          title: "Draft: fix lint",
+        })
+      }
+      if (
+        method === "PUT" &&
+        url.pathname ===
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12"
+      ) {
+        const body = JSON.parse(String(init?.body ?? "{}"))
+        mutations.push(body)
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix lint",
+        })
+      }
+      throw new Error(
+        `Unexpected request: ${method} ${url.pathname}${url.search}`,
+      )
+    }) as typeof fetch)
+
+    await Effect.runPromise(
+      service.markPullRequestReadyForReview(repository, "rfa/branch"),
+    )
+
+    expect(mutations).toEqual([{ draft: false, title: "fix lint" }])
+  })
+
+  test("reports conflicting mergeability for Merge Conflict Handoff", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "conflict",
+          merge_status: "cannot_be_merged",
+          head_pipeline: { id: 1, status: "success", sha: "abc" },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [
+            {
+              id: 1,
+              name: "lint",
+              status: "success",
+              allow_failure: false,
+            },
+          ],
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status.mergeability).toBe("conflicting")
+    expect(status._tag).toBe("succeeded")
+  })
+
+  test("observes a closed MR after open list is empty", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [],
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=all&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false, title: "fix" }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "closed",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "not_open",
+          merge_status: "cannot_be_merged",
+          head_pipeline: null,
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("closed")
+    expect(status.headSha).toBe("abc")
+    // not_open + cannot_be_merged must not invent a conflict for Watch.
+    expect(status.mergeability).not.toBe("conflicting")
+  })
+
+  test("locked MRs keep watching the head pipeline (not decode failure)", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [],
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=all&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false, title: "fix" }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "locked",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "checking",
+          merge_status: "checking",
+          head_pipeline: { id: 1, status: "success", sha: "abc" },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [
+            {
+              id: 1,
+              name: "lint",
+              status: "success",
+              allow_failure: false,
+            },
+          ],
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("succeeded")
+    expect(status.headSha).toBe("abc")
+  })
+
+  test("single-MR 404 after list resolves to pending, not project unavailable", async () => {
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return new Response("not found", { status: 404 })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("pending")
+    expect(status).toMatchObject({
+      terminalChecks: [],
+      headSha: null,
+    })
+  })
+
+  test("merged MRs report succeeded with non-blocking mergeability", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [],
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=all&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false, title: "fix" }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "merged",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "not_open",
+          merge_status: "cannot_be_merged",
+          has_conflicts: false,
+          head_pipeline: { id: 1, status: "success", sha: "abc" },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status).toMatchObject({
+      _tag: "succeeded",
+      mergeability: "mergeable",
+      headSha: "abc",
+    })
+  })
+
+  test("treats policy/CI detailed statuses as mergeable so reds can hand off", async () => {
+    const openUrl =
+      "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1"
+    for (const detailed of [
+      "status_checks_must_pass",
+      "security_policy_violations",
+      "locked_paths",
+    ] as const) {
+      const service = makeGitLabServiceFromToken(
+        "test-token",
+        fakeFetch({
+          [openUrl]: [{ iid: 12, draft: false }],
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+            iid: 12,
+            state: "opened",
+            draft: false,
+            title: "fix",
+            sha: "abc",
+            target_branch: "main",
+            detailed_merge_status: detailed,
+            merge_status: "cannot_be_merged",
+            has_conflicts: false,
+            head_pipeline: { id: 1, status: "failed", sha: "abc" },
+          },
+          "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+            id: "abc",
+            committed_date: "2026-07-20T10:04:00.000Z",
+          },
+          "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+            [
+              {
+                id: 1,
+                name: "lint",
+                status: "failed",
+                allow_failure: false,
+              },
+            ],
+        }),
+      )
+
+      const status = await Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "rfa/branch"),
+      )
+      expect(status.mergeability).toBe("mergeable")
+      expect(status._tag).toBe("failed")
+    }
+  })
+
+  test("uses has_conflicts and detailed conflict for true merge conflicts", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "ci_must_pass",
+          merge_status: "cannot_be_merged",
+          has_conflicts: true,
+          head_pipeline: { id: 1, status: "success", sha: "abc" },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [
+            {
+              id: 1,
+              name: "lint",
+              status: "success",
+              allow_failure: false,
+            },
+          ],
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status.mergeability).toBe("conflicting")
+  })
+
+  test("includes bridge jobs so parent/child pipelines do not look settled early", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "ci_still_running",
+          merge_status: "can_be_merged",
+          head_pipeline: {
+            id: 1,
+            status: "running",
+            sha: "abc",
+          },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        // Parent has no ordinary jobs — only a trigger/bridge to a child pipeline.
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [],
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/bridges?per_page=100&page=1":
+          [
+            {
+              id: 50,
+              name: "trigger:child",
+              status: "running",
+              allow_failure: false,
+            },
+          ],
+      }),
+    )
+
+    const pending = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(pending._tag).toBe("pending")
+
+    const failedService = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "ci_must_pass",
+          merge_status: "can_be_merged",
+          head_pipeline: {
+            id: 1,
+            status: "failed",
+            sha: "abc",
+          },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [],
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/bridges?per_page=100&page=1":
+          [
+            {
+              id: 50,
+              name: "trigger:child",
+              status: "failed",
+              allow_failure: false,
+            },
+          ],
+      }),
+    )
+    const failed = await Effect.runPromise(
+      failedService.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(failed._tag).toBe("failed")
+    if (failed._tag === "failed") {
+      expect(failed.terminalChecks).toEqual([
+        {
+          externalId: "gitlab-job:50",
+          name: "trigger:child",
+          outcome: "red",
+        },
+      ])
+    }
+  })
+
+  test("manual-only jobs settle without waiting forever on pipeline manual status", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1":
+          [{ iid: 12, draft: false }],
+        "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "mergeable",
+          merge_status: "can_be_merged",
+          head_pipeline: { id: 1, status: "manual", sha: "abc" },
+        },
+        "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        },
+        "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+          [
+            {
+              id: 1,
+              name: "deploy",
+              status: "manual",
+              allow_failure: true,
+            },
+          ],
+      }),
+    )
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    // Job-level manual is ignore; do not fall back to pipeline "manual" as
+    // pending (which would requeue Watch forever).
+    expect(status._tag).toBe("no_checks")
+  })
+
+  test("jobs-list 404 degrades to empty jobs and pipeline-status rollup", async () => {
+    const service = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: false }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "fix",
+          sha: "abc",
+          target_branch: "main",
+          detailed_merge_status: "ci_still_running",
+          merge_status: "can_be_merged",
+          head_pipeline: { id: 1, status: "running", sha: "abc" },
+        })
+      }
+      if (method === "GET" && url.pathname.includes("/repository/commits/")) {
+        return json({
+          id: "abc",
+          committed_date: "2026-07-20T10:04:00.000Z",
+        })
+      }
+      if (method === "GET" && url.pathname.endsWith("/pipelines/1/jobs")) {
+        return new Response("not found", { status: 404 })
+      }
+      if (method === "GET" && url.pathname.endsWith("/pipelines/1/bridges")) {
+        return json([])
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    const status = await Effect.runPromise(
+      service.getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(status._tag).toBe("pending")
+  })
+
+  test("empty jobs fall back to head_pipeline status instead of settled no_checks", async () => {
+    const openUrl =
+      "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1"
+    const emptyLists = {
+      "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1":
+        [] as const,
+      "/api/v4/projects/project%2Foauth_client/pipelines/1/bridges?per_page=100&page=1":
+        [] as const,
+      "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+        id: "abc",
+        committed_date: "2026-07-20T10:04:00.000Z",
+      },
+    }
+
+    const running = await Effect.runPromise(
+      makeGitLabServiceFromToken(
+        "test-token",
+        fakeFetch({
+          [openUrl]: [{ iid: 12, draft: false }],
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+            iid: 12,
+            state: "opened",
+            draft: false,
+            title: "fix",
+            sha: "abc",
+            target_branch: "main",
+            detailed_merge_status: "ci_still_running",
+            merge_status: "can_be_merged",
+            head_pipeline: { id: 1, status: "running", sha: "abc" },
+          },
+          ...emptyLists,
+        }),
+      ).getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(running._tag).toBe("pending")
+
+    const pipelineFailed = await Effect.runPromise(
+      makeGitLabServiceFromToken(
+        "test-token",
+        fakeFetch({
+          [openUrl]: [{ iid: 12, draft: false }],
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+            iid: 12,
+            state: "opened",
+            draft: false,
+            title: "fix",
+            sha: "abc",
+            target_branch: "main",
+            detailed_merge_status: "ci_must_pass",
+            merge_status: "can_be_merged",
+            head_pipeline: { id: 1, status: "failed", sha: "abc" },
+          },
+          ...emptyLists,
+        }),
+      ).getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(pipelineFailed._tag).toBe("failed")
+
+    const pipelineSuccess = await Effect.runPromise(
+      makeGitLabServiceFromToken(
+        "test-token",
+        fakeFetch({
+          [openUrl]: [{ iid: 12, draft: false }],
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12": {
+            iid: 12,
+            state: "opened",
+            draft: false,
+            title: "fix",
+            sha: "abc",
+            target_branch: "main",
+            detailed_merge_status: "mergeable",
+            merge_status: "can_be_merged",
+            head_pipeline: { id: 1, status: "success", sha: "abc" },
+          },
+          ...emptyLists,
+        }),
+      ).getPullRequestCheckStatus(repository, "rfa/branch"),
+    )
+    expect(pipelineSuccess._tag).toBe("succeeded")
+  })
+
+  test("aggregates skipped-only, all-green, and hard-fail pipelines", async () => {
+    const jobsUrl =
+      "/api/v4/projects/project%2Foauth_client/pipelines/1/jobs?per_page=100&page=1"
+    const openUrl =
+      "/api/v4/projects/project%2Foauth_client/merge_requests?state=opened&source_branch=rfa%2Fbranch&order_by=updated_at&sort=desc&per_page=100&page=1"
+    const mrBase = {
+      iid: 12,
+      state: "opened" as const,
+      draft: false,
+      title: "fix",
+      sha: "abc",
+      target_branch: "main",
+      detailed_merge_status: "mergeable",
+      merge_status: "can_be_merged",
+      head_pipeline: { id: 1, status: "success", sha: "abc" },
+    }
+
+    const run = async (jobs: readonly unknown[]) => {
+      const service = makeGitLabServiceFromToken(
+        "test-token",
+        fakeFetch({
+          [openUrl]: [{ iid: 12, draft: false }],
+          "/api/v4/projects/project%2Foauth_client/merge_requests/12": mrBase,
+          "/api/v4/projects/project%2Foauth_client/repository/commits/abc": {
+            id: "abc",
+            committed_date: "2026-07-20T10:04:00.000Z",
+          },
+          [jobsUrl]: jobs,
+        }),
+      )
+      return Effect.runPromise(
+        service.getPullRequestCheckStatus(repository, "rfa/branch"),
+      )
+    }
+
+    const skippedOnly = await run([
+      { id: 1, name: "optional", status: "skipped", allow_failure: false },
+    ])
+    // Skip-only jobs are ignore terminals; pipeline-status fallback applies
+    // only when zero jobs exist, so this settles as no_checks (not pending).
+    expect(skippedOnly._tag).toBe("no_checks")
+
+    const allGreen = await run([
+      { id: 1, name: "lint", status: "success", allow_failure: false },
+      { id: 2, name: "test", status: "success", allow_failure: false },
+    ])
+    expect(allGreen._tag).toBe("succeeded")
+    if (allGreen._tag === "succeeded") {
+      expect(allGreen.terminalChecks).toHaveLength(2)
+    }
+
+    const hardFail = await run([
+      { id: 1, name: "lint", status: "success", allow_failure: false },
+      { id: 2, name: "test", status: "failed", allow_failure: false },
+    ])
+    expect(hardFail._tag).toBe("failed")
+  })
+
+  test("mark ready is idempotent for non-draft and strips empty Draft: titles", async () => {
+    let putCount = 0
+    const readyService = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: false, title: "Already ready" }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: "Already ready",
+        })
+      }
+      if (method === "PUT") {
+        putCount += 1
+        return json({ iid: 12, state: "opened", draft: false, title: "x" })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    await Effect.runPromise(
+      readyService.markPullRequestReadyForReview(repository, "rfa/branch"),
+    )
+    expect(putCount).toBe(0)
+
+    const mutations: unknown[] = []
+    const emptyDraftService = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 12, draft: true, title: "Draft:" }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/12")) {
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: true,
+          title: "Draft:",
+        })
+      }
+      if (method === "PUT" && url.pathname.endsWith("/merge_requests/12")) {
+        const body = JSON.parse(String(init?.body ?? "{}"))
+        mutations.push(body)
+        return json({
+          iid: 12,
+          state: "opened",
+          draft: false,
+          title: body.title,
+        })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    await Effect.runPromise(
+      emptyDraftService.markPullRequestReadyForReview(repository, "rfa/branch"),
+    )
+    expect(mutations).toEqual([{ draft: false, title: "Ready" }])
+
+    const nestedMutations: unknown[] = []
+    const nestedDraftService = makeGitLabServiceFromToken("test-token", (async (
+      input,
+      init,
+    ) => {
+      const url = new URL(String(input))
+      const method = (init?.method ?? "GET").toUpperCase()
+      if (
+        method === "GET" &&
+        url.pathname.endsWith("/merge_requests") &&
+        url.search.includes("state=opened")
+      ) {
+        return json([{ iid: 13, draft: true, title: "Draft: WIP: nested" }])
+      }
+      if (method === "GET" && url.pathname.endsWith("/merge_requests/13")) {
+        return json({
+          iid: 13,
+          state: "opened",
+          draft: true,
+          title: "Draft: WIP: nested",
+        })
+      }
+      if (method === "PUT" && url.pathname.endsWith("/merge_requests/13")) {
+        const body = JSON.parse(String(init?.body ?? "{}"))
+        nestedMutations.push(body)
+        return json({
+          iid: 13,
+          state: "opened",
+          draft: false,
+          title: body.title,
+        })
+      }
+      throw new Error(`Unexpected: ${method} ${url.pathname}${url.search}`)
+    }) as typeof fetch)
+
+    await Effect.runPromise(
+      nestedDraftService.markPullRequestReadyForReview(
+        repository,
+        "rfa/nested",
+      ),
+    )
+    expect(nestedMutations).toEqual([{ draft: false, title: "nested" }])
   })
 })

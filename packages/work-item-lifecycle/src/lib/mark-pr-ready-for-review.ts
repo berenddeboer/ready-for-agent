@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -13,8 +14,8 @@ export class MarkPrReadyForReviewContextError extends Schema.TaggedErrorClass<Ma
 
 /**
  * Production Mark PR Ready for Review Lifecycle Step.
- * After status checks are green, converts the draft PR on the Work Item branch
- * to ready for review via the GitHub GraphQL API (token-backed, no `gh`).
+ * After status checks are green, converts the draft PR/MR on the Work Item
+ * branch to ready for review (GitHub GraphQL or GitLab draft flag).
  */
 export const markPrReadyForReview = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -33,17 +34,16 @@ export const markPrReadyForReview = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
-    if (repository.forge === "gitlab") {
-      return yield* new MarkPrReadyForReviewContextError({
-        message:
-          "GitLab Mark PR Ready for Review requires GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
-      })
-    }
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      yield* gitlab.markPullRequestReadyForReview(repository, branch)
+      return
+    }
     const github = yield* GitHubService
     yield* github.markPullRequestReadyForReview(repository, branch)
   })
