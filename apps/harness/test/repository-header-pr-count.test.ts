@@ -17,6 +17,12 @@ const openPrCountLiveSource = () =>
     "utf8",
   )
 
+const membershipLiveSource = () =>
+  readFileSync(
+    join(import.meta.dir, "../src/refresh-repositories-live.ts"),
+    "utf8",
+  )
+
 describe("repository header pull request count", () => {
   test("main repositories query does not request pullRequestCount", () => {
     const source = homeSource()
@@ -95,15 +101,21 @@ describe("repository header pull request count", () => {
     expect(home).toMatch(
       /followOpenPullRequestCountLive\(\{\s*queryClient,\s*openPullRequestCountsQuery,/,
     )
-    // Repository membership SSE fire-and-forgets dedicated counts, then awaits
-    // repositories only — never couples membership catch-up to count latency.
-    expect(home).toContain("streamRepositoryChanges")
-    expect(home).toMatch(
+    // Repository membership SSE is owned by the transport-health follower;
+    // catch-up fire-and-forgets dedicated counts and never couples warning
+    // state to count latency.
+    expect(home).toContain("followRepositoryMembershipLive")
+    expect(home).toContain("liveUpdatesWarningPresentation")
+    expect(home).toContain("onLiveUpdatesUnavailable")
+
+    const membership = membershipLiveSource()
+    expect(membership).toContain("openPullRequestCountsQueryKey")
+    expect(membership).toMatch(
       /invalidateQueries\(\{\s*queryKey:\s*openPullRequestCountsQueryKey\s*\}\)/,
     )
-    expect(home).toMatch(
-      /invalidateQueries\(\{\s*queryKey:\s*openPullRequestCountsQueryKey[\s\S]*?fetchQuery\(\{\s*\.\.\.repositoriesQuery/,
-    )
+    expect(membership).toContain("scheduleCatchUp")
+    expect(membership).toContain("Fire-and-forget")
+    expect(membership).toContain("transport health")
 
     const live = openPrCountLiveSource()
     expect(live).toContain("OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS")
