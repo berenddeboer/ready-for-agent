@@ -630,16 +630,24 @@ export function CommittedPullRequestsDashboard() {
   const lastWeekQuery = useQuery(
     committedPullRequestsCountQuery(bounds.lastWeekFrom, bounds.lastWeekTo),
   )
+  const twoWeeksAgoQuery = useQuery(
+    committedPullRequestsCountQuery(
+      bounds.twoWeeksAgoFrom,
+      bounds.twoWeeksAgoTo,
+    ),
+  )
   const loading =
     todayQuery.isLoading ||
     yesterdayQuery.isLoading ||
     thisWeekQuery.isLoading ||
-    lastWeekQuery.isLoading
+    lastWeekQuery.isLoading ||
+    twoWeeksAgoQuery.isLoading
   const failed =
     todayQuery.isError ||
     yesterdayQuery.isError ||
     thisWeekQuery.isError ||
-    lastWeekQuery.isError
+    lastWeekQuery.isError ||
+    twoWeeksAgoQuery.isError
 
   if (loading) {
     return (
@@ -649,7 +657,8 @@ export function CommittedPullRequestsDashboard() {
         aria-label="Loading committed pull requests"
         aria-busy="true"
       >
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
           <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
           <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
           <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
@@ -673,10 +682,11 @@ export function CommittedPullRequestsDashboard() {
   const yesterday = yesterdayQuery.data ?? 0
   const thisWeek = thisWeekQuery.data ?? 0
   const lastWeek = lastWeekQuery.data ?? 0
+  const twoWeeksAgo = twoWeeksAgoQuery.data ?? 0
 
   return (
     <article className="border border-rule-2 bg-panel px-4 py-4 sm:px-5">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
         <div>
           <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
             Today
@@ -707,6 +717,14 @@ export function CommittedPullRequestsDashboard() {
           </p>
           <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
             {lastWeek}
+          </p>
+        </div>
+        <div>
+          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
+            Two weeks ago
+          </p>
+          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
+            {twoWeeksAgo}
           </p>
         </div>
       </div>

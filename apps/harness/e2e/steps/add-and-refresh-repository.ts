@@ -34,6 +34,7 @@ Given("the Harness has no configured Repositories", async ({ page }) => {
   await expect(page.getByText("Yesterday", { exact: true })).toHaveCount(0)
   await expect(page.getByText("This week", { exact: true })).toHaveCount(0)
   await expect(page.getByText("Last week", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Two weeks ago", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("region", { name: "Jobs" })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Jobs" })).toHaveCount(0)
   await expect(page.getByText("Add a repository to see jobs.")).toHaveCount(0)

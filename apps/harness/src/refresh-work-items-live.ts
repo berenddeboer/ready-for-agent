@@ -122,8 +122,9 @@ export const followRepositoryWorkItemsLive = async ({
 
   /**
    * Refetch active committed-pull-requests-count windows (Today / Yesterday /
-   * This week / Last week) observed by the mounted dashboard. Coalesces so a
-   * burst of Work Item notifications shares one trailing aggregate refresh.
+   * This week / Last week / Two weeks ago) observed by the mounted dashboard.
+   * Coalesces so a burst of Work Item notifications shares one trailing
+   * aggregate refresh.
    *
    * Intermediate pass failures are swallowed so pending notifications still
    * drain. A failure on the final pass rejects so callers can retry or
