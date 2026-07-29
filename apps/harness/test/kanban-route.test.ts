@@ -39,7 +39,12 @@ describe("/kanban route", () => {
     expect(source).toContain('{ id: "pipeline", label: "Pipeline" }')
     expect(source).toContain('{ id: "working", label: "Working" }')
     expect(source).toContain('{ id: "failed", label: "Failed" }')
-    expect(source).toContain('{ id: "completed", label: "Completed" }')
+    expect(source).toContain(
+      '{ id: "completed", label: JOBS_COMPLETED_TAB_LABEL }',
+    )
+    expect(source).toContain(
+      "Completed last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h",
+    )
     expect(source).toContain('role="tablist"')
     expect(source).toContain('role="tab"')
     expect(source).toContain("aria-selected={selected}")
@@ -106,6 +111,14 @@ describe("/kanban route", () => {
     expect(source).not.toContain("createClient(")
     expect(source).not.toContain("setInterval")
     expect(source).not.toContain("refetchInterval")
+  })
+
+  test("Pipeline preserves Completed stateReadyAt order instead of re-sorting by createdAt", () => {
+    const source = kanbanSource()
+    const board = source.slice(source.indexOf("function KanbanJobsBoard("))
+    expect(board).toContain("sortCompletedNewestFirst")
+    expect(board).toContain("const pipelineItems = Array.from(")
+    expect(board).not.toMatch(/const pipelineItems\s*=\s*sortNewestFirst\s*\(/)
   })
 
   test("starts live invalidation after the initial board queries settle", () => {

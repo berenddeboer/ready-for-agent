@@ -13,6 +13,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./jobs-completed-window": {
+      "@ready-for-agent/source": "./src/lib/jobs-completed-window.ts",
+      "types": "./dist/lib/jobs-completed-window.d.ts",
+      "import": "./dist/lib/jobs-completed-window.js",
+      "default": "./dist/lib/jobs-completed-window.js"
     }
   },
   "dependencies": {

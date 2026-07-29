@@ -572,12 +572,18 @@ export const createGraphqlApi = (
                 const lifecycle = yield* WorkItemLifecycle
                 const listKind = toWorkItemsListKind(args.listKind)
                 const limit = args.limit
+                const nowMs = Date.now()
                 if (args.issueNumber !== undefined) {
                   const workItems = yield* lifecycle.listWorkItemsForIssue(
                     args.repositoryId,
                     args.issueNumber,
                   )
-                  return filterWorkItemsByListKind(workItems, listKind, limit)
+                  return filterWorkItemsByListKind(
+                    workItems,
+                    listKind,
+                    limit,
+                    nowMs,
+                  )
                 }
                 const db = yield* DbService
                 const [workItems, issues] = yield* Effect.all([
@@ -593,7 +599,12 @@ export const createGraphqlApi = (
                     isJobsWorkingWorkItem(workItem) ||
                     relevantIssueNumbers.has(workItem.issueNumber),
                 )
-                return filterWorkItemsByListKind(visible, listKind, limit)
+                return filterWorkItemsByListKind(
+                  visible,
+                  listKind,
+                  limit,
+                  nowMs,
+                )
               }).pipe(Effect.withSpan("graphql-api.workItems")),
             ),
           committedPullRequestsCount: async (

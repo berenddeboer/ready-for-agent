@@ -50,9 +50,11 @@ type Query {
   listKind WORKING: unfinished Work Items (including retryable failed or
   interrupted Step Runs) plus Needs Human (no history cap from the Jobs card).
   listKind FAILED: non-retryable terminal failures only, newest createdAt first.
-  Pass limit (e.g. 15) to bound Failed history — independent of the Completed limit.
-  listKind COMPLETED: Complete and Abandoned only, newest createdAt first;
-  pass limit (e.g. 15) to bound finished history. Terminal failed is not included.
+  Pass limit (e.g. 15) to bound Failed history — independent of Completed.
+  listKind COMPLETED: Complete and Abandoned only, with stateReadyAt in the
+  rolling previous JOBS_COMPLETED_WINDOW_MS (24 hours), newest stateReadyAt
+  first, no default item cap. Optional limit may still bound the window.
+  Terminal failed is not included.
   """
   workItems(
     repositoryId: ID!

@@ -1,5 +1,11 @@
 import { Duration, Schema } from "effect"
 import { ulid } from "ulidx"
+import {
+  JOBS_COMPLETED_WINDOW_HOURS,
+  JOBS_COMPLETED_WINDOW_MS,
+} from "./jobs-completed-window.js"
+
+export { JOBS_COMPLETED_WINDOW_HOURS, JOBS_COMPLETED_WINDOW_MS }
 
 export const WorkItemId = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^wi-[0-9A-HJKMNP-TV-Z]{26}$/)),
@@ -257,6 +263,16 @@ const newestCreatedFirst = <T extends { readonly createdAt: Date }>(
     .slice()
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
 
+const newestStateReadyFirst = <T extends { readonly stateReadyAt: Date }>(
+  items: readonly T[],
+): T[] =>
+  items
+    .slice()
+    .sort(
+      (left, right) =>
+        right.stateReadyAt.getTime() - left.stateReadyAt.getTime(),
+    )
+
 const applyLimit = <T>(
   items: readonly T[],
   limit: number | undefined,
@@ -264,7 +280,10 @@ const applyLimit = <T>(
 
 /**
  * Filter Work Items for Jobs Working / Failed / Completed lists.
- * Failed and Completed are ordered by createdAt newest-first (recency for last-N windows).
+ * Failed is ordered by createdAt newest-first (recency for last-N windows).
+ * Completed is Complete/Abandoned with stateReadyAt in the rolling previous
+ * JOBS_COMPLETED_WINDOW_MS (from nowMs), ordered by stateReadyAt newest-first,
+ * with no default item cap (optional limit still applies when provided).
  * Working preserves input order. Omitting listKind returns the input unchanged.
  */
 export const filterWorkItemsByListKind = <
@@ -272,11 +291,13 @@ export const filterWorkItemsByListKind = <
     readonly state: WorkItemState
     readonly failureCode?: string | null
     readonly createdAt: Date
+    readonly stateReadyAt: Date
   },
 >(
   workItems: readonly T[],
   listKind: WorkItemsListKind | undefined,
   limit?: number,
+  nowMs: number = Date.now(),
 ): readonly T[] => {
   if (listKind === undefined) {
     return workItems
@@ -290,9 +311,14 @@ export const filterWorkItemsByListKind = <
       limit,
     )
   }
+  const windowStartMs = nowMs - JOBS_COMPLETED_WINDOW_MS
   return applyLimit(
-    newestCreatedFirst(
-      workItems.filter((item) => isJobsCompletedWorkItemState(item.state)),
+    newestStateReadyFirst(
+      workItems.filter(
+        (item) =>
+          isJobsCompletedWorkItemState(item.state) &&
+          item.stateReadyAt.getTime() >= windowStartMs,
+      ),
     ),
     limit,
   )

@@ -1,4 +1,5 @@
 import {
+  JOBS_COMPLETED_WINDOW_MS,
   type OperationalLifecycleStep,
   type StepRunStatus,
   type WorkItemState,
@@ -10,16 +11,20 @@ import {
 } from "../src/lib/types.js"
 import { describe, expect, it } from "bun:test"
 
+const NOW_MS = Date.parse("2026-07-30T12:00:00.000Z")
+
 const item = (
   state: WorkItemState,
   createdAtMs: number,
   latestStepStatus?: StepRunStatus,
   failureCode: string | null = null,
   latestStep?: OperationalLifecycleStep,
+  stateReadyAtMs: number = createdAtMs,
 ) => ({
   state,
   failureCode,
   createdAt: new Date(createdAtMs),
+  stateReadyAt: new Date(stateReadyAtMs),
   stepRuns:
     latestStepStatus === undefined
       ? []
@@ -110,14 +115,14 @@ describe("Jobs list membership", () => {
 
 describe("filterWorkItemsByListKind", () => {
   const items = [
-    item("complete", 1000),
-    item("implement", 2000, "running"),
-    item("needs_human", 3000),
-    item("failed", 4000, "failed"),
-    item("abandoned", 5000),
-    item("create_worktree", 6000, "queued"),
-    item("pre_commit", 7000, "failed"),
-    item("review", 8000, "interrupted"),
+    item("complete", NOW_MS - 8000),
+    item("implement", NOW_MS - 7000, "running"),
+    item("needs_human", NOW_MS - 6000),
+    item("failed", NOW_MS - 5000, "failed"),
+    item("abandoned", NOW_MS - 4000),
+    item("create_worktree", NOW_MS - 3000, "queued"),
+    item("pre_commit", NOW_MS - 2000, "failed"),
+    item("review", NOW_MS - 1000, "interrupted"),
   ]
 
   it("returns the input unchanged when listKind is omitted", () => {
@@ -144,7 +149,9 @@ describe("filterWorkItemsByListKind", () => {
 
   it("filters Completed to Complete/Abandoned newest-first without terminal failed", () => {
     expect(
-      filterWorkItemsByListKind(items, "completed").map((i) => i.state),
+      filterWorkItemsByListKind(items, "completed", undefined, NOW_MS).map(
+        (i) => i.state,
+      ),
     ).toEqual(["abandoned", "complete"])
   })
 
@@ -158,26 +165,122 @@ describe("filterWorkItemsByListKind", () => {
     expect(limited[14]!.createdAt.getTime()).toBe(500)
   })
 
-  it("limits Completed to the newest N by createdAt", () => {
+  it("includes every Completed item within the rolling 24h window without a fixed limit", () => {
     const many = Array.from({ length: 20 }, (_, index) =>
-      item(index % 2 === 0 ? "complete" : "abandoned", index * 100),
+      item(
+        index % 2 === 0 ? "complete" : "abandoned",
+        NOW_MS - index * 60_000,
+        undefined,
+        null,
+        undefined,
+        NOW_MS - index * 60_000,
+      ),
     )
-    const limited = filterWorkItemsByListKind(many, "completed", 15)
+    const filtered = filterWorkItemsByListKind(
+      many,
+      "completed",
+      undefined,
+      NOW_MS,
+    )
+    expect(filtered).toHaveLength(20)
+    expect(filtered[0]!.stateReadyAt.getTime()).toBe(NOW_MS)
+    expect(filtered[19]!.stateReadyAt.getTime()).toBe(NOW_MS - 19 * 60_000)
+  })
+
+  it("excludes Completed items whose stateReadyAt is older than 24 hours", () => {
+    const recent = item(
+      "complete",
+      NOW_MS - 1_000,
+      undefined,
+      null,
+      undefined,
+      NOW_MS - 1_000,
+    )
+    const atBoundary = item(
+      "abandoned",
+      NOW_MS - JOBS_COMPLETED_WINDOW_MS,
+      undefined,
+      null,
+      undefined,
+      NOW_MS - JOBS_COMPLETED_WINDOW_MS,
+    )
+    const tooOld = item(
+      "complete",
+      NOW_MS - JOBS_COMPLETED_WINDOW_MS - 1,
+      undefined,
+      null,
+      undefined,
+      NOW_MS - JOBS_COMPLETED_WINDOW_MS - 1,
+    )
+    expect(
+      filterWorkItemsByListKind(
+        [recent, atBoundary, tooOld],
+        "completed",
+        undefined,
+        NOW_MS,
+      ).map((i) => i.stateReadyAt.getTime()),
+    ).toEqual([
+      recent.stateReadyAt.getTime(),
+      atBoundary.stateReadyAt.getTime(),
+    ])
+  })
+
+  it("orders Completed by stateReadyAt (completion), not createdAt", () => {
+    const olderCompletion = item(
+      "complete",
+      NOW_MS - 10_000,
+      undefined,
+      null,
+      undefined,
+      NOW_MS - 2_000,
+    )
+    const newerCompletion = item(
+      "abandoned",
+      NOW_MS - 20_000,
+      undefined,
+      null,
+      undefined,
+      NOW_MS - 1_000,
+    )
+    expect(
+      filterWorkItemsByListKind(
+        [olderCompletion, newerCompletion],
+        "completed",
+        undefined,
+        NOW_MS,
+      ).map((i) => i.state),
+    ).toEqual(["abandoned", "complete"])
+  })
+
+  it("applies optional limit after the Completed window, newest stateReadyAt first", () => {
+    const many = Array.from({ length: 20 }, (_, index) =>
+      item(
+        index % 2 === 0 ? "complete" : "abandoned",
+        NOW_MS - index * 60_000,
+        undefined,
+        null,
+        undefined,
+        NOW_MS - index * 60_000,
+      ),
+    )
+    const limited = filterWorkItemsByListKind(many, "completed", 15, NOW_MS)
     expect(limited).toHaveLength(15)
-    expect(limited[0]!.createdAt.getTime()).toBe(1900)
-    expect(limited[14]!.createdAt.getTime()).toBe(500)
+    expect(limited[0]!.stateReadyAt.getTime()).toBe(NOW_MS)
+    expect(limited[14]!.stateReadyAt.getTime()).toBe(NOW_MS - 14 * 60_000)
   })
 
   it("does not put Needs Human or Failed under Completed even with limit", () => {
     const mixed = [
-      item("needs_human", 9000),
-      item("complete", 8000),
-      item("failed", 7000, "failed"),
-      item("implement", 6000, "failed"),
-      item("abandoned", 5000),
+      item("needs_human", NOW_MS - 1000),
+      item("complete", NOW_MS - 2000),
+      item("failed", NOW_MS - 3000, "failed"),
+      item("implement", NOW_MS - 4000, "failed"),
+      item("abandoned", NOW_MS - 5000),
     ]
     expect(
-      filterWorkItemsByListKind(mixed, "completed", 15).map((i) => i.state),
+      filterWorkItemsByListKind(mixed, "completed", 15, NOW_MS).map(
+        (i) => i.state,
+      ),
     ).toEqual(["complete", "abandoned"])
   })
 

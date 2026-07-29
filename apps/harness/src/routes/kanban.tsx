@@ -15,7 +15,7 @@ import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 import {
   CommittedPullRequestsDashboard,
-  JOBS_COMPLETED_LIMIT,
+  JOBS_COMPLETED_WINDOW_HOURS,
   JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
   type Repository,
@@ -32,11 +32,13 @@ import {
 
 type JobsTab = "pipeline" | "working" | "failed" | "completed"
 
+const JOBS_COMPLETED_TAB_LABEL = `Completed last ${JOBS_COMPLETED_WINDOW_HOURS} h`
+
 const JOBS_TABS = [
   { id: "pipeline", label: "Pipeline" },
   { id: "working", label: "Working" },
   { id: "failed", label: "Failed" },
-  { id: "completed", label: "Completed" },
+  { id: "completed", label: JOBS_COMPLETED_TAB_LABEL },
 ] as const satisfies readonly { id: JobsTab; label: string }[]
 
 const PIPELINE_LANE_LABELS = {
@@ -51,19 +53,26 @@ const PIPELINE_LANE_LABELS = {
 const jobsTabEmptyMessage = (tab: Exclude<JobsTab, "pipeline">): string => {
   if (tab === "working") return "No working jobs."
   if (tab === "failed") return "No failed jobs."
-  return "No completed jobs."
+  return `No jobs completed in the last ${JOBS_COMPLETED_WINDOW_HOURS} h.`
 }
 
 const jobsTabListAriaLabel = (tab: Exclude<JobsTab, "pipeline">): string => {
   if (tab === "working") return "Working jobs"
   if (tab === "failed") return "Failed jobs"
-  return "Completed jobs"
+  return JOBS_COMPLETED_TAB_LABEL
 }
 
 const sortNewestFirst = (items: readonly WorkItem[]): readonly WorkItem[] =>
   items
     .slice()
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+
+const sortCompletedNewestFirst = (
+  items: readonly WorkItem[],
+): readonly WorkItem[] =>
+  items
+    .slice()
+    .sort((left, right) => right.stateReadyAt.localeCompare(left.stateReadyAt))
 
 const repositoryIssueKey = (
   repositoryId: string,
@@ -277,18 +286,19 @@ function KanbanJobsBoard() {
   const failedItems = sortNewestFirst(
     failedQueries.flatMap((query) => query.data ?? []),
   ).slice(0, JOBS_FAILED_LIMIT)
-  const completedItems = sortNewestFirst(
+  const completedItems = sortCompletedNewestFirst(
     completedQueries.flatMap((query) => query.data ?? []),
-  ).slice(0, JOBS_COMPLETED_LIMIT)
-  const pipelineItems = sortNewestFirst(
-    Array.from(
-      new Map(
-        [...workingItems, ...failedItems, ...completedItems].map((item) => [
-          item.id,
-          item,
-        ]),
-      ).values(),
-    ),
+  )
+  // Preserve per-list recency: Working/Failed by createdAt, Completed by
+  // stateReadyAt. Do not re-sort the merge by createdAt or Complete-lane order
+  // drifts from the Completed tab.
+  const pipelineItems = Array.from(
+    new Map(
+      [...workingItems, ...failedItems, ...completedItems].map((item) => [
+        item.id,
+        item,
+      ]),
+    ).values(),
   )
   const repositoryFilteredItems = (items: readonly WorkItem[]) =>
     selectedRepositoryId === null
