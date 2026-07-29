@@ -9,7 +9,7 @@ A code-hosting platform kind the harness supports as a Repository's source of gi
 _Avoid_: Provider (overloaded with model provider and credential metadata), issue source (too narrow — the Forge also hosts Pull Requests and checks), platform
 
 **Forge Host**:
-The hostname of the Forge instance serving a Repository — `github.com` for GitHub, or a self-managed GitLab instance such as `git.drupalcode.org`. It is part of Repository identity: the same Project Path on two different Forge Hosts denotes two different Repositories. The git remote's hostname is not authoritative for the Forge Host — an instance may serve SSH on a different hostname (git.drupal.org vs git.drupalcode.org) — so the Forge Host is guessed from the remote, verified against the Forge API, and correctable in Repository settings.
+The hostname of the Forge instance serving a Repository — `github.com` for GitHub, or a self-managed GitLab instance such as `git.drupalcode.org`. It is part of Repository identity: the same Project Path on two different Forge Hosts denotes two different Repositories. The git remote's hostname is not authoritative for the Forge Host — an instance may serve SSH on a different hostname (git.drupal.org vs git.drupalcode.org).
 _Avoid_: Instance URL, server, domain
 
 **Project Path**:
@@ -17,7 +17,7 @@ The Forge's own slash-separated path addressing the project within its Forge Hos
 _Avoid_: Owner/repo pair (cannot express nested GitLab paths), clone URL (too many spellings for one project)
 
 **Repository**:
-A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per project; the harness keeps a single local clone of it (bare or working). Displayed as `Project Path` — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
+A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per project; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **End-to-End Fixture Repository**:
@@ -163,12 +163,16 @@ _Avoid_: Required Keymaxxer support, injected Forge token
 An Issue carrying the `ready-for-agent` Forge label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, Forge state, and Issue Author (username when the Forge provides one) so consumers can decide whether it is actionable.
 _Avoid_: Ready Issue (can imply that the Issue is open and actionable)
 
+**Pull Request**:
+A proposal to merge one branch into another on a Forge, reviewed and merged through the Forge: a GitHub pull request or a GitLab merge request.
+_Avoid_: Merge request, MR (GitLab's name for the same concept)
+
 **Issue-closing PR**:
-A pull request that the Forge associates with an Issue through closing semantics, such as a supported closing keyword. GitLab calls a pull request a merge request; both are Pull Requests in harness language. A mere mention or other cross-reference does not make a pull request an Issue-closing PR.
-_Avoid_: Merge request, MR (as separate harness terms), related PR, linked PR (both can include incidental references)
+A Pull Request that the Forge associates with an Issue through closing semantics, such as a supported closing keyword. A mere mention or other cross-reference does not make one an Issue-closing PR.
+_Avoid_: Related PR, linked PR (both can include incidental references)
 
 **Work Item PR**:
-A pull request whose exact identity is recorded by a Work Item. A matching Issue number or Git branch alone does not establish that the PR belongs to the Work Item. The PR need not use Issue-closing semantics. Complete, Failed, Needs Human, and Abandoned Work Items retain their Work Item PR; Reset relinquishes ownership by deleting the Work Item. When an Issue has multiple Issue-closing PRs, one matching Work Item PR is sufficient to establish that the harness is managing the Issue.
+A Pull Request whose exact identity is recorded by a Work Item. A matching Issue number or Git branch alone does not establish that the PR belongs to the Work Item. The PR need not use Issue-closing semantics. Complete, Failed, Needs Human, and Abandoned Work Items retain their Work Item PR; Reset relinquishes ownership by deleting the Work Item. When an Issue has multiple Issue-closing PRs, one matching Work Item PR is sufficient to establish that the harness is managing the Issue.
 _Avoid_: Our PR, harness PR, associated PR
 
 **Last PR Change**:
