@@ -6,6 +6,24 @@ export type BrowserOpenEnv = Partial<
 
 const DEFAULT_UI_PORT = 6056
 const DEFAULT_UI_HOST = "127.0.0.1"
+const DEFAULT_READY_TIMEOUT_MS = 60_000
+const DEFAULT_POLL_INTERVAL_MS = 250
+
+/** Minimal child surface used by the detached browser launcher (testable). */
+type DetachedBrowserChild = {
+  on(event: "error", listener: (error: Error) => void): unknown
+  unref(): unknown
+}
+
+/** Minimal spawn surface used by the detached browser launcher (testable). */
+export type BrowserSpawn = (
+  command: string,
+  args: ReadonlyArray<string>,
+  options: {
+    readonly detached: true
+    readonly stdio: "ignore"
+  },
+) => DetachedBrowserChild
 
 /** Whether start should open the default browser to the local UI. */
 export const shouldOpenBrowser = (input: {
@@ -56,31 +74,107 @@ export const browserOpenCommand = (
 }
 
 /**
- * Detached browser launch is deliberately a host boundary: polling uses fetch
- * and the launcher must outlive its child rather than be scoped to an Effect.
+ * Detached best-effort browser launch.
+ *
+ * Spawn failures (missing `xdg-open`, etc.) arrive on the child `error` event,
+ * not as a synchronous throw. Register that handler before `unref()` so the
+ * host process cannot terminate from an unhandled spawn error. The GUI process
+ * remains detached — callers never own browser lifetime.
  */
-export const openBrowserWhenReady = (platform: string, url: string): void => {
+export const launchDetachedBrowser = (
+  platform: string,
+  url: string,
+  spawnImpl: BrowserSpawn = spawn as BrowserSpawn,
+): void => {
   const { command, args } = browserOpenCommand(platform, url)
-  const deadline = Date.now() + 60_000
+  try {
+    const child = spawnImpl(command, [...args], {
+      detached: true,
+      stdio: "ignore",
+    })
+    // Must attach before unref: unhandled `error` can exit the host (Bun).
+    child.on("error", () => {
+      // Best-effort only.
+    })
+    child.unref()
+  } catch {
+    // Best-effort: startup must not fail when the opener is unavailable.
+  }
+}
 
-  const tryOpen = async () => {
-    while (Date.now() < deadline) {
+export type OpenBrowserWhenReadyOptions = {
+  readonly signal?: AbortSignal
+  readonly fetch?: (
+    input: string,
+    init?: RequestInit,
+  ) => Promise<Pick<Response, "status" | "body">>
+  readonly sleep?: (ms: number) => Promise<void>
+  readonly launch?: (platform: string, url: string) => void
+  readonly now?: () => number
+  readonly timeoutMs?: number
+  readonly pollIntervalMs?: number
+}
+
+/**
+ * Poll until the UI URL responds, then launch the platform opener once.
+ *
+ * Owned by the caller: pass an `AbortSignal` (e.g. from Effect.tryPromise) so
+ * the poll stops when startup completes, fails, or is interrupted. The browser
+ * process itself is not canceled on abort.
+ */
+export const openBrowserWhenReady = (
+  platform: string,
+  url: string,
+  options: OpenBrowserWhenReadyOptions = {},
+): Promise<void> => {
+  const signal = options.signal
+  const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis)
+  const sleep =
+    options.sleep ?? ((ms: number) => Bun.sleep(ms) as Promise<void>)
+  const launch = options.launch ?? launchDetachedBrowser
+  const now = options.now ?? Date.now
+  const timeoutMs = options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
+  const deadline = now() + timeoutMs
+
+  const aborted = (): boolean => signal?.aborted === true
+
+  const poll = async (): Promise<void> => {
+    while (now() < deadline) {
+      if (aborted()) {
+        return
+      }
+
       try {
-        const response = await fetch(url, { redirect: "manual" })
-        void response.body?.cancel()
+        const response = await fetchImpl(url, {
+          redirect: "manual",
+          signal,
+        })
+        void response.body?.cancel?.()
         if (response.status > 0) {
-          spawn(command, [...args], {
-            detached: true,
-            stdio: "ignore",
-          }).unref()
+          if (aborted()) {
+            return
+          }
+          try {
+            launch(platform, url)
+          } catch {
+            // Opener failure is best-effort.
+          }
           return
         }
       } catch {
-        // Port not ready yet.
+        if (aborted()) {
+          return
+        }
+        // Port not ready yet, or fetch aborted.
       }
-      await Bun.sleep(250)
+
+      if (aborted()) {
+        return
+      }
+      await sleep(pollIntervalMs)
     }
   }
 
-  void tryOpen()
+  return poll()
 }
