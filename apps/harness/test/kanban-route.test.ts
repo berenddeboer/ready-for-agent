@@ -23,7 +23,7 @@ describe("/kanban route", () => {
       "Queue",
       "Build",
       "Review",
-      "Ship",
+      "PR",
       "Attention",
       "Complete",
     ]) {
