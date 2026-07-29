@@ -409,6 +409,7 @@ function KanbanJobsBoard() {
                   type="button"
                   className="lane-switch"
                   aria-pressed={mobileLane === lane.id}
+                  aria-controls={`lane-panel-${lane.id}`}
                   key={lane.id}
                   onClick={() => setMobileLane(lane.id)}
                 >
@@ -424,6 +425,7 @@ function KanbanJobsBoard() {
                   <section
                     className="pipeline-lane"
                     data-mobile-active={mobileLane === lane.id}
+                    id={`lane-panel-${lane.id}`}
                     key={lane.id}
                     aria-labelledby={`lane-${lane.id}`}
                   >

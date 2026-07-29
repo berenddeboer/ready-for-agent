@@ -103,14 +103,48 @@ describe("/kanban route", () => {
     expect(settledBranch).toContain("<KanbanLiveUpdates")
   })
 
-  test("ports the six-column industrial board and responsive lane selector", () => {
-    const source = stylesSource()
-    expect(source).toContain(".pipeline-board")
-    expect(source).toContain("grid-template-columns: repeat(6, minmax(0, 1fr))")
-    expect(source).toContain(".lane-header")
-    expect(source).toContain("position: sticky")
-    expect(source).toContain(".job-ticket")
-    expect(source).toContain("@media (max-width: 900px)")
-    expect(source).toContain("grid-template-columns: repeat(3, minmax(0, 1fr))")
+  test("renders an accessible mobile lane selector controlling one selected lane", () => {
+    const source = kanbanSource()
+    expect(source).toContain('useState<PipelineLaneId>("queue")')
+    expect(source).toContain('<fieldset className="lane-switcher">')
+    expect(source).toContain("aria-pressed={mobileLane === lane.id}")
+    expect(source).toMatch(/aria-controls=\{`lane-panel-\$\{lane\.id\}`\}/)
+    expect(source).toContain("onClick={() => setMobileLane(lane.id)}")
+    expect(source).toContain("data-mobile-active={mobileLane === lane.id}")
+    expect(source).toMatch(/id=\{`lane-panel-\$\{lane\.id\}`\}/)
+  })
+
+  test("keeps the six-column board and sticky lane headers on desktop", () => {
+    const desktopStyles = stylesSource().split("@media (max-width: 900px)")[0]
+    expect(desktopStyles).toContain(".pipeline-board")
+    expect(desktopStyles).toContain(
+      "grid-template-columns: repeat(6, minmax(0, 1fr))",
+    )
+    expect(desktopStyles).toContain(".lane-header")
+    expect(desktopStyles).toContain("position: sticky")
+    expect(desktopStyles).toContain(".job-ticket")
+    expect(desktopStyles).toContain(".lane-switcher")
+    expect(desktopStyles).toContain("display: none")
+  })
+
+  test("uses a touch-scrollable repository row and three-column lane selector on mobile", () => {
+    const mobileStyles = stylesSource().split("@media (max-width: 900px)")[1]
+    expect(mobileStyles).toBeDefined()
+    expect(mobileStyles).toContain(".repository-filters")
+    expect(mobileStyles).toContain("flex-wrap: nowrap")
+    expect(mobileStyles).toContain("overflow-x: auto")
+    expect(mobileStyles).toContain("touch-action: pan-x")
+    expect(mobileStyles).toContain(".lane-switcher")
+    expect(mobileStyles).toContain("display: grid")
+    expect(mobileStyles).toContain(
+      "grid-template-columns: repeat(3, minmax(0, 1fr))",
+    )
+    expect(mobileStyles).toContain(".pipeline-lane")
+    expect(mobileStyles).toContain("display: none")
+    expect(mobileStyles).toMatch(
+      /\.pipeline-lane\[data-mobile-active="true"\]\s*\{\s*display: block;\s*\}/,
+    )
+    expect(mobileStyles).toContain(".lane-header")
+    expect(mobileStyles).toContain("position: static")
   })
 })
