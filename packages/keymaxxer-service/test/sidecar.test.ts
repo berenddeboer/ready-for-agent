@@ -1,6 +1,7 @@
-import { Effect } from "effect"
+import { Cause, Effect, Option } from "effect"
 import {
   KeymaxxerService,
+  type KeymaxxerToolClient,
   type KeymaxxerUpstreamClient,
   parseSidecarUrl,
   sidecarKeymaxxerLayer,
@@ -56,6 +57,80 @@ describe("parseSidecarUrl", () => {
 })
 
 describe("sidecar-backed Keymaxxer layer", () => {
+  test("closes a lazily created client exactly once when its layer is released", async () => {
+    let closeCalls = 0
+    const client: KeymaxxerToolClient = {
+      callTool: async () => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify([{ name: "PRESENT_SECRET" }]),
+          },
+        ],
+      }),
+      close: async () => {
+        closeCalls += 1
+        throw new Error("close failed")
+      },
+    }
+
+    const present = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        yield* keymaxxer.initialize
+        return yield* keymaxxer.hasSecret("PRESENT_SECRET")
+      }).pipe(
+        Effect.provide(
+          sidecarKeymaxxerLayer("http://127.0.0.1:6057/capability/mcp", {
+            createClient: async () => client,
+            fetch: async () => new Response(null, { status: 404 }),
+          }),
+        ),
+      ),
+    )
+
+    expect(present).toBe(true)
+    expect(closeCalls).toBe(1)
+  })
+
+  test("preserves a failed operation when closing its client also fails", async () => {
+    let closeCalls = 0
+    const client: KeymaxxerToolClient = {
+      callTool: async () => {
+        throw new Error("request failed")
+      },
+      close: async () => {
+        closeCalls += 1
+        throw new Error("close failed")
+      },
+    }
+
+    const exit = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        return yield* Effect.exit(keymaxxer.hasSecret("PRESENT_SECRET"))
+      }).pipe(
+        Effect.provide(
+          sidecarKeymaxxerLayer("http://127.0.0.1:6057/capability/mcp", {
+            createClient: async () => client,
+            fetch: async () => new Response(null, { status: 404 }),
+          }),
+        ),
+      ),
+    )
+
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      expect(
+        Option.getOrThrow(Cause.findErrorOption(exit.cause)),
+      ).toMatchObject({
+        _tag: "KeymaxxerError",
+        operation: "listSecrets",
+      })
+    }
+    expect(closeCalls).toBe(1)
+  })
+
   test("initializes over TCP and runs Keymaxxer tools through Streamable HTTP", async () => {
     const facade = await startKeymaxxerFacade({
       host: "127.0.0.1",

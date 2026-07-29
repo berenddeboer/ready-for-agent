@@ -32,6 +32,7 @@ export const ambientGitLabLayer = (options: {
     GitLabService,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const layerScope = yield* Effect.scope
       const makeService = options.makeService ?? makeGitLabServiceFromToken
       const makeAnonymousService =
         options.makeAnonymousService ?? (() => makeGitLabService({}))
@@ -135,7 +136,7 @@ export const ambientGitLabLayer = (options: {
                 ),
               ),
             ),
-            Effect.forkDetach({ startImmediately: true }),
+            Effect.forkIn(layerScope, { startImmediately: true }),
           )
         }
 
