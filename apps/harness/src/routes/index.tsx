@@ -46,6 +46,7 @@ import {
 } from "../refresh-work-items-live.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
+import { canShowWorkItemResetAction } from "../work-item-job-actions.js"
 import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
 import {
   lifecycleStepChipClassName,
@@ -3875,8 +3876,14 @@ export function WorkItemLifecycleStatus({
     workItem.state === "INVESTIGATE_PR_STATUS_CHECKS" ||
     (workItem.canRetry &&
       workItem.lifecycleLabels.at(-1)?.phase === "GITHUB_STATUS_CHECKS")
-  // Reset is the cancel affordance for held Queue rows (and compact jobs generally).
-  const canReset = compact
+  // Reset cancels/deletes a Work Item (history + worktree). Compact non-terminal
+  // cards (held Queue and other unfinished work) keep it; Completed/Failed
+  // terminal history never does. Needs Human stays on Working and keeps cancel.
+  const canReset = canShowWorkItemResetAction({
+    compact,
+    isTerminal: workItem.isTerminal,
+    isNeedsHuman: status === "NEEDS_HUMAN",
+  })
   const dataUpdatedAt = queryClient
     .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })
     .reduce(
