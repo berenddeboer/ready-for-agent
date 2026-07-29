@@ -388,6 +388,299 @@ describe("production lifecycle process behavior", () => {
     await handle.dispose()
   })
 
+  test("SIGINT finishes remaining cleanup and exits when HTTP stop rejects", async () => {
+    const child = new FakeChild()
+    let triggerShutdown: ((signal: NodeJS.Signals) => void) | undefined
+    let releaseStop: (() => void) | undefined
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
+
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+      },
+      resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
+      startSidecar: async () => ({
+        url: "http://127.0.0.1:6057/capability/mcp",
+        child,
+      }),
+      applyMigrations: async () => {},
+      createApplication: async () => ({
+        context: {
+          graphqlApi: {
+            fetch: async () => new Response("ok"),
+          },
+        },
+        dispose: async () => {
+          disposed.push("application")
+        },
+      }),
+      serveHttp: async () => ({
+        port: 4242,
+        stop: async () => {
+          disposed.push("server")
+          await stopGate
+          throw new Error("server stop failed")
+        },
+      }),
+      installSignalHandlers: (shutdown) => {
+        triggerShutdown = shutdown
+        return () => {
+          triggerShutdown = undefined
+        }
+      },
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
+
+    expect(triggerShutdown).toBeTypeOf("function")
+    triggerShutdown!("SIGINT")
+    await Bun.sleep(10)
+
+    // Dispose is in flight; exit must wait until cleanup settles.
+    expect(exits).toEqual([])
+    expect(disposed).toEqual(["server"])
+    expect(child.killed).toBe(false)
+
+    releaseStop!()
+    await Bun.sleep(20)
+
+    expect(events).toContain("shutdown-complete")
+    expect(disposed).toEqual(["server", "application"])
+    expect(child.killed).toBe(true)
+    expect(exits).toEqual([0])
+    expect(
+      errors.some((line) =>
+        line.includes("Production lifecycle disposal failed"),
+      ),
+    ).toBe(true)
+
+    // Shared dispose settled as rejected; later callers still await the same result.
+    await expect(handle.dispose()).rejects.toThrow("server stop failed")
+  })
+
+  test("rejected HTTP stop still disposes application and owned Sidecar", async () => {
+    const child = new FakeChild()
+    let stopCalls = 0
+    let applicationDisposeCalls = 0
+
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+      },
+      resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
+      startSidecar: async () => ({
+        url: "http://127.0.0.1:6057/capability/mcp",
+        child,
+      }),
+      applyMigrations: async () => {},
+      createApplication: async () => ({
+        context: {
+          graphqlApi: {
+            fetch: async () => new Response("ok"),
+          },
+        },
+        dispose: async () => {
+          applicationDisposeCalls += 1
+          disposed.push("application")
+        },
+      }),
+      serveHttp: async () => ({
+        port: 4242,
+        stop: async () => {
+          stopCalls += 1
+          disposed.push("server")
+          throw new Error("server stop failed")
+        },
+      }),
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
+
+    await expect(handle.dispose()).rejects.toThrow("server stop failed")
+
+    expect(stopCalls).toBe(1)
+    expect(applicationDisposeCalls).toBe(1)
+    expect(disposed).toEqual(["server", "application"])
+    expect(child.killed).toBe(true)
+    expect(events).toContain("shutdown-start")
+    expect(events).toContain("shutdown-complete")
+  })
+
+  test("rejected application disposal still terminates owned Sidecar", async () => {
+    const child = new FakeChild()
+    let stopCalls = 0
+    let applicationDisposeCalls = 0
+
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+      },
+      resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
+      startSidecar: async () => ({
+        url: "http://127.0.0.1:6057/capability/mcp",
+        child,
+      }),
+      applyMigrations: async () => {},
+      createApplication: async () => ({
+        context: {
+          graphqlApi: {
+            fetch: async () => new Response("ok"),
+          },
+        },
+        dispose: async () => {
+          applicationDisposeCalls += 1
+          disposed.push("application")
+          throw new Error("application dispose failed")
+        },
+      }),
+      serveHttp: async () => ({
+        port: 4242,
+        stop: async () => {
+          stopCalls += 1
+          disposed.push("server")
+        },
+      }),
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
+
+    await expect(handle.dispose()).rejects.toThrow("application dispose failed")
+
+    expect(stopCalls).toBe(1)
+    expect(applicationDisposeCalls).toBe(1)
+    expect(disposed).toEqual(["server", "application"])
+    expect(child.killed).toBe(true)
+    expect(events).toContain("shutdown-complete")
+  })
+
+  test("concurrent dispose callers await one shared cleanup attempt", async () => {
+    const child = new FakeChild()
+    let stopCalls = 0
+    let applicationDisposeCalls = 0
+    let releaseStop: (() => void) | undefined
+    const stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve
+    })
+
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+      },
+      resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
+      startSidecar: async () => ({
+        url: "http://127.0.0.1:6057/capability/mcp",
+        child,
+      }),
+      applyMigrations: async () => {},
+      createApplication: async () => ({
+        context: {
+          graphqlApi: {
+            fetch: async () => new Response("ok"),
+          },
+        },
+        dispose: async () => {
+          applicationDisposeCalls += 1
+          disposed.push("application")
+        },
+      }),
+      serveHttp: async () => ({
+        port: 4242,
+        stop: async () => {
+          stopCalls += 1
+          disposed.push("server")
+          await stopGate
+        },
+      }),
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
+
+    const first = handle.dispose()
+    const second = handle.dispose()
+    const third = handle.dispose()
+
+    // Cleanup is in flight; concurrent callers must not start additional stops.
+    await Bun.sleep(10)
+    expect(stopCalls).toBe(1)
+    expect(applicationDisposeCalls).toBe(0)
+    expect(child.killed).toBe(false)
+
+    releaseStop!()
+    await Promise.all([first, second, third])
+
+    expect(stopCalls).toBe(1)
+    expect(applicationDisposeCalls).toBe(1)
+    expect(disposed).toEqual(["server", "application"])
+    expect(child.killed).toBe(true)
+    expect(events.filter((event) => event === "shutdown-start")).toHaveLength(1)
+    expect(
+      events.filter((event) => event === "shutdown-complete"),
+    ).toHaveLength(1)
+  })
+
+  test("aggregates multiple cleanup failures after all actions attempt", async () => {
+    const child = new FakeChild()
+
+    const handle = await startProductionLifecycle({
+      ...baseOptions(),
+      environment: {
+        SQLITE_DATABASE_PATH: "/tmp/unused.db",
+      },
+      resolveKeymaxxerMode: () => ({ kind: "spawn-sidecar" }),
+      startSidecar: async () => ({
+        url: "http://127.0.0.1:6057/capability/mcp",
+        child,
+      }),
+      applyMigrations: async () => {},
+      createApplication: async () => ({
+        context: {
+          graphqlApi: {
+            fetch: async () => new Response("ok"),
+          },
+        },
+        dispose: async () => {
+          disposed.push("application")
+          throw new Error("application dispose failed")
+        },
+      }),
+      serveHttp: async () => ({
+        port: 4242,
+        stop: async () => {
+          disposed.push("server")
+          throw new Error("server stop failed")
+        },
+      }),
+      onEvent: (event) => {
+        events.push(event)
+      },
+    })
+
+    const rejection = await handle.dispose().then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+
+    expect(rejection).toBeInstanceOf(AggregateError)
+    const aggregate = rejection as AggregateError
+    expect(aggregate.errors.map((error) => String(error))).toEqual([
+      "Error: server stop failed",
+      "Error: application dispose failed",
+    ])
+    expect(disposed).toEqual(["server", "application"])
+    expect(child.killed).toBe(true)
+    expect(events).toContain("shutdown-complete")
+  })
+
   test("existing Sidecar URL is supplied to the application without spawning", async () => {
     let startSidecarCalls = 0
     const handle = await startProductionLifecycle({
