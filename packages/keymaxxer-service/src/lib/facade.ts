@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js"
 import { z } from "zod"
+import { mcpToolCallTimeoutMs } from "./config.js"
 import { keymaxxerEnvironment, keymaxxerMcpCommand } from "./mcp-layer.js"
 
 export const KEYMAXXER_SIDECAR_URL_PREFIX = "KEYMAXXER_SIDECAR_URL="
@@ -65,6 +66,14 @@ type UpstreamToolResult = {
   structuredContent?: unknown
 }
 
+/** Thrown when a caller is removed before acquiring the global dialog lane. */
+export class DialogLaneCancelledError extends Error {
+  constructor(message = "request cancelled before dialog lane") {
+    super(message)
+    this.name = "DialogLaneCancelledError"
+  }
+}
+
 const createCapability = () => randomBytes(32).toString("base64url")
 
 const constantTimeEqual = (a: string, b: string) => {
@@ -90,20 +99,146 @@ const toolResultText = (result: { readonly content?: unknown }): string =>
         .join("\n")
     : ""
 
+const isTimeoutError = (error: unknown): boolean => {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    // MCP SDK ErrorCode.RequestTimeout
+    if ((error as { code: unknown }).code === -32001) return true
+  }
+  if (error instanceof Error) {
+    return /timed out|timeout/i.test(error.message)
+  }
+  return false
+}
+
+const errorMessageSafe = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+/**
+ * Wait for a shared promise, but leave that promise running if this waiter is
+ * aborted (e.g. shared unlock must not be cancelled for remaining waiters).
+ */
+const raceAbort = async <T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> => {
+  if (signal === undefined) return promise
+  if (signal.aborted) throw new DialogLaneCancelledError()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      reject(new DialogLaneCancelledError())
+    }
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort)
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+    promise.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (error: unknown) => {
+        cleanup()
+        reject(error)
+      },
+    )
+  })
+}
+
+type DialogLaneOptions = {
+  readonly signal?: AbortSignal
+  readonly onQueueWait?: () => void
+}
+
+/**
+ * Global human-dialog mutex with cancellable waiters.
+ * A waiter aborted before it acquires the lane is removed and never runs `fn`.
+ * Once `fn` starts (forwarded upstream), abort does not stop `fn` and does not
+ * clear shared vault state — the result may simply never be delivered.
+ */
 const makeDialogLane = () => {
-  let chain: Promise<void> = Promise.resolve()
-  return async <T>(fn: () => Promise<T>): Promise<T> => {
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
+  type Entry = {
+    readonly proceed: () => void
+    readonly fail: (error: unknown) => void
+    settled: boolean
+  }
+
+  let active: Entry | null = null
+  const queue: Entry[] = []
+
+  const removeFromQueue = (entry: Entry) => {
+    const index = queue.indexOf(entry)
+    if (index >= 0) queue.splice(index)
+  }
+
+  const startNext = () => {
+    if (active !== null) return
+    while (queue.length > 0) {
+      const entry = queue.shift()
+      if (entry === undefined) return
+      if (entry.settled) continue
+      active = entry
+      entry.settled = true
+      entry.proceed()
+      return
+    }
+  }
+
+  return async <T>(
+    fn: () => Promise<T>,
+    options: DialogLaneOptions = {},
+  ): Promise<T> => {
+    const { signal, onQueueWait } = options
+    if (signal?.aborted) {
+      throw new DialogLaneCancelledError()
+    }
+
+    const needsWait = active !== null || queue.length > 0
+    if (needsWait) {
+      onQueueWait?.()
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const entry: Entry = {
+        proceed: () => {
+          resolve()
+        },
+        fail: (error) => {
+          reject(error)
+        },
+        settled: false,
+      }
+
+      const onAbort = () => {
+        // Already acquired: leave in-flight work alone (no replay, no vault clear).
+        if (active === entry) return
+        removeFromQueue(entry)
+        if (!entry.settled) {
+          entry.settled = true
+          entry.fail(new DialogLaneCancelledError())
+        }
+      }
+
+      if (signal !== undefined) {
+        if (signal.aborted) {
+          entry.settled = true
+          entry.fail(new DialogLaneCancelledError())
+          return
+        }
+        signal.addEventListener("abort", onAbort, { once: true })
+      }
+
+      queue.push(entry)
+      startNext()
     })
-    const wait = chain
-    chain = gate
-    await wait
+
     try {
       return await fn()
     } finally {
-      release()
+      active = null
+      startNext()
     }
   }
 }
@@ -130,14 +265,18 @@ const createDefaultUpstream = async (
   await client.connect(transport)
   return {
     callTool: (input) =>
-      client.callTool(input).then(
-        (result) =>
-          result as {
-            content?: unknown
-            isError?: boolean
-            structuredContent?: unknown
-          },
-      ),
+      client
+        .callTool(input, undefined, {
+          timeout: mcpToolCallTimeoutMs(input.name, input.arguments),
+        })
+        .then(
+          (result) =>
+            result as {
+              content?: unknown
+              isError?: boolean
+              structuredContent?: unknown
+            },
+        ),
     close: () => transport.close(),
   }
 }
@@ -147,6 +286,31 @@ const exhaustedUnlockError = (): UpstreamToolResult => ({
     {
       type: "text",
       text: `error: vault unlock failed after ${MAX_UNLOCK_ATTEMPTS} attempts (wrong passphrase).`,
+    },
+  ],
+  isError: true,
+})
+
+const cancelledToolResult = (): UpstreamToolResult => ({
+  content: [{ type: "text", text: "error: request cancelled" }],
+  isError: true,
+})
+
+const timeoutToolResult = (name: string): UpstreamToolResult => ({
+  content: [
+    {
+      type: "text",
+      text: `error: keymaxxer ${name} timed out waiting for the keyholder`,
+    },
+  ],
+  isError: true,
+})
+
+const executionFailureResult = (name: string): UpstreamToolResult => ({
+  content: [
+    {
+      type: "text",
+      text: `error: keymaxxer ${name} failed`,
     },
   ],
   isError: true,
@@ -192,6 +356,14 @@ export const startKeymaxxerFacade = async (
     try {
       return await client.callTool({ name, arguments: args })
     } catch (error) {
+      if (isTimeoutError(error)) {
+        log(`[facade] upstream ${name} timed out`)
+        // Timeouts are not keyholder death; keep the upstream client.
+        return timeoutToolResult(name)
+      }
+      log(
+        `[facade] upstream ${name} execution failed: ${errorMessageSafe(error)}`,
+      )
       if (upstream === client) {
         upstream = null
         upstreamPromise = null
@@ -217,6 +389,7 @@ export const startKeymaxxerFacade = async (
    * Serialized unlock probe via metadata-only `keymaxxer_list`.
    * Wrong passphrase is retried up to MAX_UNLOCK_ATTEMPTS; other failures are not.
    * Must run inside the dialog lane (via {@link sharedUnlockProbe}).
+   * Never cancelled once started — shared vault session benefit.
    */
   const unlockProbe = async (): Promise<UpstreamToolResult> => {
     if (unlockObserved) {
@@ -256,10 +429,13 @@ export const startKeymaxxerFacade = async (
   /**
    * Single-flight unlock: concurrent waiters share one probe result.
    * A later independent request may start a new probe after this settles.
+   * The probe itself is not abortable; individual waiters may race-abort.
    */
   const sharedUnlockProbe = (): Promise<UpstreamToolResult> => {
     if (unlockInFlight !== null) return unlockInFlight
-    unlockInFlight = dialogLane(unlockProbe).then(
+    unlockInFlight = dialogLane(unlockProbe, {
+      onQueueWait: () => log("[facade] waiting for dialog lane (unlock)"),
+    }).then(
       (result) => {
         unlockInFlight = null
         return result
@@ -278,9 +454,11 @@ export const startKeymaxxerFacade = async (
    * `unlockObserved` flag after the dialog lane releases (TOCTOU with transport
    * recovery). Never return a successful list payload as a run/add outcome.
    */
-  const ensureUnlocked = async (): Promise<UpstreamToolResult | null> => {
+  const ensureUnlocked = async (
+    signal?: AbortSignal,
+  ): Promise<UpstreamToolResult | null> => {
     if (unlockObserved) return null
-    const result = await sharedUnlockProbe()
+    const result = await raceAbort(sharedUnlockProbe(), signal)
     if (result.isError === true) {
       return result
     }
@@ -290,41 +468,63 @@ export const startKeymaxxerFacade = async (
   const forwardTool = async (
     name: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<UpstreamToolResult> => {
-    if (name === "keymaxxer_list") {
-      // Once unlocked, metadata-only list bypasses a run/add waiting on approval.
-      if (unlockObserved) {
-        return noteListResult(await callUpstream(name, args))
+    try {
+      if (name === "keymaxxer_list") {
+        // Once unlocked, metadata-only list bypasses a run/add waiting on approval.
+        if (unlockObserved) {
+          if (signal?.aborted) throw new DialogLaneCancelledError()
+          return noteListResult(await callUpstream(name, args))
+        }
+        return await raceAbort(sharedUnlockProbe(), signal)
       }
-      return sharedUnlockProbe()
-    }
 
-    // Dialog-producing operations: unlock first (separate dialog-lane acquisition
-    // so metadata list can proceed while this op later waits on approval), then
-    // re-check unlock inside the op lane before calling upstream. Re-check covers
-    // transport recovery or concurrent re-lock that clears unlockObserved after
-    // ensureUnlocked returned. Call unlockProbe directly here — not
-    // sharedUnlockProbe — to avoid re-entering dialogLane while holding it.
-    if (!unlockObserved) {
-      const unlockFailure = await ensureUnlocked()
-      if (unlockFailure !== null) {
-        return unlockFailure
-      }
-    }
-
-    return dialogLane(async () => {
+      // Dialog-producing operations: unlock first (separate dialog-lane acquisition
+      // so metadata list can proceed while this op later waits on approval), then
+      // re-check unlock inside the op lane before calling upstream. Re-check covers
+      // transport recovery or concurrent re-lock that clears unlockObserved after
+      // ensureUnlocked returned. Call unlockProbe directly here — not
+      // sharedUnlockProbe — to avoid re-entering dialogLane while holding it.
       if (!unlockObserved) {
-        log(`[facade] re-probing vault unlock before ${name}`)
-        const unlockResult = await unlockProbe()
-        if (unlockResult.isError === true) {
-          return unlockResult
+        const unlockFailure = await ensureUnlocked(signal)
+        if (unlockFailure !== null) {
+          return unlockFailure
         }
       }
-      // No preemptive per-call "may require operator interaction" log: the facade
-      // cannot know if Keymaxxer will dialog, and that line spam looks stuck after
-      // Allow-session (#547). Unlock waits stay in unlockProbe only.
-      return callUpstream(name, args)
-    })
+
+      return await dialogLane(
+        async () => {
+          if (!unlockObserved) {
+            log(`[facade] re-probing vault unlock before ${name}`)
+            const unlockResult = await unlockProbe()
+            if (unlockResult.isError === true) {
+              return unlockResult
+            }
+          }
+          // No preemptive per-call "may require operator interaction" log: the facade
+          // cannot know if Keymaxxer will dialog, and that line spam looks stuck after
+          // Allow-session. Unlock waits stay in unlockProbe only.
+          try {
+            return await callUpstream(name, args)
+          } catch {
+            // callUpstream already logs and converts timeouts; remaining throws
+            // are execution/transport failures (client already invalidated).
+            return executionFailureResult(name)
+          }
+        },
+        {
+          signal,
+          onQueueWait: () => log(`[facade] waiting for dialog lane (${name})`),
+        },
+      )
+    } catch (error) {
+      if (error instanceof DialogLaneCancelledError) {
+        // Caller left before delivery; SDK already dropped the response when aborted.
+        return cancelledToolResult()
+      }
+      throw error
+    }
   }
 
   const createServer = () => {
@@ -340,8 +540,8 @@ export const startKeymaxxerFacade = async (
           "List the secrets in the vault with their attributes. Returns NO secret values.",
         inputSchema: {},
       },
-      async () => {
-        const result = await forwardTool("keymaxxer_list", {})
+      async (_args, extra) => {
+        const result = await forwardTool("keymaxxer_list", {}, extra.signal)
         return result as {
           content: { type: "text"; text: string }[]
           isError?: boolean
@@ -361,8 +561,8 @@ export const startKeymaxxerFacade = async (
           timeoutMs: z.number().optional(),
         },
       },
-      async (args) => {
-        const result = await forwardTool("keymaxxer_run", args)
+      async (args, extra) => {
+        const result = await forwardTool("keymaxxer_run", args, extra.signal)
         return result as {
           content: { type: "text"; text: string }[]
           isError?: boolean
@@ -384,8 +584,8 @@ export const startKeymaxxerFacade = async (
           tags: z.string().optional(),
         },
       },
-      async (args) => {
-        const result = await forwardTool("keymaxxer_add", args)
+      async (args, extra) => {
+        const result = await forwardTool("keymaxxer_add", args, extra.signal)
         return result as {
           content: { type: "text"; text: string }[]
           isError?: boolean

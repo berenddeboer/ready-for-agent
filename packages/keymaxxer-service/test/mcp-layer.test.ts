@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Cause, Effect, Option } from "effect"
 import {
   KeymaxxerService,
   type KeymaxxerToolClient,
@@ -284,6 +284,78 @@ describe("MCP Keymaxxer layer", () => {
       stdout: "machine output",
       stderr: "diagnostic",
     })
+  })
+
+  test("decodes isError non-zero runs even when stderr contains failed or timed out", async () => {
+    // Keymaxxer sets isError for exitCode !== 0 while still returning a run
+    // payload. Soft MCP diagnostics must not steal ordinary command failures.
+    const client: KeymaxxerToolClient = {
+      callTool: async () =>
+        textResult(
+          "exit_code: 1\n--- stdout ---\n\n--- stderr ---\ncommand failed: request timed out\n",
+          true,
+        ),
+      close: async () => {},
+    }
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        return yield* keymaxxer.runWithSecrets({
+          command: "false",
+          cwd: "/tmp",
+          secrets: ["A_SECRET"],
+          timeoutMs: 1_000,
+        })
+      }).pipe(
+        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
+      ),
+    )
+
+    expect(result).toEqual({
+      exitCode: 1,
+      stdout: "",
+      stderr: "command failed: request timed out\n",
+    })
+  })
+
+  test("maps facade soft timeout diagnostics without decoding as a command result", async () => {
+    const client: KeymaxxerToolClient = {
+      callTool: async () =>
+        textResult(
+          "error: keymaxxer keymaxxer_run timed out waiting for the keyholder",
+          true,
+        ),
+      close: async () => {},
+    }
+
+    const exit = await Effect.runPromise(
+      Effect.gen(function* () {
+        const keymaxxer = yield* KeymaxxerService
+        return yield* Effect.exit(
+          keymaxxer.runWithSecrets({
+            command: "true",
+            cwd: "/tmp",
+            secrets: ["A_SECRET"],
+            timeoutMs: 1_000,
+          }),
+        )
+      }).pipe(
+        Effect.provide(mcpKeymaxxerLayer({ createClient: async () => client })),
+      ),
+    )
+
+    expect(exit._tag).toBe("Failure")
+    if (exit._tag === "Failure") {
+      const error = Option.getOrThrow(Cause.findErrorOption(exit.cause))
+      expect(error).toMatchObject({
+        _tag: "KeymaxxerError",
+        operation: "runWithSecrets",
+      })
+      expect(String((error as { message?: string }).message ?? error)).toMatch(
+        /timed out/i,
+      )
+    }
   })
 
   test("prefers structured command results", async () => {

@@ -1,10 +1,12 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
 import {
+  KEYMAXXER_HUMAN_DIALOG_TIMEOUT_MS,
   KEYMAXXER_SIDECAR_URL_PREFIX,
   type KeymaxxerUpstreamClient,
   MAX_UNLOCK_ATTEMPTS,
   isWrongPassphraseResult,
+  mcpToolCallTimeoutMs,
   startKeymaxxerFacade,
 } from "../src/index.js"
 import { describe, expect, test } from "bun:test"
@@ -706,12 +708,373 @@ describe("Keymaxxer MCP facade security surface", () => {
             /operator interaction/i.test(line),
         )
         expect(interactionLines).toEqual([])
-        // Unlock probe stays visible; successful runs must not add more facade noise.
-        expect(logs.filter((line) => line.startsWith("[facade]"))).toEqual([
-          "[facade] waiting for vault unlock",
-        ])
+        // Unlock probe stays visible; successful runs may log dialog-lane queue wait
+        // only — never secret names, capability URLs, or operator-interaction spam.
+        const facadeLines = logs.filter((line) => line.startsWith("[facade]"))
+        expect(facadeLines[0]).toBe("[facade] waiting for vault unlock")
+        for (const line of facadeLines.slice(1)) {
+          expect(line).toMatch(
+            /^\[facade\] waiting for dialog lane \(keymaxxer_run\)$/,
+          )
+          expect(line).not.toMatch(/DEMO|secret|\/mcp|capabilit/i)
+        }
       } finally {
         await connection.transport.close()
+      }
+    } finally {
+      await facade.stop()
+    }
+  })
+
+  test("mcpToolCallTimeoutMs covers the dialog budget and run child timeout", () => {
+    expect(KEYMAXXER_HUMAN_DIALOG_TIMEOUT_MS).toBeGreaterThanOrEqual(300_000)
+    expect(mcpToolCallTimeoutMs("keymaxxer_list")).toBe(
+      KEYMAXXER_HUMAN_DIALOG_TIMEOUT_MS,
+    )
+    expect(mcpToolCallTimeoutMs("keymaxxer_add")).toBe(
+      KEYMAXXER_HUMAN_DIALOG_TIMEOUT_MS,
+    )
+    expect(mcpToolCallTimeoutMs("keymaxxer_run", { timeoutMs: 5_000 })).toBe(
+      KEYMAXXER_HUMAN_DIALOG_TIMEOUT_MS + 5_000,
+    )
+    // Child timeout is independent: MCP wait is dialog + child, not child alone.
+    expect(
+      mcpToolCallTimeoutMs("keymaxxer_run", { timeoutMs: 1_000 }),
+    ).toBeGreaterThan(1_000)
+  })
+
+  test("cancelling a waiter before the dialog lane never invokes upstream later", async () => {
+    let runCalls = 0
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const firstStarted = Promise.withResolvers<void>()
+    const logs: string[] = []
+
+    const facade = await startKeymaxxerFacade({
+      host: "127.0.0.1",
+      port: 0,
+      createUpstream: async () => ({
+        callTool: async ({ name }) => {
+          if (name === "keymaxxer_list") return listResult()
+          if (name === "keymaxxer_run") {
+            runCalls += 1
+            if (runCalls === 1) {
+              firstStarted.resolve()
+              await firstGate
+            }
+            return runOkResult()
+          }
+          return { content: [{ type: "text", text: "ok" }] }
+        },
+        close: async () => {},
+      }),
+      onBootstrapUrl: () => {},
+      log: (message) => {
+        logs.push(message)
+      },
+    })
+
+    try {
+      const [holder, waiter] = await Promise.all([
+        connectClient(facade.url),
+        connectClient(facade.url),
+      ])
+      try {
+        await holder.client.callTool({ name: "keymaxxer_list", arguments: {} })
+
+        const firstRun = holder.client.callTool({
+          name: "keymaxxer_run",
+          arguments: { command: "true", secrets: ["DEMO"] },
+        })
+        await firstStarted.promise
+
+        const abort = new AbortController()
+        const secondRun = waiter.client.callTool(
+          {
+            name: "keymaxxer_run",
+            arguments: { command: "echo cancelled", secrets: ["DEMO"] },
+          },
+          undefined,
+          { signal: abort.signal },
+        )
+
+        // Wait until the second caller is known to be queued on the dialog lane.
+        for (let i = 0; i < 50; i++) {
+          if (
+            logs.some((line) =>
+              line.includes("waiting for dialog lane (keymaxxer_run)"),
+            )
+          ) {
+            break
+          }
+          await Bun.sleep(10)
+        }
+        expect(
+          logs.some((line) =>
+            line.includes("waiting for dialog lane (keymaxxer_run)"),
+          ),
+        ).toBe(true)
+        expect(runCalls).toBe(1)
+
+        abort.abort()
+        await expect(secondRun).rejects.toBeDefined()
+
+        // Give the facade a tick to drop the waiter before releasing the lane.
+        await Bun.sleep(30)
+        releaseFirst()
+        const firstResult = await firstRun
+        expect(firstResult.isError).not.toBe(true)
+
+        // Cancelled waiter must never have launched upstream after the holder finished.
+        expect(runCalls).toBe(1)
+      } finally {
+        await holder.transport.close()
+        await waiter.transport.close()
+      }
+    } finally {
+      await facade.stop()
+    }
+  })
+
+  test("cancelling one session does not cancel another session's in-flight run", async () => {
+    let runCalls = 0
+    let releaseRun!: () => void
+    const runGate = new Promise<void>((resolve) => {
+      releaseRun = resolve
+    })
+    const runStarted = Promise.withResolvers<void>()
+
+    const facade = await startKeymaxxerFacade({
+      host: "127.0.0.1",
+      port: 0,
+      createUpstream: async () => ({
+        callTool: async ({ name }) => {
+          if (name === "keymaxxer_list") return listResult()
+          if (name === "keymaxxer_run") {
+            runCalls += 1
+            runStarted.resolve()
+            await runGate
+            return runOkResult()
+          }
+          return { content: [{ type: "text", text: "ok" }] }
+        },
+        close: async () => {},
+      }),
+      onBootstrapUrl: () => {},
+      log: () => {},
+    })
+
+    try {
+      const [runner, other] = await Promise.all([
+        connectClient(facade.url),
+        connectClient(facade.url),
+      ])
+      try {
+        await other.client.callTool({ name: "keymaxxer_list", arguments: {} })
+
+        const runPromise = runner.client.callTool({
+          name: "keymaxxer_run",
+          arguments: { command: "true", secrets: ["DEMO"] },
+        })
+        await runStarted.promise
+        expect(runCalls).toBe(1)
+
+        // Closing another session must not abort the runner's upstream work.
+        await other.transport.close()
+
+        // Metadata remains available on a fresh session while run is held.
+        const observer = await connectClient(facade.url)
+        try {
+          const listWhileRun = await observer.client.callTool({
+            name: "keymaxxer_list",
+            arguments: {},
+          })
+          expect(listWhileRun.isError).not.toBe(true)
+          expect(toolText(listWhileRun)).toContain("DEMO")
+        } finally {
+          await observer.transport.close()
+        }
+
+        releaseRun()
+        const runResult = await runPromise
+        expect(runResult.isError).not.toBe(true)
+        expect(runCalls).toBe(1)
+      } finally {
+        await runner.transport.close()
+      }
+    } finally {
+      await facade.stop()
+    }
+  })
+
+  test("cancel after upstream forward does not replay the run", async () => {
+    let runCalls = 0
+    let releaseRun!: () => void
+    const runGate = new Promise<void>((resolve) => {
+      releaseRun = resolve
+    })
+    const runStarted = Promise.withResolvers<void>()
+
+    const facade = await startKeymaxxerFacade({
+      host: "127.0.0.1",
+      port: 0,
+      createUpstream: async () => ({
+        callTool: async ({ name }) => {
+          if (name === "keymaxxer_list") return listResult()
+          if (name === "keymaxxer_run") {
+            runCalls += 1
+            runStarted.resolve()
+            await runGate
+            return runOkResult()
+          }
+          return { content: [{ type: "text", text: "ok" }] }
+        },
+        close: async () => {},
+      }),
+      onBootstrapUrl: () => {},
+      log: () => {},
+    })
+
+    try {
+      const connection = await connectClient(facade.url)
+      try {
+        await connection.client.callTool({
+          name: "keymaxxer_list",
+          arguments: {},
+        })
+
+        const abort = new AbortController()
+        const runPromise = connection.client.callTool(
+          {
+            name: "keymaxxer_run",
+            arguments: { command: "true", secrets: ["DEMO"] },
+          },
+          undefined,
+          { signal: abort.signal },
+        )
+        await runStarted.promise
+        expect(runCalls).toBe(1)
+
+        // Cancel after forward: upstream may finish without delivering a result.
+        abort.abort()
+        await expect(runPromise).rejects.toBeDefined()
+
+        releaseRun()
+        // Allow the orphaned upstream call to settle without a second launch.
+        await Bun.sleep(30)
+        expect(runCalls).toBe(1)
+
+        // Shared vault session remains usable (unlock/approvals not cleared).
+        const after = await connection.client.callTool({
+          name: "keymaxxer_list",
+          arguments: {},
+        })
+        expect(after.isError).not.toBe(true)
+      } finally {
+        await connection.transport.close()
+      }
+    } finally {
+      await facade.stop()
+    }
+  })
+
+  test("queue wait, execution failure, and timeout diagnostics are distinct", async () => {
+    const logs: string[] = []
+    let runCalls = 0
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    const firstStarted = Promise.withResolvers<void>()
+
+    const facade = await startKeymaxxerFacade({
+      host: "127.0.0.1",
+      port: 0,
+      createUpstream: async () => ({
+        callTool: async ({ name }) => {
+          if (name === "keymaxxer_list") return listResult()
+          if (name === "keymaxxer_run") {
+            runCalls += 1
+            if (runCalls === 1) {
+              firstStarted.resolve()
+              await firstGate
+              return runOkResult()
+            }
+            if (runCalls === 2) {
+              const timeoutError = Object.assign(
+                new Error("Request timed out"),
+                {
+                  code: -32001,
+                },
+              )
+              throw timeoutError
+            }
+            throw new Error("keyholder crashed")
+          }
+          return { content: [{ type: "text", text: "ok" }] }
+        },
+        close: async () => {},
+      }),
+      onBootstrapUrl: () => {},
+      log: (message) => {
+        logs.push(message)
+      },
+    })
+
+    try {
+      const [a, b] = await Promise.all([
+        connectClient(facade.url),
+        connectClient(facade.url),
+      ])
+      try {
+        await a.client.callTool({ name: "keymaxxer_list", arguments: {} })
+
+        const first = a.client.callTool({
+          name: "keymaxxer_run",
+          arguments: { command: "true", secrets: ["DEMO"] },
+        })
+        await firstStarted.promise
+
+        const second = b.client.callTool({
+          name: "keymaxxer_run",
+          arguments: { command: "true", secrets: ["DEMO"] },
+        })
+        for (let i = 0; i < 50; i++) {
+          if (logs.some((line) => line.includes("waiting for dialog lane"))) {
+            break
+          }
+          await Bun.sleep(10)
+        }
+        releaseFirst()
+        await first
+        const timedOut = await second
+        expect(timedOut.isError).toBe(true)
+        expect(toolText(timedOut)).toMatch(/timed out/i)
+
+        const crashed = await a.client.callTool({
+          name: "keymaxxer_run",
+          arguments: { command: "true", secrets: ["DEMO"] },
+        })
+        expect(crashed.isError).toBe(true)
+        expect(toolText(crashed)).toMatch(/failed/i)
+
+        expect(
+          logs.some((line) => line.includes("waiting for dialog lane")),
+        ).toBe(true)
+        expect(logs.some((line) => line.includes("timed out"))).toBe(true)
+        expect(logs.some((line) => line.includes("execution failed"))).toBe(
+          true,
+        )
+        for (const line of logs) {
+          expect(line).not.toMatch(
+            /DEMO|secret value|capability|Authorization|exit_code/i,
+          )
+        }
+      } finally {
+        await a.transport.close()
+        await b.transport.close()
       }
     } finally {
       await facade.stop()

@@ -1,4 +1,4 @@
-import { Effect } from "effect"
+import { Effect, Result } from "effect"
 import {
   type AddSecretInput,
   type FindSecretInput,
@@ -103,7 +103,24 @@ export const makeKeymaxxerClientService = (
     const client = yield* getClient()
     const result = yield* Effect.tryPromise({
       try: () => client.callTool({ name, arguments: args }),
-      catch: () => keymaxxerError(operation, deps.failureMessage(operation)),
+      catch: (error) => {
+        const detail =
+          error instanceof Error
+            ? error.message
+            : typeof error === "object" &&
+                error !== null &&
+                "message" in error &&
+                typeof (error as { message: unknown }).message === "string"
+              ? (error as { message: string }).message
+              : ""
+        const timedOut = /timed out|timeout/i.test(detail)
+        return keymaxxerError(
+          operation,
+          timedOut
+            ? `${deps.failureMessage(operation)}: timed out`
+            : deps.failureMessage(operation),
+        )
+      },
     }).pipe(Effect.tapError(() => resetClient()))
 
     return {
@@ -238,10 +255,44 @@ export const makeKeymaxxerClientService = (
         secrets: [...decoded.secrets],
         timeoutMs: decoded.timeoutMs,
       })
-      return yield* decodeRunWithSecretsResult(
-        result.structuredContent,
-        result.text,
+      // Keymaxxer sets isError when exitCode !== 0 while still returning a normal
+      // exit_code/stdout/stderr payload. Decode that shape first so non-zero
+      // command outcomes are never misclassified as MCP/transport failures.
+      const decodedRun = yield* Effect.result(
+        decodeRunWithSecretsResult(result.structuredContent, result.text),
       )
+      if (Result.isSuccess(decodedRun)) {
+        return decodedRun.success
+      }
+
+      // Facade soft diagnostics only (tight anchors — not substrings in stderr).
+      if (result.isError) {
+        const text = result.text.trim()
+        if (
+          /^error:\s*keymaxxer\s+\S+\s+timed out waiting for the keyholder$/i.test(
+            text,
+          )
+        ) {
+          return yield* keymaxxerError(
+            "runWithSecrets",
+            `${deps.failureMessage("runWithSecrets")}: timed out`,
+          )
+        }
+        if (/^error:\s*request cancelled$/i.test(text)) {
+          return yield* keymaxxerError(
+            "runWithSecrets",
+            `${deps.failureMessage("runWithSecrets")}: cancelled`,
+          )
+        }
+        if (/^error:\s*keymaxxer\s+\S+\s+failed$/i.test(text)) {
+          return yield* keymaxxerError(
+            "runWithSecrets",
+            `${deps.failureMessage("runWithSecrets")}: execution failed`,
+          )
+        }
+      }
+
+      return yield* decodedRun.failure
     },
   )
 
