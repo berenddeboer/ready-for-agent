@@ -1,5 +1,8 @@
 import { Data, type Duration, Effect } from "effect"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
+import {
+  GitLabService,
+  gitlabVaultAccount,
+} from "@ready-for-agent/gitlab-service"
 import {
   KeymaxxerService,
   keymaxxerError,
@@ -22,6 +25,17 @@ export const githubTokenSecretName = (repository: Repository) =>
     .replace(/[^A-Za-z0-9_]/g, "_")
     .toUpperCase()
 
+/** Suggested Keymaxxer secret name: `GITLAB_TOKEN_<HOST>_<PATH>`. */
+export const gitlabTokenSecretName = (repository: Repository) =>
+  `GITLAB_TOKEN_${repository.forgeHost}_${repository.projectPath}`
+    .replace(/[^A-Za-z0-9_]/g, "_")
+    .toUpperCase()
+
+export const tokenSecretName = (repository: Repository) =>
+  repository.forge === "gitlab"
+    ? gitlabTokenSecretName(repository)
+    : githubTokenSecretName(repository)
+
 const githubTokenCreationUrl = (repository: Repository) => {
   const [owner = "", name = ""] = repository.projectPath.split("/")
   const url = new URL("https://github.com/settings/personal-access-tokens/new")
@@ -43,6 +57,15 @@ const githubTokenCreationUrl = (repository: Repository) => {
   return url.toString()
 }
 
+/** Instance-correct GitLab personal access token creation page. */
+export const gitlabTokenCreationUrl = (repository: Repository) =>
+  `https://${repository.forgeHost}/-/user_settings/personal_access_tokens`
+
+export const tokenCreationUrl = (repository: Repository) =>
+  repository.forge === "gitlab"
+    ? gitlabTokenCreationUrl(repository)
+    : githubTokenCreationUrl(repository)
+
 export const repositoryCredential = (
   repository: Repository,
   existingToken: string | null,
@@ -50,8 +73,10 @@ export const repositoryCredential = (
 ) => ({
   repositoryId: repository.id,
   configured,
-  githubTokenSecretName: existingToken ?? githubTokenSecretName(repository),
-  githubTokenCreationUrl: githubTokenCreationUrl(repository),
+  // Field names are historical (GitHub-first) but hold the active Forge's
+  // suggested or configured vault secret name and creation URL.
+  githubTokenSecretName: existingToken ?? tokenSecretName(repository),
+  githubTokenCreationUrl: tokenCreationUrl(repository),
 })
 
 /**
@@ -80,6 +105,28 @@ export const withKeymaxxerMetadataTimeout = <A, E, R>(
     ),
   )
 
+/**
+ * Probe ambient GitLab credentials (no vault re-entry) with an optional wait bound.
+ *
+ * After GraphQL already paid for vault metadata (miss or timeout), ambient-only
+ * Repositories must not re-enter Keymaxxer findSecret.
+ */
+export const gitlabHasAmbientCredentialsBounded = (
+  repository: Repository,
+  metadataTimeout?: Duration.Duration,
+) =>
+  Effect.gen(function* () {
+    const gitlab = yield* GitLabService
+    const check = gitlab.hasAmbientCredentials(repository)
+    if (metadataTimeout === undefined) {
+      return yield* check
+    }
+    return yield* check.pipe(
+      Effect.timeout(metadataTimeout),
+      Effect.catchTag("TimeoutError", () => Effect.succeed(false)),
+    )
+  })
+
 /** Activate durable Issue Polling only when this repository has forge credentials. */
 export const activatePollingIfCredentialed = Effect.fn(
   "graphql-api.activatePollingIfCredentialed",
@@ -87,19 +134,66 @@ export const activatePollingIfCredentialed = Effect.fn(
   repository: Repository,
   options?: { readonly metadataTimeout?: Duration.Duration },
 ) {
+  const keymaxxer = yield* KeymaxxerService
+  if (keymaxxer.enabled === false) {
+    if (repository.forge === "gitlab") {
+      if (
+        yield* gitlabHasAmbientCredentialsBounded(
+          repository,
+          options?.metadataTimeout,
+        )
+      ) {
+        yield* activateRepositoryPolling(repository.id)
+      }
+      return
+    }
+    yield* activateRepositoryPolling(repository.id)
+    return
+  }
+
   if (repository.forge === "gitlab") {
-    const gitlab = yield* GitLabService
-    if (yield* gitlab.hasCredentials(repository)) {
+    const lookup = keymaxxer.findSecret({
+      provider: "gitlab",
+      account: gitlabVaultAccount(repository),
+    })
+    // Distinguish clean vault miss from Keymaxxer unavailable so we never
+    // re-enter vault RPC after a timed-out probe — ambient-only path instead.
+    type VaultProbe =
+      | { readonly kind: "secret"; readonly name: string }
+      | { readonly kind: "miss" }
+      | { readonly kind: "unavailable" }
+    const timedLookup =
+      options?.metadataTimeout === undefined
+        ? lookup
+        : withKeymaxxerMetadataTimeout(
+            lookup,
+            options.metadataTimeout,
+            "findSecret",
+          )
+    const vaultProbe: VaultProbe = yield* timedLookup.pipe(
+      Effect.map(
+        (name): VaultProbe =>
+          name === null ? { kind: "miss" } : { kind: "secret", name },
+      ),
+      Effect.catchTag(
+        "KeymaxxerError",
+        (): Effect.Effect<VaultProbe> =>
+          Effect.succeed({ kind: "unavailable" }),
+      ),
+    )
+    if (vaultProbe.kind === "secret") {
+      yield* activateRepositoryPolling(repository.id)
+      return
+    }
+    // miss or unavailable: ambient only (no second vault findSecret).
+    // Do not re-apply the full GraphQL metadata bound — vault already consumed
+    // that budget; ambient glab/env has its own short path.
+    if (yield* gitlabHasAmbientCredentialsBounded(repository)) {
       yield* activateRepositoryPolling(repository.id)
     }
     return
   }
 
-  const keymaxxer = yield* KeymaxxerService
-  if (keymaxxer.enabled === false) {
-    yield* activateRepositoryPolling(repository.id)
-    return
-  }
   const lookup = keymaxxer.findSecret({
     provider: "github",
     account: repository.projectPath,

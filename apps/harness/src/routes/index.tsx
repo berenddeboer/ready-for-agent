@@ -1145,6 +1145,7 @@ function RepositoryCard({
 }) {
   const queryClient = useQueryClient()
   const [githubTokenCreated, setGithubTokenCreated] = useState(false)
+  const [gitlabTokenCreated, setGitlabTokenCreated] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [awaitingRefresh, setAwaitingRefresh] = useState(false)
   const issuesChangeCountOnRefresh = useRef(issuesChangeCount)
@@ -1711,6 +1712,32 @@ function RepositoryCard({
         },
       })
       return result.addRepositoryGitHubToken
+    },
+    onSuccess: (credential) => {
+      queryClient.setQueryData<readonly Repository[]>(
+        repositoriesQuery.queryKey,
+        (repositories) =>
+          repositories?.map((candidate) =>
+            candidate.id === repository.id
+              ? { ...candidate, credential }
+              : candidate,
+          ),
+      )
+    },
+  })
+
+  const addGitLabToken = useMutation({
+    mutationFn: async () => {
+      const result = await graphql.mutation({
+        addRepositoryGitLabToken: {
+          __args: { repositoryId: repository.id },
+          repositoryId: true,
+          configured: true,
+          githubTokenSecretName: true,
+          githubTokenCreationUrl: true,
+        },
+      })
+      return result.addRepositoryGitLabToken
     },
     onSuccess: (credential) => {
       queryClient.setQueryData<readonly Repository[]>(
@@ -2524,13 +2551,69 @@ function RepositoryCard({
                   GitLab authentication required
                 </strong>
                 <p className="m-0">
-                  Set <code className="font-bold">GITLAB_TOKEN</code> before
-                  starting the Harness, or authenticate this host with{" "}
+                  {gitlabTokenCreated ? (
+                    <>
+                      Store the generated token as{" "}
+                      <code className="font-bold">
+                        {repository.credential.githubTokenSecretName}
+                      </code>{" "}
+                      in Keymaxxer when available (provider{" "}
+                      <code className="font-bold">gitlab</code>, account{" "}
+                      <code className="font-bold">
+                        {repository.forgeHost}/{repository.projectPath}
+                      </code>
+                      ). Or set ambient auth without Keymaxxer:{" "}
+                    </>
+                  ) : (
+                    <>
+                      Create a personal access token on this GitLab instance
+                      with API access for{" "}
+                      <code className="font-bold">
+                        {repository.projectPath}
+                      </code>
+                      . Store it in Keymaxxer when available, or set ambient
+                      auth:{" "}
+                    </>
+                  )}
+                  <code className="font-bold">GITLAB_TOKEN</code> or{" "}
                   <code className="font-bold">
                     glab auth login --hostname {repository.forgeHost}
-                  </code>
-                  .
+                  </code>{" "}
+                  before starting the Harness.
                 </p>
+                <div className="flex flex-wrap gap-2">
+                  {!gitlabTokenCreated && (
+                    <a
+                      className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper no-underline uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+                      href={repository.credential.githubTokenCreationUrl}
+                      onClick={() => setGitlabTokenCreated(true)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Create GitLab token
+                    </a>
+                  )}
+                  {gitlabTokenCreated && (
+                    <button
+                      type="button"
+                      className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+                      disabled={addGitLabToken.isPending}
+                      onClick={() => addGitLabToken.mutate()}
+                    >
+                      {addGitLabToken.isPending
+                        ? "Waiting for Keymaxxer"
+                        : "Store in Keymaxxer"}
+                    </button>
+                  )}
+                </div>
+                {addGitLabToken.isError && (
+                  <p className="m-0 text-oxblood-deep" role="alert">
+                    Keymaxxer setup was cancelled or failed. Use ambient{" "}
+                    <code className="font-bold">GITLAB_TOKEN</code> or{" "}
+                    <code className="font-bold">glab auth login</code> and
+                    restart the Harness if Keymaxxer is unavailable.
+                  </p>
+                )}
               </div>
             )}
           <div className="mt-5">

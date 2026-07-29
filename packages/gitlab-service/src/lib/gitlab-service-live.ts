@@ -1,6 +1,6 @@
-import { Duration, Effect, Schema } from "effect"
+import { Config, Duration, Effect, Layer, Redacted, Schema } from "effect"
 import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
-import type { GitLabServiceShape } from "./gitlab-service.js"
+import { GitLabService, type GitLabServiceShape } from "./gitlab-service.js"
 import type { GitLabReadyLabeledIssue, GitLabRepository } from "./types.js"
 
 const REQUEST_TIMEOUT = Duration.seconds(30)
@@ -322,6 +322,7 @@ export const makeGitLabService = (options: {
       },
     ),
     hasCredentials: () => Effect.succeed(options.token !== undefined),
+    hasAmbientCredentials: () => Effect.succeed(options.token !== undefined),
   }
 }
 
@@ -329,3 +330,16 @@ export const makeGitLabServiceFromToken = (
   token: string,
   fetchImpl: GitLabFetch = fetch,
 ): GitLabServiceShape => makeGitLabService({ token, fetch: fetchImpl })
+
+/**
+ * Helper-process Live layer: reads `GITLAB_TOKEN` from the environment.
+ * Keymaxxer injects the named vault secret aliased as `GITLAB_TOKEN` so the
+ * raw token never enters the Harness process.
+ */
+export const GitLabServiceLive = Layer.effect(
+  GitLabService,
+  Effect.gen(function* () {
+    const token = yield* Config.redacted("GITLAB_TOKEN")
+    return makeGitLabServiceFromToken(Redacted.value(token))
+  }),
+)

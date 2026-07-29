@@ -53,6 +53,7 @@ import {
 } from "./application-config.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
+import { keymaxxerGitLabLayer } from "./keymaxxer-gitlab-layer.js"
 
 export interface Application {
   readonly context: ApplicationRequestContext
@@ -161,10 +162,16 @@ export const createApplication = async (
       : keymaxxerGitHubLayer({ workspaceRoot: toolCwd }).pipe(
           Layer.provide(keymaxxerLayer),
         )
-  const gitlabLayer = ambientGitLabLayer({
-    workspaceRoot: toolCwd,
-    environment,
-  }).pipe(Layer.provide(platformLayer))
+  const gitlabLayer =
+    sidecarUrl === undefined
+      ? ambientGitLabLayer({
+          workspaceRoot: toolCwd,
+          environment,
+        }).pipe(Layer.provide(platformLayer))
+      : keymaxxerGitLabLayer({
+          workspaceRoot: toolCwd,
+          environment,
+        }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
   const reconcilerLayer = IssueReconcilerLive.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(githubLayer),

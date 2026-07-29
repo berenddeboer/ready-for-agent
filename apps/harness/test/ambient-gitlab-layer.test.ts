@@ -27,6 +27,7 @@ const service = (
   getAuthenticatedUserLogin: () => Effect.succeed("operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
   ...overrides,
 })
 
@@ -130,6 +131,7 @@ test("public project verification falls back to anonymous access", async () => {
           return Effect.void
         },
         hasCredentials: () => Effect.succeed(false),
+        hasAmbientCredentials: () => Effect.succeed(false),
       }),
   })
 

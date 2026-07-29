@@ -22,8 +22,20 @@ export interface GitLabServiceShape {
   readonly listReadyIssues: (
     repository: GitLabRepository,
   ) => Effect.Effect<readonly GitLabReadyLabeledIssue[], GitLabServiceError>
-  /** Whether ambient GitLab authentication resolves for this Forge Host. */
+  /**
+   * Whether credentials resolve for this Repository: a per-Repository vault
+   * secret and/or ambient `GITLAB_TOKEN` / `glab` (layer-dependent).
+   */
   readonly hasCredentials: (
+    repository: GitLabRepository,
+  ) => Effect.Effect<boolean, GitLabRequestError>
+  /**
+   * Whether ambient credentials resolve, ignoring Keymaxxer vault.
+   * Callers that already paid for a vault metadata probe (miss or timeout)
+   * use this so ambient-only Repositories are not blocked by a second vault RPC.
+   * Ambient-only layers implement this the same as hasCredentials.
+   */
+  readonly hasAmbientCredentials: (
     repository: GitLabRepository,
   ) => Effect.Effect<boolean, GitLabRequestError>
 }

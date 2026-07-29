@@ -156,7 +156,7 @@ A slash command invoked verbatim by a Lifecycle Step and expected to have common
 _Avoid_: Backend-specific prompt template, readiness capability
 
 **Agent Forge Access**:
-Authentication available to Forge commands invoked during Agent Turns. A backend may integrate the Keymaxxer named-secret tools, but need not; otherwise it uses authenticated ambient Forge access (the `gh` CLI on GitHub; a `GITLAB_TOKEN` environment variable or `glab` CLI on GitLab), and the Harness never copies raw Forge tokens into the Agent Turn environment.
+Authentication available to Forge commands invoked during Agent Turns. A backend may integrate the Keymaxxer named-secret tools, but need not; otherwise it uses authenticated ambient Forge access (the `gh` CLI on GitHub; a `GITLAB_TOKEN` environment variable or `glab` CLI on GitLab), and the Harness never copies raw Forge tokens into the Agent Turn environment. On GitLab, a per-Repository vault secret (`provider: gitlab`, `account: <forge-host>/<project-path>`) is strictly more specific than ambient sources when Keymaxxer is enabled; Agent Turns prefer `keymaxxer_run` with that secret and fall back to ambient guidance when none exists.
 _Avoid_: Required Keymaxxer support, injected Forge token
 
 **Ready-labeled Issue**:

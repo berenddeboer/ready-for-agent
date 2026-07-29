@@ -488,6 +488,11 @@ type Mutation {
   """
   pickLocalDirectory: String
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
+  """
+  Add a per-Repository GitLab PAT to the Keymaxxer vault (provider gitlab,
+  account <forge-host>/<project-path>) and activate Issue Polling.
+  """
+  addRepositoryGitLabToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
   implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!

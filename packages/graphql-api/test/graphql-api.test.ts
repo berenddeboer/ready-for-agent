@@ -201,6 +201,7 @@ const defaultGitlab: GitLabServiceShape = {
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
 }
 
 const makeRuntime = (
@@ -468,6 +469,7 @@ describe("GraphQL API", () => {
             actions.push(`verify:${forgeHost}/${projectPath}`)
           }),
         hasCredentials: () => Effect.succeed(false),
+        hasAmbientCredentials: () => Effect.succeed(false),
       },
     )
 
@@ -890,7 +892,11 @@ describe("GraphQL API", () => {
           Effect.succeed({ ...repository, ...input, paused: true }),
       },
       {
-        findSecret: () => Effect.die("must not inspect GitHub credentials"),
+        // Vault-first: look up the GitLab secret (miss), then fall back to ambient.
+        findSecret: ({ provider }) =>
+          provider === "github"
+            ? Effect.die("must not inspect GitHub credentials")
+            : Effect.succeed(null),
       },
       {
         ensureKeyed: () => {
@@ -908,6 +914,7 @@ describe("GraphQL API", () => {
       {},
       {
         hasCredentials: () => Effect.succeed(true),
+        hasAmbientCredentials: () => Effect.succeed(true),
       },
     )
 
@@ -1868,7 +1875,7 @@ describe("GraphQL API", () => {
     ])
   })
 
-  test("reports ambient GitLab credential status without consulting Keymaxxer", async () => {
+  test("reports ambient GitLab credential status when no vault secret exists", async () => {
     const gitlabRepository = {
       ...repository,
       forge: "gitlab" as const,
@@ -1881,8 +1888,17 @@ describe("GraphQL API", () => {
         listRepositories: Effect.succeed([gitlabRepository]),
       },
       {
-        findSecrets: () =>
-          Effect.die("must not inspect GitHub credentials for GitLab"),
+        findSecrets: (inputs) =>
+          Effect.succeed(
+            inputs.map(({ provider }) => {
+              if (provider === "github") {
+                throw new Error(
+                  "must not inspect GitHub credentials for GitLab",
+                )
+              }
+              return null
+            }),
+          ),
       },
       {},
       {},
@@ -1891,13 +1907,77 @@ describe("GraphQL API", () => {
       {},
       {
         hasCredentials: () => Effect.succeed(true),
+        hasAmbientCredentials: () => Effect.succeed(true),
       },
     )
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
         query: `query {
-          repositoryCredentials { repositoryId configured }
+          repositoryCredentials {
+            repositoryId configured githubTokenSecretName githubTokenCreationUrl
+          }
+        }`,
+      }),
+    )
+    const body = (await response.json()) as {
+      data: { repositoryCredentials: Array<Record<string, unknown>> }
+    }
+
+    expect(body.data.repositoryCredentials).toEqual([
+      {
+        repositoryId: repository.id,
+        configured: true,
+        githubTokenSecretName:
+          "GITLAB_TOKEN_GIT_DRUPALCODE_ORG_PROJECT_OAUTH_CLIENT",
+        githubTokenCreationUrl:
+          "https://git.drupalcode.org/-/user_settings/personal_access_tokens",
+      },
+    ])
+  })
+
+  test("reports vault-backed GitLab credential status", async () => {
+    const gitlabRepository = {
+      ...repository,
+      forge: "gitlab" as const,
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+      },
+      {
+        findSecrets: (inputs) =>
+          Effect.succeed(
+            inputs.map(({ provider, account }) =>
+              provider === "gitlab" &&
+              account === "git.drupalcode.org/project/oauth_client"
+                ? "GITLAB_TOKEN_CUSTOM"
+                : null,
+            ),
+          ),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        hasCredentials: () =>
+          Effect.die("must not consult ambient when vault has the secret"),
+        hasAmbientCredentials: () =>
+          Effect.die("must not consult ambient when vault has the secret"),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials {
+            repositoryId configured githubTokenSecretName githubTokenCreationUrl
+          }
         }`,
       }),
     )
@@ -1908,10 +1988,85 @@ describe("GraphQL API", () => {
           {
             repositoryId: repository.id,
             configured: true,
+            githubTokenSecretName: "GITLAB_TOKEN_CUSTOM",
+            githubTokenCreationUrl:
+              "https://git.drupalcode.org/-/user_settings/personal_access_tokens",
           },
         ],
       },
     })
+  })
+
+  test("opens Keymaxxer setup for a missing GitLab repository token", async () => {
+    const gitlabRepository = {
+      ...repository,
+      forge: "gitlab" as const,
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    }
+    let tokenName: string | null = null
+    let addCalls = 0
+    let addedInput: Parameters<KeymaxxerServiceShape["addSecret"]>[0] | null =
+      null
+    const ensured: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+      },
+      {
+        findSecret: () => Effect.succeed(tokenName),
+        addSecret: (input) =>
+          Effect.sleep("10 millis").pipe(
+            Effect.map(() => {
+              addCalls += 1
+              addedInput = input
+              tokenName = "RENAMED_GITLAB_TOKEN"
+              return true
+            }),
+          ),
+      },
+      {
+        ensureKeyed: (_queue, key) =>
+          Effect.sync(() => {
+            ensured.push(key)
+            return { jobId: makeJobId(), created: true }
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddToken($repositoryId: ID!) {
+          addRepositoryGitLabToken(repositoryId: $repositoryId) {
+            repositoryId configured githubTokenSecretName
+          }
+        }`,
+        variables: { repositoryId: repository.id },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addRepositoryGitLabToken: {
+          repositoryId: repository.id,
+          configured: true,
+          githubTokenSecretName: "RENAMED_GITLAB_TOKEN",
+        },
+      },
+    })
+    expect(addCalls).toBe(1)
+    expect(addedInput).toEqual({
+      name: "GITLAB_TOKEN_GIT_DRUPALCODE_ORG_PROJECT_OAUTH_CLIENT",
+      provider: "gitlab",
+      account: "git.drupalcode.org/project/oauth_client",
+      environment: "prod",
+      access: "read-write",
+      description:
+        "GitLab personal access token for Ready for Agent on git.drupalcode.org/project/oauth_client",
+      tags: "ready-for-agent,harness,gitlab",
+    })
+    expect(ensured).toEqual([repository.id])
   })
 
   test("pullRequestCount uses GitHub open non-draft PRs including external ones", async () => {
@@ -4853,6 +5008,112 @@ describe("GraphQL API", () => {
         }),
       ],
     })
+    expect(elapsedMs).toBeLessThan(2_000)
+  })
+
+  test("GitLab repositoryCredentials falls through to ambient when vault never resolves", async () => {
+    const gitlabRepository = {
+      ...repository,
+      forge: "gitlab" as const,
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    }
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+      },
+      {
+        findSecrets: () => Effect.never,
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        hasCredentials: () => Effect.succeed(true),
+        hasAmbientCredentials: () => Effect.succeed(true),
+      },
+    )
+
+    const started = Date.now()
+    const response = await createGraphqlApi(runtime, {
+      keymaxxerMetadataTimeout: Duration.millis(50),
+    }).fetch(
+      graphqlRequest({
+        query: `query {
+          repositoryCredentials { repositoryId configured }
+        }`,
+      }),
+    )
+    const elapsedMs = Date.now() - started
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      data: {
+        repositoryCredentials: [
+          { repositoryId: repository.id, configured: true },
+        ],
+      },
+    })
+    expect(elapsedMs).toBeLessThan(2_000)
+  })
+
+  test("activates GitLab polling via ambient after vault metadata timeout", async () => {
+    let ensured = false
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: (input) =>
+          Effect.succeed({ ...repository, ...input, paused: true }),
+      },
+      {
+        findSecret: ({ provider }) =>
+          provider === "gitlab" ? Effect.never : Effect.succeed(null),
+      },
+      {
+        ensureKeyed: () => {
+          ensured = true
+          return Effect.succeed({ jobId: makeJobId(), created: true })
+        },
+        enqueue: () => Effect.succeed(makeJobId()),
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        hasCredentials: () => Effect.succeed(true),
+        hasAmbientCredentials: () => Effect.succeed(true),
+      },
+    )
+
+    const started = Date.now()
+    const response = await createGraphqlApi(runtime, {
+      keymaxxerMetadataTimeout: Duration.millis(50),
+    }).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            localPath: "/tmp/oauth_client",
+            isBare: false,
+          },
+        },
+      }),
+    )
+    const elapsedMs = Date.now() - started
+
+    expect(await response.json()).toEqual({
+      data: { addRepository: { id: repository.id } },
+    })
+    expect(ensured).toBe(true)
     expect(elapsedMs).toBeLessThan(2_000)
   })
 

@@ -221,6 +221,15 @@ export const ambientGitLabLayer = (options: {
               ),
             ),
         ),
+        hasAmbientCredentials: Effect.fn("AmbientGitLab.hasAmbientCredentials")(
+          (repository) =>
+            acquireToken(repository.forgeHost).pipe(
+              Effect.as(true),
+              Effect.catchTag("GitLabRequestError", () =>
+                Effect.succeed(false),
+              ),
+            ),
+        ),
       }
     }),
   )
