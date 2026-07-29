@@ -166,6 +166,27 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "Repository credential error",
         "REPOSITORY_CREDENTIAL_ERROR",
       )
+    case "GitLabProjectUnavailableError":
+      return gql(
+        `GitLab project ${error.projectPath} was not found on ${error.forgeHost}. Check the Forge Host and Project Path, then try again.`,
+        "GITLAB_PROJECT_UNAVAILABLE",
+        {
+          forgeHost: error.forgeHost,
+          projectPath: error.projectPath,
+        },
+      )
+    case "GitLabRequestError":
+      return gql(
+        error.message ?? "GitLab request failed",
+        "GITLAB_REQUEST_FAILED",
+      )
+    case "RepositoryIdentityChangeBlockedError":
+      return gql(
+        error.message ??
+          "Cannot change Repository Forge identity while Work Items exist",
+        "REPOSITORY_IDENTITY_CHANGE_BLOCKED",
+        { repositoryId: error.repositoryId },
+      )
     case "KeymaxxerError":
       return gql(
         error.message ?? "Keymaxxer operation failed",
@@ -224,10 +245,10 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         "NOT_A_GIT_REPOSITORY",
         { path: error.path },
       )
-    case "NoGitHubRemote":
+    case "NoForgeRemote":
       return gql(
-        error.message ?? `No GitHub remote found for: ${error.path ?? ""}`,
-        "NO_GITHUB_REMOTE",
+        error.message ?? `No supported Forge remote found: ${error.path ?? ""}`,
+        "NO_FORGE_REMOTE",
         { path: error.path },
       )
     case "DatabaseError":

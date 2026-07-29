@@ -1,4 +1,5 @@
 import { Data, type Duration, Effect } from "effect"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   KeymaxxerService,
   keymaxxerError,
@@ -79,13 +80,21 @@ export const withKeymaxxerMetadataTimeout = <A, E, R>(
     ),
   )
 
-/** Activate durable Issue Polling only when a GitHub token is already configured. */
+/** Activate durable Issue Polling only when this repository has forge credentials. */
 export const activatePollingIfCredentialed = Effect.fn(
   "graphql-api.activatePollingIfCredentialed",
 )(function* (
   repository: Repository,
   options?: { readonly metadataTimeout?: Duration.Duration },
 ) {
+  if (repository.forge === "gitlab") {
+    const gitlab = yield* GitLabService
+    if (yield* gitlab.hasCredentials(repository)) {
+      yield* activateRepositoryPolling(repository.id)
+    }
+    return
+  }
+
   const keymaxxer = yield* KeymaxxerService
   if (keymaxxer.enabled === false) {
     yield* activateRepositoryPolling(repository.id)

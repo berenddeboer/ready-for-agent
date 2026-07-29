@@ -90,10 +90,22 @@ export class AgentBackendChangeBlockedError extends Schema.TaggedErrorClass<Agen
   },
 ) {}
 
+export class RepositoryIdentityChangeBlockedError extends Schema.TaggedErrorClass<RepositoryIdentityChangeBlockedError>()(
+  "RepositoryIdentityChangeBlockedError",
+  {
+    repositoryId: Schema.String,
+    workItemCount: Schema.Int,
+    message: Schema.String,
+  },
+) {}
+
 export class InvalidRepositorySettingsError extends Schema.TaggedErrorClass<InvalidRepositorySettingsError>()(
   "InvalidRepositorySettingsError",
   {
     field: Schema.Literals([
+      "forge",
+      "forgeHost",
+      "projectPath",
       "selectedAgentBackend",
       "defaultModel",
       "defaultThinkingLevel",

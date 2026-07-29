@@ -9,7 +9,7 @@ import {
 } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { parseGitHubRemote } from "./parse-github-remote.js"
+import { parseForgeRemote } from "./parse-forge-remote.js"
 import type { LocalRepository } from "./types.js"
 
 export class PathNotFound extends Schema.TaggedErrorClass<PathNotFound>()(
@@ -39,12 +39,12 @@ export class NotAGitRepository extends Schema.TaggedErrorClass<NotAGitRepository
   }
 }
 
-export class NoGitHubRemote extends Schema.TaggedErrorClass<NoGitHubRemote>()(
-  "NoGitHubRemote",
+export class NoForgeRemote extends Schema.TaggedErrorClass<NoForgeRemote>()(
+  "NoForgeRemote",
   { path: Schema.String },
 ) {
   override get message() {
-    return `No GitHub remote found for: ${this.path}`
+    return `No supported Forge remote found for: ${this.path}`
   }
 }
 
@@ -52,7 +52,7 @@ export type LocalGitError =
   | PathNotFound
   | NotADirectory
   | NotAGitRepository
-  | NoGitHubRemote
+  | NoForgeRemote
   | PlatformError
 
 export class LocalGit extends Context.Service<
@@ -128,7 +128,13 @@ export class LocalGit extends Context.Service<
                   const line = output
                     .split("\n")
                     .map((entry) => entry.trim())
-                    .find((entry) => entry.includes("github.com"))
+                    .find((entry) => {
+                      const candidate = entry.split(/\s+/)[1]
+                      return (
+                        candidate !== undefined &&
+                        Option.isSome(parseForgeRemote(candidate))
+                      )
+                    })
                   if (!line) {
                     return undefined
                   }
@@ -137,18 +143,18 @@ export class LocalGit extends Context.Service<
               )
 
         if (!remoteUrl) {
-          return yield* new NoGitHubRemote({ path: localPath })
+          return yield* new NoForgeRemote({ path: localPath })
         }
 
-        const github = parseGitHubRemote(remoteUrl)
-        if (Option.isNone(github)) {
-          return yield* new NoGitHubRemote({ path: localPath })
+        const forge = parseForgeRemote(remoteUrl)
+        if (Option.isNone(forge)) {
+          return yield* new NoForgeRemote({ path: localPath })
         }
 
         return {
-          forge: "github" as const,
-          forgeHost: "github.com" as const,
-          projectPath: `${github.value.owner}/${github.value.repo}`,
+          forge: forge.value.forge,
+          forgeHost: forge.value.forgeHost,
+          projectPath: forge.value.projectPath,
           localPath,
           isBare,
           paused: true as const,

@@ -14,8 +14,10 @@ import {
   DbService,
   RepositoryId,
   RepositoryNotFoundError,
+  type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import { formatUserFacingError } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   ISSUE_POLL_QUEUE,
   ISSUE_REFRESH_QUEUE,
@@ -119,14 +121,22 @@ const repositoryHasGitHubCredential = Effect.fn(
   return credential !== null
 })
 
+const repositoryHasCredential = Effect.fn("JobWorker.repositoryHasCredential")(
+  function* (repository: RepositoryRecord) {
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      return yield* gitlab.hasCredentials(repository)
+    }
+    return yield* repositoryHasGitHubCredential(repository.projectPath)
+  },
+)
+
 const listCredentialedRepositoryIds = Effect.gen(function* () {
   const db = yield* DbService
   const repositories = yield* db.listRepositories
   const credentialed: string[] = []
   for (const repository of repositories) {
-    const hasCredential = yield* repositoryHasGitHubCredential(
-      repository.projectPath,
-    )
+    const hasCredential = yield* repositoryHasCredential(repository)
     if (hasCredential) {
       credentialed.push(repository.id)
     }
@@ -279,9 +289,7 @@ const finalizeScheduledRefresh = <A, E>(
       return
     }
 
-    const credentialed = yield* repositoryHasGitHubCredential(
-      repository.projectPath,
-    )
+    const credentialed = yield* repositoryHasCredential(repository)
     if (!credentialed) {
       yield* Effect.logWarning(
         "Scheduled Issue poll finalized without recurrence; Repository uncredentialed",
@@ -392,9 +400,7 @@ const claimAndRunRefreshJob = (
       return "busy" as const
     }
 
-    const credentialed = yield* repositoryHasGitHubCredential(
-      repository.projectPath,
-    )
+    const credentialed = yield* repositoryHasCredential(repository)
     if (!credentialed) {
       yield* finalizeScheduledRefresh(
         job.jobId,

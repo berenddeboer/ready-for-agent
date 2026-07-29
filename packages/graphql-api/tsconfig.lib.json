@@ -29,6 +29,9 @@
       "path": "../github-service/tsconfig.lib.json"
     },
     {
+      "path": "../gitlab-service/tsconfig.lib.json"
+    },
+    {
       "path": "../db-service/tsconfig.lib.json"
     },
     {

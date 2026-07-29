@@ -263,6 +263,14 @@ type Repository {
   pullRequestCount: Int!
 }
 
+type LocalRepositoryInspection {
+  forge: String!
+  forgeHost: String!
+  projectPath: String!
+  localPath: String!
+  isBare: Boolean!
+}
+
 type RepositoryCredential {
   repositoryId: ID!
   configured: Boolean!
@@ -442,6 +450,9 @@ input UpdateConfigInput {
 
 input UpdateRepositorySettingsInput {
   repositoryId: ID!
+  forge: String
+  forgeHost: String
+  projectPath: String
   paused: Boolean!
   """
   Set the Repository Agent Backend override, pass null to clear (inherit
@@ -470,6 +481,7 @@ type Mutation {
   deep server module.
   """
   addLocalRepository(path: String!): Repository!
+  inspectLocalRepository(path: String!): LocalRepositoryInspection!
   """
   Open a native OS folder dialog on the Harness host. Returns the absolute
   path, or null when the user cancels or no dialog tool is available.

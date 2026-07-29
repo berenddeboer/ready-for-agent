@@ -860,14 +860,29 @@ function AddRepositoryGuidance({
   )
   const [path, setPath] = useState("")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [inspection, setInspection] = useState<{
+    forge: "github" | "gitlab"
+    forgeHost: string
+    projectPath: string
+    localPath: string
+    isBare: boolean
+  } | null>(null)
   // Bridges pick→add so controls stay disabled across the handoff.
   const [pickToAddBridging, setPickToAddBridging] = useState(false)
 
   const addLocalRepository = useMutation({
-    mutationFn: async (localPath: string) => {
+    mutationFn: async (input: NonNullable<typeof inspection>) => {
       const result = await graphql.mutation({
-        addLocalRepository: {
-          __args: { path: localPath },
+        addRepository: {
+          __args: {
+            input: {
+              forge: input.forge,
+              forgeHost: input.forgeHost.trim(),
+              projectPath: input.projectPath.trim(),
+              localPath: input.localPath,
+              isBare: input.isBare,
+            },
+          },
           id: true,
           forge: true,
           forgeHost: true,
@@ -889,11 +904,12 @@ function AddRepositoryGuidance({
           pullRequestCount: true,
         },
       })
-      return result.addLocalRepository
+      return result.addRepository
     },
     onSuccess: async () => {
       setErrorMessage(null)
       setPath("")
+      setInspection(null)
       await queryClient.invalidateQueries({
         queryKey: repositoriesQuery.queryKey,
       })
@@ -903,6 +919,40 @@ function AddRepositoryGuidance({
         error instanceof Error
           ? error.message
           : "Could not add repository. Check the path and try again.",
+      )
+    },
+    onSettled: () => {
+      setPickToAddBridging(false)
+    },
+  })
+
+  const inspectLocalRepository = useMutation({
+    mutationFn: async (localPath: string) => {
+      const result = await graphql.mutation({
+        inspectLocalRepository: {
+          __args: { path: localPath },
+          forge: true,
+          forgeHost: true,
+          projectPath: true,
+          localPath: true,
+          isBare: true,
+        },
+      })
+      return result.inspectLocalRepository
+    },
+    onSuccess: (result) => {
+      setInspection({
+        ...result,
+        forge: result.forge === "gitlab" ? "gitlab" : "github",
+      })
+      setErrorMessage(null)
+    },
+    onError: (error) => {
+      setInspection(null)
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not inspect repository. Check the path and try again.",
       )
     },
     onSettled: () => {
@@ -924,8 +974,9 @@ function AddRepositoryGuidance({
       }
       setPickToAddBridging(true)
       setPath(picked)
+      setInspection(null)
       setErrorMessage(null)
-      addLocalRepository.mutate(picked)
+      inspectLocalRepository.mutate(picked)
     },
     onError: () => {
       // Transport/server failures only — cancel maps to null in onSuccess.
@@ -935,7 +986,10 @@ function AddRepositoryGuidance({
   })
 
   const busy =
-    addLocalRepository.isPending || pickDirectory.isPending || pickToAddBridging
+    addLocalRepository.isPending ||
+    inspectLocalRepository.isPending ||
+    pickDirectory.isPending ||
+    pickToAddBridging
 
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -945,7 +999,12 @@ function AddRepositoryGuidance({
       return
     }
     setErrorMessage(null)
-    addLocalRepository.mutate(trimmed)
+    if (inspection === null) {
+      setInspection(null)
+      inspectLocalRepository.mutate(trimmed)
+      return
+    }
+    addLocalRepository.mutate(inspection)
   }
 
   return (
@@ -972,6 +1031,7 @@ function AddRepositoryGuidance({
             value={path}
             onChange={(event) => {
               setPath(event.target.value)
+              setInspection(null)
               if (errorMessage !== null) {
                 setErrorMessage(null)
               }
@@ -998,10 +1058,70 @@ function AddRepositoryGuidance({
               disabled={busy}
               className="bg-oxblood px-3 py-2 text-sm font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
             >
-              {addLocalRepository.isPending ? "Adding…" : "Add"}
+              {addLocalRepository.isPending
+                ? "Adding…"
+                : inspectLocalRepository.isPending
+                  ? "Inspecting…"
+                  : inspection === null
+                    ? "Inspect"
+                    : "Confirm and add"}
             </button>
           </div>
         </div>
+        {inspection !== null ? (
+          <fieldset className="grid gap-3 border border-rule p-4 text-left">
+            <legend className="px-1 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
+              Confirm forge identity
+            </legend>
+            <label className="grid gap-1 text-sm font-semibold text-ink-2">
+              Forge
+              <select
+                className="border border-rule-2 bg-paper px-3 py-2 font-normal"
+                value={inspection.forge}
+                onChange={(event) =>
+                  setInspection({
+                    ...inspection,
+                    forge: event.target.value as "github" | "gitlab",
+                  })
+                }
+              >
+                <option value="github">GitHub</option>
+                <option value="gitlab">GitLab</option>
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-ink-2">
+              Forge host
+              <input
+                className="border border-rule-2 bg-paper px-3 py-2 font-mono font-normal"
+                required
+                value={inspection.forgeHost}
+                onChange={(event) =>
+                  setInspection({
+                    ...inspection,
+                    forgeHost: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold text-ink-2">
+              Project path
+              <input
+                className="border border-rule-2 bg-paper px-3 py-2 font-mono font-normal"
+                required
+                value={inspection.projectPath}
+                onChange={(event) =>
+                  setInspection({
+                    ...inspection,
+                    projectPath: event.target.value,
+                  })
+                }
+              />
+            </label>
+            <p className="m-0 text-xs text-ink-faint">
+              The project is verified against this forge before it is saved.
+            </p>
+          </fieldset>
+        ) : null}
         {errorMessage !== null ? (
           <p className="m-0 text-left text-sm text-oxblood-deep" role="alert">
             {errorMessage}
@@ -1044,6 +1164,11 @@ function RepositoryCard({
     ...agentBackendsQuery,
     enabled: settingsOpen,
   })
+  const [forge, setForge] = useState<"github" | "gitlab">(
+    repository.forge === "gitlab" ? "gitlab" : "github",
+  )
+  const [forgeHost, setForgeHost] = useState(repository.forgeHost)
+  const [projectPath, setProjectPath] = useState(repository.projectPath)
   const [paused, setPaused] = useState(repository.paused)
   // null override = inherit harness default; select value is "" for inherit.
   const [selectedAgentBackend, setSelectedAgentBackend] = useState<
@@ -1093,6 +1218,9 @@ function RepositoryCard({
   const updateSettings = useMutation({
     mutationFn: async (input: {
       repositoryId: string
+      forge: "github" | "gitlab"
+      forgeHost: string
+      projectPath: string
       paused: boolean
       selectedAgentBackend: string | null
       defaultModel: string | null
@@ -1142,6 +1270,9 @@ function RepositoryCard({
       // Override changes can expand/shrink the Active Agent Backend set.
       void queryClient.invalidateQueries({
         queryKey: ["agentBackendStatus"],
+      })
+      void queryClient.invalidateQueries({
+        queryKey: repositoriesQuery.queryKey,
       })
       settingsDialogRef.current?.close()
       setSettingsOpen(false)
@@ -1228,6 +1359,9 @@ function RepositoryCard({
     setSettingsOpen(true)
     previewGenerationRef.current += 1
     setPaused(repository.paused)
+    setForge(repository.forge === "gitlab" ? "gitlab" : "github")
+    setForgeHost(repository.forgeHost)
+    setProjectPath(repository.projectPath)
     setSelectedAgentBackend(repository.selectedAgentBackend)
     setDefaultModel(repository.defaultModel ?? "")
     setDefaultVariant(repository.defaultThinkingLevel ?? "")
@@ -1266,6 +1400,9 @@ function RepositoryCard({
     event.preventDefault()
     updateSettings.mutate({
       repositoryId: repository.id,
+      forge,
+      forgeHost: forgeHost.trim(),
+      projectPath: projectPath.trim(),
       paused,
       selectedAgentBackend,
       defaultModel: defaultModel.trim() === "" ? null : defaultModel,
@@ -1821,6 +1958,46 @@ function RepositoryCard({
             </p>
           </div>
           <div className="grid gap-5 px-6 py-5">
+            <fieldset className="grid gap-3 border border-rule p-4">
+              <legend className="px-1 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
+                Forge identity
+              </legend>
+              <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+                Forge
+                <select
+                  className="w-full border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                  value={forge}
+                  onChange={(event) =>
+                    setForge(event.target.value as "github" | "gitlab")
+                  }
+                >
+                  <option value="github">GitHub</option>
+                  <option value="gitlab">GitLab</option>
+                </select>
+              </label>
+              <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+                Forge host
+                <input
+                  className="w-full border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                  required
+                  value={forgeHost}
+                  onChange={(event) => setForgeHost(event.target.value)}
+                />
+              </label>
+              <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+                Project path
+                <input
+                  className="w-full border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                  required
+                  value={projectPath}
+                  onChange={(event) => setProjectPath(event.target.value)}
+                />
+              </label>
+              <span className="text-xs text-ink-faint">
+                GitLab identities are verified before Save. Identity changes are
+                blocked after this Repository has any Work Item.
+              </span>
+            </fieldset>
             <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
               <input
                 type="checkbox"
@@ -2276,63 +2453,80 @@ function RepositoryCard({
               </dd>
             </div>
           </dl>
-          {!repository.credential.configured && (
-            <div className="mt-5 grid gap-2 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep">
-              <strong className="font-serif text-base font-semibold">
-                GitHub token required
-              </strong>
-              {githubTokenCreated ? (
+          {!repository.credential.configured &&
+            repository.forge === "github" && (
+              <div className="mt-5 grid gap-2 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep">
+                <strong className="font-serif text-base font-semibold">
+                  GitHub token required
+                </strong>
+                {githubTokenCreated ? (
+                  <p className="m-0">
+                    Store the generated token as{" "}
+                    <code className="font-bold">
+                      {repository.credential.githubTokenSecretName}
+                    </code>{" "}
+                    in Keymaxxer. Already-created tokens are not upgraded
+                    automatically — edit the token on GitHub or recreate it,
+                    then store the replacement.
+                  </p>
+                ) : (
+                  <p className="m-0">
+                    Create a fine-grained token, choose{" "}
+                    <strong>Only select repositories</strong>, select{" "}
+                    <code className="font-bold">
+                      {repository.projectPath.split("/").at(-1)}
+                    </code>
+                    , and allow <strong>Actions: Read and write</strong>{" "}
+                    (required for workflow reruns and CI logs). Already-created
+                    tokens are not upgraded automatically — edit or recreate
+                    them if Actions is still read-only.
+                  </p>
+                )}
+                {githubTokenCreated ? (
+                  <button
+                    type="button"
+                    className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+                    disabled={addGitHubToken.isPending}
+                    onClick={() => addGitHubToken.mutate()}
+                  >
+                    {addGitHubToken.isPending
+                      ? "Waiting for Keymaxxer"
+                      : "Store in Keymaxxer"}
+                  </button>
+                ) : (
+                  <a
+                    className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper no-underline uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+                    href={repository.credential.githubTokenCreationUrl}
+                    onClick={() => setGithubTokenCreated(true)}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    Create GitHub token
+                  </a>
+                )}
+                {addGitHubToken.isError && (
+                  <p className="m-0 text-oxblood-deep" role="alert">
+                    Keymaxxer setup was cancelled or failed.
+                  </p>
+                )}
+              </div>
+            )}
+          {!repository.credential.configured &&
+            repository.forge === "gitlab" && (
+              <div className="mt-5 grid gap-2 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep">
+                <strong className="font-serif text-base font-semibold">
+                  GitLab authentication required
+                </strong>
                 <p className="m-0">
-                  Store the generated token as{" "}
+                  Set <code className="font-bold">GITLAB_TOKEN</code> before
+                  starting the Harness, or authenticate this host with{" "}
                   <code className="font-bold">
-                    {repository.credential.githubTokenSecretName}
-                  </code>{" "}
-                  in Keymaxxer. Already-created tokens are not upgraded
-                  automatically — edit the token on GitHub or recreate it, then
-                  store the replacement.
-                </p>
-              ) : (
-                <p className="m-0">
-                  Create a fine-grained token, choose{" "}
-                  <strong>Only select repositories</strong>, select{" "}
-                  <code className="font-bold">
-                    {repository.projectPath.split("/").at(-1)}
+                    glab auth login --hostname {repository.forgeHost}
                   </code>
-                  , and allow <strong>Actions: Read and write</strong> (required
-                  for workflow reruns and CI logs). Already-created tokens are
-                  not upgraded automatically — edit or recreate them if Actions
-                  is still read-only.
+                  .
                 </p>
-              )}
-              {githubTokenCreated ? (
-                <button
-                  type="button"
-                  className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
-                  disabled={addGitHubToken.isPending}
-                  onClick={() => addGitHubToken.mutate()}
-                >
-                  {addGitHubToken.isPending
-                    ? "Waiting for Keymaxxer"
-                    : "Store in Keymaxxer"}
-                </button>
-              ) : (
-                <a
-                  className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper no-underline uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-                  href={repository.credential.githubTokenCreationUrl}
-                  onClick={() => setGithubTokenCreated(true)}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  Create GitHub token
-                </a>
-              )}
-              {addGitHubToken.isError && (
-                <p className="m-0 text-oxblood-deep" role="alert">
-                  Keymaxxer setup was cancelled or failed.
-                </p>
-              )}
-            </div>
-          )}
+              </div>
+            )}
           <div className="mt-5">
             <div className="mb-2 flex items-baseline justify-between gap-3">
               <h3 className="m-0 font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
@@ -2349,7 +2543,9 @@ function RepositoryCard({
                 title={
                   repository.credential.configured
                     ? "Refresh issues"
-                    : "Add a GitHub token before refreshing issues"
+                    : repository.forge === "gitlab"
+                      ? "Authenticate GitLab before refreshing issues"
+                      : "Add a GitHub token before refreshing issues"
                 }
               >
                 <svg

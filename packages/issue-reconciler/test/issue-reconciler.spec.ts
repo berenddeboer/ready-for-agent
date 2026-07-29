@@ -16,6 +16,10 @@ import {
   type ReadyLabeledIssue,
 } from "@ready-for-agent/github-service"
 import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   IssueReconciler,
   IssueReconcilerLive,
   ReconciliationMutationError,
@@ -201,22 +205,139 @@ const makeGitHubLayer = (
     },
   } satisfies GitHubServiceShape)
 
+const defaultGitLabLayer = Layer.succeed(GitLabService, {
+  verifyProject: () => Effect.void,
+  getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+  listReadyIssues: () => Effect.succeed([]),
+  hasCredentials: () => Effect.succeed(true),
+} satisfies GitLabServiceShape)
+
 const runReconciliation = <A, E>(
   effect: Effect.Effect<A, E, IssueReconciler>,
   dbLayer: Layer.Layer<DbService>,
   githubLayer: Layer.Layer<GitHubService>,
+  gitlabLayer: Layer.Layer<GitLabService> = defaultGitLabLayer,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(
         IssueReconcilerLive.pipe(
-          Layer.provide(Layer.merge(dbLayer, githubLayer)),
+          Layer.provide(Layer.mergeAll(dbLayer, githubLayer, gitlabLayer)),
         ),
       ),
     ),
   )
 
 describe("IssueReconciler", () => {
+  it("reconciles GitLab standalone Issues and honors closing-PR ownership", () => {
+    const gitlabRepository = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      includeAllIssueAuthors: true,
+    })
+    const db = makeDbFixture({
+      issues: [],
+      workItemPullRequests: [{ issueNumber: 5, pullRequestNumber: 105 }],
+    })
+    const issues = [
+      remoteIssue(1, {
+        hierarchySupported: false,
+        blockedBy: [
+          {
+            number: 99,
+            url: "https://git.drupalcode.org/project/oauth_client/-/issues/99",
+          },
+        ],
+      }),
+      remoteIssue(2, {
+        hierarchySupported: false,
+        closingPullRequests: [
+          {
+            number: 102,
+            repository: "project/oauth_client",
+            state: "OPEN",
+            isDraft: true,
+          },
+        ],
+      }),
+      remoteIssue(3, {
+        hierarchySupported: false,
+        closingPullRequests: [
+          {
+            number: 103,
+            repository: "project/oauth_client",
+            state: "MERGED",
+            isDraft: false,
+          },
+        ],
+      }),
+      remoteIssue(4, {
+        hierarchySupported: false,
+        closingPullRequests: [
+          {
+            number: 104,
+            repository: "project/oauth_client",
+            state: "CLOSED",
+            isDraft: false,
+          },
+        ],
+      }),
+      remoteIssue(5, {
+        hierarchySupported: false,
+        closingPullRequests: [
+          {
+            number: 105,
+            repository: "project/oauth_client",
+            state: "OPEN",
+            isDraft: true,
+          },
+        ],
+      }),
+    ]
+    const gitlab = Layer.succeed(GitLabService, {
+      verifyProject: () => Effect.void,
+      getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+      listReadyIssues: ({ projectPath }) =>
+        Effect.sync(() => {
+          db.actions.push(`gitlab:${projectPath}`)
+          return issues
+        }),
+      hasCredentials: () => Effect.succeed(true),
+    } satisfies GitLabServiceShape)
+    const github = makeGitHubLayer([], db.actions)
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        const summary = yield* reconciler.reconcile(gitlabRepository)
+
+        expect(summary).toEqual({
+          fetched: 5,
+          inserted: 3,
+          updated: 0,
+          deleted: 0,
+          unchanged: 0,
+        })
+        expect(db.stored.map(({ issueNumber }) => issueNumber)).toEqual([
+          1, 4, 5,
+        ])
+        expect(db.stored[0]?.blockedBy).toEqual([
+          {
+            issueNumber: 99,
+            issueUrl:
+              "https://git.drupalcode.org/project/oauth_client/-/issues/99",
+          },
+        ])
+        expect(db.actions).toContain("gitlab:project/oauth_client")
+      }),
+      db.layer,
+      github,
+      gitlab,
+    )
+  })
+
   it("classifies changes, writes by issue number, and records success", () => {
     const db = makeDbFixture({
       issues: [

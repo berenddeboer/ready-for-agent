@@ -11,6 +11,7 @@ import {
   LocalPathInUseError,
   RepositoryAlreadyExistsError,
   RepositoryHasRunningStepError,
+  RepositoryIdentityChangeBlockedError,
   RepositoryNotFoundError,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -654,6 +655,125 @@ describe("DbService", () => {
   })
 
   describe("updateRepositorySettings", () => {
+    it("corrects Forge identity when no Work Item exists", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repo = yield* db.addRepository({
+            ...sampleInput,
+            forge: "gitlab",
+            forgeHost: "git.drupal.org",
+            projectPath: "project/oauth_client",
+          })
+
+          const updated = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            forge: "gitlab",
+            forgeHost: "  git.drupalcode.org  ",
+            projectPath: "  project/oauth_client  ",
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+
+          expect(updated).toMatchObject({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+          })
+        }),
+      ))
+
+    it("rejects Forge identity correction when any Work Item exists", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repo = yield* db.addRepository(sampleInput)
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 1, 'complete', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            ["wi-terminal-still-freezes-identity", repo.id, now, now, now],
+          )
+
+          const error = yield* Effect.flip(
+            db.updateRepositorySettings({
+              repositoryId: repo.id,
+              forge: "gitlab",
+              forgeHost: "gitlab.example",
+              projectPath: "group/widgets",
+              paused: true,
+              defaultModel: null,
+              defaultThinkingLevel: null,
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              autoMerge: false,
+              includeAllIssueAuthors: false,
+              waitForReadyForReviewChecks: true,
+            }),
+          )
+
+          expect(error).toBeInstanceOf(RepositoryIdentityChangeBlockedError)
+          expect(error).toMatchObject({
+            repositoryId: repo.id,
+            workItemCount: 1,
+          })
+        }),
+      ))
+
+    it("allows Project Path display casing correction when a Work Item exists", () =>
+      runTest(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const sql = yield* SqlClient.SqlClient
+          const repo = yield* db.addRepository({
+            ...sampleInput,
+            projectPath: "Acme/Widgets",
+          })
+          const now = Date.now()
+          yield* sql.unsafe(
+            `INSERT INTO work_item (
+               id, repository_id, issue_number, state, state_ready_at,
+               worktree_path, session_id, failure_code, failure_message,
+               created_at, updated_at
+             ) VALUES (?, ?, 1, 'complete', ?, NULL, NULL, NULL, NULL, ?, ?)`,
+            [
+              "wi-display-casing-does-not-freeze-identity",
+              repo.id,
+              now,
+              now,
+              now,
+            ],
+          )
+
+          const updated = yield* db.updateRepositorySettings({
+            repositoryId: repo.id,
+            forge: repo.forge,
+            forgeHost: repo.forgeHost,
+            projectPath: "acme/widgets",
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          })
+
+          expect(updated.projectPath).toBe("acme/widgets")
+        }),
+      ))
+
     it("updates pause, model override, auto-merge, include-all authors, and ready-check wait", () =>
       runTest(
         Effect.gen(function* () {
