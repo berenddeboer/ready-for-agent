@@ -182,7 +182,7 @@ const reconcileVariantForModel = (
 ): string =>
   variant.length > 0 && modelVariants.includes(variant) ? variant : ""
 
-const repositoriesQuery = {
+export const repositoriesQuery = {
   queryKey: ["repositories"],
   queryFn: async () => {
     const result = await graphql.query({
@@ -246,7 +246,7 @@ const directoryPickerAvailableQuery = {
   },
 }
 
-const issuesQuery = (repositoryId: string) => ({
+export const issuesQuery = (repositoryId: string) => ({
   queryKey: ["issues", repositoryId],
   queryFn: async () => {
     const result = await graphql.query({
@@ -274,7 +274,7 @@ const issuesQuery = (repositoryId: string) => ({
   },
 })
 
-type Repository = {
+export type Repository = {
   id: string
   forge: string
   forgeHost: string
@@ -359,7 +359,7 @@ type WorkItemStatus =
   | "WAITING_FOR_WORKER_SLOT"
   | "WAITING_FOR_BLOCKERS"
 
-type WorkItem = {
+export type WorkItem = {
   id: string
   repositoryId: string
   issueNumber: number
@@ -424,11 +424,11 @@ type WorkItemsQueryOptions = {
 }
 
 /** Completed history window (successful finished outcomes). */
-const JOBS_COMPLETED_LIMIT = 15
+export const JOBS_COMPLETED_LIMIT = 15
 /** Failed history window, independent of JOBS_COMPLETED_LIMIT. */
-const JOBS_FAILED_LIMIT = 15
+export const JOBS_FAILED_LIMIT = 15
 
-const workItemsQuery = (
+export const workItemsQuery = (
   repositoryId: string,
   options: WorkItemsQueryOptions = {},
 ) => {
@@ -457,16 +457,16 @@ const workItemsQuery = (
   }
 }
 
-const jobsWorkingWorkItemsQuery = (repositoryId: string) =>
+export const jobsWorkingWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, { listKind: "WORKING" })
 
-const jobsFailedWorkItemsQuery = (repositoryId: string) =>
+export const jobsFailedWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, {
     listKind: "FAILED",
     limit: JOBS_FAILED_LIMIT,
   })
 
-const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
+export const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, {
     listKind: "COMPLETED",
     limit: JOBS_COMPLETED_LIMIT,
@@ -554,7 +554,7 @@ function HomeBody() {
   )
 }
 
-function CommittedPullRequestsDashboard() {
+export function CommittedPullRequestsDashboard() {
   const [bounds, setBounds] = useState(() =>
     localCommittedPullRequestDayBounds(),
   )
@@ -2886,7 +2886,7 @@ const jobsTabListAriaLabel = (tab: JobsTab): string => {
   return "Completed jobs"
 }
 
-function SessionUsageDialog({
+export function SessionUsageDialog({
   workItemId,
   sessionId,
   open,
@@ -3428,7 +3428,7 @@ function JobsCard() {
   )
 }
 
-function JobsCardSkeleton() {
+export function JobsCardSkeleton() {
   return (
     <article
       className="border border-rule-2 bg-panel px-4 py-3 sm:px-5"
@@ -3444,7 +3444,7 @@ function JobsCardSkeleton() {
   )
 }
 
-function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
+export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   const queryClient = useQueryClient()
   const updateWorkItem = (updated: WorkItem) => {
     patchWorkItemsCaches(queryClient, workItem.repositoryId, (current) =>
@@ -3545,7 +3545,7 @@ function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   )
 }
 
-function WorkItemLifecycleStatus({
+export function WorkItemLifecycleStatus({
   workItem,
   compact = false,
   pullRequestUrl = null,

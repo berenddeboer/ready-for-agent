@@ -108,4 +108,394 @@
   .entry-rule {
     border-top: 1px solid var(--color-rule-soft);
   }
+
+  .industrial-shell {
+    --industrial-ink: #151515;
+    --industrial-paper: #f4f1e8;
+    --industrial-concrete: #dedbd2;
+    max-width: 100rem;
+    margin-inline: auto;
+  }
+
+  .board-masthead {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    margin-bottom: 1rem;
+    padding: clamp(2rem, 6vw, 5rem) 0 1.1rem;
+    border-bottom: 0.5rem solid var(--industrial-ink);
+  }
+
+  .board-kicker {
+    grid-column: 1 / -1;
+    margin: 0 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
+  .board-title {
+    margin: 0;
+    font-size: clamp(3rem, 8vw, 7.5rem);
+    font-weight: 950;
+    line-height: 0.8;
+    letter-spacing: -0.07em;
+    text-transform: uppercase;
+  }
+
+  .board-deck {
+    max-width: 17rem;
+    margin: 0 0 0.25rem 2rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.35;
+    text-transform: uppercase;
+  }
+
+  .industrial-shell > section[aria-label="Committed pull requests"] > article {
+    border: 2px solid var(--industrial-ink);
+    background: var(--industrial-paper);
+    box-shadow: 5px 5px 0 var(--industrial-ink);
+  }
+
+  .section-rail {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1rem 0 0.75rem;
+  }
+
+  .section-index {
+    margin: 0 0 0.2rem;
+    color: var(--color-ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .section-title {
+    margin: 0;
+    font-size: clamp(1.6rem, 3vw, 2.6rem);
+    font-weight: 950;
+    line-height: 0.95;
+    letter-spacing: -0.04em;
+    text-transform: uppercase;
+  }
+
+  .live-marker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .live-marker span {
+    width: 0.55rem;
+    height: 0.55rem;
+    background: #009c68;
+    animation: industrial-pulse 1.8s steps(2) infinite;
+  }
+
+  .pipeline-controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border: 2px solid var(--industrial-ink);
+    border-bottom: 0;
+    background: var(--industrial-paper);
+  }
+
+  .pipeline-tabs,
+  .repository-filters,
+  .lane-switcher {
+    display: flex;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .pipeline-tab,
+  .repository-filter,
+  .lane-switch {
+    border: 1px solid var(--industrial-ink);
+    background: transparent;
+    padding: 0.45rem 0.65rem;
+    color: var(--industrial-ink);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .pipeline-tab:hover,
+  .repository-filter:hover,
+  .lane-switch:hover {
+    background: var(--color-paper-3);
+  }
+
+  .pipeline-tab[aria-selected="true"],
+  .repository-filter[aria-pressed="true"],
+  .lane-switch[aria-pressed="true"] {
+    background: var(--industrial-ink);
+    color: var(--industrial-paper);
+  }
+
+  .pipeline-board {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    border: 2px solid var(--industrial-ink);
+    background: var(--industrial-ink);
+    gap: 2px;
+  }
+
+  .pipeline-lane {
+    min-width: 0;
+    min-height: 23rem;
+    background: var(--industrial-concrete);
+  }
+
+  .lane-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    min-height: 5.25rem;
+    padding: 0.7rem;
+    border-bottom: 2px solid var(--industrial-ink);
+    background: var(--lane-color);
+    color: var(--lane-text, white);
+  }
+
+  .lane-number {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 800;
+    line-height: 1;
+    opacity: 0.75;
+  }
+
+  .lane-title {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 950;
+    line-height: 0.85;
+    letter-spacing: -0.04em;
+    text-transform: uppercase;
+  }
+
+  .lane-count {
+    font-family: var(--font-mono);
+    font-size: 2rem;
+    font-weight: 950;
+    line-height: 0.8;
+  }
+
+  .lane-stack {
+    display: grid;
+    align-content: start;
+    gap: 0.55rem;
+    padding: 0.55rem;
+  }
+
+  .lane-empty {
+    margin: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px dashed #777;
+    color: #666;
+    font-family: var(--font-mono);
+    font-size: 0.67rem;
+    font-weight: 700;
+    line-height: 1.4;
+    text-transform: uppercase;
+  }
+
+  .job-ticket {
+    position: relative;
+    min-width: 0;
+    border: 2px solid var(--industrial-ink);
+    background: var(--industrial-paper);
+    padding: 0.65rem;
+    box-shadow: 2px 2px 0 var(--industrial-ink);
+  }
+
+  .job-ticket::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--ticket-color, var(--industrial-ink));
+  }
+
+  .job-ticket-repo {
+    margin: 0 0 0.4rem 0.35rem;
+    overflow: hidden;
+    color: var(--color-ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 800;
+    line-height: 1;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .job-ticket-title {
+    display: block;
+    margin-left: 0.35rem;
+    overflow-wrap: anywhere;
+    color: var(--industrial-ink);
+    font-size: 0.76rem;
+    font-weight: 800;
+    line-height: 1.25;
+    text-decoration: none;
+  }
+
+  .job-ticket-title:hover {
+    color: var(--color-oxblood);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+  }
+
+  .job-ticket-state {
+    display: inline-block;
+    margin: 0.55rem 0 0 0.35rem;
+    border: 1px solid currentColor;
+    padding: 0.2rem 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .job-ticket-runtime {
+    display: grid;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgb(21 21 21 / 20%);
+  }
+
+  .pipeline-list {
+    border: 2px solid var(--industrial-ink);
+    background: var(--industrial-concrete);
+    padding: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  }
+
+  .pipeline-list-empty {
+    margin: 0;
+    border: 2px solid var(--industrial-ink);
+    background: var(--industrial-concrete);
+    padding: 1.5rem;
+    color: var(--color-ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .lane-switcher {
+    display: none;
+  }
+}
+
+@keyframes industrial-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (max-width: 900px) {
+  .board-masthead {
+    display: block;
+  }
+
+  .board-deck {
+    margin: 1rem 0 0;
+  }
+
+  .pipeline-controls {
+    display: grid;
+    min-width: 0;
+  }
+
+  .repository-filters {
+    width: 100%;
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 0.45rem;
+    scroll-snap-type: inline proximity;
+    scrollbar-color: var(--industrial-ink) var(--industrial-concrete);
+    scrollbar-width: thin;
+    touch-action: pan-x;
+  }
+
+  .repository-filter {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  .lane-switcher {
+    display: grid;
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding: 0.55rem;
+    border: 2px solid var(--industrial-ink);
+    border-bottom: 0;
+    background: var(--industrial-concrete);
+  }
+
+  .lane-switch {
+    min-width: 0;
+    min-height: 2.75rem;
+    padding-inline: 0.35rem;
+    white-space: normal;
+  }
+
+  .pipeline-board {
+    display: block;
+  }
+
+  .pipeline-lane {
+    display: none;
+    min-height: 18rem;
+  }
+
+  .pipeline-lane[data-mobile-active="true"] {
+    display: block;
+  }
+
+  .lane-header {
+    position: static;
+    min-height: 4rem;
+  }
 }
