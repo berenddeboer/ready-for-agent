@@ -170,10 +170,37 @@ export const workItemStatusMessage = (
   return latest.reasonMessage
 }
 
+/**
+ * Cumulative wall-clock execution time for a phase across every attempt in
+ * the same Work Item. Prior failed, timed-out, and Needs Human attempts stay
+ * included so retries and continues do not reset the displayed timer.
+ * Null when no attempt has started yet (first attempt still queued).
+ */
+export const cumulativeExecutionDurationMs = (
+  stepRuns: readonly Pick<StepRunRecord, "executionDurationMs">[],
+): number | null => {
+  let total = 0
+  let hasStartedAttempt = false
+  for (const stepRun of stepRuns) {
+    if (stepRun.executionDurationMs === null) continue
+    hasStartedAttempt = true
+    total += stepRun.executionDurationMs
+  }
+  return hasStartedAttempt ? total : null
+}
+
 export const lifecycleLabels = (workItem: WorkItemRecord) => {
   const latestRuns = new Map<LifecyclePhase, StepRunRecord>()
+  const runsByPhase = new Map<LifecyclePhase, StepRunRecord[]>()
   for (const stepRun of workItem.stepRuns) {
-    latestRuns.set(lifecyclePhase(stepRun.step), stepRun)
+    const phase = lifecyclePhase(stepRun.step)
+    latestRuns.set(phase, stepRun)
+    const runs = runsByPhase.get(phase)
+    if (runs === undefined) {
+      runsByPhase.set(phase, [stepRun])
+    } else {
+      runs.push(stepRun)
+    }
   }
   const finalStepRun = latestStepRun(workItem)
   const finalPhase =
@@ -218,7 +245,7 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
       phase: phase.toUpperCase(),
       label: `${lifecyclePhaseLabel(phase)}: ${outcome}`,
       status: status.toUpperCase(),
-      durationMs: stepRun.executionDurationMs,
+      durationMs: cumulativeExecutionDurationMs(runsByPhase.get(phase) ?? []),
     }
   })
 }
