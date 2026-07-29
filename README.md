@@ -1,28 +1,49 @@
-# Ready for Agent: Clanker Harness
+# Ready for Agent: Clanker Harness for 150+ PRs a week
 
-Agentic software engineering harness which watches configured Forge issue
-queues for issues marked with `ready-for-agent`. Select an issue in the UI to
-start working on it.
+This harness is designed for people who create issues in GitHub, and
+then use this tool to start working working on them, reviewing them,
+and merging them (if auto-merge is enabled). It's a different way of
+working: you talk to your agent to create GitHub issues, and this
+harness implements them.
+
+Label your issues with `ready-for-agent`, then select an issue in the
+UI to start working on it, or select a parent to implement all child
+issues.
+
+It very much supports a HITL workflow (Human in the Loop): you design,
+you architect, you verify where needed.
+
+It works very well if you follow [the Matt Pocock
+workflow](https://www.youtube.com/watch?v=M6mYodf0dJM): start a
+grilling session, then create a specification (`/to-spec`), then
+create tickets (`/to-tickets1`). These tickets will be labled with
+ready-for-agent, and show up immediately. Install his [Skills for Real Engineers](https://github.com/mattpocock/skills) to get started with this
+workflow.
 
 <img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
 
-It does this by creating a new worktree, installing packages, and
-asking a selectable headless Agent Backend
-([OpenCode](https://opencode.ai/), [Codex](https://github.com/openai/codex), or
-[Grok Build](https://docs.x.ai/))
-to implement the issue, review the issue, create a PR, and merge if allowed.
+## How it works
 
-The goal of this clanker harness is to get you to that 50+ PRs merged
-a day nirvana. You focus on design, creating specifications, and
-turning them into GitHub tickets as per [the Matt Pocock
-workflow](https://www.youtube.com/watch?v=M6mYodf0dJM). The harness
-allows you to drop that baby-sitting of your agent.
+The harness creates a new worktree, installs packages, and asking a
+selectable headless Agent Backend ([OpenCode](https://opencode.ai/),
+[Codex](https://github.com/openai/codex), or [Grok
+Build](https://docs.x.ai/)) to implement the issue, review the issue,
+create a PR, and merge if allowed.
 
-See [the introduction video](https://www.youtube.com/watch?v=bj_aPnjS3d0) to see the tool in action.
+The goal of this clanker harness is to get you to that 25+ PRs merged
+a day nirvana. It does that by removing the time spend babysitting an
+agent sand guiding it through a implement, review, commit, and watch
+PR stages.
+
+See [the introduction
+video](https://www.youtube.com/watch?v=dnYWUenIo7Y) to see the tool in
+action.
 
 # Usage
 
 Requires a supported platform: Linux, macOS, or Windows (x64 or arm64).
+
+Run:
 
 ```bash
 npx ready-for-agent@latest
@@ -86,8 +107,6 @@ auto-merged, higher risk still require human review.
 
 Pick the "Implement locally" option to implement the issue in the new
 worktree, but withoutr creating a PR yet. This allows you to test and verify.
-
-![Clanker Harness Console](docs/screenshot.png)
 
 ## Assumptions
 
@@ -174,14 +193,19 @@ Yes. GitLab Repository identity, Issue reconciliation, and local Agent Turns
 through Review are supported. GitLab Pull Request lifecycle operations are
 being delivered in later phases.
 
+3. Can I implement something locally, and then check myself?
+
+Yes, pick "Implement locally" from the kebab menu. Everything stays
+local, and no commit is made.
+
 # Architecture
 
 ## The Forge is source of truth
 
-Issues on the configured Repository Forge remain the source of truth; the local
-database is book-keeping. Style and guidelines come from the target
-repository—this harness steers an agent swarm on `ready-for-agent` labeled
-work.
+Issues on the configured Repository Forge (GitHub/GitLab) remain the
+source of truth; the local database is book-keeping. Style and
+guidelines come from the target repository—this harness steers an
+agent swarm on `ready-for-agent` labeled work.
 
 ## Graphql API
 
