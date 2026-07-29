@@ -10,7 +10,7 @@ const DEFAULT_READY_TIMEOUT_MS = 60_000
 const DEFAULT_POLL_INTERVAL_MS = 250
 
 /** Minimal child surface used by the detached browser launcher (testable). */
-export type DetachedBrowserChild = {
+type DetachedBrowserChild = {
   on(event: "error", listener: (error: Error) => void): unknown
   unref(): unknown
 }

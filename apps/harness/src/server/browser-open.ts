@@ -8,7 +8,7 @@ const DEFAULT_UI_PORT = 6056
 const DEFAULT_UI_HOST = "127.0.0.1"
 
 /** Minimal child surface used by the detached browser launcher (testable). */
-export type DetachedBrowserChild = {
+type DetachedBrowserChild = {
   on(event: "error", listener: (error: Error) => void): unknown
   unref(): unknown
 }
