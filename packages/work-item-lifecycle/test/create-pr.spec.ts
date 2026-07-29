@@ -49,7 +49,7 @@ const baseContext = (
 ): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: testRepositoryId,
-  githubIssueNumber: 91,
+  issueNumber: 91,
   issueTitle: "Add widgets endpoint",
   agentBackend: "opencode",
   model: "opencode/test-model",
@@ -210,7 +210,7 @@ describe("deterministic PR templates", () => {
   it("builds title and body with closing semantics", () => {
     expect(
       buildDeterministicPullRequestTitle({
-        githubIssueNumber: 91,
+        issueNumber: 91,
         issueTitle: "Add widgets",
       }),
     ).toBe("Add widgets")
@@ -237,15 +237,16 @@ describe("createPr", () => {
       let resolvedBranch: string | null = null
       let reconciledCopy: { title: string; body: string } | null = null
       const context = baseContext(root, {
-        githubIssueNumber: 2039,
+        issueNumber: 2039,
         workItemId: makeWorkItemId(),
         publicationTitle: "feat: ship widgets",
         publicationBody: "Ships widgets for the dashboard.\n\nCloses #2039",
       })
       const expectedBranch = workItemBranchName({
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 2039,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 2039,
         workItemId: context.workItemId,
       })
 
@@ -292,7 +293,7 @@ describe("createPr", () => {
       const result = await run(
         createPr(
           baseContext(root, {
-            githubIssueNumber: 55,
+            issueNumber: 55,
             publicationTitle: "feat: x",
             publicationBody: "Body for issue 55.\n\nCloses #55",
           }),
@@ -346,7 +347,7 @@ describe("createPr", () => {
         await addRemote.exited
         // Need a branch matching work item branch with a commit to push.
         const context = baseContext(root, {
-          githubIssueNumber: 2039,
+          issueNumber: 2039,
           issueTitle: "Ship widgets",
           publicationTitle: "feat: ship widgets",
           publicationBody:
@@ -356,9 +357,10 @@ describe("createPr", () => {
           maxDuration: Duration.minutes(12),
         })
         const branch = workItemBranchName({
-          githubOwner: "acme",
-          githubRepo: "widgets",
-          githubIssueNumber: 2039,
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          issueNumber: 2039,
           workItemId: context.workItemId,
         })
         for (const args of [
@@ -392,7 +394,11 @@ describe("createPr", () => {
             createDraftPullRequest: (repository, input) => {
               createCalls += 1
               createdInput = input
-              expect(repository).toEqual({ owner: "acme", name: "widgets" })
+              expect(repository).toEqual({
+                forge: "github",
+                forgeHost: "github.com",
+                projectPath: "acme/widgets",
+              })
               return Effect.succeed(555)
             },
           }),
@@ -428,7 +434,7 @@ describe("createPr", () => {
       let secrets: readonly string[] = []
       let continueCalls = 0
 
-      const context = baseContext(root, { githubIssueNumber: 77 })
+      const context = baseContext(root, { issueNumber: 77 })
       const result = await run(createPr(context), {
         keymaxxer: stubKeymaxxer({
           findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -521,11 +527,12 @@ describe("createPr", () => {
           stderr: "pipe",
         }).exited
 
-        const context = baseContext(root, { githubIssueNumber: 42 })
+        const context = baseContext(root, { issueNumber: 42 })
         const branch = workItemBranchName({
-          githubOwner: "acme",
-          githubRepo: "widgets",
-          githubIssueNumber: 42,
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          issueNumber: 42,
           workItemId: context.workItemId,
         })
         for (const args of [
@@ -599,7 +606,7 @@ describe("createPr", () => {
 
       const context = baseContext(root, {
         sessionId: "ses_from_implement",
-        githubIssueNumber: 2039,
+        issueNumber: 2039,
         model: "opencode/create-pr-model",
         thinkingLevel: "max",
       })

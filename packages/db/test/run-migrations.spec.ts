@@ -100,6 +100,7 @@ describe("runMigrations", () => {
           { name: "20260726090000_waiting_for_blockers" },
           { name: "20260728120000_work_item_merge_mode" },
           { name: "20260729120000_work_item_publication_copy" },
+          { name: "20260729160000_forge_identity_foundation" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -705,6 +706,118 @@ describe("runMigrations", () => {
           { id: "repo-1", wait_for_ready_for_review_checks: 1 },
           { id: "repo-2", wait_for_ready_for_review_checks: 1 },
         ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("backfills Forge identity and renames issue and pull request numbers", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260729160000_forge_identity_foundation/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const setupStatements = [
+          `CREATE TABLE repository (
+            id text PRIMARY KEY,
+            github_owner text NOT NULL,
+            github_repo text NOT NULL
+          )`,
+          `CREATE UNIQUE INDEX repository_github_owner_repo_lower_uidx
+          ON repository (lower(github_owner), lower(github_repo))`,
+          `CREATE TABLE issue (
+            id text PRIMARY KEY,
+            repository_id text NOT NULL,
+            github_issue_number integer NOT NULL,
+            parent_github_issue_number integer,
+            parent_github_issue_url text
+          )`,
+          `CREATE UNIQUE INDEX issue_repository_id_github_issue_number_uidx
+          ON issue (repository_id, github_issue_number)`,
+          `CREATE TABLE issue_dependency (
+            issue_id text NOT NULL,
+            blocking_github_issue_number integer NOT NULL,
+            blocking_github_issue_url text NOT NULL
+          )`,
+          `CREATE TABLE work_item (
+            id text PRIMARY KEY,
+            repository_id text NOT NULL,
+            github_issue_number integer NOT NULL,
+            github_pull_request_number integer
+          )`,
+          `INSERT INTO repository VALUES ('repo-1', 'Acme', 'Widgets')`,
+          `INSERT INTO issue VALUES (
+            'issue-1', 'repo-1', 42, 7,
+            'https://github.com/Acme/Widgets/issues/7'
+          )`,
+          `INSERT INTO issue_dependency VALUES (
+            'issue-1', 5, 'https://github.com/Acme/Widgets/issues/5'
+          )`,
+          `INSERT INTO work_item VALUES ('wi-1', 'repo-1', 42, 99)`,
+        ]
+        for (const statement of setupStatements) {
+          yield* sql.unsafe(statement)
+        }
+
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        expect(
+          yield* sql.unsafe(
+            `SELECT id, forge, forge_host, project_path FROM repository`,
+          ),
+        ).toEqual([
+          {
+            id: "repo-1",
+            forge: "github",
+            forge_host: "github.com",
+            project_path: "Acme/Widgets",
+          },
+        ])
+        expect(
+          yield* sql.unsafe(
+            `SELECT issue_number, parent_issue_number, parent_issue_url FROM issue`,
+          ),
+        ).toEqual([
+          {
+            issue_number: 42,
+            parent_issue_number: 7,
+            parent_issue_url: "https://github.com/Acme/Widgets/issues/7",
+          },
+        ])
+        expect(
+          yield* sql.unsafe(
+            `SELECT blocking_issue_number, blocking_issue_url FROM issue_dependency`,
+          ),
+        ).toEqual([
+          {
+            blocking_issue_number: 5,
+            blocking_issue_url: "https://github.com/Acme/Widgets/issues/5",
+          },
+        ])
+        expect(
+          yield* sql.unsafe(
+            `SELECT issue_number, pull_request_number FROM work_item`,
+          ),
+        ).toEqual([{ issue_number: 42, pull_request_number: 99 }])
+
+        const duplicate = yield* Effect.exit(
+          sql.unsafe(
+            `INSERT INTO repository (id, forge, forge_host, project_path)
+             VALUES ('repo-2', 'github', 'github.com', 'acme/widgets')`,
+          ),
+        )
+        expect(duplicate._tag).toBe("Failure")
       }).pipe(Effect.provide(SqliteTest)),
     )
   })

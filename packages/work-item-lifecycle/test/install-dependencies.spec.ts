@@ -19,7 +19,7 @@ const PlatformLayer = BunServices.layer
 const baseContext = (worktreePath: string | null): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
-  githubIssueNumber: 79,
+  issueNumber: 79,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",

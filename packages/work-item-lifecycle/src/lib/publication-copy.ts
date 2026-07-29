@@ -100,15 +100,12 @@ export const parsePublicationCopyResult = (
   return { title, body }
 }
 
-const stripClosingReferences = (
-  body: string,
-  githubIssueNumber: number,
-): string => {
+const stripClosingReferences = (body: string, issueNumber: number): string => {
   const kept: string[] = []
   for (const line of body.split("\n")) {
     const trimmed = line.trim()
     const match = CLOSING_REFERENCE_LINE.exec(trimmed)
-    if (match !== null && Number(match[1]) === githubIssueNumber) {
+    if (match !== null && Number(match[1]) === issueNumber) {
       continue
     }
     kept.push(line)
@@ -126,14 +123,14 @@ const stripClosingReferences = (
  */
 export const normalizePublicationCopy = (
   raw: PublicationCopy,
-  githubIssueNumber: number,
+  issueNumber: number,
 ): PublicationCopy | null => {
   const title = raw.title.replace(/\s+/g, " ").trim()
   if (title === "" || title.length > PUBLICATION_TITLE_MAX_LENGTH) {
     return null
   }
 
-  const withoutCloses = stripClosingReferences(raw.body, githubIssueNumber)
+  const withoutCloses = stripClosingReferences(raw.body, issueNumber)
   if (withoutCloses === "") {
     return null
   }
@@ -145,7 +142,7 @@ export const normalizePublicationCopy = (
     return null
   }
 
-  const closesLine = `Closes #${githubIssueNumber}`
+  const closesLine = `Closes #${issueNumber}`
   const body = `${withoutCloses}\n\n${closesLine}`
   if (body.length > PUBLICATION_BODY_MAX_LENGTH) {
     return null
@@ -164,7 +161,7 @@ export const formatPublicationCommitMessage = (copy: PublicationCopy): string =>
  */
 export const publicationCopyFromCommitMessage = (
   message: string,
-  githubIssueNumber: number,
+  issueNumber: number,
 ): PublicationCopy | null => {
   const trimmed = message.replace(/\r\n/g, "\n").trim()
   if (trimmed === "") {
@@ -181,13 +178,12 @@ export const publicationCopyFromCommitMessage = (
   // Prefer equality with the actual commit: strip duplicate closing refs and
   // re-append exactly one. Do not invent prose when the body was empty or only
   // closes (legacy `title\n\nCloses #N` → body is just `Closes #N`).
-  const stripped =
-    body === "" ? "" : stripClosingReferences(body, githubIssueNumber)
+  const stripped = body === "" ? "" : stripClosingReferences(body, issueNumber)
   const prose = stripped.trim()
   const normalizedBody =
     prose === ""
-      ? `Closes #${githubIssueNumber}`
-      : `${prose}\n\nCloses #${githubIssueNumber}`
+      ? `Closes #${issueNumber}`
+      : `${prose}\n\nCloses #${issueNumber}`
   if (title.length > PUBLICATION_TITLE_MAX_LENGTH) {
     return {
       title: title.slice(0, PUBLICATION_TITLE_MAX_LENGTH).trimEnd(),
@@ -203,7 +199,7 @@ export const publicationCopyFromCommitMessage = (
   }
 }
 
-export const buildPublicationCopyPrompt = (githubIssueNumber: number): string =>
+export const buildPublicationCopyPrompt = (issueNumber: number): string =>
   [
     "Author shared publication copy for this Work Item's git commit and draft pull request.",
     "Use the completed implementation, Review remediation, and verification already present in this Session.",
@@ -213,24 +209,24 @@ export const buildPublicationCopyPrompt = (githubIssueNumber: number): string =>
     "- body: useful reviewer-facing Markdown explaining why the change was needed, what changed, and meaningful verification or limitations.",
     "Do not use the Issue title alone as the publication title.",
     'Do not write a generic body such as "Automated draft pull request for GitHub issue #N".',
-    `You may mention issue #${githubIssueNumber}; the harness will ensure the body ends with exactly one Closes #${githubIssueNumber} reference.`,
+    `You may mention issue #${issueNumber}; the harness will ensure the body ends with exactly one Closes #${issueNumber} reference.`,
     "End your final response with exactly one machine-readable result line. Prefer putting the JSON on that line:",
     `READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
     "The body value must be a JSON string (use \\n for newlines). The result line must be the final non-empty line.",
   ].join("\n")
 
 export const buildPublicationCopyFormatCorrectionPrompt = (
-  githubIssueNumber: number,
+  issueNumber: number,
 ): string =>
   [
     "Your previous response did not report a unique final READY_FOR_AGENT_RESULT: PUBLICATION_COPY with valid JSON title and body.",
     "Reply with copy only — do not edit files, stage, commit, push, or create a pull request.",
     `End with exactly one final line of the form: READY_FOR_AGENT_RESULT: PUBLICATION_COPY {"title":"...","body":"..."}`,
-    `Include a substantive title and body for the completed work on issue #${githubIssueNumber}.`,
+    `Include a substantive title and body for the completed work on issue #${issueNumber}.`,
   ].join("\n")
 
 export const buildCreatePrFallbackPromptWithCopy = (input: {
-  readonly githubIssueNumber: number
+  readonly issueNumber: number
   readonly branch: string
   readonly title: string
   readonly body: string
@@ -257,7 +253,7 @@ export const buildCreatePrFallbackPromptWithCopy = (input: {
   ].join("\n")
 
 export const buildCommitFallbackPromptWithCopy = (input: {
-  readonly githubIssueNumber: number
+  readonly issueNumber: number
   readonly title: string
   readonly body: string
   readonly diagnostics: string
@@ -271,7 +267,7 @@ export const buildCommitFallbackPromptWithCopy = (input: {
     "",
     input.body,
     "-----",
-    `The commit must still close GitHub issue #${input.githubIssueNumber} (include Closes #${input.githubIssueNumber} in the body unless policy forbids it — then mention the issue another accepted way).`,
+    `The commit must still close GitHub issue #${input.issueNumber} (include Closes #${input.issueNumber} in the body unless policy forbids it — then mention the issue another accepted way).`,
     "Stage only the relevant implementation changes, then commit.",
     "Exclude harness-owned diagnostic artifacts such as `.ready-for-agent/`.",
     "If there is nothing left to commit because a valid commit already exists for this work, succeed without creating an empty commit.",

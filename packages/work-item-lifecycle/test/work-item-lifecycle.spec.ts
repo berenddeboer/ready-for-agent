@@ -199,8 +199,9 @@ describe("WorkItemLifecycle", () => {
     )
 
   const sampleRepository = {
-    githubOwner: "acme",
-    githubRepo: "widgets",
+    forge: "github",
+    forgeHost: "github.com",
+    projectPath: "acme/widgets",
     localPath: "/repos/acme/widgets.git",
     isBare: true,
   }
@@ -241,7 +242,7 @@ describe("WorkItemLifecycle", () => {
     const repository = yield* db.addRepository(sampleRepository)
     const issue = yield* db.storeIssue({
       repositoryId: repository.id,
-      githubIssueNumber: 42,
+      issueNumber: 42,
       ...sampleIssueFields,
     })
     return { repository, issue }
@@ -272,12 +273,12 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           expect(workItem.id).toMatch(/^wi-[0-9A-HJKMNP-TV-Z]{26}$/)
           expect(workItem.repositoryId).toBe(repository.id)
-          expect(workItem.githubIssueNumber).toBe(42)
+          expect(workItem.issueNumber).toBe(42)
           expect(workItem.issueTitle).toBe(sampleIssueFields.title)
           expect(workItem.state).toBe("create_worktree")
           expect(workItem.paused).toBe(false)
@@ -307,7 +308,7 @@ describe("WorkItemLifecycle", () => {
             })
           }
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           const reloaded = yield* lifecycle.getWorkItem(workItem.id)
           expect(reloaded.issueTitle).toBe(sampleIssueFields.title)
         }),
@@ -321,12 +322,12 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           const issue = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             ...sampleIssueFields,
           })
 
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+            lifecycle.implementNow(repository.id, issue.issueNumber),
           )
 
           expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
@@ -344,7 +345,7 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           const issue = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             ...sampleIssueFields,
           })
           yield* db.updateRepositorySettings({
@@ -361,7 +362,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           expect(workItem.state).toBe("create_worktree")
@@ -382,7 +383,7 @@ describe("WorkItemLifecycle", () => {
           expect(error).toBeInstanceOf(IssueNotFoundError)
           if (error instanceof IssueNotFoundError) {
             expect(error.repositoryId).toBe(repository.id)
-            expect(error.githubIssueNumber).toBe(999)
+            expect(error.issueNumber).toBe(999)
           }
         }),
       ))
@@ -395,7 +396,7 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 7,
+            issueNumber: 7,
             ...sampleIssueFields,
             state: "CLOSED",
             url: "https://github.com/acme/widgets/issues/7",
@@ -417,7 +418,7 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 1,
+            issueNumber: 1,
             ...sampleIssueFields,
             title: "Parent",
             url: "https://github.com/acme/widgets/issues/1",
@@ -440,13 +441,13 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 3,
+            issueNumber: 3,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/3",
             blockedBy: [
               {
-                githubIssueNumber: 2,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/2",
+                issueNumber: 2,
+                issueUrl: "https://github.com/acme/widgets/issues/2",
               },
             ],
           })
@@ -470,10 +471,10 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const error = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+            lifecycle.implementNow(repository.id, issue.issueNumber),
           )
 
           expect(error).toBeInstanceOf(UnfinishedWorkItemExistsError)
@@ -492,10 +493,10 @@ describe("WorkItemLifecycle", () => {
           const results = yield* Effect.all(
             [
               lifecycle
-                .implementNow(repository.id, issue.githubIssueNumber)
+                .implementNow(repository.id, issue.issueNumber)
                 .pipe(Effect.result),
               lifecycle
-                .implementNow(repository.id, issue.githubIssueNumber)
+                .implementNow(repository.id, issue.issueNumber)
                 .pipe(Effect.result),
             ],
             { concurrency: "unbounded" },
@@ -508,7 +509,7 @@ describe("WorkItemLifecycle", () => {
           expect(failures).toHaveLength(1)
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed).toHaveLength(1)
           expect(listed[0]!.stepRuns).toHaveLength(1)
@@ -560,7 +561,7 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             ...sampleIssueFields,
           })
 
@@ -601,7 +602,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementLocally(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           expect(workItem.state).toBe("create_worktree")
@@ -621,7 +622,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementLocally(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           // create_worktree → install → implement → assess_changes → pre_commit → review
@@ -672,11 +673,11 @@ describe("WorkItemLifecycle", () => {
       const repository = yield* db.addRepository({
         ...sampleRepository,
         localPath: "/repos/acme/widgets-parent.git",
-        githubRepo: "widgets-parent",
+        projectPath: "acme/widgets-parent",
       })
       const parent = yield* db.storeIssue({
         repositoryId: repository.id,
-        githubIssueNumber: 100,
+        issueNumber: 100,
         ...sampleIssueFields,
         title: "Parent feature",
         url: "https://github.com/acme/widgets/issues/100",
@@ -684,13 +685,13 @@ describe("WorkItemLifecycle", () => {
       })
       const child = yield* db.storeIssue({
         repositoryId: repository.id,
-        githubIssueNumber: 101,
+        issueNumber: 101,
         ...sampleIssueFields,
         title: "Child work",
         url: "https://github.com/acme/widgets/issues/101",
         parent: {
-          githubIssueNumber: 100,
-          githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+          issueNumber: 100,
+          issueUrl: "https://github.com/acme/widgets/issues/100",
         },
         parentPosition: 0,
         hasChildren: false,
@@ -707,11 +708,11 @@ describe("WorkItemLifecycle", () => {
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
 
           expect(covered).toHaveLength(1)
-          expect(covered[0]!.githubIssueNumber).toBe(child.githubIssueNumber)
+          expect(covered[0]!.issueNumber).toBe(child.issueNumber)
           expect(covered[0]!.mergeMode).toBe("always")
           expect(covered[0]!.state).toBe("create_worktree")
           expect(covered[0]!.holdsWorkerSlot).toBe(true)
@@ -719,7 +720,7 @@ describe("WorkItemLifecycle", () => {
 
           const parentItems = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
           expect(parentItems).toHaveLength(0)
         }),
@@ -732,7 +733,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(workItem.mergeMode).toBe("ordinary")
         }),
@@ -752,7 +753,7 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 50,
+            issueNumber: 50,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/50",
             hasChildren: false,
@@ -766,11 +767,11 @@ describe("WorkItemLifecycle", () => {
           const grandRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-grand.git",
-            githubRepo: "widgets-grand",
+            projectPath: "acme/widgets-grand",
           })
           yield* db.storeIssue({
             repositoryId: grandRepo.id,
-            githubIssueNumber: 300,
+            issueNumber: 300,
             ...sampleIssueFields,
             title: "Grand parent",
             url: "https://github.com/acme/widgets/issues/300",
@@ -778,13 +779,13 @@ describe("WorkItemLifecycle", () => {
           })
           yield* db.storeIssue({
             repositoryId: grandRepo.id,
-            githubIssueNumber: 301,
+            issueNumber: 301,
             ...sampleIssueFields,
             title: "Mid child with children",
             url: "https://github.com/acme/widgets/issues/301",
             parent: {
-              githubIssueNumber: 300,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/300",
+              issueNumber: 300,
+              issueUrl: "https://github.com/acme/widgets/issues/300",
             },
             hasChildren: true,
           })
@@ -797,11 +798,11 @@ describe("WorkItemLifecycle", () => {
           const closedOnlyRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-closed-parent.git",
-            githubRepo: "widgets-closed-parent",
+            projectPath: "acme/widgets-closed-parent",
           })
           yield* db.storeIssue({
             repositoryId: closedOnlyRepo.id,
-            githubIssueNumber: 400,
+            issueNumber: 400,
             ...sampleIssueFields,
             title: "Closed-only parent",
             url: "https://github.com/acme/widgets/issues/400",
@@ -809,14 +810,14 @@ describe("WorkItemLifecycle", () => {
           })
           yield* db.storeIssue({
             repositoryId: closedOnlyRepo.id,
-            githubIssueNumber: 401,
+            issueNumber: 401,
             ...sampleIssueFields,
             title: "Closed child",
             url: "https://github.com/acme/widgets/issues/401",
             state: "CLOSED",
             parent: {
-              githubIssueNumber: 400,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/400",
+              issueNumber: 400,
+              issueUrl: "https://github.com/acme/widgets/issues/400",
             },
           })
           const noOpen = yield* Effect.flip(
@@ -837,11 +838,11 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-mixed-parent.git",
-            githubRepo: "widgets-mixed-parent",
+            projectPath: "acme/widgets-mixed-parent",
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 500,
+            issueNumber: 500,
             ...sampleIssueFields,
             title: "Mixed parent",
             url: "https://github.com/acme/widgets/issues/500",
@@ -849,44 +850,44 @@ describe("WorkItemLifecycle", () => {
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 501,
+            issueNumber: 501,
             ...sampleIssueFields,
             title: "Actionable child",
             url: "https://github.com/acme/widgets/issues/501",
             parent: {
-              githubIssueNumber: 500,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/500",
+              issueNumber: 500,
+              issueUrl: "https://github.com/acme/widgets/issues/500",
             },
             parentPosition: 0,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 502,
+            issueNumber: 502,
             ...sampleIssueFields,
             title: "Blocked child",
             url: "https://github.com/acme/widgets/issues/502",
             parent: {
-              githubIssueNumber: 500,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/500",
+              issueNumber: 500,
+              issueUrl: "https://github.com/acme/widgets/issues/500",
             },
             parentPosition: 1,
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 503,
+            issueNumber: 503,
             ...sampleIssueFields,
             title: "Closed child",
             url: "https://github.com/acme/widgets/issues/503",
             state: "CLOSED",
             parent: {
-              githubIssueNumber: 500,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/500",
+              issueNumber: 500,
+              issueUrl: "https://github.com/acme/widgets/issues/500",
             },
             parentPosition: 2,
           })
@@ -898,7 +899,7 @@ describe("WorkItemLifecycle", () => {
 
           expect(covered).toHaveLength(2)
           const byIssue = new Map(
-            covered.map((item) => [item.githubIssueNumber, item]),
+            covered.map((item) => [item.issueNumber, item]),
           )
 
           const actionable = byIssue.get(501)!
@@ -949,11 +950,11 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-slot-parent.git",
-            githubRepo: "widgets-slot-parent",
+            projectPath: "acme/widgets-slot-parent",
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 600,
+            issueNumber: 600,
             ...sampleIssueFields,
             title: "Slot parent",
             url: "https://github.com/acme/widgets/issues/600",
@@ -962,13 +963,13 @@ describe("WorkItemLifecycle", () => {
           for (const number of [601, 602] as const) {
             yield* db.storeIssue({
               repositoryId: repository.id,
-              githubIssueNumber: number,
+              issueNumber: number,
               ...sampleIssueFields,
               title: `Child ${number}`,
               url: `https://github.com/acme/widgets/issues/${number}`,
               parent: {
-                githubIssueNumber: 600,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/600",
+                issueNumber: 600,
+                issueUrl: "https://github.com/acme/widgets/issues/600",
               },
               parentPosition: number - 601,
             })
@@ -1029,11 +1030,11 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-rollback-parent.git",
-            githubRepo: "widgets-rollback-parent",
+            projectPath: "acme/widgets-rollback-parent",
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 700,
+            issueNumber: 700,
             ...sampleIssueFields,
             title: "Rollback parent",
             url: "https://github.com/acme/widgets/issues/700",
@@ -1042,13 +1043,13 @@ describe("WorkItemLifecycle", () => {
           for (const number of [701, 702] as const) {
             yield* db.storeIssue({
               repositoryId: repository.id,
-              githubIssueNumber: number,
+              issueNumber: number,
               ...sampleIssueFields,
               title: `Child ${number}`,
               url: `https://github.com/acme/widgets/issues/${number}`,
               parent: {
-                githubIssueNumber: 700,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/700",
+                issueNumber: 700,
+                issueUrl: "https://github.com/acme/widgets/issues/700",
               },
               parentPosition: number - 701,
             })
@@ -1079,7 +1080,7 @@ describe("WorkItemLifecycle", () => {
           // Ordinary unfinished Work Item created outside the parent command.
           const ordinary = yield* lifecycle.implementNow(
             repository.id,
-            child.githubIssueNumber,
+            child.issueNumber,
           )
           expect(ordinary.mergeMode).toBe("ordinary")
           const stepRunCount = ordinary.stepRuns.length
@@ -1088,7 +1089,7 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
           expect(first).toHaveLength(1)
           expect(first[0]!.id).toBe(ordinary.id)
@@ -1100,26 +1101,26 @@ describe("WorkItemLifecycle", () => {
           // Child added after the first accepted snapshot is not yet enrolled.
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 102,
+            issueNumber: 102,
             ...sampleIssueFields,
             title: "Later sibling",
             url: "https://github.com/acme/widgets/issues/102",
             parent: {
-              githubIssueNumber: 100,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/100",
+              issueNumber: 100,
+              issueUrl: "https://github.com/acme/widgets/issues/100",
             },
             parentPosition: 1,
           })
 
           const second = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
           expect(second).toHaveLength(2)
           const byIssue = new Map(
-            second.map((item) => [item.githubIssueNumber, item]),
+            second.map((item) => [item.issueNumber, item]),
           )
-          const adopted = byIssue.get(child.githubIssueNumber)!
+          const adopted = byIssue.get(child.issueNumber)!
           expect(adopted.id).toBe(ordinary.id)
           expect(adopted.mergeMode).toBe("always")
           expect(adopted.state).toBe(ordinaryState)
@@ -1132,7 +1133,7 @@ describe("WorkItemLifecycle", () => {
           // No duplicate unfinished Work Item for the original child.
           const originalList = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            child.githubIssueNumber,
+            child.issueNumber,
           )
           expect(originalList).toHaveLength(1)
         }),
@@ -1148,14 +1149,14 @@ describe("WorkItemLifecycle", () => {
 
           const ordinary = yield* lifecycle.implementNow(
             repository.id,
-            child.githubIssueNumber,
+            child.issueNumber,
           )
           yield* sql.unsafe(
             `UPDATE work_item
              SET state = 'implement',
                  session_id = 'ses_adopt_preserve',
                  worktree_path = '/tmp/worktrees/adopt-preserve',
-                 github_pull_request_number = 77,
+                 pull_request_number = 77,
                  starting_commit_oid = 'deadbeef'
              WHERE id = ?`,
             [ordinary.id],
@@ -1164,7 +1165,7 @@ describe("WorkItemLifecycle", () => {
           const before = yield* lifecycle.getWorkItem(ordinary.id)
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
 
           expect(covered).toHaveLength(1)
@@ -1174,7 +1175,7 @@ describe("WorkItemLifecycle", () => {
           expect(adopted.state).toBe("implement")
           expect(adopted.sessionId).toBe("ses_adopt_preserve")
           expect(adopted.worktreePath).toBe("/tmp/worktrees/adopt-preserve")
-          expect(adopted.githubPullRequestNumber).toBe(77)
+          expect(adopted.pullRequestNumber).toBe(77)
           expect(adopted.startingCommitOid).toBe("deadbeef")
           expect(adopted.holdsWorkerSlot).toBe(before.holdsWorkerSlot)
           expect(adopted.stepRuns.map((run) => run.id)).toEqual(
@@ -1193,14 +1194,14 @@ describe("WorkItemLifecycle", () => {
 
           const ordinary = yield* lifecycle.implementNow(
             repository.id,
-            child.githubIssueNumber,
+            child.issueNumber,
           )
           // Simulate a merge-related Needs Human handoff with ordinary mode.
           yield* sql.unsafe(
             `UPDATE work_item
              SET state = 'needs_human',
                  merge_mode = 'ordinary',
-                 github_pull_request_number = 88,
+                 pull_request_number = 88,
                  failure_code = 'needs_human',
                  failure_message = 'Human merge required',
                  holds_worker_slot = 0,
@@ -1223,7 +1224,7 @@ describe("WorkItemLifecycle", () => {
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
 
           expect(covered).toHaveLength(1)
@@ -1233,7 +1234,7 @@ describe("WorkItemLifecycle", () => {
           expect(adopted.state).toBe("needs_human")
           expect(adopted.failureCode).toBe("needs_human")
           expect(adopted.failureMessage).toBe("Human merge required")
-          expect(adopted.githubPullRequestNumber).toBe(88)
+          expect(adopted.pullRequestNumber).toBe(88)
           expect(adopted.holdsWorkerSlot).toBe(false)
           // No Merge PR (or other) Step Run enqueued by the adopt path.
           expect(adopted.stepRuns.every((run) => run.status !== "queued")).toBe(
@@ -1278,11 +1279,11 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-mixed-rollback.git",
-            githubRepo: "widgets-mixed-rollback",
+            projectPath: "acme/widgets-mixed-rollback",
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 800,
+            issueNumber: 800,
             ...sampleIssueFields,
             title: "Mixed rollback parent",
             url: "https://github.com/acme/widgets/issues/800",
@@ -1290,25 +1291,25 @@ describe("WorkItemLifecycle", () => {
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 801,
+            issueNumber: 801,
             ...sampleIssueFields,
             title: "Existing child",
             url: "https://github.com/acme/widgets/issues/801",
             parent: {
-              githubIssueNumber: 800,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/800",
+              issueNumber: 800,
+              issueUrl: "https://github.com/acme/widgets/issues/800",
             },
             parentPosition: 0,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 802,
+            issueNumber: 802,
             ...sampleIssueFields,
             title: "New child",
             url: "https://github.com/acme/widgets/issues/802",
             parent: {
-              githubIssueNumber: 800,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/800",
+              issueNumber: 800,
+              issueUrl: "https://github.com/acme/widgets/issues/800",
             },
             parentPosition: 1,
           })
@@ -1320,7 +1321,7 @@ describe("WorkItemLifecycle", () => {
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, agent_backend,
+               id, repository_id, issue_number, agent_backend,
                issue_title, state, state_ready_at, paused,
                waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                pause_before_step, worktree_path, session_id, failure_code,
@@ -1357,11 +1358,11 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-concurrent-parent.git",
-            githubRepo: "widgets-concurrent-parent",
+            projectPath: "acme/widgets-concurrent-parent",
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 900,
+            issueNumber: 900,
             ...sampleIssueFields,
             title: "Concurrent parent",
             url: "https://github.com/acme/widgets/issues/900",
@@ -1369,25 +1370,25 @@ describe("WorkItemLifecycle", () => {
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 901,
+            issueNumber: 901,
             ...sampleIssueFields,
             title: "Child A",
             url: "https://github.com/acme/widgets/issues/901",
             parent: {
-              githubIssueNumber: 900,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/900",
+              issueNumber: 900,
+              issueUrl: "https://github.com/acme/widgets/issues/900",
             },
             parentPosition: 0,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 902,
+            issueNumber: 902,
             ...sampleIssueFields,
             title: "Child B",
             url: "https://github.com/acme/widgets/issues/902",
             parent: {
-              githubIssueNumber: 900,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/900",
+              issueNumber: 900,
+              issueUrl: "https://github.com/acme/widgets/issues/900",
             },
             parentPosition: 1,
           })
@@ -1403,7 +1404,7 @@ describe("WorkItemLifecycle", () => {
           )
           expect(covered).toHaveLength(2)
           const byIssue = new Map(
-            covered.map((item) => [item.githubIssueNumber, item]),
+            covered.map((item) => [item.issueNumber, item]),
           )
           expect(byIssue.get(901)!.id).toBe(childA.id)
           expect(byIssue.get(901)!.mergeMode).toBe("always")
@@ -1453,14 +1454,14 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            child.githubIssueNumber,
+            child.issueNumber,
           )
           yield* lifecycle.abandon(first.id)
           expect(first.mergeMode).toBe("ordinary")
 
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
           expect(covered).toHaveLength(1)
           expect(covered[0]!.id).not.toBe(first.id)
@@ -1468,7 +1469,7 @@ describe("WorkItemLifecycle", () => {
 
           const history = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            child.githubIssueNumber,
+            child.issueNumber,
           )
           expect(history).toHaveLength(2)
           expect(history[0]!.id).toBe(first.id)
@@ -1489,7 +1490,7 @@ describe("WorkItemLifecycle", () => {
               yield* seedParentWithOneActionableChild
             const covered = yield* lifecycle.implementAllWithAutoMerge(
               repository.id,
-              parent.githubIssueNumber,
+              parent.issueNumber,
             )
             return covered[0]!.id
           }).pipe(Effect.provide(createLayer)),
@@ -1543,7 +1544,7 @@ describe("WorkItemLifecycle", () => {
 
             const covered = yield* lifecycle.implementAllWithAutoMerge(
               repository.id,
-              parent.githubIssueNumber,
+              parent.issueNumber,
             )
             const workItemId = covered[0]!.id
 
@@ -1616,7 +1617,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, parent } = yield* seedParentWithOneActionableChild
           const covered = yield* lifecycle.implementAllWithAutoMerge(
             repository.id,
-            parent.githubIssueNumber,
+            parent.issueNumber,
           )
           const workItemId = covered[0]!.id
 
@@ -1664,7 +1665,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const retrieved = yield* lifecycle.getWorkItem(created.id)
 
@@ -1682,7 +1683,7 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           yield* lifecycle.abandon(first.id)
@@ -1690,12 +1691,12 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           expect(listed.map((item) => item.id)).toEqual([first.id, second.id])
@@ -1739,7 +1740,7 @@ describe("WorkItemLifecycle", () => {
 
           const complete = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           for (let i = 0; i < 8; i++) {
             yield* claimAndRun
@@ -1754,9 +1755,9 @@ describe("WorkItemLifecycle", () => {
 
           const failed = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           const failJob = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           if (Option.isNone(failJob)) {
             return yield* Effect.die("expected job")
@@ -1768,19 +1769,19 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
           })
 
           const abandonedQueued = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* lifecycle.abandon(abandonedQueued.id)
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed.map((item) => item.state)).toEqual([
             "complete",
@@ -1804,7 +1805,7 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           for (let i = 0; i < 8; i++) {
             const sql = yield* SqlClient.SqlClient
@@ -1837,13 +1838,13 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(second.id).not.toBe(first.id)
           expect(second.state).toBe("create_worktree")
 
           const unfinishedBlocks = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+            lifecycle.implementNow(repository.id, issue.issueNumber),
           )
           expect(unfinishedBlocks).toBeInstanceOf(UnfinishedWorkItemExistsError)
         }),
@@ -1859,7 +1860,7 @@ describe("WorkItemLifecycle", () => {
           yield* TestClock.setTime(1_000)
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           yield* TestClock.setTime(4_000)
@@ -1925,7 +1926,7 @@ describe("WorkItemLifecycle", () => {
               yield* TestClock.setTime(10_000)
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               yield* TestClock.setTime(12_000)
@@ -2076,7 +2077,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(created.state).toBe("create_worktree")
           expect(created.stepRuns).toHaveLength(1)
@@ -2161,12 +2162,12 @@ describe("WorkItemLifecycle", () => {
           expect(afterCreatePr._tag).toBe("processed")
           if (afterCreatePr._tag === "processed") {
             expect(afterCreatePr.workItem.state).toBe("watch_pr_status_checks")
-            expect(afterCreatePr.workItem.githubPullRequestNumber).toBe(101)
+            expect(afterCreatePr.workItem.pullRequestNumber).toBe(101)
             const db = yield* DbService
             expect(yield* db.listWorkItemPullRequests(repository.id)).toEqual([
               {
-                githubIssueNumber: issue.githubIssueNumber,
-                githubPullRequestNumber: 101,
+                issueNumber: issue.issueNumber,
+                pullRequestNumber: 101,
               },
             ])
           }
@@ -2202,7 +2203,7 @@ describe("WorkItemLifecycle", () => {
             expect(afterCleanup.workItem.sessionId).toBe(
               "ses_test_implement_session",
             )
-            expect(afterCleanup.workItem.githubPullRequestNumber).toBe(101)
+            expect(afterCleanup.workItem.pullRequestNumber).toBe(101)
             expect(afterCleanup.workItem.failureCode).toBeNull()
             expect(
               afterCleanup.workItem.stepRuns.map((run) => [
@@ -2279,7 +2280,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* sql.unsafe(
             `INSERT INTO pr_status_check
@@ -2369,7 +2370,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 3; index += 1) {
@@ -2409,7 +2410,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 3; index += 1) {
@@ -2456,7 +2457,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           yield* driveThroughCreatePrAlreadyReady(created.id)
@@ -2481,7 +2482,7 @@ describe("WorkItemLifecycle", () => {
           expect(retried.state).toBe("local_cleanup")
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
             state: "CLOSED",
           })
@@ -2520,7 +2521,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -2619,7 +2620,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.githubIssueNumber,
+                  issue.issueNumber,
                 )
 
                 for (let index = 0; index < 8; index += 1) {
@@ -2759,7 +2760,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -2852,7 +2853,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -2923,7 +2924,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3005,7 +3006,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3080,10 +3081,7 @@ describe("WorkItemLifecycle", () => {
               const lifecycle = yield* WorkItemLifecycle
               const sql = yield* SqlClient.SqlClient
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
+              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -3137,7 +3135,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3180,10 +3178,7 @@ describe("WorkItemLifecycle", () => {
               yield* TestClock.setTime(1_000_000)
               const lifecycle = yield* WorkItemLifecycle
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
+              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -3236,7 +3231,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3342,10 +3337,7 @@ describe("WorkItemLifecycle", () => {
                 includeAllIssueAuthors: repository.includeAllIssueAuthors,
                 waitForReadyForReviewChecks: false,
               })
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
+              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -3429,7 +3421,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3526,7 +3518,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3619,7 +3611,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3701,7 +3693,7 @@ describe("WorkItemLifecycle", () => {
               })
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -3763,10 +3755,7 @@ describe("WorkItemLifecycle", () => {
               const db = yield* DbService
               const { repository, issue } = yield* seedActionableIssue
               // Default true: reach Mark Ready under the safe policy.
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
+              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -3841,7 +3830,7 @@ describe("WorkItemLifecycle", () => {
                 const { repository, issue } = yield* seedActionableIssue
                 const created = yield* lifecycle.implementNow(
                   repository.id,
-                  issue.githubIssueNumber,
+                  issue.issueNumber,
                 )
 
                 for (let index = 0; index < 8; index += 1) {
@@ -4035,10 +4024,7 @@ describe("WorkItemLifecycle", () => {
                 yield* TestClock.setTime(1_000_000)
                 const lifecycle = yield* WorkItemLifecycle
                 const { repository, issue } = yield* seedActionableIssue
-                yield* lifecycle.implementNow(
-                  repository.id,
-                  issue.githubIssueNumber,
-                )
+                yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
                 for (let index = 0; index < 8; index += 1) {
                   yield* TestClock.adjust(1_000)
@@ -4115,10 +4101,7 @@ describe("WorkItemLifecycle", () => {
               yield* TestClock.setTime(1_000_000)
               const lifecycle = yield* WorkItemLifecycle
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
+              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
               for (let index = 0; index < 8; index += 1) {
                 yield* TestClock.adjust(1_000)
@@ -4167,7 +4150,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4252,7 +4235,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4348,7 +4331,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4398,7 +4381,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -4470,7 +4453,7 @@ describe("WorkItemLifecycle", () => {
           const final = yield* lifecycle.getWorkItem(created.id)
           expect(final.state).toBe("needs_human")
           const blocked = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+            lifecycle.implementNow(repository.id, issue.issueNumber),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
 
@@ -4559,7 +4542,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -4627,7 +4610,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -4700,7 +4683,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -4788,7 +4771,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -4880,7 +4863,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           for (let index = 0; index < 8; index += 1) {
             yield* claimAndRunPending
@@ -4946,7 +4929,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
           }
@@ -4985,7 +4968,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 9; index += 1) {
@@ -5063,7 +5046,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -5135,7 +5118,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           for (let index = 0; index < 8; index += 1) {
@@ -5226,7 +5209,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5326,7 +5309,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
 
               for (let index = 0; index < 8; index += 1) {
@@ -5417,7 +5400,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           for (let index = 0; index < 9; index += 1) {
             yield* claimAndRunPending
@@ -5523,10 +5506,10 @@ describe("WorkItemLifecycle", () => {
             maxConcurrentWorkItems: 5,
           })
 
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           const wi = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const workItemId = wi[0]!.id
           yield* driveThroughCreatePrAlreadyReady(workItemId)
@@ -5624,7 +5607,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           yield* claimAndRunPending
@@ -5695,7 +5678,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -5730,7 +5713,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -5778,12 +5761,12 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           const watching = yield* lifecycle.getWorkItem(created.id)
           expect(watching.state).toBe("watch_pr_status_checks")
-          expect(watching.githubPullRequestNumber).toBe(101)
+          expect(watching.pullRequestNumber).toBe(101)
 
           const advanced = yield* lifecycle.continueAfterHumanPrOutcome(
             created.id,
@@ -5841,7 +5824,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -5908,17 +5891,17 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
           const investigating = yield* lifecycle.getWorkItem(created.id)
           expect(investigating.state).toBe("investigate_pr_status_checks")
-          expect(investigating.githubPullRequestNumber).toBe(101)
+          expect(investigating.pullRequestNumber).toBe(101)
 
           // Issue gone (operator-closed or removed). Open PR → Pause, not silent park.
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
 
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
@@ -5930,7 +5913,7 @@ describe("WorkItemLifecycle", () => {
             expect(afterInvestigate.workItem.paused).toBe(true)
             expect(afterInvestigate.workItem.failureCode).toBeNull()
             expect(afterInvestigate.workItem.failureMessage).toBe(
-              `Issue #${issue.githubIssueNumber} is closed or no longer present while pull request #101 is still open. Reopen the issue if you want to continue, then Start job.`,
+              `Issue #${issue.issueNumber} is closed or no longer present while pull request #101 is still open. Reopen the issue if you want to continue, then Start job.`,
             )
             expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
             const investigateRun = afterInvestigate.workItem.stepRuns.find(
@@ -6025,11 +6008,11 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-paused-merge-slot.git",
-            githubRepo: "widgets-paused-merge-slot",
+            projectPath: "acme/widgets-paused-merge-slot",
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             ...sampleIssueFields,
           })
           const pausedItem = yield* lifecycle.implementNow(repository.id, 42)
@@ -6047,7 +6030,7 @@ describe("WorkItemLifecycle", () => {
           // Occupy the only Worker Slot with another Work Item.
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 43,
+            issueNumber: 43,
             ...sampleIssueFields,
             title: "Occupies the only slot",
             url: "https://github.com/acme/widgets/issues/43",
@@ -6118,12 +6101,12 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* makeQueuedJobsAvailable
           const paused = yield* claimAndRunPending
           expect(paused._tag).toBe("processed")
@@ -6137,7 +6120,7 @@ describe("WorkItemLifecycle", () => {
           // merge seam must not fire, and no other Refresh effect auto-Starts.
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
           })
           const blockersReleased = yield* lifecycle.releaseWaitingForBlockers(
@@ -6163,7 +6146,7 @@ describe("WorkItemLifecycle", () => {
     const runMergedOwnedPrCleanupAfterIssueInvalidation = (
       invalidate: (
         repositoryId: string,
-        githubIssueNumber: number,
+        issueNumber: number,
       ) => Effect.Effect<void, never, DbService>,
     ) => {
       const steps: LifecycleStepsShape = {
@@ -6186,7 +6169,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -6195,7 +6178,7 @@ describe("WorkItemLifecycle", () => {
             "investigate_pr_status_checks",
           )
 
-          yield* invalidate(repository.id, issue.githubIssueNumber)
+          yield* invalidate(repository.id, issue.issueNumber)
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
           expect(afterInvestigate._tag).toBe("processed")
@@ -6219,7 +6202,7 @@ describe("WorkItemLifecycle", () => {
             expect(investigateRun).toBeDefined()
             expect(investigateRun?.reasonCode).toBe(STEP_RUN_REASON.prMerged)
             expect(investigateRun?.reasonMessage).toBe(
-              formatIssueClosedPrMergedMessage(issue.githubIssueNumber, 101),
+              formatIssueClosedPrMergedMessage(issue.issueNumber, 101),
             )
             expect(
               afterInvestigate.workItem.stepRuns.some(
@@ -6250,24 +6233,24 @@ describe("WorkItemLifecycle", () => {
 
     it("advances cleanup → Complete when Issue is missing and owned PR is merged", () =>
       runMergedOwnedPrCleanupAfterIssueInvalidation(
-        (repositoryId, githubIssueNumber) =>
+        (repositoryId, issueNumber) =>
           Effect.gen(function* () {
             const db = yield* DbService
-            yield* db.deleteIssue(repositoryId, githubIssueNumber)
+            yield* db.deleteIssue(repositoryId, issueNumber)
           }),
       ))
 
     it("advances cleanup → Complete when Issue is closed and owned PR is merged", () =>
       runMergedOwnedPrCleanupAfterIssueInvalidation(
-        (repositoryId, githubIssueNumber) =>
+        (repositoryId, issueNumber) =>
           Effect.gen(function* () {
             const db = yield* DbService
             yield* db.storeIssue({
               repositoryId,
-              githubIssueNumber,
+              issueNumber,
               ...sampleIssueFields,
               state: "CLOSED",
-              url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+              url: `https://github.com/acme/widgets/issues/${issueNumber}`,
             })
           }),
       ))
@@ -6299,7 +6282,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -6308,13 +6291,13 @@ describe("WorkItemLifecycle", () => {
           // Issue missing (or closed) + PR closed unmerged → Pause with
           // closed-unmerged reason, not silent Succeeded park and not Abandon
           // (Abandon remains merge-related Needs Human only; ADR 0020).
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
           expect(afterInvestigate._tag).toBe("processed")
           if (afterInvestigate._tag === "processed") {
             const expectedReason = formatIssueClosedPrClosedUnmergedMessage(
-              issue.githubIssueNumber,
+              issue.issueNumber,
               101,
             )
             expect(afterInvestigate.workItem.state).toBe(
@@ -6374,7 +6357,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
@@ -6383,7 +6366,7 @@ describe("WorkItemLifecycle", () => {
           // issue_not_open (still in store, not OPEN) uses the same seam.
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
             state: "CLOSED",
           })
@@ -6393,10 +6376,7 @@ describe("WorkItemLifecycle", () => {
           if (afterInvestigate._tag === "processed") {
             expect(afterInvestigate.workItem.paused).toBe(true)
             expect(afterInvestigate.workItem.failureMessage).toBe(
-              formatIssueClosedPrClosedUnmergedMessage(
-                issue.githubIssueNumber,
-                101,
-              ),
+              formatIssueClosedPrClosedUnmergedMessage(issue.issueNumber, 101),
             )
             expect(
               afterInvestigate.workItem.stepRuns.find(
@@ -6441,20 +6421,20 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
           expect(afterInvestigate._tag).toBe("processed")
           if (afterInvestigate._tag === "processed") {
             const expectedReason =
               formatIssueClosedPrStatusIndeterminateMessage(
-                issue.githubIssueNumber,
+                issue.issueNumber,
                 101,
               )
             expect(afterInvestigate.workItem.state).toBe(
@@ -6512,13 +6492,13 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* makeQueuedJobsAvailable
           const afterInvestigate = yield* claimAndRunPending
           expect(afterInvestigate._tag).toBe("processed")
@@ -6526,7 +6506,7 @@ describe("WorkItemLifecycle", () => {
             expect(afterInvestigate.workItem.paused).toBe(true)
             expect(afterInvestigate.workItem.failureMessage).toBe(
               formatIssueClosedPrStatusIndeterminateMessage(
-                issue.githubIssueNumber,
+                issue.issueNumber,
                 101,
               ),
             )
@@ -6568,13 +6548,13 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           yield* makeQueuedJobsAvailable
           yield* claimAndRunPending
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* makeQueuedJobsAvailable
           const paused = yield* claimAndRunPending
           expect(paused._tag).toBe("processed")
@@ -6585,7 +6565,7 @@ describe("WorkItemLifecycle", () => {
           // Reopen Issue in store; Start resumes current operational step.
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
           })
 
@@ -6627,7 +6607,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -6668,7 +6648,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -6705,14 +6685,14 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           for (let index = 0; index < 10; index += 1) {
             yield* makeQueuedJobsAvailable
             yield* claimAndRunPending
           }
 
           const blocked = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+            lifecycle.implementNow(repository.id, issue.issueNumber),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
         }),
@@ -6741,7 +6721,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* driveThroughCreatePrAlreadyReady(created.id)
           for (let index = 0; index < 2; index += 1) {
@@ -6772,7 +6752,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -6805,7 +6785,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -6842,7 +6822,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -6885,7 +6865,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -6927,7 +6907,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -6970,7 +6950,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -6999,7 +6979,7 @@ describe("WorkItemLifecycle", () => {
           expect(Number(queued[0]?.count)).toBe(0)
 
           const blocked = yield* Effect.flip(
-            lifecycle.implementNow(repository.id, issue.githubIssueNumber),
+            lifecycle.implementNow(repository.id, issue.issueNumber),
           )
           expect(blocked).toBeInstanceOf(UnfinishedWorkItemExistsError)
 
@@ -7034,7 +7014,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -7091,7 +7071,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -7129,7 +7109,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -7169,7 +7149,7 @@ describe("WorkItemLifecycle", () => {
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           yield* claimAndRunPending
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -7214,10 +7194,10 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* Effect.sleep("5 millis")
 
           const result = yield* claimAndRunPending
@@ -7251,50 +7231,50 @@ describe("WorkItemLifecycle", () => {
       const cases = [
         {
           name: "closed",
-          mutate: (repositoryId: string, githubIssueNumber: number) =>
+          mutate: (repositoryId: string, issueNumber: number) =>
             Effect.gen(function* () {
               const db = yield* DbService
               yield* db.storeIssue({
                 repositoryId,
-                githubIssueNumber,
+                issueNumber,
                 ...sampleIssueFields,
                 state: "CLOSED",
-                url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+                url: `https://github.com/acme/widgets/issues/${issueNumber}`,
               })
             }),
           code: "issue_not_open",
         },
         {
           name: "parent",
-          mutate: (repositoryId: string, githubIssueNumber: number) =>
+          mutate: (repositoryId: string, issueNumber: number) =>
             Effect.gen(function* () {
               const db = yield* DbService
               yield* db.storeIssue({
                 repositoryId,
-                githubIssueNumber,
+                issueNumber,
                 ...sampleIssueFields,
                 hasChildren: true,
-                url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+                url: `https://github.com/acme/widgets/issues/${issueNumber}`,
               })
             }),
           code: "issue_is_parent",
         },
         {
           name: "blocked",
-          mutate: (repositoryId: string, githubIssueNumber: number) =>
+          mutate: (repositoryId: string, issueNumber: number) =>
             Effect.gen(function* () {
               const db = yield* DbService
               yield* db.storeIssue({
                 repositoryId,
-                githubIssueNumber,
+                issueNumber,
                 ...sampleIssueFields,
                 blockedBy: [
                   {
-                    githubIssueNumber: 99,
-                    githubIssueUrl: "https://github.com/acme/widgets/issues/99",
+                    issueNumber: 99,
+                    issueUrl: "https://github.com/acme/widgets/issues/99",
                   },
                 ],
-                url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+                url: `https://github.com/acme/widgets/issues/${issueNumber}`,
               })
             }),
           code: "issue_blocked",
@@ -7307,11 +7287,8 @@ describe("WorkItemLifecycle", () => {
             yield* Effect.gen(function* () {
               const lifecycle = yield* WorkItemLifecycle
               const { repository, issue } = yield* seedActionableIssue
-              yield* lifecycle.implementNow(
-                repository.id,
-                issue.githubIssueNumber,
-              )
-              yield* testCase.mutate(repository.id, issue.githubIssueNumber)
+              yield* lifecycle.implementNow(repository.id, issue.issueNumber)
+              yield* testCase.mutate(repository.id, issue.issueNumber)
               const result = yield* claimAndRunPending
               expect(result._tag).toBe("processed")
               if (result._tag === "processed") {
@@ -7332,12 +7309,12 @@ describe("WorkItemLifecycle", () => {
           const db = yield* DbService
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
-          yield* db.deleteIssue(repository.id, issue.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
             title: "Restored projection",
             body: "New local row, same GitHub identity",
@@ -7399,7 +7376,7 @@ describe("WorkItemLifecycle", () => {
               const { repository, issue } = yield* seedActionableIssue
               const created = yield* lifecycle.implementNow(
                 repository.id,
-                issue.githubIssueNumber,
+                issue.issueNumber,
               )
               yield* claimAndRunPending
               yield* claimAndRunPending
@@ -7486,7 +7463,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
           yield* claimAndRunPending
@@ -7531,7 +7508,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -7565,7 +7542,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -7625,7 +7602,7 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository(sampleRepository)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             ...sampleIssueFields,
           })
 
@@ -7668,7 +7645,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const result = yield* claimAndRunPending
 
@@ -7711,7 +7688,7 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           const result = yield* claimAndRunPending
 
           expect(result._tag).toBe("processed")
@@ -7744,7 +7721,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const result = yield* claimAndRunPending
 
@@ -7822,7 +7799,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const claimed = yield* queue.rawClaim(
             WORK_ITEM_LIFECYCLE_QUEUE,
@@ -7898,7 +7875,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const failed = yield* claimAndRunPending
           expect(failed._tag).toBe("processed")
@@ -7959,7 +7936,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
           yield* lifecycle.retry(created.id)
@@ -7994,7 +7971,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
           const now = Date.now()
@@ -8028,7 +8005,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const now = Date.now()
 
@@ -8070,7 +8047,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const queuedError = yield* Effect.flip(lifecycle.retry(created.id))
@@ -8114,12 +8091,12 @@ describe("WorkItemLifecycle", () => {
               const db = yield* DbService
               const repository = yield* db.addRepository({
                 ...sampleRepository,
-                githubRepo: "widgets-running",
+                projectPath: "acme/widgets-running",
                 localPath: "/repos/acme/widgets-running.git",
               })
               const issue = yield* db.storeIssue({
                 repositoryId: repository.id,
-                githubIssueNumber: 43,
+                issueNumber: 43,
                 ...sampleIssueFields,
                 url: "https://github.com/acme/widgets/issues/43",
               })
@@ -8128,7 +8105,7 @@ describe("WorkItemLifecycle", () => {
           )
           const runningItem = yield* lifecycle.implementNow(
             repo2.id,
-            issue2.githubIssueNumber,
+            issue2.issueNumber,
           )
           yield* sql.unsafe(
             `UPDATE step_run
@@ -8176,7 +8153,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
 
@@ -8219,7 +8196,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -8263,7 +8240,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -8315,7 +8292,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -8385,7 +8362,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRun = created.stepRuns[0]!
           const now = Date.now()
@@ -8432,7 +8409,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
           const jobId = created.stepRuns[0]!.queueJobId!
@@ -8483,7 +8460,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
           const jobId = created.stepRuns[0]!.queueJobId!
@@ -8560,7 +8537,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
           const jobId = created.stepRuns[0]!.queueJobId!
@@ -8694,7 +8671,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(claimed)).toBe(true)
           if (Option.isNone(claimed)) {
@@ -8793,7 +8770,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedActionableIssue
 
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
           const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(claimed)).toBe(true)
           if (Option.isNone(claimed)) {
@@ -8835,7 +8812,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -8870,7 +8847,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const abandoned = yield* lifecycle.abandon(created.id)
@@ -8891,14 +8868,14 @@ describe("WorkItemLifecycle", () => {
 
           const next = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(next.id).not.toBe(created.id)
           expect(next.state).toBe("create_worktree")
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed.map((item) => item.id)).toEqual([created.id, next.id])
           expect(listed[0]!.state).toBe("abandoned")
@@ -8924,7 +8901,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(job)).toBe(true)
@@ -8948,7 +8925,7 @@ describe("WorkItemLifecycle", () => {
 
           const second = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const now = Date.now()
           yield* sql.unsafe(
@@ -8980,14 +8957,14 @@ describe("WorkItemLifecycle", () => {
 
           const third = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(third.id).not.toBe(created.id)
           expect(third.id).not.toBe(second.id)
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed).toHaveLength(3)
           expect(listed.map((item) => item.state)).toEqual([
@@ -9008,7 +8985,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           yield* sql.unsafe(
@@ -9075,7 +9052,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const running = yield* Effect.forkChild(
@@ -9107,7 +9084,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* sql.unsafe(
             `UPDATE step_run
@@ -9128,7 +9105,7 @@ describe("WorkItemLifecycle", () => {
           expect(
             yield* lifecycle.listWorkItemsForIssue(
               repository.id,
-              issue.githubIssueNumber,
+              issue.issueNumber,
             ),
           ).toHaveLength(1)
           const jobs = yield* sql.unsafe(
@@ -9162,7 +9139,7 @@ describe("WorkItemLifecycle", () => {
 
           const failed = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const failedJob = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           if (Option.isNone(failedJob)) {
@@ -9178,13 +9155,13 @@ describe("WorkItemLifecycle", () => {
 
           const stillQueued = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(stillQueued.state).toBe("create_worktree")
           expect(
             (yield* lifecycle.listWorkItemsForIssue(
               repository.id,
-              issue.githubIssueNumber,
+              issue.issueNumber,
             )).map((item) => item.state),
           ).toEqual(["abandoned", "create_worktree"])
 
@@ -9215,7 +9192,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* sql.unsafe(
             `CREATE TRIGGER reject_repository_removal
@@ -9253,7 +9230,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const deletedId = yield* lifecycle.reset(created.id)
@@ -9267,13 +9244,13 @@ describe("WorkItemLifecycle", () => {
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed).toHaveLength(0)
 
           const next = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(next.id).not.toBe(created.id)
           expect(next.state).toBe("create_worktree")
@@ -9290,7 +9267,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* sql.unsafe(
             `UPDATE step_run
@@ -9310,7 +9287,7 @@ describe("WorkItemLifecycle", () => {
 
           const next = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(next.id).not.toBe(created.id)
         }),
@@ -9342,7 +9319,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           if (Option.isNone(job)) {
@@ -9381,7 +9358,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const error = yield* Effect.flip(lifecycle.reset(created.id))
@@ -9402,7 +9379,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* lifecycle.abandon(created.id)
 
@@ -9411,7 +9388,7 @@ describe("WorkItemLifecycle", () => {
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed).toHaveLength(0)
         }),
@@ -9441,7 +9418,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const job = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
           expect(Option.isSome(job)).toBe(true)
@@ -9461,7 +9438,7 @@ describe("WorkItemLifecycle", () => {
           expect(seen[0]).toEqual({
             workItemId: created.id,
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             issueTitle: issue.title,
             agentBackend: "opencode",
             model: "",
@@ -9515,7 +9492,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(created.paused).toBe(false)
           expect(created.stepRuns[0]!.status).toBe("queued")
@@ -9542,7 +9519,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* lifecycle.pause(created.id)
 
@@ -9585,7 +9562,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = created.stepRuns[0]!.id
 
@@ -9640,7 +9617,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* claimAndRunPending
           yield* lifecycle.pause(created.id)
@@ -9673,7 +9650,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           yield* sql.unsafe(
             `UPDATE work_item SET state = 'complete', updated_at = ? WHERE id = ?`,
@@ -9704,7 +9681,7 @@ describe("WorkItemLifecycle", () => {
           )
           yield* Effect.yieldNow
 
-          yield* lifecycle.implementNow(repository.id, issue.githubIssueNumber)
+          yield* lifecycle.implementNow(repository.id, issue.issueNumber)
 
           expect(yield* Fiber.join(changes)).toEqual([repository.id])
         }),
@@ -9751,7 +9728,7 @@ describe("WorkItemLifecycle", () => {
 
           const workItem = yield* lifecycle.implementNow(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const stepRunId = workItem.stepRuns[0]!.id
 
@@ -9772,20 +9749,20 @@ describe("WorkItemLifecycle", () => {
   })
 
   describe("Worker Slots", () => {
-    const seedIssue = (githubIssueNumber: number) =>
+    const seedIssue = (issueNumber: number) =>
       Effect.gen(function* () {
         const db = yield* DbService
         yield* seedHarnessBuildModel
         const repository = yield* db.addRepository({
           ...sampleRepository,
-          localPath: `/repos/acme/widgets-${githubIssueNumber}.git`,
-          githubRepo: `widgets-${githubIssueNumber}`,
+          localPath: `/repos/acme/widgets-${issueNumber}.git`,
+          projectPath: `acme/widgets-${issueNumber}`,
         })
         const issue = yield* db.storeIssue({
           repositoryId: repository.id,
-          githubIssueNumber,
+          issueNumber,
           ...sampleIssueFields,
-          url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+          url: `https://github.com/acme/widgets/issues/${issueNumber}`,
         })
         return { repository, issue }
       })
@@ -9818,15 +9795,15 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.githubIssueNumber,
+            a.issue.issueNumber,
           )
           const second = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.githubIssueNumber,
+            b.issue.issueNumber,
           )
           const third = yield* lifecycle.implementNow(
             c.repository.id,
-            c.issue.githubIssueNumber,
+            c.issue.issueNumber,
           )
 
           expect(first.holdsWorkerSlot).toBe(true)
@@ -9856,15 +9833,15 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.githubIssueNumber,
+            a.issue.issueNumber,
           )
           const second = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.githubIssueNumber,
+            b.issue.issueNumber,
           )
           const third = yield* lifecycle.implementNow(
             c.repository.id,
-            c.issue.githubIssueNumber,
+            c.issue.issueNumber,
           )
 
           expect(first.holdsWorkerSlot).toBe(true)
@@ -9896,11 +9873,11 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.githubIssueNumber,
+            a.issue.issueNumber,
           )
           const waiter = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.githubIssueNumber,
+            b.issue.issueNumber,
           )
           expect(waiter.waitingSince).not.toBeNull()
 
@@ -9937,11 +9914,11 @@ describe("WorkItemLifecycle", () => {
 
           const first = yield* lifecycle.implementNow(
             a.repository.id,
-            a.issue.githubIssueNumber,
+            a.issue.issueNumber,
           )
           const waiter = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.githubIssueNumber,
+            b.issue.issueNumber,
           )
 
           const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
@@ -9978,13 +9955,10 @@ describe("WorkItemLifecycle", () => {
           const a = yield* seedIssue(501)
           const b = yield* seedIssue(502)
 
-          yield* lifecycle.implementNow(
-            a.repository.id,
-            a.issue.githubIssueNumber,
-          )
+          yield* lifecycle.implementNow(a.repository.id, a.issue.issueNumber)
           const waiter = yield* lifecycle.implementNow(
             b.repository.id,
-            b.issue.githubIssueNumber,
+            b.issue.issueNumber,
           )
           expect(waiter.waitingSince).not.toBeNull()
 
@@ -10007,22 +9981,22 @@ describe("WorkItemLifecycle", () => {
       const repository = yield* db.addRepository({
         ...sampleRepository,
         localPath: "/repos/acme/widgets-blocked.git",
-        githubRepo: "widgets-blocked",
+        projectPath: "acme/widgets-blocked",
       })
       const issue = yield* db.storeIssue({
         repositoryId: repository.id,
-        githubIssueNumber: 77,
+        issueNumber: 77,
         ...sampleIssueFields,
         title: "Blocked leaf",
         url: "https://github.com/acme/widgets/issues/77",
         blockedBy: [
           {
-            githubIssueNumber: 12,
-            githubIssueUrl: "https://github.com/acme/widgets/issues/12",
+            issueNumber: 12,
+            issueUrl: "https://github.com/acme/widgets/issues/12",
           },
           {
-            githubIssueNumber: 15,
-            githubIssueUrl: "https://github.com/acme/widgets/issues/15",
+            issueNumber: 15,
+            issueUrl: "https://github.com/acme/widgets/issues/15",
           },
         ],
       })
@@ -10038,7 +10012,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.queue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           expect(created.waitingForBlockers).toBe(true)
@@ -10064,7 +10038,7 @@ describe("WorkItemLifecycle", () => {
           const { repository, issue } = yield* seedActionableIssue
 
           const error = yield* Effect.flip(
-            lifecycle.queue(repository.id, issue.githubIssueNumber),
+            lifecycle.queue(repository.id, issue.issueNumber),
           )
 
           expect(error).toBeInstanceOf(IssueNotBlockedError)
@@ -10077,12 +10051,9 @@ describe("WorkItemLifecycle", () => {
           const lifecycle = yield* WorkItemLifecycle
           const { repository, issue } = yield* seedBlockedIssue
 
-          const first = yield* lifecycle.queue(
-            repository.id,
-            issue.githubIssueNumber,
-          )
+          const first = yield* lifecycle.queue(repository.id, issue.issueNumber)
           const error = yield* Effect.flip(
-            lifecycle.queue(repository.id, issue.githubIssueNumber),
+            lifecycle.queue(repository.id, issue.issueNumber),
           )
 
           expect(error).toBeInstanceOf(UnfinishedWorkItemExistsError)
@@ -10105,7 +10076,7 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-queue-rejects.git",
-            githubRepo: "widgets-queue-rejects",
+            projectPath: "acme/widgets-queue-rejects",
           })
 
           const missing = yield* Effect.flip(
@@ -10115,14 +10086,14 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 8,
+            issueNumber: 8,
             ...sampleIssueFields,
             state: "CLOSED",
             url: "https://github.com/acme/widgets/issues/8",
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
@@ -10131,15 +10102,15 @@ describe("WorkItemLifecycle", () => {
 
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 9,
+            issueNumber: 9,
             ...sampleIssueFields,
             title: "Parent",
             url: "https://github.com/acme/widgets/issues/9",
             hasChildren: true,
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
@@ -10156,7 +10127,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.queue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
 
           const pauseError = yield* Effect.flip(lifecycle.pause(created.id))
@@ -10180,7 +10151,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.queue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           const deletedId = yield* lifecycle.reset(created.id)
           expect(deletedId).toBe(created.id)
@@ -10190,14 +10161,11 @@ describe("WorkItemLifecycle", () => {
 
           const listed = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(listed).toHaveLength(0)
 
-          const again = yield* lifecycle.queue(
-            repository.id,
-            issue.githubIssueNumber,
-          )
+          const again = yield* lifecycle.queue(repository.id, issue.issueNumber)
           expect(again.id).not.toBe(created.id)
           expect(again.waitingForBlockers).toBe(true)
         }),
@@ -10211,7 +10179,7 @@ describe("WorkItemLifecycle", () => {
 
           const created = yield* lifecycle.queue(
             repository.id,
-            issue.githubIssueNumber,
+            issue.issueNumber,
           )
           expect(created.waitingForBlockers).toBe(true)
 
@@ -10244,17 +10212,17 @@ describe("WorkItemLifecycle", () => {
           const blockedRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-held.git",
-            githubRepo: "widgets-held",
+            projectPath: "acme/widgets-held",
           })
           yield* db.storeIssue({
             repositoryId: blockedRepo.id,
-            githubIssueNumber: 88,
+            issueNumber: 88,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/88",
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
@@ -10264,11 +10232,11 @@ describe("WorkItemLifecycle", () => {
           const actionableRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-admit.git",
-            githubRepo: "widgets-admit",
+            projectPath: "acme/widgets-admit",
           })
           yield* db.storeIssue({
             repositoryId: actionableRepo.id,
-            githubIssueNumber: 89,
+            issueNumber: 89,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/89",
           })
@@ -10292,10 +10260,7 @@ describe("WorkItemLifecycle", () => {
           const queue = yield* QueueService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const held = yield* lifecycle.queue(
-            repository.id,
-            issue.githubIssueNumber,
-          )
+          const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
           expect(held.waitingForBlockers).toBe(true)
           expect(held.holdsWorkerSlot).toBe(false)
           expect(held.stepRuns).toHaveLength(0)
@@ -10304,7 +10269,7 @@ describe("WorkItemLifecycle", () => {
           expect(repository.paused).toBe(true)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
             title: issue.title,
             url: issue.url,
@@ -10337,22 +10302,19 @@ describe("WorkItemLifecycle", () => {
           const db = yield* DbService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const held = yield* lifecycle.queue(
-            repository.id,
-            issue.githubIssueNumber,
-          )
+          const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
 
           // Partial clearance: one blocker remains — still not Implementable.
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
             title: issue.title,
             url: issue.url,
             blockedBy: [
               {
-                githubIssueNumber: 12,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/12",
+                issueNumber: 12,
+                issueUrl: "https://github.com/acme/widgets/issues/12",
               },
             ],
           })
@@ -10380,25 +10342,25 @@ describe("WorkItemLifecycle", () => {
           const repository = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-held-invalid.git",
-            githubRepo: "widgets-held-invalid",
+            projectPath: "acme/widgets-held-invalid",
           })
 
           const closed = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 201,
+            issueNumber: 201,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/201",
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
           const closedHeld = yield* lifecycle.queue(repository.id, 201)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 201,
+            issueNumber: 201,
             ...sampleIssueFields,
             title: closed.title,
             url: closed.url,
@@ -10408,37 +10370,37 @@ describe("WorkItemLifecycle", () => {
 
           const missing = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 202,
+            issueNumber: 202,
             ...sampleIssueFields,
             title: "Missing later",
             url: "https://github.com/acme/widgets/issues/202",
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
           const missingHeld = yield* lifecycle.queue(repository.id, 202)
-          yield* db.deleteIssue(repository.id, missing.githubIssueNumber)
+          yield* db.deleteIssue(repository.id, missing.issueNumber)
 
           const parent = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 203,
+            issueNumber: 203,
             ...sampleIssueFields,
             title: "Becomes parent",
             url: "https://github.com/acme/widgets/issues/203",
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
           const parentHeld = yield* lifecycle.queue(repository.id, 203)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 203,
+            issueNumber: 203,
             ...sampleIssueFields,
             title: parent.title,
             url: parent.url,
@@ -10489,17 +10451,17 @@ describe("WorkItemLifecycle", () => {
           const heldRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-release-fifo-held.git",
-            githubRepo: "widgets-release-fifo-held",
+            projectPath: "acme/widgets-release-fifo-held",
           })
           yield* db.storeIssue({
             repositoryId: heldRepo.id,
-            githubIssueNumber: 301,
+            issueNumber: 301,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/301",
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           })
@@ -10508,11 +10470,11 @@ describe("WorkItemLifecycle", () => {
           const admittedRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-release-fifo-admitted.git",
-            githubRepo: "widgets-release-fifo-admitted",
+            projectPath: "acme/widgets-release-fifo-admitted",
           })
           yield* db.storeIssue({
             repositoryId: admittedRepo.id,
-            githubIssueNumber: 302,
+            issueNumber: 302,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/302",
           })
@@ -10522,11 +10484,11 @@ describe("WorkItemLifecycle", () => {
           const waiterRepo = yield* db.addRepository({
             ...sampleRepository,
             localPath: "/repos/acme/widgets-release-fifo-waiter.git",
-            githubRepo: "widgets-release-fifo-waiter",
+            projectPath: "acme/widgets-release-fifo-waiter",
           })
           yield* db.storeIssue({
             repositoryId: waiterRepo.id,
-            githubIssueNumber: 303,
+            issueNumber: 303,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/303",
           })
@@ -10537,7 +10499,7 @@ describe("WorkItemLifecycle", () => {
           // Clear blockers; release should join wait line by creation time.
           yield* db.storeIssue({
             repositoryId: heldRepo.id,
-            githubIssueNumber: 301,
+            issueNumber: 301,
             ...sampleIssueFields,
             url: "https://github.com/acme/widgets/issues/301",
             blockedBy: [],
@@ -10578,13 +10540,10 @@ describe("WorkItemLifecycle", () => {
           const db = yield* DbService
           const { repository, issue } = yield* seedBlockedIssue
 
-          const held = yield* lifecycle.queue(
-            repository.id,
-            issue.githubIssueNumber,
-          )
+          const held = yield* lifecycle.queue(repository.id, issue.issueNumber)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             ...sampleIssueFields,
             title: issue.title,
             url: issue.url,

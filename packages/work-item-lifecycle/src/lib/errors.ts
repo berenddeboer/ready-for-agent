@@ -14,7 +14,7 @@ export class IssueNotFoundError extends Schema.TaggedErrorClass<IssueNotFoundErr
   "IssueNotFoundError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
   },
 ) {}
 
@@ -22,7 +22,7 @@ export class IssueNotOpenError extends Schema.TaggedErrorClass<IssueNotOpenError
   "IssueNotOpenError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
     state: Schema.String,
   },
 ) {}
@@ -31,7 +31,7 @@ export class ParentIssueError extends Schema.TaggedErrorClass<ParentIssueError>(
   "ParentIssueError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
   },
 ) {}
 
@@ -40,7 +40,7 @@ export class NotAParentIssueError extends Schema.TaggedErrorClass<NotAParentIssu
   "NotAParentIssueError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
   },
 ) {}
 
@@ -51,7 +51,7 @@ export class UnsupportedIssueHierarchyError extends Schema.TaggedErrorClass<Unsu
   "UnsupportedIssueHierarchyError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
     message: Schema.String,
   },
 ) {}
@@ -64,7 +64,7 @@ export class ImplementAllWithAutoMergeNotEligibleError extends Schema.TaggedErro
   "ImplementAllWithAutoMergeNotEligibleError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
     reason: Schema.String,
   },
 ) {}
@@ -73,7 +73,7 @@ export class IssueBlockedError extends Schema.TaggedErrorClass<IssueBlockedError
   "IssueBlockedError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
     blockerCount: Schema.Finite,
   },
 ) {}
@@ -83,7 +83,7 @@ export class IssueNotBlockedError extends Schema.TaggedErrorClass<IssueNotBlocke
   "IssueNotBlockedError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
   },
 ) {}
 
@@ -91,7 +91,7 @@ export class UnfinishedWorkItemExistsError extends Schema.TaggedErrorClass<Unfin
   "UnfinishedWorkItemExistsError",
   {
     repositoryId: Schema.String,
-    githubIssueNumber: Schema.Finite,
+    issueNumber: Schema.Finite,
     workItemId: Schema.String,
   },
 ) {}

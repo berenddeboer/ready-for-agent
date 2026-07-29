@@ -3,6 +3,7 @@ import { GitHubService } from "../lib/github-service.js"
 import {
   CliArgumentError,
   decodeArgument,
+  githubRepository,
   runGitHubCli,
   writeStandardOutput,
 } from "./cli.js"
@@ -16,9 +17,10 @@ const CreateDraftPullRequestPayload = Schema.Struct({
 
 export const createDraftPullRequestProgram = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const owner = yield* decodeArgument(args[0], "owner")
-    const name = yield* decodeArgument(args[1], "name")
-    const payloadJson = yield* decodeArgument(args[2], "create draft payload")
+    const forge = yield* decodeArgument(args[0], "forge")
+    const forgeHost = yield* decodeArgument(args[1], "forge host")
+    const projectPath = yield* decodeArgument(args[2], "project path")
+    const payloadJson = yield* decodeArgument(args[3], "create draft payload")
     const payload = yield* Schema.decodeUnknownEffect(
       Schema.fromJsonString(CreateDraftPullRequestPayload),
     )(payloadJson).pipe(
@@ -31,7 +33,7 @@ export const createDraftPullRequestProgram = (args: ReadonlyArray<string>) =>
     )
     const github = yield* GitHubService
     const number = yield* github.createDraftPullRequest(
-      { owner, name },
+      githubRepository(forge, forgeHost, projectPath),
       {
         headRefName: payload.headRefName,
         title: payload.title,

@@ -3,6 +3,7 @@ import { GitHubService } from "../lib/github-service.js"
 import {
   CliArgumentError,
   decodeArgument,
+  githubRepository,
   runGitHubCli,
   writeStandardOutput,
 } from "./cli.js"
@@ -18,10 +19,11 @@ export const getPrStatusCheckDiagnosticsProgram = (
   args: ReadonlyArray<string>,
 ) =>
   Effect.gen(function* () {
-    const owner = yield* decodeArgument(args[0], "owner")
-    const name = yield* decodeArgument(args[1], "name")
-    const checksJson = yield* decodeArgument(args[2], "checks")
-    const logDirectoryRaw = args[3]
+    const forge = yield* decodeArgument(args[0], "forge")
+    const forgeHost = yield* decodeArgument(args[1], "forge host")
+    const projectPath = yield* decodeArgument(args[2], "project path")
+    const checksJson = yield* decodeArgument(args[3], "checks")
+    const logDirectoryRaw = args[4]
     const logDirectory =
       logDirectoryRaw === undefined || logDirectoryRaw === ""
         ? undefined
@@ -39,7 +41,7 @@ export const getPrStatusCheckDiagnosticsProgram = (
     )
     const github = yield* GitHubService
     const diagnostics = yield* github.getPrStatusCheckDiagnostics(
-      { owner, name },
+      githubRepository(forge, forgeHost, projectPath),
       checks,
       logDirectory === undefined ? {} : { logDirectory },
     )

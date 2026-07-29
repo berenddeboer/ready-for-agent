@@ -103,15 +103,16 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
           const context = {
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -134,9 +135,10 @@ describe("removeWorktree", () => {
           return {
             path,
             branch: workItemBranchName({
-              githubOwner: "acme",
-              githubRepo: "widgets",
-              githubIssueNumber: 42,
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+              issueNumber: 42,
               workItemId,
             }),
           }
@@ -167,8 +169,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -176,7 +179,7 @@ describe("removeWorktree", () => {
           const context = {
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -198,9 +201,10 @@ describe("removeWorktree", () => {
           return {
             path: created.worktreePath,
             branch: workItemBranchName({
-              githubOwner: "acme",
-              githubRepo: "widgets",
-              githubIssueNumber: 42,
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+              issueNumber: 42,
               workItemId,
             }),
           }
@@ -229,8 +233,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -238,7 +243,7 @@ describe("removeWorktree", () => {
           yield* removeWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -260,9 +265,10 @@ describe("removeWorktree", () => {
       const planned = workItemWorktreePath({
         localPath: bare,
         isBare: true,
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId,
       })
       expect(await Bun.file(join(planned, "README.md")).exists()).toBe(false)
@@ -281,8 +287,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -290,7 +297,7 @@ describe("removeWorktree", () => {
           const context = {
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -332,15 +339,16 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
           const context = {
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -381,9 +389,10 @@ describe("removeWorktree", () => {
       const bare = await initBareRepository(root)
       const workItemId = makeWorkItemId()
       const branch = workItemBranchName({
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId,
       })
       const commands: string[] = []
@@ -392,8 +401,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -401,7 +411,7 @@ describe("removeWorktree", () => {
           const context = {
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -464,8 +474,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -473,7 +484,7 @@ describe("removeWorktree", () => {
           yield* removeWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -530,8 +541,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -539,7 +551,7 @@ describe("removeWorktree", () => {
           return yield* removeWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -578,8 +590,9 @@ describe("removeWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -587,7 +600,7 @@ describe("removeWorktree", () => {
           return yield* removeWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",

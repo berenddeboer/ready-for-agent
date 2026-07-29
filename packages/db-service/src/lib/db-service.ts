@@ -117,7 +117,7 @@ const isUniqueConstraint = (error: SqlError): boolean => {
 
 const trimRequired = (
   value: string,
-  field: "githubOwner" | "githubRepo" | "localPath",
+  field: "forgeHost" | "projectPath" | "localPath",
 ): Effect.Effect<string, InvalidRepositoryInputError> => {
   const trimmed = value.trim()
   if (trimmed.length === 0) {
@@ -231,21 +231,22 @@ const decodeRunningStepRows = (rows: ReadonlyArray<unknown>) =>
     Effect.mapError(toSchemaDatabaseError),
   )
 
-const repositorySelectColumns = `id, github_owner, github_repo, local_path, is_bare, paused,
+const repositorySelectColumns = `id, forge, forge_host, project_path, local_path, is_bare, paused,
              selected_agent_backend, default_model, default_thinking_level,
              review_model, review_thinking_level, backend_model_prefs, auto_merge,
              include_all_issue_authors, wait_for_ready_for_review_checks,
              issues_reconciled_at`
 
-const issueSelectColumns = `id, repository_id, github_issue_number, title, body, url, state,
-                github_created_at, issue_author, parent_github_issue_number,
-                parent_github_issue_url, parent_position, has_children`
+const issueSelectColumns = `id, repository_id, issue_number, title, body, url, state,
+                github_created_at, issue_author, parent_issue_number,
+                parent_issue_url, parent_position, has_children`
 
 const toRepositoryRecord = (row: RepositorySqlRow): RepositoryRecord =>
   RepositoryRecord.make({
     id: row.id,
-    githubOwner: row.githubOwner,
-    githubRepo: row.githubRepo,
+    forge: row.forge,
+    forgeHost: row.forgeHost,
+    projectPath: row.projectPath,
     localPath: row.localPath,
     isBare: row.isBare,
     paused: row.paused,
@@ -266,7 +267,7 @@ const toIssueRecord = (
 ): IssueRecord => ({
   id: row.id,
   repositoryId: row.repositoryId,
-  githubIssueNumber: row.githubIssueNumber,
+  issueNumber: row.issueNumber,
   title: row.title,
   body: row.body,
   url: row.url,
@@ -276,11 +277,11 @@ const toIssueRecord = (
   parentPosition: row.parentPosition,
   hasChildren: row.hasChildren,
   parent:
-    row.parentGithubIssueNumber === null || row.parentGithubIssueUrl === null
+    row.parentIssueNumber === null || row.parentIssueUrl === null
       ? null
       : {
-          githubIssueNumber: row.parentGithubIssueNumber,
-          githubIssueUrl: row.parentGithubIssueUrl,
+          issueNumber: row.parentIssueNumber,
+          issueUrl: row.parentIssueUrl,
         },
   blockedBy,
 })
@@ -400,7 +401,7 @@ export interface DbServiceShape {
    */
   readonly deleteIssue: (
     repositoryId: string,
-    githubIssueNumber: number,
+    issueNumber: number,
   ) => Effect.Effect<void, RepositoryNotFoundError | DatabaseError>
   /**
    * Record reconciliation completion. Does not publish `issueChanges`; call
@@ -914,25 +915,29 @@ export const DbServiceLive = Layer.effect(
     const addRepository = Effect.fn("DbService.addRepository")(function* (
       input: AddRepositoryInput,
     ) {
-      const githubOwner = yield* trimRequired(input.githubOwner, "githubOwner")
-      const githubRepo = yield* trimRequired(input.githubRepo, "githubRepo")
+      const forgeHost = (yield* trimRequired(
+        input.forgeHost,
+        "forgeHost",
+      )).toLowerCase()
+      const projectPath = yield* trimRequired(input.projectPath, "projectPath")
       const localPath = yield* trimRequired(input.localPath, "localPath")
       const now = yield* Clock.currentTimeMillis
       const id = RepositoryId.make(`repo-${ulid()}`)
 
-      const existingByGithub = yield* sql
+      const existingByForgeIdentity = yield* sql
         .unsafe(
           `SELECT id FROM repository
-             WHERE lower(github_owner) = ? AND lower(github_repo) = ?
+             WHERE forge = ? AND forge_host = ? AND lower(project_path) = ?
              LIMIT 1`,
-          [githubOwner.toLowerCase(), githubRepo.toLowerCase()],
+          [input.forge, forgeHost, projectPath.toLowerCase()],
         )
         .pipe(Effect.mapError(toDatabaseError))
 
-      if (existingByGithub[0]) {
+      if (existingByForgeIdentity[0]) {
         return yield* new RepositoryAlreadyExistsError({
-          githubOwner,
-          githubRepo,
+          forge: input.forge,
+          forgeHost,
+          projectPath,
         })
       }
 
@@ -947,18 +952,19 @@ export const DbServiceLive = Layer.effect(
       const result = yield* sql
         .unsafe(
           `INSERT INTO repository (
-               id, github_owner, github_repo, local_path, is_bare, paused,
+               id, forge, forge_host, project_path, local_path, is_bare, paused,
                selected_agent_backend,
                default_model, default_thinking_level, review_model, review_thinking_level,
                backend_model_prefs,
                auto_merge, include_all_issue_authors, wait_for_ready_for_review_checks,
                created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?, ?)
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, '{}', ?, ?, ?, ?, ?)
              RETURNING ${repositorySelectColumns}`,
           [
             id,
-            githubOwner,
-            githubRepo,
+            input.forge,
+            forgeHost,
+            projectPath,
             localPath,
             input.isBare,
             true,
@@ -980,8 +986,9 @@ export const DbServiceLive = Layer.effect(
                 return new LocalPathInUseError({ localPath })
               }
               return new RepositoryAlreadyExistsError({
-                githubOwner,
-                githubRepo,
+                forge: input.forge,
+                forgeHost,
+                projectPath,
               })
             }
             return toDatabaseError(error)
@@ -1211,7 +1218,7 @@ export const DbServiceLive = Layer.effect(
         .unsafe(
           `SELECT ${repositorySelectColumns}
            FROM repository
-           ORDER BY lower(github_owner) ASC, lower(github_repo) ASC`,
+           ORDER BY forge ASC, forge_host ASC, lower(project_path) ASC`,
         )
         .pipe(Effect.mapError(toDatabaseError))
 
@@ -1339,13 +1346,10 @@ export const DbServiceLive = Layer.effect(
     const storeIssue = Effect.fn("DbService.storeIssue")(function* (
       input: StoreIssueInput,
     ) {
-      if (
-        !Number.isSafeInteger(input.githubIssueNumber) ||
-        input.githubIssueNumber <= 0
-      ) {
+      if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber <= 0) {
         return yield* new InvalidIssueInputError({
-          field: "githubIssueNumber",
-          message: "githubIssueNumber must be a positive integer",
+          field: "issueNumber",
+          message: "issueNumber must be a positive integer",
         })
       }
       if (input.title.trim().length === 0) {
@@ -1375,9 +1379,9 @@ export const DbServiceLive = Layer.effect(
 
       if (
         input.parent !== null &&
-        (!Number.isSafeInteger(input.parent.githubIssueNumber) ||
-          input.parent.githubIssueNumber <= 0 ||
-          !URL.canParse(input.parent.githubIssueUrl))
+        (!Number.isSafeInteger(input.parent.issueNumber) ||
+          input.parent.issueNumber <= 0 ||
+          !URL.canParse(input.parent.issueUrl))
       ) {
         return yield* new InvalidIssueInputError({
           field: "parent",
@@ -1397,15 +1401,15 @@ export const DbServiceLive = Layer.effect(
 
       for (const dependency of input.blockedBy) {
         if (
-          !Number.isSafeInteger(dependency.githubIssueNumber) ||
-          dependency.githubIssueNumber <= 0
+          !Number.isSafeInteger(dependency.issueNumber) ||
+          dependency.issueNumber <= 0
         ) {
           return yield* new InvalidIssueInputError({
             field: "blockedBy",
             message: "blockedBy issue numbers must be positive integers",
           })
         }
-        if (!URL.canParse(dependency.githubIssueUrl)) {
+        if (!URL.canParse(dependency.issueUrl)) {
           return yield* new InvalidIssueInputError({
             field: "blockedBy",
             message: "blockedBy issue URLs must be valid URLs",
@@ -1427,20 +1431,20 @@ export const DbServiceLive = Layer.effect(
             const result = yield* sql
               .unsafe(
                 `INSERT INTO issue (
-               id, repository_id, github_issue_number, title, body, url, state,
-                github_created_at, issue_author, parent_github_issue_number,
-                 parent_github_issue_url, parent_position, has_children,
+               id, repository_id, issue_number, title, body, url, state,
+                github_created_at, issue_author, parent_issue_number,
+                 parent_issue_url, parent_position, has_children,
                  created_at, updated_at
               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT (repository_id, github_issue_number) DO UPDATE SET
+             ON CONFLICT (repository_id, issue_number) DO UPDATE SET
                title = excluded.title,
                body = excluded.body,
                url = excluded.url,
                 state = excluded.state,
                 github_created_at = excluded.github_created_at,
                  issue_author = excluded.issue_author,
-                 parent_github_issue_number = excluded.parent_github_issue_number,
-                 parent_github_issue_url = excluded.parent_github_issue_url,
+                 parent_issue_number = excluded.parent_issue_number,
+                 parent_issue_url = excluded.parent_issue_url,
                  parent_position = excluded.parent_position,
                  has_children = excluded.has_children,
                  updated_at = excluded.updated_at
@@ -1448,15 +1452,15 @@ export const DbServiceLive = Layer.effect(
                 [
                   `issue-${ulid()}`,
                   input.repositoryId,
-                  input.githubIssueNumber,
+                  input.issueNumber,
                   input.title,
                   input.body,
                   input.url,
                   input.state,
                   input.githubCreatedAt.getTime(),
                   issueAuthor,
-                  input.parent?.githubIssueNumber ?? null,
-                  input.parent?.githubIssueUrl ?? null,
+                  input.parent?.issueNumber ?? null,
+                  input.parent?.issueUrl ?? null,
                   input.parentPosition,
                   input.hasChildren,
                   now,
@@ -1479,27 +1483,27 @@ export const DbServiceLive = Layer.effect(
             const dependencies = [
               ...new Map(
                 input.blockedBy.map((dependency) => [
-                  dependency.githubIssueUrl,
+                  dependency.issueUrl,
                   dependency,
                 ]),
               ).values(),
             ].sort(
               (left, right) =>
-                left.githubIssueNumber - right.githubIssueNumber ||
-                left.githubIssueUrl.localeCompare(right.githubIssueUrl),
+                left.issueNumber - right.issueNumber ||
+                left.issueUrl.localeCompare(right.issueUrl),
             )
             for (const dependency of dependencies) {
               yield* sql
                 .unsafe(
                   `INSERT INTO issue_dependency (
-                 id, issue_id, blocking_github_issue_number,
-                 blocking_github_issue_url, created_at
+                 id, issue_id, blocking_issue_number,
+                 blocking_issue_url, created_at
                ) VALUES (?, ?, ?, ?, ?)`,
                   [
                     `issue-dependency-${ulid()}`,
                     row.id,
-                    dependency.githubIssueNumber,
-                    dependency.githubIssueUrl,
+                    dependency.issueNumber,
+                    dependency.issueUrl,
                     now,
                   ],
                 )
@@ -1528,20 +1532,20 @@ export const DbServiceLive = Layer.effect(
       const issues = yield* sql
         .unsafe(
           `SELECT ${issueSelectColumns}
-             FROM issue WHERE repository_id = ? ORDER BY github_issue_number ASC`,
+             FROM issue WHERE repository_id = ? ORDER BY issue_number ASC`,
           [repositoryId],
         )
         .pipe(Effect.mapError(toDatabaseError))
 
       const dependencyRows = yield* sql
         .unsafe(
-          `SELECT d.issue_id, d.blocking_github_issue_number,
-               d.blocking_github_issue_url
+          `SELECT d.issue_id, d.blocking_issue_number,
+               d.blocking_issue_url
              FROM issue_dependency d
              INNER JOIN issue i ON i.id = d.issue_id
              WHERE i.repository_id = ?
-             ORDER BY d.blocking_github_issue_number ASC,
-               d.blocking_github_issue_url ASC`,
+             ORDER BY d.blocking_issue_number ASC,
+               d.blocking_issue_url ASC`,
           [repositoryId],
         )
         .pipe(Effect.mapError(toDatabaseError))
@@ -1550,8 +1554,8 @@ export const DbServiceLive = Layer.effect(
       for (const dependency of dependencies) {
         const records = dependenciesByIssue.get(dependency.issueId) ?? []
         records.push({
-          githubIssueNumber: dependency.githubIssueNumber,
-          githubIssueUrl: dependency.githubIssueUrl,
+          issueNumber: dependency.issueNumber,
+          issueUrl: dependency.issueUrl,
         })
         dependenciesByIssue.set(dependency.issueId, records)
       }
@@ -1570,10 +1574,10 @@ export const DbServiceLive = Layer.effect(
       yield* ensureRepositoryExists(repositoryId)
       const rows = yield* sql
         .unsafe(
-          `SELECT github_issue_number, github_pull_request_number
+          `SELECT issue_number, pull_request_number
              FROM work_item
-             WHERE repository_id = ? AND github_pull_request_number IS NOT NULL
-             ORDER BY github_issue_number ASC, github_pull_request_number ASC`,
+             WHERE repository_id = ? AND pull_request_number IS NOT NULL
+             ORDER BY issue_number ASC, pull_request_number ASC`,
           [repositoryId],
         )
         .pipe(Effect.mapError(toDatabaseError))
@@ -1581,15 +1585,15 @@ export const DbServiceLive = Layer.effect(
       const decoded = yield* decodeWorkItemPullRequestRows(rows)
       return decoded.map((row) =>
         WorkItemPullRequest.make({
-          githubIssueNumber: row.githubIssueNumber,
-          githubPullRequestNumber: row.githubPullRequestNumber,
+          issueNumber: row.issueNumber,
+          pullRequestNumber: row.pullRequestNumber,
         }),
       )
     })
 
     const deleteIssue = Effect.fn("DbService.deleteIssue")(function* (
       repositoryId: string,
-      githubIssueNumber: number,
+      issueNumber: number,
     ) {
       yield* ensureRepositoryExists(repositoryId)
       yield* sql
@@ -1597,16 +1601,16 @@ export const DbServiceLive = Layer.effect(
           `DELETE FROM issue_dependency
              WHERE issue_id IN (
                SELECT id FROM issue
-               WHERE repository_id = ? AND github_issue_number = ?
+               WHERE repository_id = ? AND issue_number = ?
              )`,
-          [repositoryId, githubIssueNumber],
+          [repositoryId, issueNumber],
         )
         .pipe(Effect.mapError(toDatabaseError))
       yield* sql
         .unsafe(
           `DELETE FROM issue
-             WHERE repository_id = ? AND github_issue_number = ?`,
-          [repositoryId, githubIssueNumber],
+             WHERE repository_id = ? AND issue_number = ?`,
+          [repositoryId, issueNumber],
         )
         .pipe(Effect.mapError(toDatabaseError))
     })

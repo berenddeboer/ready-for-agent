@@ -1,6 +1,7 @@
 export interface GitHubRepository {
-  readonly owner: string
-  readonly name: string
+  readonly forge: string
+  readonly forgeHost: string
+  readonly projectPath: string
 }
 
 export type TerminalPrStatusCheckOutcome = "green" | "red"

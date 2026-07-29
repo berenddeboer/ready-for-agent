@@ -8,11 +8,8 @@ import {
 import { describe, expect, test } from "bun:test"
 
 describe("isParentImplementAllWithAutoMergeEligible", () => {
-  const leaf = (
-    githubIssueNumber: number,
-    blockedBy: readonly unknown[] = [],
-  ) => ({
-    githubIssueNumber,
+  const leaf = (issueNumber: number, blockedBy: readonly unknown[] = []) => ({
+    issueNumber,
     hasChildren: false,
     blockedBy,
   })
@@ -38,8 +35,8 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
 
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2, [{ githubIssueNumber: 1 }]), leaf(3)],
-        directChildren: [leaf(2, [{ githubIssueNumber: 1 }]), leaf(3)],
+        openChildren: [leaf(2, [{ issueNumber: 1 }]), leaf(3)],
+        directChildren: [leaf(2, [{ issueNumber: 1 }]), leaf(3)],
         workItems: [],
         workItemsLoading: false,
       }),
@@ -47,8 +44,8 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
 
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2, [{ githubIssueNumber: 1 }])],
-        directChildren: [leaf(2, [{ githubIssueNumber: 1 }])],
+        openChildren: [leaf(2, [{ issueNumber: 1 }])],
+        directChildren: [leaf(2, [{ issueNumber: 1 }])],
         workItems: [],
         workItemsLoading: false,
       }),
@@ -59,7 +56,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
         directChildren: [leaf(2)],
-        workItems: [{ githubIssueNumber: 2, state: "CREATE_WORKTREE" }],
+        workItems: [{ issueNumber: 2, state: "CREATE_WORKTREE" }],
         workItemsLoading: false,
       }),
     ).toBe(true)
@@ -70,7 +67,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2), leaf(3)],
         directChildren: [leaf(2), leaf(3)],
-        workItems: [{ githubIssueNumber: 2, state: "CREATE_WORKTREE" }],
+        workItems: [{ issueNumber: 2, state: "CREATE_WORKTREE" }],
         workItemsLoading: false,
       }),
     ).toBe(true)
@@ -80,8 +77,8 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
         openChildren: [leaf(2), leaf(3)],
         directChildren: [leaf(2), leaf(3)],
         workItems: [
-          { githubIssueNumber: 2, state: "CREATE_WORKTREE" },
-          { githubIssueNumber: 3, state: "IMPLEMENT" },
+          { issueNumber: 2, state: "CREATE_WORKTREE" },
+          { issueNumber: 3, state: "IMPLEMENT" },
         ],
         workItemsLoading: false,
       }),
@@ -91,12 +88,8 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
   test("hides unsupported hierarchy for open or closed direct children with children", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
-        openChildren: [
-          { githubIssueNumber: 2, hasChildren: true, blockedBy: [] },
-        ],
-        directChildren: [
-          { githubIssueNumber: 2, hasChildren: true, blockedBy: [] },
-        ],
+        openChildren: [{ issueNumber: 2, hasChildren: true, blockedBy: [] }],
+        directChildren: [{ issueNumber: 2, hasChildren: true, blockedBy: [] }],
         workItems: [],
         workItemsLoading: false,
       }),
@@ -118,7 +111,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
         directChildren: [leaf(2)],
-        workItems: [{ githubIssueNumber: 2, state: "NEEDS_HUMAN" }],
+        workItems: [{ issueNumber: 2, state: "NEEDS_HUMAN" }],
         workItemsLoading: false,
       }),
     ).toBe(true)
@@ -130,7 +123,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
         isParentImplementAllWithAutoMergeEligible({
           openChildren: [leaf(2)],
           directChildren: [leaf(2)],
-          workItems: [{ githubIssueNumber: 2, state }],
+          workItems: [{ issueNumber: 2, state }],
           workItemsLoading: false,
         }),
       ).toBe(true)
@@ -162,7 +155,7 @@ describe("ParentIssueActionsMenu", () => {
   test("renders accessible Actions control for the Parent Issue", () => {
     const html = renderToStaticMarkup(
       <ParentIssueActionsMenu
-        parentGithubIssueNumber={42}
+        parentIssueNumber={42}
         menuId="issue-parent-42"
         pending={false}
         errorMessage={null}
@@ -180,7 +173,7 @@ describe("ParentIssueActionsMenu", () => {
   test("shows parent-level error alert without partial-success copy", () => {
     const html = renderToStaticMarkup(
       <ParentIssueActionsMenu
-        parentGithubIssueNumber={7}
+        parentIssueNumber={7}
         menuId="issue-parent-7"
         pending={true}
         errorMessage="Could not start Implement all with auto-merge. Refresh the issues and try again."

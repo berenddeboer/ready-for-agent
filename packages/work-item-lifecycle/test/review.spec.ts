@@ -50,7 +50,7 @@ const baseContext = (
 ): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
-  githubIssueNumber: 91,
+  issueNumber: 91,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",
@@ -1550,14 +1550,14 @@ describe("review", () => {
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO repository (
-               id, github_owner, github_repo, local_path, is_bare, paused,
+               id, forge, forge_host, project_path, local_path, is_bare, paused,
                issues_reconciled_at, created_at, updated_at
-             ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+             ) VALUES (?, 'github', 'github.com', 'o/r', ?, 1, 0, NULL, ?, ?)`,
             [repositoryId, `/tmp/${repositoryId}`, now, now],
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
+               id, repository_id, issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'review', ?,
                ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
@@ -1642,14 +1642,14 @@ describe("review", () => {
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO repository (
-               id, github_owner, github_repo, local_path, is_bare, paused,
+               id, forge, forge_host, project_path, local_path, is_bare, paused,
                issues_reconciled_at, created_at, updated_at
-             ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+             ) VALUES (?, 'github', 'github.com', 'o/r', ?, 1, 0, NULL, ?, ?)`,
             [repositoryId, `/tmp/${repositoryId}`, now, now],
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
+               id, repository_id, issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'review', ?,
                ?, 'ses_implement_session', NULL, NULL, ?, ?)`,
@@ -1728,14 +1728,14 @@ describe("review", () => {
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO repository (
-               id, github_owner, github_repo, local_path, is_bare, paused,
+               id, forge, forge_host, project_path, local_path, is_bare, paused,
                issues_reconciled_at, created_at, updated_at
-             ) VALUES (?, 'o', 'r', ?, 1, 0, NULL, ?, ?)`,
+             ) VALUES (?, 'github', 'github.com', 'o/r', ?, 1, 0, NULL, ?, ?)`,
             [repositoryId, `/tmp/${repositoryId}`, now, now],
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
+               id, repository_id, issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'review', ?,
                ?, 'ses_implement_session', NULL, NULL, ?, ?)`,

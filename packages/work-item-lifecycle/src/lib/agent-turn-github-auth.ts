@@ -47,8 +47,7 @@ export const isAgentTurnKeymaxxerEffective = (
 ): boolean => keymaxxerMcpSupported && keymaxxerEnabled !== false
 
 export const resolveAgentTurnGitHubAuth = (input: {
-  readonly githubOwner: string
-  readonly githubRepo: string
+  readonly projectPath: string
 }) =>
   Effect.gen(function* () {
     const active = yield* ActiveAgentBackend
@@ -90,11 +89,11 @@ export const resolveAgentTurnGitHubAuth = (input: {
     }
     const tokenName = yield* keymaxxer.findSecret({
       provider: "github",
-      account: `${input.githubOwner}/${input.githubRepo}`,
+      account: input.projectPath,
     })
     if (tokenName === null) {
       return yield* new AgentTurnGitHubCredentialMissingError({
-        message: `No GitHub credential is configured for ${input.githubOwner}/${input.githubRepo}`,
+        message: `No GitHub credential is configured for ${input.projectPath}`,
       })
     }
     return {

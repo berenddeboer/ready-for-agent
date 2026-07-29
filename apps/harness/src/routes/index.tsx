@@ -188,8 +188,9 @@ const repositoriesQuery = {
     const result = await graphql.query({
       repositories: {
         id: true,
-        githubOwner: true,
-        githubRepo: true,
+        forge: true,
+        forgeHost: true,
+        projectPath: true,
         localPath: true,
         isBare: true,
         paused: true,
@@ -253,19 +254,19 @@ const issuesQuery = (repositoryId: string) => ({
         __args: { repositoryId },
         id: true,
         repositoryId: true,
-        githubIssueNumber: true,
+        issueNumber: true,
         title: true,
         url: true,
         state: true,
         issueAuthor: true,
         parent: {
-          githubIssueNumber: true,
-          githubIssueUrl: true,
+          issueNumber: true,
+          issueUrl: true,
         },
         hasChildren: true,
         blockedBy: {
-          githubIssueNumber: true,
-          githubIssueUrl: true,
+          issueNumber: true,
+          issueUrl: true,
         },
       },
     })
@@ -275,8 +276,9 @@ const issuesQuery = (repositoryId: string) => ({
 
 type Repository = {
   id: string
-  githubOwner: string
-  githubRepo: string
+  forge: string
+  forgeHost: string
+  projectPath: string
   localPath: string
   isBare: boolean
   paused: boolean
@@ -305,19 +307,19 @@ type RepositoryCredential = {
 type RepositoryIssue = {
   id: string
   repositoryId: string
-  githubIssueNumber: number
+  issueNumber: number
   title: string
   url: string
   state: "OPEN" | "CLOSED"
   issueAuthor: string | null
   parent: {
-    githubIssueNumber: number
-    githubIssueUrl: string
+    issueNumber: number
+    issueUrl: string
   } | null
   hasChildren: boolean
   blockedBy: readonly {
-    githubIssueNumber: number
-    githubIssueUrl: string
+    issueNumber: number
+    issueUrl: string
   }[]
 }
 
@@ -360,9 +362,9 @@ type WorkItemStatus =
 type WorkItem = {
   id: string
   repositoryId: string
-  githubIssueNumber: number
+  issueNumber: number
   issueTitle: string | null
-  githubPullRequestNumber: number | null
+  pullRequestNumber: number | null
   agentBackend: { id: string; label: string }
   state: WorkItemState
   stateLabel: string
@@ -388,9 +390,9 @@ type WorkItem = {
 const workItemFields = {
   id: true,
   repositoryId: true,
-  githubIssueNumber: true,
+  issueNumber: true,
   issueTitle: true,
-  githubPullRequestNumber: true,
+  pullRequestNumber: true,
   agentBackend: { id: true, label: true },
   mergeMode: true,
   state: true,
@@ -867,8 +869,9 @@ function AddRepositoryGuidance({
         addLocalRepository: {
           __args: { path: localPath },
           id: true,
-          githubOwner: true,
-          githubRepo: true,
+          forge: true,
+          forgeHost: true,
+          projectPath: true,
           localPath: true,
           isBare: true,
           paused: true,
@@ -1104,8 +1107,9 @@ function RepositoryCard({
         updateRepositorySettings: {
           __args: { input },
           id: true,
-          githubOwner: true,
-          githubRepo: true,
+          forge: true,
+          forgeHost: true,
+          projectPath: true,
           localPath: true,
           isBare: true,
           paused: true,
@@ -1510,9 +1514,7 @@ function RepositoryCard({
 
   const confirmRemoval = () => {
     if (
-      window.confirm(
-        `Remove ${repository.githubOwner}/${repository.githubRepo} and its stored issues?`,
-      )
+      window.confirm(`Remove ${repository.projectPath} and its stored issues?`)
     ) {
       removeRepository.mutate()
     }
@@ -1640,7 +1642,7 @@ function RepositoryCard({
   const pauseButtonClass = repository.paused
     ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
     : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
-  const repositoryLabel = `${repository.githubOwner}/${repository.githubRepo}`
+  const repositoryLabel = `${repository.projectPath}`
   const pullRequestCountLabel =
     repository.pullRequestCount === 1
       ? "1 open pull request"
@@ -1659,7 +1661,7 @@ function RepositoryCard({
         <h2 className="m-0 flex min-w-0 max-w-full items-baseline gap-x-2 font-serif text-2xl font-semibold tracking-[-0.012em]">
           <a
             className="min-w-0 truncate text-ink hover:text-oxblood hover:underline"
-            href={`https://github.com/${repository.githubOwner}/${repository.githubRepo}`}
+            href={`https://${repository.forgeHost}/${repository.projectPath}`}
           >
             {repositoryLabel}
           </a>
@@ -1742,7 +1744,7 @@ function RepositoryCard({
             <button
               type="button"
               className="inline-flex size-8 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-              aria-label={`Actions for ${repository.githubOwner}/${repository.githubRepo}`}
+              aria-label={`Actions for ${repository.projectPath}`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
@@ -1810,7 +1812,7 @@ function RepositoryCard({
               id={`repo-settings-title-${repository.id}`}
               className="mt-1.5 font-serif text-2xl font-semibold tracking-[-0.01em]"
             >
-              {repository.githubOwner}/{repository.githubRepo}
+              {repository.projectPath}
             </h2>
             <p className="mt-1.5 text-sm text-ink-soft">
               Overrides apply on the next Agent Turn. Empty model fields use
@@ -2293,8 +2295,10 @@ function RepositoryCard({
                 <p className="m-0">
                   Create a fine-grained token, choose{" "}
                   <strong>Only select repositories</strong>, select{" "}
-                  <code className="font-bold">{repository.githubRepo}</code>,
-                  and allow <strong>Actions: Read and write</strong> (required
+                  <code className="font-bold">
+                    {repository.projectPath.split("/").at(-1)}
+                  </code>
+                  , and allow <strong>Actions: Read and write</strong> (required
                   for workflow reruns and CI logs). Already-created tokens are
                   not upgraded automatically — edit or recreate them if Actions
                   is still read-only.
@@ -2415,9 +2419,9 @@ function RepositoryIssues({
   const childrenByParent = new Map<number, RepositoryIssue[]>()
   for (const issue of issues) {
     if (issue.parent === null) continue
-    const children = childrenByParent.get(issue.parent.githubIssueNumber) ?? []
+    const children = childrenByParent.get(issue.parent.issueNumber) ?? []
     children.push(issue)
-    childrenByParent.set(issue.parent.githubIssueNumber, children)
+    childrenByParent.set(issue.parent.issueNumber, children)
   }
 
   return (
@@ -2436,7 +2440,7 @@ function RepositoryIssues({
           )
         }
 
-        const children = childrenByParent.get(issue.githubIssueNumber) ?? []
+        const children = childrenByParent.get(issue.issueNumber) ?? []
         const closedChildren = children.filter(
           (child) => child.state === "CLOSED",
         ).length
@@ -2485,7 +2489,7 @@ function ParentIssueGroup({
         implementAllWithAutoMerge: {
           __args: {
             repositoryId: parent.repositoryId,
-            githubIssueNumber: parent.githubIssueNumber,
+            issueNumber: parent.issueNumber,
           },
           ...workItemFields,
         },
@@ -2536,7 +2540,7 @@ function ParentIssueGroup({
       >
         <summary className="grid cursor-pointer list-none grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2 py-1.5 marker:content-none">
           <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
-            #{parent.githubIssueNumber}
+            #{parent.issueNumber}
           </span>
           <span className="min-w-0">
             <a
@@ -2570,7 +2574,7 @@ function ParentIssueGroup({
             </svg>
             {canImplementAll && (
               <ParentIssueActionsMenu
-                parentGithubIssueNumber={parent.githubIssueNumber}
+                parentIssueNumber={parent.issueNumber}
                 menuId={parent.id}
                 pending={implementAll.isPending}
                 errorMessage={
@@ -2618,7 +2622,7 @@ function RepositoryIssueRow({
   const queryClient = useQueryClient()
   const query = workItemsQuery(issue.repositoryId)
   const issueWorkItems = workItems.filter(
-    (workItem) => workItem.githubIssueNumber === issue.githubIssueNumber,
+    (workItem) => workItem.issueNumber === issue.issueNumber,
   )
   const latestWorkItem = issueWorkItems.at(-1)
   const hasUnfinishedWorkItem =
@@ -2639,7 +2643,7 @@ function RepositoryIssueRow({
         implementNow: {
           __args: {
             repositoryId: issue.repositoryId,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
           },
           ...workItemFields,
         },
@@ -2654,7 +2658,7 @@ function RepositoryIssueRow({
         implementLocally: {
           __args: {
             repositoryId: issue.repositoryId,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
           },
           ...workItemFields,
         },
@@ -2669,7 +2673,7 @@ function RepositoryIssueRow({
         queue: {
           __args: {
             repositoryId: issue.repositoryId,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
           },
           ...workItemFields,
         },
@@ -2706,7 +2710,7 @@ function RepositoryIssueRow({
     >
       <div className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2">
         <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
-          #{issue.githubIssueNumber}
+          #{issue.issueNumber}
         </span>
         <span className="min-w-0">
           <a
@@ -2735,7 +2739,7 @@ function RepositoryIssueRow({
               <button
                 type="button"
                 className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-                aria-label={`Actions for issue #${issue.githubIssueNumber}`}
+                aria-label={`Actions for issue #${issue.issueNumber}`}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((open) => !open)}
@@ -2821,15 +2825,15 @@ function RepositoryIssueRow({
             issue.url !== ""
               ? issue.url
               : workItemIssueUrl(
-                  repository.githubOwner,
-                  repository.githubRepo,
-                  latestWorkItem.githubIssueNumber,
+                  repository.forgeHost,
+                  repository.projectPath,
+                  latestWorkItem.issueNumber,
                 )
           }
           pullRequestUrl={workItemPullRequestUrl(
-            repository.githubOwner,
-            repository.githubRepo,
-            latestWorkItem.githubPullRequestNumber,
+            repository.forgeHost,
+            repository.projectPath,
+            latestWorkItem.pullRequestNumber,
           )}
         />
       )}
@@ -2846,13 +2850,13 @@ function RepositoryIssueRow({
         <p className="mt-1.5 mb-0 pl-11 font-mono text-xs text-sepia">
           Blocked by{" "}
           {issue.blockedBy.map((blocker, index) => (
-            <span key={blocker.githubIssueUrl}>
+            <span key={blocker.issueUrl}>
               {index > 0 && ", "}
               <a
                 className="font-semibold underline decoration-rule-2 underline-offset-2 hover:text-oxblood"
-                href={blocker.githubIssueUrl}
+                href={blocker.issueUrl}
               >
-                #{blocker.githubIssueNumber}
+                #{blocker.issueNumber}
               </a>
             </span>
           ))}
@@ -3156,10 +3160,10 @@ function JobsCard() {
   const issueByRepoAndNumber = new Map<string, { title: string; url: string }>()
   for (const query of issueQueries) {
     for (const issue of query.data ?? []) {
-      issueByRepoAndNumber.set(
-        `${issue.repositoryId}:${issue.githubIssueNumber}`,
-        { title: issue.title, url: issue.url },
-      )
+      issueByRepoAndNumber.set(`${issue.repositoryId}:${issue.issueNumber}`, {
+        title: issue.title,
+        url: issue.url,
+      })
     }
   }
   const sortNewestFirst = (items: readonly WorkItem[]) =>
@@ -3279,9 +3283,9 @@ function JobsCard() {
               const repositoryLabel =
                 repository === undefined
                   ? workItem.repositoryId
-                  : `${repository.githubOwner}/${repository.githubRepo}`
+                  : `${repository.projectPath}`
               const issue = issueByRepoAndNumber.get(
-                `${workItem.repositoryId}:${workItem.githubIssueNumber}`,
+                `${workItem.repositoryId}:${workItem.issueNumber}`,
               )
               const issueTitle =
                 issue?.title ?? workItem.issueTitle ?? undefined
@@ -3291,19 +3295,17 @@ function JobsCard() {
                   : repository === undefined
                     ? null
                     : workItemIssueUrl(
-                        repository.githubOwner,
-                        repository.githubRepo,
-                        workItem.githubIssueNumber,
+                        repository.forgeHost,
+                        repository.projectPath,
+                        workItem.issueNumber,
                       )
               const issueIdentity =
                 issueTitle === undefined
-                  ? `#${workItem.githubIssueNumber}`
-                  : `#${workItem.githubIssueNumber} · ${issueTitle}`
+                  ? `#${workItem.issueNumber}`
+                  : `#${workItem.issueNumber} · ${issueTitle}`
               const issueIdentityContent = (
                 <>
-                  <span className="font-mono">
-                    #{workItem.githubIssueNumber}
-                  </span>
+                  <span className="font-mono">#{workItem.issueNumber}</span>
                   {issueTitle !== undefined && (
                     <span className="font-serif"> · {issueTitle}</span>
                   )}
@@ -3402,9 +3404,9 @@ function JobsCard() {
                       repository === undefined
                         ? null
                         : workItemPullRequestUrl(
-                            repository.githubOwner,
-                            repository.githubRepo,
-                            workItem.githubPullRequestNumber,
+                            repository.forgeHost,
+                            repository.projectPath,
+                            workItem.pullRequestNumber,
                           )
                     }
                   />
@@ -3613,7 +3615,7 @@ function WorkItemLifecycleStatus({
     },
   })
   const actionsPending = retry.isPending || reset.isPending
-  const prNumber = workItem.githubPullRequestNumber
+  const prNumber = workItem.pullRequestNumber
   const statusBadgeClassName = statusBadgeClassNameForStatus(status)
   const statusMessageClassName = statusMessageClassNameForStatus(status)
   const openPullRequestLabel =
@@ -3634,7 +3636,7 @@ function WorkItemLifecycleStatus({
           state={workItem.state}
           statusLabel={workItem.statusLabel}
           statusBadgeClassName={statusBadgeClassName}
-          githubPullRequestNumber={workItem.githubPullRequestNumber}
+          pullRequestNumber={workItem.pullRequestNumber}
           pullRequestUrl={pullRequestUrl}
           completionSummary={workItem.completionSummary}
           issueUrl={issueUrl}

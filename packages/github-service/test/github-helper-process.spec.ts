@@ -51,20 +51,26 @@ describe("internal GitHub helper mode", () => {
     expect(
       resolveGitHubHelperChildSpawn({
         operation: "list-ready-issues",
-        args: ["owner", "name"],
+        args: ["github", "github.com", "owner/name"],
         execPath: "/opt/ready-for-agent",
         argv: ["/opt/ready-for-agent", "start"],
       }),
     ).toEqual({
       command: "/opt/ready-for-agent",
-      args: [INTERNAL_GITHUB_HELPER_ARG, "list-ready-issues", "owner", "name"],
+      args: [
+        INTERNAL_GITHUB_HELPER_ARG,
+        "list-ready-issues",
+        "github",
+        "github.com",
+        "owner/name",
+      ],
     })
   })
 
   test("uses workspace bin scripts under a Bun source runtime", () => {
     const spawnPlan = resolveGitHubHelperChildSpawn({
       operation: "merge-pull-request",
-      args: ["o", "n", "h"],
+      args: ["github", "github.com", "o/n", "h"],
       execPath: "/usr/bin/bun",
       argv: ["/usr/bin/bun", "/repo/apps/harness/server.ts"],
     })
@@ -72,7 +78,12 @@ describe("internal GitHub helper mode", () => {
     expect(spawnPlan.args[0]).toBe("--conditions")
     expect(spawnPlan.args[1]).toBe("@ready-for-agent/source")
     expect(spawnPlan.args[2]).toMatch(/merge-pull-request\.ts$/)
-    expect(spawnPlan.args.slice(3)).toEqual(["o", "n", "h"])
+    expect(spawnPlan.args.slice(3)).toEqual([
+      "github",
+      "github.com",
+      "o/n",
+      "h",
+    ])
     expect(formatGitHubHelperShellCommand(spawnPlan)).toContain(
       "merge-pull-request.ts",
     )
@@ -111,8 +122,9 @@ describe("GitHub helper process boundary", () => {
         harnessServerEntry,
         INTERNAL_GITHUB_HELPER_ARG,
         "list-ready-issues",
-        encode("acme"),
-        encode("widgets"),
+        encode("github"),
+        encode("github.com"),
+        encode("acme/widgets"),
       ],
       {
         env: {
@@ -146,8 +158,9 @@ describe("GitHub helper process boundary", () => {
         harnessServerEntry,
         INTERNAL_GITHUB_HELPER_ARG,
         "merge-pull-request",
-        encode("acme"),
-        encode("widgets"),
+        encode("github"),
+        encode("github.com"),
+        encode("acme/widgets"),
         encode("rfa/acme-widgets/1/wi-test"),
       ],
       {

@@ -34,14 +34,10 @@ export const markPrReadyForReview = (context: LifecycleStepContext) =>
       })
     }
     const branch = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
     const github = yield* GitHubService
-    yield* github.markPullRequestReadyForReview(
-      { owner: repository.githubOwner, name: repository.githubRepo },
-      branch,
-    )
+    yield* github.markPullRequestReadyForReview(repository, branch)
   })

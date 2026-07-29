@@ -43,7 +43,7 @@ const baseContext = (
 ): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
-  githubIssueNumber: 91,
+  issueNumber: 91,
   issueTitle: "Add widgets endpoint",
   agentBackend: "opencode",
   model: "opencode/test-model",
@@ -283,7 +283,7 @@ describe("commit", () => {
           baseContext(root, {
             startingCommitOid: startingOid,
             sessionId: "ses_from_implement",
-            githubIssueNumber: 2039,
+            issueNumber: 2039,
             issueTitle: "Fix the widgets path",
             publicationTitle: "fix: widgets path",
             publicationBody:
@@ -330,7 +330,7 @@ describe("commit", () => {
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             sessionId: "ses_from_implement",
           }),
         ),
@@ -368,7 +368,7 @@ describe("commit", () => {
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
-            githubIssueNumber: 9,
+            issueNumber: 9,
           }),
         ).pipe(Effect.flip),
         stubOpencode({
@@ -398,7 +398,7 @@ describe("commit", () => {
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
-            githubIssueNumber: 2039,
+            issueNumber: 2039,
             ...sampleCopy,
             publicationBody:
               "Corrects the widgets route used by the API.\n\nCloses #2039",
@@ -424,7 +424,7 @@ describe("commit", () => {
         commit(
           baseContext(root, {
             startingCommitOid: startingOid,
-            githubIssueNumber: 12,
+            issueNumber: 12,
             publicationTitle: "chore: keep diagnostics out",
             publicationBody:
               "Ensures harness artifacts stay uncommitted.\n\nCloses #12",
@@ -535,7 +535,7 @@ fi
           baseContext(root, {
             startingCommitOid: startingOid,
             sessionId: "ses_from_implement",
-            githubIssueNumber: 2039,
+            issueNumber: 2039,
             publicationTitle: "Add feature without conventional prefix",
             publicationBody: "Adds the feature file.\n\nCloses #2039",
             model: "opencode/commit-model",

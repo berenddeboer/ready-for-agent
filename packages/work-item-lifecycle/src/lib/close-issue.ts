@@ -39,13 +39,13 @@ export const closeIssue = (context: LifecycleStepContext) =>
 
     const issues = yield* db.listIssues(context.repositoryId)
     const issue = issues.find(
-      (candidate) => candidate.githubIssueNumber === context.githubIssueNumber,
+      (candidate) => candidate.issueNumber === context.issueNumber,
     )
     if (issue === undefined) {
       return yield* new CloseIssueEligibilityError({
         workItemId: context.workItemId,
         failureCode: "issue_not_found",
-        message: `Issue #${context.githubIssueNumber} is no longer present in the Issue store`,
+        message: `Issue #${context.issueNumber} is no longer present in the Issue store`,
       })
     }
 
@@ -54,22 +54,26 @@ export const closeIssue = (context: LifecycleStepContext) =>
         return yield* new CloseIssueEligibilityError({
           workItemId: context.workItemId,
           failureCode: "issue_is_parent",
-          message: `Issue #${context.githubIssueNumber} has children and is no longer a Leaf Issue`,
+          message: `Issue #${context.issueNumber} has children and is no longer a Leaf Issue`,
         })
       }
       if (issue.blockedBy.length > 0) {
         return yield* new CloseIssueEligibilityError({
           workItemId: context.workItemId,
           failureCode: "issue_blocked",
-          message: `Issue #${context.githubIssueNumber} is blocked by ${issue.blockedBy.length} Issue(s)`,
+          message: `Issue #${context.issueNumber} is blocked by ${issue.blockedBy.length} Issue(s)`,
         })
       }
     }
 
     const github = yield* GitHubService
     yield* github.ensureIssueCompletedWithSummary(
-      { owner: repository.githubOwner, name: repository.githubRepo },
-      context.githubIssueNumber,
+      {
+        forge: repository.forge,
+        forgeHost: repository.forgeHost,
+        projectPath: repository.projectPath,
+      },
+      context.issueNumber,
       context.workItemId,
       summary,
     )

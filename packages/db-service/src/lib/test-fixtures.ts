@@ -13,8 +13,9 @@ export const makeRepositoryRecord = (
   overrides: Partial<RepositoryRecord> = {},
 ): RepositoryRecord => ({
   id: testRepositoryId,
-  githubOwner: "acme",
-  githubRepo: "widgets",
+  forge: "github",
+  forgeHost: "github.com",
+  projectPath: "acme/widgets",
   localPath: "/repos/acme/widgets",
   isBare: true,
   paused: false,

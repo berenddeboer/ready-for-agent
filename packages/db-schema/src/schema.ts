@@ -14,8 +14,11 @@ export const repository = snakeCase.table(
     id: text()
       .primaryKey()
       .$defaultFn(() => `repo-${ulid()}`),
-    githubOwner: text().notNull(),
-    githubRepo: text().notNull(),
+    forge: text({ enum: ["github", "gitlab"] })
+      .notNull()
+      .default("github"),
+    forgeHost: text().notNull().default("github.com"),
+    projectPath: text().notNull(),
     localPath: text().notNull().unique(),
     isBare: integer({ mode: "boolean" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(true),
@@ -54,9 +57,10 @@ export const repository = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
-    uniqueIndex("repository_github_owner_repo_lower_uidx").on(
-      sql`lower(${t.githubOwner})`,
-      sql`lower(${t.githubRepo})`,
+    uniqueIndex("repository_forge_host_project_path_lower_uidx").on(
+      t.forge,
+      t.forgeHost,
+      sql`lower(${t.projectPath})`,
     ),
   ],
 )
@@ -93,15 +97,15 @@ export const issue = snakeCase.table(
     repositoryId: text()
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
-    githubIssueNumber: integer().notNull(),
+    issueNumber: integer().notNull(),
     title: text().notNull(),
     body: text().notNull(),
     url: text().notNull(),
     state: text({ enum: ["OPEN", "CLOSED"] }).notNull(),
     githubCreatedAt: integer({ mode: "number" }).notNull(),
     issueAuthor: text(),
-    parentGithubIssueNumber: integer(),
-    parentGithubIssueUrl: text(),
+    parentIssueNumber: integer(),
+    parentIssueUrl: text(),
     parentPosition: integer(),
     hasChildren: integer({ mode: "boolean" }).notNull().default(false),
     createdAt: integer({ mode: "number" })
@@ -112,9 +116,9 @@ export const issue = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
-    uniqueIndex("issue_repository_id_github_issue_number_uidx").on(
+    uniqueIndex("issue_repository_id_issue_number_uidx").on(
       t.repositoryId,
-      t.githubIssueNumber,
+      t.issueNumber,
     ),
   ],
 )
@@ -128,8 +132,8 @@ export const issueDependency = snakeCase.table(
     issueId: text()
       .notNull()
       .references(() => issue.id, { onDelete: "cascade" }),
-    blockingGithubIssueNumber: integer().notNull(),
-    blockingGithubIssueUrl: text().notNull(),
+    blockingIssueNumber: integer().notNull(),
+    blockingIssueUrl: text().notNull(),
     createdAt: integer({ mode: "number" })
       .notNull()
       .$defaultFn(() => Date.now()),
@@ -137,7 +141,7 @@ export const issueDependency = snakeCase.table(
   (t) => [
     uniqueIndex("issue_dependency_issue_id_blocking_url_uidx").on(
       t.issueId,
-      t.blockingGithubIssueUrl,
+      t.blockingIssueUrl,
     ),
   ],
 )
@@ -222,9 +226,9 @@ export const workItem = snakeCase.table(
     repositoryId: text()
       .notNull()
       .references(() => repository.id, { onDelete: "cascade" }),
-    githubIssueNumber: integer().notNull(),
+    issueNumber: integer().notNull(),
     issueTitle: text(),
-    githubPullRequestNumber: integer(),
+    pullRequestNumber: integer(),
     /** Active Agent Backend captured at Work Item creation (provenance). */
     agentBackend: text().notNull().default("opencode"),
     state: text({
@@ -354,13 +358,13 @@ export const workItem = snakeCase.table(
   },
   (t) => [
     uniqueIndex("work_item_one_unfinished_v2_uidx")
-      .on(t.repositoryId, t.githubIssueNumber)
+      .on(t.repositoryId, t.issueNumber)
       .where(
         sql`${t.state} NOT IN ('complete', 'failed', 'abandoned', 'needs_human')`,
       ),
     index("work_item_repository_issue_created_idx").on(
       t.repositoryId,
-      t.githubIssueNumber,
+      t.issueNumber,
       t.createdAt,
     ),
   ],

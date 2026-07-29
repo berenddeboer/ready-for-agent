@@ -152,14 +152,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       maxConcurrentWorkItems: 5,
     })
     const repository = yield* db.addRepository({
-      githubOwner: "acme",
-      githubRepo: "widgets",
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
       localPath: "/repos/acme/widgets.git",
       isBare: true,
     })
     yield* db.storeIssue({
       repositoryId: repository.id,
-      githubIssueNumber: 42,
+      issueNumber: 42,
       title: "Implement feature",
       body: "Issue body",
       url: "https://github.com/acme/widgets/issues/42",
@@ -203,14 +204,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       maxConcurrentWorkItems: 5,
     })
     const repository = yield* db.addRepository({
-      githubOwner: "acme",
-      githubRepo: "widgets",
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
       localPath: "/repos/acme/widgets.git",
       isBare: true,
     })
     yield* db.storeIssue({
       repositoryId: repository.id,
-      githubIssueNumber: 42,
+      issueNumber: 42,
       title: "Implement feature",
       body: "Issue body",
       url: "https://github.com/acme/widgets/issues/42",
@@ -339,14 +341,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       maxConcurrentWorkItems: 5,
     })
     const repository = yield* db.addRepository({
-      githubOwner: "acme",
-      githubRepo: "widgets",
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
       localPath: "/repos/acme/widgets.git",
       isBare: true,
     })
     yield* db.storeIssue({
       repositoryId: repository.id,
-      githubIssueNumber: 42,
+      issueNumber: 42,
       title: "Implement feature",
       body: "Issue body",
       url: "https://github.com/acme/widgets/issues/42",
@@ -365,7 +368,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     }
     const watching = yield* lifecycle.getWorkItem(created.id)
     expect(watching.state).toBe("watch_pr_status_checks")
-    expect(watching.githubPullRequestNumber).toBe(101)
+    expect(watching.pullRequestNumber).toBe(101)
     return { repository, created, lifecycle }
   })
 
@@ -429,14 +432,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           maxConcurrentWorkItems: 5,
         })
         const repository = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets.git",
           isBare: true,
         })
         yield* db.storeIssue({
           repositoryId: repository.id,
-          githubIssueNumber: 2116,
+          issueNumber: 2116,
           title: "Status check investigation",
           body: "Issue body",
           url: "https://github.com/acme/widgets/issues/2116",
@@ -548,14 +552,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           maxConcurrentWorkItems: 5,
         })
         const repository = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets.git",
           isBare: true,
         })
         yield* db.storeIssue({
           repositoryId: repository.id,
-          githubIssueNumber: 532,
+          issueNumber: 532,
           title: "Paused then externally merged",
           body: "Issue body",
           url: "https://github.com/acme/widgets/issues/532",
@@ -651,14 +656,15 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           maxConcurrentWorkItems: 5,
         })
         const repository = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets.git",
           isBare: true,
         })
         yield* db.storeIssue({
           repositoryId: repository.id,
-          githubIssueNumber: 532,
+          issueNumber: 532,
           title: "Paused until operator Start",
           body: "Issue body",
           url: "https://github.com/acme/widgets/issues/532",
@@ -696,7 +702,7 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         // Reconciliation restores the open Issue; PR remains open.
         yield* db.storeIssue({
           repositoryId: repository.id,
-          githubIssueNumber: 532,
+          issueNumber: 532,
           title: "Paused until operator Start",
           body: "Issue body",
           url: "https://github.com/acme/widgets/issues/532",

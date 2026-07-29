@@ -6,23 +6,20 @@ const sanitizeSegment = (value: string): string => {
   return cleaned.length > 0 ? cleaned : "repo"
 }
 
-export const repositorySlug = (
-  githubOwner: string,
-  githubRepo: string,
-): string => `${sanitizeSegment(githubOwner)}-${sanitizeSegment(githubRepo)}`
+export const repositorySlug = (projectPath: string): string =>
+  projectPath.split("/").map(sanitizeSegment).join("-")
 
 /**
  * Stable, collision-resistant branch for one Work Item.
  * Encodes repository slug, GitHub issue number, and Work Item id.
  */
 export const workItemBranchName = (input: {
-  readonly githubOwner: string
-  readonly githubRepo: string
-  readonly githubIssueNumber: number
+  readonly projectPath: string
+  readonly issueNumber: number
   readonly workItemId: string
 }): string => {
-  const slug = repositorySlug(input.githubOwner, input.githubRepo)
-  return `rfa/${slug}/${input.githubIssueNumber}/${input.workItemId}`
+  const slug = repositorySlug(input.projectPath)
+  return `rfa/${slug}/${input.issueNumber}/${input.workItemId}`
 }
 
 const basename = (path: string): string => {
@@ -61,8 +58,7 @@ const repositoryStem = (localPath: string): string => {
 export const worktreeParentPath = (input: {
   readonly localPath: string
   readonly isBare: boolean
-  readonly githubOwner: string
-  readonly githubRepo: string
+  readonly projectPath: string
   readonly tmpDir?: string
 }): string => {
   const localPath = input.localPath.replace(/[/\\]+$/, "")
@@ -77,13 +73,14 @@ export const worktreeParentPath = (input: {
   const temporaryDirectory = (input.tmpDir ?? "/tmp")
     .trim()
     .replace(/[/\\]+$/, "")
-  return `${temporaryDirectory}/ready-for-agent/${sanitizeSegment(input.githubOwner)}/${sanitizeSegment(input.githubRepo)}`
+  const path = input.projectPath.split("/").map(sanitizeSegment).join("/")
+  return `${temporaryDirectory}/ready-for-agent/${path}`
 }
 
 export const workItemDirectoryName = (input: {
-  readonly githubIssueNumber: number
+  readonly issueNumber: number
   readonly workItemId: string
-}): string => `${input.githubIssueNumber}-${input.workItemId}`
+}): string => `${input.issueNumber}-${input.workItemId}`
 
 /**
  * Absolute worktree path for one Work Item.
@@ -91,15 +88,14 @@ export const workItemDirectoryName = (input: {
 export const workItemWorktreePath = (input: {
   readonly localPath: string
   readonly isBare: boolean
-  readonly githubOwner: string
-  readonly githubRepo: string
-  readonly githubIssueNumber: number
+  readonly projectPath: string
+  readonly issueNumber: number
   readonly workItemId: string
   readonly tmpDir?: string
 }): string => {
   const parent = worktreeParentPath(input)
   const name = workItemDirectoryName({
-    githubIssueNumber: input.githubIssueNumber,
+    issueNumber: input.issueNumber,
     workItemId: input.workItemId,
   })
   return `${parent}/${name}`

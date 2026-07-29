@@ -1,15 +1,21 @@
 import { Effect } from "effect"
 import { GitHubService } from "../lib/github-service.js"
-import { decodeArgument, runGitHubCli, writeStandardOutput } from "./cli.js"
+import {
+  decodeArgument,
+  githubRepository,
+  runGitHubCli,
+  writeStandardOutput,
+} from "./cli.js"
 
 export const getPrCheckStatusProgram = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const owner = yield* decodeArgument(args[0], "owner")
-    const name = yield* decodeArgument(args[1], "name")
-    const headRefName = yield* decodeArgument(args[2], "head ref")
+    const forge = yield* decodeArgument(args[0], "forge")
+    const forgeHost = yield* decodeArgument(args[1], "forge host")
+    const projectPath = yield* decodeArgument(args[2], "project path")
+    const headRefName = yield* decodeArgument(args[3], "head ref")
     const github = yield* GitHubService
     const status = yield* github.getPullRequestCheckStatus(
-      { owner, name },
+      githubRepository(forge, forgeHost, projectPath),
       headRefName,
     )
     yield* writeStandardOutput(JSON.stringify(status))

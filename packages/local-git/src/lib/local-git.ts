@@ -146,8 +146,9 @@ export class LocalGit extends Context.Service<
         }
 
         return {
-          githubOwner: github.value.owner,
-          githubRepo: github.value.repo,
+          forge: "github" as const,
+          forgeHost: "github.com" as const,
+          projectPath: `${github.value.owner}/${github.value.repo}`,
           localPath,
           isBare,
           paused: true as const,

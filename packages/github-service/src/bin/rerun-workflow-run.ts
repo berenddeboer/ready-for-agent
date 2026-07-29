@@ -3,15 +3,17 @@ import { GitHubService } from "../lib/github-service.js"
 import {
   CliArgumentError,
   decodeArgument,
+  githubRepository,
   runGitHubCli,
   writeStandardOutput,
 } from "./cli.js"
 
 export const rerunWorkflowRunProgram = (args: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    const owner = yield* decodeArgument(args[0], "owner")
-    const name = yield* decodeArgument(args[1], "name")
-    const workflowRunIdRaw = yield* decodeArgument(args[2], "workflow run id")
+    const forge = yield* decodeArgument(args[0], "forge")
+    const forgeHost = yield* decodeArgument(args[1], "forge host")
+    const projectPath = yield* decodeArgument(args[2], "project path")
+    const workflowRunIdRaw = yield* decodeArgument(args[3], "workflow run id")
     const workflowRunId = Number(workflowRunIdRaw)
     if (!Number.isSafeInteger(workflowRunId) || workflowRunId <= 0) {
       return yield* new CliArgumentError({
@@ -19,7 +21,10 @@ export const rerunWorkflowRunProgram = (args: ReadonlyArray<string>) =>
       })
     }
     const github = yield* GitHubService
-    yield* github.rerunWorkflowRun({ owner, name }, workflowRunId)
+    yield* github.rerunWorkflowRun(
+      githubRepository(forge, forgeHost, projectPath),
+      workflowRunId,
+    )
     yield* writeStandardOutput(JSON.stringify({ _tag: "rerun" as const }))
   })
 

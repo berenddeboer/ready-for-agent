@@ -8,7 +8,7 @@ export function WorkItemOutcomePresentation({
   state,
   statusLabel,
   statusBadgeClassName,
-  githubPullRequestNumber,
+  pullRequestNumber,
   pullRequestUrl,
   completionSummary,
   issueUrl,
@@ -16,17 +16,17 @@ export function WorkItemOutcomePresentation({
   state: string
   statusLabel: string
   statusBadgeClassName: string
-  githubPullRequestNumber: number | null
+  pullRequestNumber: number | null
   pullRequestUrl: string | null
   completionSummary: string | null
   issueUrl: string | null
 }) {
   const isNoChangeComplete =
     state === "COMPLETE" &&
-    githubPullRequestNumber === null &&
+    pullRequestNumber === null &&
     completionSummary !== null &&
     completionSummary.trim() !== ""
-  const prNumber = githubPullRequestNumber
+  const prNumber = pullRequestNumber
   const openPullRequestLabel =
     prNumber === null ? null : `Open pull request #${prNumber}`
   const summary = completionSummary?.trim() ?? ""

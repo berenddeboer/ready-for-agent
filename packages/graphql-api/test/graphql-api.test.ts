@@ -97,7 +97,7 @@ const readyStatus = (
 const issue = {
   id: "issue-test",
   repositoryId: repository.id,
-  githubIssueNumber: 42,
+  issueNumber: 42,
   title: "Make repository cards useful",
   body: "Show the Ready-labeled issues.",
   url: "https://github.com/acme/widgets/issues/42",
@@ -109,8 +109,8 @@ const issue = {
   hasChildren: false,
   blockedBy: [
     {
-      githubIssueNumber: 17,
-      githubIssueUrl: "https://github.com/acme/widgets/issues/17",
+      issueNumber: 17,
+      issueUrl: "https://github.com/acme/widgets/issues/17",
     },
   ],
 }
@@ -118,7 +118,7 @@ const issue = {
 const workItem = {
   id: "wi-01J00000000000000000000000",
   repositoryId: repository.id,
-  githubIssueNumber: issue.githubIssueNumber,
+  issueNumber: issue.issueNumber,
   issueTitle: issue.title,
   agentBackend: "opencode",
   state: "create_worktree",
@@ -135,7 +135,7 @@ const workItem = {
   publicationTitle: null,
   publicationBody: null,
   sessionId: null,
-  githubPullRequestNumber: null,
+  pullRequestNumber: null,
   failureCode: null,
   failureMessage: null,
   createdAt: new Date("2026-07-14T08:00:00.000Z"),
@@ -343,8 +343,9 @@ const makeRuntime = (
   const localGit = Layer.succeed(LocalGit, {
     inspect: (path) =>
       Effect.succeed({
-        githubOwner: repository.githubOwner,
-        githubRepo: repository.githubRepo,
+        forge: repository.forge,
+        forgeHost: repository.forgeHost,
+        projectPath: repository.projectPath,
         localPath: path,
         isBare: repository.isBare,
         paused: true as const,
@@ -386,12 +387,13 @@ const addRepositoryRequest = (origin?: string) =>
   graphqlRequest(
     {
       query: `mutation AddRepository($input: AddRepositoryInput!) {
-        addRepository(input: $input) { id githubOwner githubRepo }
+        addRepository(input: $input) { id forge forgeHost projectPath }
       }`,
       variables: {
         input: {
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: repository.isBare,
         },
@@ -419,11 +421,55 @@ describe("GraphQL API", () => {
       data: {
         addRepository: {
           id: repository.id,
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
         },
       },
     })
+  })
+
+  test("rejects unsupported forges before adding a repository", async () => {
+    let addRepositoryCalled = false
+    await runtime.dispose()
+    runtime = makeRuntime({
+      addRepository: () => {
+        addRepositoryCalled = true
+        return Effect.succeed(repository)
+      },
+    })
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddRepository($input: AddRepositoryInput!) {
+          addRepository(input: $input) { id }
+        }`,
+        variables: {
+          input: {
+            forge: "gitlab",
+            forgeHost: "gitlab.com",
+            projectPath: "acme/widgets",
+            localPath: "/tmp/acme-widgets",
+            isBare: false,
+          },
+        },
+      }),
+    )
+
+    const body = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(body.errors?.[0]).toMatchObject({
+      message: "Adding gitlab repositories is not supported",
+      extensions: {
+        code: "INVALID_REPOSITORY_INPUT",
+        field: "forge",
+      },
+    })
+    expect(addRepositoryCalled).toBe(false)
   })
 
   test("suggests add repository command with npx when operator binary is not on PATH", async () => {
@@ -474,8 +520,9 @@ describe("GraphQL API", () => {
 
   test("addLocalRepository inspects then adds via DbService", async () => {
     let addedInput: {
-      githubOwner: string
-      githubRepo: string
+      forge: "github" | "gitlab"
+      forgeHost: string
+      projectPath: string
       localPath: string
       isBare: boolean
     } | null = null
@@ -484,8 +531,9 @@ describe("GraphQL API", () => {
         addedInput = input
         return Effect.succeed({
           ...repository,
-          githubOwner: input.githubOwner,
-          githubRepo: input.githubRepo,
+          forge: input.forge,
+          forgeHost: input.forgeHost,
+          projectPath: input.projectPath,
           localPath: input.localPath,
           isBare: input.isBare,
         })
@@ -498,8 +546,9 @@ describe("GraphQL API", () => {
           query: `mutation AddLocal($path: String!) {
             addLocalRepository(path: $path) {
               id
-              githubOwner
-              githubRepo
+              forge
+              forgeHost
+              projectPath
               localPath
               isBare
             }
@@ -513,16 +562,18 @@ describe("GraphQL API", () => {
         data: {
           addLocalRepository: {
             id: repository.id,
-            githubOwner: repository.githubOwner,
-            githubRepo: repository.githubRepo,
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
             localPath: "/tmp/fixture-repo",
             isBare: repository.isBare,
           },
         },
       })
       expect(addedInput).toEqual({
-        githubOwner: repository.githubOwner,
-        githubRepo: repository.githubRepo,
+        forge: repository.forge,
+        forgeHost: repository.forgeHost,
+        projectPath: repository.projectPath,
         localPath: "/tmp/fixture-repo",
         isBare: repository.isBare,
       })
@@ -614,8 +665,7 @@ describe("GraphQL API", () => {
       {
         findSecret: ({ account, provider }) =>
           Effect.succeed(
-            provider === "github" &&
-              account === `${repository.githubOwner}/${repository.githubRepo}`
+            provider === "github" && account === `${repository.projectPath}`
               ? "GITHUB_TOKEN_ACME_WIDGETS"
               : null,
           ),
@@ -652,8 +702,9 @@ describe("GraphQL API", () => {
       data: {
         addRepository: {
           id: repository.id,
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
         },
       },
     })
@@ -740,8 +791,9 @@ describe("GraphQL API", () => {
       data: {
         addRepository: {
           id: repository.id,
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
         },
       },
     })
@@ -776,8 +828,9 @@ describe("GraphQL API", () => {
       data: {
         addRepository: {
           id: repository.id,
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
         },
       },
     })
@@ -813,8 +866,9 @@ describe("GraphQL API", () => {
         query: `query ListRepositories {
           repositories {
             id
-            githubOwner
-            githubRepo
+            forge
+            forgeHost
+            projectPath
             localPath
             isBare
             paused
@@ -835,8 +889,9 @@ describe("GraphQL API", () => {
         repositories: [
           {
             id: repository.id,
-            githubOwner: repository.githubOwner,
-            githubRepo: repository.githubRepo,
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
             localPath: repository.localPath,
             isBare: repository.isBare,
             paused: repository.paused,
@@ -895,7 +950,7 @@ describe("GraphQL API", () => {
       body.data.repositoryCredentials[0]!.githubTokenCreationUrl as string,
     )
     expect(creationUrl.searchParams.get("name")).toBe(
-      `${repository.githubRepo} - ready-for-agent`,
+      `${repository.projectPath.split("/").at(-1)} - ready-for-agent`,
     )
     expect(creationUrl.searchParams.get("issues")).toBe("write")
     expect(creationUrl.searchParams.get("contents")).toBe("write")
@@ -1494,7 +1549,11 @@ describe("GraphQL API", () => {
 
   test("exposes scoped gate counts on Config and Repository", async () => {
     await runtime.dispose()
-    const counted: Array<{ owner: string; name: string }> = []
+    const counted: Array<{
+      forge: "github" | "gitlab"
+      forgeHost: string
+      projectPath: string
+    }> = []
     runtime = makeRuntime(
       {
         countUnfinishedWorkItems: Effect.succeed(3),
@@ -1556,7 +1615,11 @@ describe("GraphQL API", () => {
       },
     })
     expect(counted).toEqual([
-      { owner: repository.githubOwner, name: repository.githubRepo },
+      {
+        forge: repository.forge,
+        forgeHost: repository.forgeHost,
+        projectPath: repository.projectPath,
+      },
     ])
   })
 
@@ -1824,14 +1887,14 @@ describe("GraphQL API", () => {
     )
     const unavailable = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -1864,14 +1927,14 @@ describe("GraphQL API", () => {
     )
     const missingModel = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2021,11 +2084,11 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query ListIssues($repositoryId: ID!) {
           issues(repositoryId: $repositoryId) {
-            id repositoryId githubIssueNumber title body url state githubCreatedAt
+            id repositoryId issueNumber title body url state githubCreatedAt
             issueAuthor
-            parent { githubIssueNumber githubIssueUrl }
+            parent { issueNumber issueUrl }
             hasChildren
-            blockedBy { githubIssueNumber githubIssueUrl }
+            blockedBy { issueNumber issueUrl }
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -2039,7 +2102,7 @@ describe("GraphQL API", () => {
           {
             id: issue.id,
             repositoryId: issue.repositoryId,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             title: issue.title,
             body: issue.body,
             url: issue.url,
@@ -2058,21 +2121,21 @@ describe("GraphQL API", () => {
 
   test("groups child work by actionability and preserves GitHub order", async () => {
     const makeIssue = (
-      githubIssueNumber: number,
+      issueNumber: number,
       overrides: Partial<typeof issue> = {},
     ) => ({
       ...issue,
-      id: `issue-${githubIssueNumber}`,
-      githubIssueNumber,
-      title: `Issue ${githubIssueNumber}`,
-      url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+      id: `issue-${issueNumber}`,
+      issueNumber,
+      title: `Issue ${issueNumber}`,
+      url: `https://github.com/acme/widgets/issues/${issueNumber}`,
       blockedBy: [],
       ...overrides,
     })
     const parent = makeIssue(10, { hasChildren: true })
     const parentReference = {
-      githubIssueNumber: 10,
-      githubIssueUrl: parent.url,
+      issueNumber: 10,
+      issueUrl: parent.url,
     }
     await runtime.dispose()
     runtime = makeRuntime({
@@ -2100,8 +2163,8 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query ListIssues($repositoryId: ID!) {
           issues(repositoryId: $repositoryId) {
-            githubIssueNumber hasChildren
-            parent { githubIssueNumber }
+            issueNumber hasChildren
+            parent { issueNumber }
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -2111,28 +2174,28 @@ describe("GraphQL API", () => {
     expect(await response.json()).toEqual({
       data: {
         issues: [
-          { githubIssueNumber: 10, hasChildren: true, parent: null },
+          { issueNumber: 10, hasChildren: true, parent: null },
           {
-            githubIssueNumber: 14,
+            issueNumber: 14,
             hasChildren: false,
-            parent: { githubIssueNumber: 10 },
+            parent: { issueNumber: 10 },
           },
           {
-            githubIssueNumber: 11,
+            issueNumber: 11,
             hasChildren: false,
-            parent: { githubIssueNumber: 10 },
+            parent: { issueNumber: 10 },
           },
           {
-            githubIssueNumber: 13,
+            issueNumber: 13,
             hasChildren: false,
-            parent: { githubIssueNumber: 10 },
+            parent: { issueNumber: 10 },
           },
           {
-            githubIssueNumber: 12,
+            issueNumber: 12,
             hasChildren: false,
-            parent: { githubIssueNumber: 10 },
+            parent: { issueNumber: 10 },
           },
-          { githubIssueNumber: 3, hasChildren: false, parent: null },
+          { issueNumber: 3, hasChildren: false, parent: null },
         ],
       },
     })
@@ -2152,7 +2215,7 @@ describe("GraphQL API", () => {
         },
         {
           query: `query Second($repositoryId: ID!) {
-            issues(repositoryId: $repositoryId) { githubIssueNumber }
+            issues(repositoryId: $repositoryId) { issueNumber }
           }`,
           variables: { repositoryId: repository.id },
         },
@@ -2164,7 +2227,7 @@ describe("GraphQL API", () => {
       { data: { issues: [{ id: issue.id }] } },
       {
         data: {
-          issues: [{ githubIssueNumber: issue.githubIssueNumber }],
+          issues: [{ issueNumber: issue.issueNumber }],
         },
       },
     ])
@@ -2178,8 +2241,8 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        listWorkItemsForIssue: (repositoryId, githubIssueNumber) => {
-          receivedArgs = [repositoryId, githubIssueNumber]
+        listWorkItemsForIssue: (repositoryId, issueNumber) => {
+          receivedArgs = [repositoryId, issueNumber]
           return Effect.succeed([workItem])
         },
       },
@@ -2187,8 +2250,8 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id state stateLabel status statusLabel statusMessage paused canRetry isTerminal
             stateReadyAt createdAt updatedAt
             lifecycleLabels { phase label status durationMs }
@@ -2196,7 +2259,7 @@ describe("GraphQL API", () => {
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2229,7 +2292,7 @@ describe("GraphQL API", () => {
         ],
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
   })
 
   test("serializes local_cleanup as a lifecycle phase", async () => {
@@ -2254,14 +2317,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2337,15 +2400,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             stateLabel status statusLabel statusMessage canRetry isTerminal
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2430,15 +2493,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state stateLabel status statusLabel paused isTerminal
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2511,14 +2574,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state status statusLabel paused isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2547,7 +2610,7 @@ describe("GraphQL API", () => {
       state: "watch_pr_status_checks",
       paused: true,
       pauseBeforeStep: null,
-      githubPullRequestNumber: 101,
+      pullRequestNumber: 101,
       failureCode: null,
       failureMessage: reason,
       holdsWorkerSlot: false,
@@ -2574,15 +2637,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state stateLabel status statusLabel statusMessage paused isTerminal canRetry
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2626,7 +2689,7 @@ describe("GraphQL API", () => {
       state: "investigate_pr_status_checks",
       paused: true,
       pauseBeforeStep: null,
-      githubPullRequestNumber: 101,
+      pullRequestNumber: 101,
       failureCode: null,
       failureMessage: reason,
       holdsWorkerSlot: false,
@@ -2653,15 +2716,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state stateLabel status statusLabel statusMessage paused isTerminal canRetry
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2723,14 +2786,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state status statusLabel statusMessage paused isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2778,15 +2841,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2839,15 +2902,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2900,15 +2963,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -2961,15 +3024,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -3022,15 +3085,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             stateLabel status statusLabel statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -3083,15 +3146,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             status statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -3142,15 +3205,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             status statusMessage
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -3195,7 +3258,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!) {
           workItems(repositoryId: $repositoryId) {
-            id githubIssueNumber state
+            id issueNumber state
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -3207,7 +3270,7 @@ describe("GraphQL API", () => {
         workItems: [
           {
             id: workItem.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             state: "CREATE_WORKTREE",
           },
         ],
@@ -3219,12 +3282,12 @@ describe("GraphQL API", () => {
   test("exposes Work Item PR number when recorded", async () => {
     const withPr = {
       ...workItem,
-      githubPullRequestNumber: 212,
+      pullRequestNumber: 212,
     } as WorkItemRecord
     const withoutPr = {
       ...workItem,
       id: makeWorkItemId(),
-      githubPullRequestNumber: null,
+      pullRequestNumber: null,
     } as WorkItemRecord
     await runtime.dispose()
     runtime = makeRuntime(
@@ -3242,7 +3305,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!) {
           workItems(repositoryId: $repositoryId) {
-            id githubPullRequestNumber
+            id pullRequestNumber
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -3254,11 +3317,11 @@ describe("GraphQL API", () => {
         workItems: [
           {
             id: withPr.id,
-            githubPullRequestNumber: 212,
+            pullRequestNumber: 212,
           },
           {
             id: withoutPr.id,
-            githubPullRequestNumber: null,
+            pullRequestNumber: null,
           },
         ],
       },
@@ -3593,42 +3656,42 @@ describe("GraphQL API", () => {
     const needsHumanOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 120,
+      issueNumber: 120,
       state: "needs_human" as const,
       stepRuns: [],
     }
     const failedOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 122,
+      issueNumber: 122,
       state: "failed" as const,
       stepRuns: [],
     }
     const unfinishedOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 121,
+      issueNumber: 121,
       state: "implement" as const,
       stepRuns: [],
     }
     const completeOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 123,
+      issueNumber: 123,
       state: "complete" as const,
       stepRuns: [],
     }
     const abandonedOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 124,
+      issueNumber: 124,
       state: "abandoned" as const,
       stepRuns: [],
     }
     const terminalRelevant = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: issue.githubIssueNumber,
+      issueNumber: issue.issueNumber,
       state: "complete" as const,
       stepRuns: [],
     }
@@ -3656,7 +3719,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!) {
           workItems(repositoryId: $repositoryId) {
-            id githubIssueNumber state
+            id issueNumber state
           }
         }`,
         variables: { repositoryId: repository.id },
@@ -3668,27 +3731,27 @@ describe("GraphQL API", () => {
         workItems: [
           {
             id: needsHumanOrphan.id,
-            githubIssueNumber: 120,
+            issueNumber: 120,
             state: "NEEDS_HUMAN",
           },
           {
             id: unfinishedOrphan.id,
-            githubIssueNumber: 121,
+            issueNumber: 121,
             state: "IMPLEMENT",
           },
           {
             id: completeOrphan.id,
-            githubIssueNumber: 123,
+            issueNumber: 123,
             state: "COMPLETE",
           },
           {
             id: abandonedOrphan.id,
-            githubIssueNumber: 124,
+            issueNumber: 124,
             state: "ABANDONED",
           },
           {
             id: terminalRelevant.id,
-            githubIssueNumber: issue.githubIssueNumber,
+            issueNumber: issue.issueNumber,
             state: "COMPLETE",
           },
         ],
@@ -3700,7 +3763,7 @@ describe("GraphQL API", () => {
     const completeOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 201,
+      issueNumber: 201,
       issueTitle: "Completed issue title",
       state: "complete" as const,
       createdAt: new Date("2026-03-01T00:00:00.000Z"),
@@ -3709,7 +3772,7 @@ describe("GraphQL API", () => {
     const abandonedOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 202,
+      issueNumber: 202,
       issueTitle: null,
       state: "abandoned" as const,
       createdAt: new Date("2026-03-02T00:00:00.000Z"),
@@ -3718,7 +3781,7 @@ describe("GraphQL API", () => {
     const failedOrphan = {
       ...workItem,
       id: makeWorkItemId(),
-      githubIssueNumber: 203,
+      issueNumber: 203,
       state: "failed" as const,
       createdAt: new Date("2026-03-03T00:00:00.000Z"),
       stepRuns: [],
@@ -3740,7 +3803,7 @@ describe("GraphQL API", () => {
       graphqlRequest({
         query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
           workItems(repositoryId: $repositoryId, listKind: $listKind) {
-            id githubIssueNumber issueTitle state
+            id issueNumber issueTitle state
           }
         }`,
         variables: { repositoryId: repository.id, listKind: "COMPLETED" },
@@ -3752,13 +3815,13 @@ describe("GraphQL API", () => {
         workItems: [
           {
             id: abandonedOrphan.id,
-            githubIssueNumber: 202,
+            issueNumber: 202,
             issueTitle: null,
             state: "ABANDONED",
           },
           {
             id: completeOrphan.id,
-            githubIssueNumber: 201,
+            issueNumber: 201,
             issueTitle: "Completed issue title",
             state: "COMPLETE",
           },
@@ -3775,8 +3838,8 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        implementNow: (repositoryId, githubIssueNumber) => {
-          receivedArgs = [repositoryId, githubIssueNumber]
+        implementNow: (repositoryId, issueNumber) => {
+          receivedArgs = [repositoryId, issueNumber]
           return Effect.succeed(workItem)
         },
       },
@@ -3784,15 +3847,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementNow($repositoryId: ID!, $githubIssueNumber: Int!) {
-          implementNow(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation ImplementNow($repositoryId: ID!, $issueNumber: Int!) {
+          implementNow(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id state
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -3812,7 +3875,7 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
   })
 
   test("starts a Work Item for Implement Locally", async () => {
@@ -3823,8 +3886,8 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        implementLocally: (repositoryId, githubIssueNumber) => {
-          receivedArgs = [repositoryId, githubIssueNumber]
+        implementLocally: (repositoryId, issueNumber) => {
+          receivedArgs = [repositoryId, issueNumber]
           return Effect.succeed(workItem)
         },
       },
@@ -3832,14 +3895,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementLocally($repositoryId: ID!, $githubIssueNumber: Int!) {
-          implementLocally(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation ImplementLocally($repositoryId: ID!, $issueNumber: Int!) {
+          implementLocally(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id state
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -3852,7 +3915,7 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
   })
 
   test("implements all with auto-merge for a Parent Issue's covered children", async () => {
@@ -3861,13 +3924,13 @@ describe("GraphQL API", () => {
       ...workItem,
       id: makeWorkItemId(),
       mergeMode: "always" as const,
-      githubIssueNumber: 43,
+      issueNumber: 43,
     }
     const blockedChild = {
       ...workItem,
       id: makeWorkItemId(),
       mergeMode: "always" as const,
-      githubIssueNumber: 44,
+      issueNumber: 44,
       waitingForBlockers: true,
       holdsWorkerSlot: false,
       stepRuns: [],
@@ -3878,8 +3941,8 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        implementAllWithAutoMerge: (repositoryId, githubIssueNumber) => {
-          receivedArgs = [repositoryId, githubIssueNumber]
+        implementAllWithAutoMerge: (repositoryId, issueNumber) => {
+          receivedArgs = [repositoryId, issueNumber]
           return Effect.succeed([actionableChild, blockedChild])
         },
       },
@@ -3887,14 +3950,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $githubIssueNumber: Int!) {
-          implementAllWithAutoMerge(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
-            id githubIssueNumber mergeMode state status statusLabel
+        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $issueNumber: Int!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id issueNumber mergeMode state status statusLabel
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: 10,
+          issueNumber: 10,
         },
       }),
     )
@@ -3904,7 +3967,7 @@ describe("GraphQL API", () => {
         implementAllWithAutoMerge: [
           {
             id: actionableChild.id,
-            githubIssueNumber: 43,
+            issueNumber: 43,
             mergeMode: "ALWAYS",
             state: "CREATE_WORKTREE",
             status: "RUNNING",
@@ -3912,7 +3975,7 @@ describe("GraphQL API", () => {
           },
           {
             id: blockedChild.id,
-            githubIssueNumber: 44,
+            issueNumber: 44,
             mergeMode: "ALWAYS",
             state: "CREATE_WORKTREE",
             status: "WAITING_FOR_BLOCKERS",
@@ -3935,7 +3998,7 @@ describe("GraphQL API", () => {
           Effect.fail({
             _tag: "ImplementAllWithAutoMergeNotEligibleError",
             repositoryId: repository.id,
-            githubIssueNumber: 10,
+            issueNumber: 10,
             reason: "Parent Issue #10 has no open Child Issues",
           } as never),
       },
@@ -3943,14 +4006,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $githubIssueNumber: Int!) {
-          implementAllWithAutoMerge(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation ImplementAllWithAutoMerge($repositoryId: ID!, $issueNumber: Int!) {
+          implementAllWithAutoMerge(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: 10,
+          issueNumber: 10,
         },
       }),
     )
@@ -3982,8 +4045,8 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        queue: (repositoryId, githubIssueNumber) => {
-          receivedArgs = [repositoryId, githubIssueNumber]
+        queue: (repositoryId, issueNumber) => {
+          receivedArgs = [repositoryId, issueNumber]
           return Effect.succeed(held)
         },
       },
@@ -3991,14 +4054,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation Queue($repositoryId: ID!, $githubIssueNumber: Int!) {
-          queue(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation Queue($repositoryId: ID!, $issueNumber: Int!) {
+          queue(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id state status statusLabel statusMessage canRetry isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -4016,7 +4079,7 @@ describe("GraphQL API", () => {
         },
       },
     })
-    expect(receivedArgs).toEqual([repository.id, issue.githubIssueNumber])
+    expect(receivedArgs).toEqual([repository.id, issue.issueNumber])
   })
 
   test("surfaces Queue errors for unblocked Issues and unfinished Work Items", async () => {
@@ -4033,21 +4096,21 @@ describe("GraphQL API", () => {
           Effect.fail(
             new IssueNotBlockedError({
               repositoryId: repository.id,
-              githubIssueNumber: issue.githubIssueNumber,
+              issueNumber: issue.issueNumber,
             }),
           ),
       },
     )
     const notBlocked = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation Queue($repositoryId: ID!, $githubIssueNumber: Int!) {
-          queue(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation Queue($repositoryId: ID!, $issueNumber: Int!) {
+          queue(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -4072,7 +4135,7 @@ describe("GraphQL API", () => {
           Effect.fail(
             new UnfinishedWorkItemExistsError({
               repositoryId: repository.id,
-              githubIssueNumber: issue.githubIssueNumber,
+              issueNumber: issue.issueNumber,
               workItemId: workItem.id,
             }),
           ),
@@ -4080,14 +4143,14 @@ describe("GraphQL API", () => {
     )
     const unfinished = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `mutation Queue($repositoryId: ID!, $githubIssueNumber: Int!) {
-          queue(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `mutation Queue($repositoryId: ID!, $issueNumber: Int!) {
+          queue(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             id
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -4126,15 +4189,15 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             status statusLabel statusMessage canRetry isTerminal paused
             lifecycleLabels { phase label status }
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )
@@ -4178,14 +4241,14 @@ describe("GraphQL API", () => {
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $githubIssueNumber: Int!) {
-          workItems(repositoryId: $repositoryId, githubIssueNumber: $githubIssueNumber) {
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
             state status statusLabel statusMessage isTerminal
           }
         }`,
         variables: {
           repositoryId: repository.id,
-          githubIssueNumber: issue.githubIssueNumber,
+          issueNumber: issue.issueNumber,
         },
       }),
     )

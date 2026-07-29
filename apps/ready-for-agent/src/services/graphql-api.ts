@@ -32,15 +32,17 @@ export class GraphqlApi extends Context.Service<
               addRepository: {
                 __args: {
                   input: {
-                    githubOwner: repository.githubOwner,
-                    githubRepo: repository.githubRepo,
+                    forge: repository.forge,
+                    forgeHost: repository.forgeHost,
+                    projectPath: repository.projectPath,
                     localPath: repository.localPath,
                     isBare: repository.isBare,
                   },
                 },
                 id: true,
-                githubOwner: true,
-                githubRepo: true,
+                forge: true,
+                forgeHost: true,
+                projectPath: true,
                 localPath: true,
                 isBare: true,
                 paused: true,

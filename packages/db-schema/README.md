@@ -91,4 +91,4 @@ type pr status check = work item, external id, name, outcome,
 
 **Roles (FK has-a):** `issue` / `work item` → `repository`; `issue dependency` → `issue`; `step run` / `pr status check` → `work item`.
 
-**Not true roles (no FK):** issue parent fields, issue-dependency blocking number/url, `work item.github_issue_number`, `step_run.queue_job_id`, `completed_job.job_id`.
+**Not true roles (no FK):** issue parent fields, issue-dependency blocking number/url, `work item.issue_number`, `step_run.queue_job_id`, `completed_job.job_id`.

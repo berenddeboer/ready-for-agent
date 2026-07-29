@@ -109,12 +109,12 @@ export const transferPersistedRefreshJobs = Effect.gen(function* () {
 
 const repositoryHasGitHubCredential = Effect.fn(
   "JobWorker.repositoryHasGitHubCredential",
-)(function* (githubOwner: string, githubRepo: string) {
+)(function* (projectPath: string) {
   const keymaxxer = yield* KeymaxxerService
   if (keymaxxer.enabled === false) return true
   const credential = yield* keymaxxer.findSecret({
     provider: "github",
-    account: `${githubOwner}/${githubRepo}`,
+    account: projectPath,
   })
   return credential !== null
 })
@@ -125,8 +125,7 @@ const listCredentialedRepositoryIds = Effect.gen(function* () {
   const credentialed: string[] = []
   for (const repository of repositories) {
     const hasCredential = yield* repositoryHasGitHubCredential(
-      repository.githubOwner,
-      repository.githubRepo,
+      repository.projectPath,
     )
     if (hasCredential) {
       credentialed.push(repository.id)
@@ -281,8 +280,7 @@ const finalizeScheduledRefresh = <A, E>(
     }
 
     const credentialed = yield* repositoryHasGitHubCredential(
-      repository.githubOwner,
-      repository.githubRepo,
+      repository.projectPath,
     )
     if (!credentialed) {
       yield* Effect.logWarning(
@@ -395,8 +393,7 @@ const claimAndRunRefreshJob = (
     }
 
     const credentialed = yield* repositoryHasGitHubCredential(
-      repository.githubOwner,
-      repository.githubRepo,
+      repository.projectPath,
     )
     if (!credentialed) {
       yield* finalizeScheduledRefresh(

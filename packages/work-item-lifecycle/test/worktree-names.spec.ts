@@ -7,17 +7,18 @@ import {
 import { describe, expect, it } from "bun:test"
 
 describe("worktree names", () => {
-  it("builds a repository slug from owner and name", () => {
-    expect(repositorySlug("Acme", "Widgets")).toBe("acme-widgets")
-    expect(repositorySlug("acme.org", "my_repo")).toBe("acme-org-my-repo")
+  it("builds a repository slug from Project Path", () => {
+    expect(repositorySlug("Acme/Widgets")).toBe("acme-widgets")
+    expect(repositorySlug("acme.org/my_repo")).toBe("acme-org-my-repo")
   })
 
   it("builds a branch identifiable by repo, issue, and Work Item", () => {
     expect(
       workItemBranchName({
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId: "wi-01HABCDEFGHJKMNPQRSTVWXYZ",
       }),
     ).toBe("rfa/acme-widgets/42/wi-01HABCDEFGHJKMNPQRSTVWXYZ")
@@ -28,8 +29,9 @@ describe("worktree names", () => {
       worktreeParentPath({
         localPath: "/home/berend/src/pf/monorepo/.bare",
         isBare: true,
-        githubOwner: "pf",
-        githubRepo: "monorepo",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "pf/monorepo",
       }),
     ).toBe("/home/berend/src/pf/monorepo")
 
@@ -37,9 +39,10 @@ describe("worktree names", () => {
       workItemWorktreePath({
         localPath: "/home/berend/src/pf/monorepo/.bare",
         isBare: true,
-        githubOwner: "pf",
-        githubRepo: "monorepo",
-        githubIssueNumber: 2039,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "pf/monorepo",
+        issueNumber: 2039,
         workItemId: "wi-01HABCDEFGHJKMNPQRSTVWXYZ",
       }),
     ).toBe("/home/berend/src/pf/monorepo/2039-wi-01HABCDEFGHJKMNPQRSTVWXYZ")
@@ -50,8 +53,9 @@ describe("worktree names", () => {
       worktreeParentPath({
         localPath: "/repos/acme/widgets.git",
         isBare: true,
-        githubOwner: "acme",
-        githubRepo: "widgets",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
       }),
     ).toBe("/repos/acme/widgets-worktrees")
 
@@ -59,9 +63,10 @@ describe("worktree names", () => {
       workItemWorktreePath({
         localPath: "/repos/acme/widgets.git",
         isBare: true,
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId: "wi-01HABCDEFGHJKMNPQRSTVWXYZ",
       }),
     ).toBe("/repos/acme/widgets-worktrees/42-wi-01HABCDEFGHJKMNPQRSTVWXYZ")
@@ -72,8 +77,9 @@ describe("worktree names", () => {
       worktreeParentPath({
         localPath: "/home/berend/src/acme/widgets",
         isBare: false,
-        githubOwner: "acme",
-        githubRepo: "widgets",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
         tmpDir: "/tmp",
       }),
     ).toBe("/tmp/ready-for-agent/acme/widgets")
@@ -82,9 +88,10 @@ describe("worktree names", () => {
       workItemWorktreePath({
         localPath: "/home/berend/src/acme/widgets",
         isBare: false,
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 7,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 7,
         workItemId: "wi-01HZZZZZZZZZZZZZZZZZZZZZZZ",
         tmpDir: "/var/tmp",
       }),

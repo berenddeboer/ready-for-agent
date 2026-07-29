@@ -143,7 +143,7 @@ const isUnfinishedWorkItemUniqueViolation = (error: SqlError): boolean => {
       message.includes("work_item_one_unfinished_v2_uidx") ||
       message.includes("work_item_one_unfinished_v3_uidx") ||
       (message.includes("work_item.repository_id") &&
-        message.includes("work_item.github_issue_number")))
+        message.includes("work_item.issue_number")))
   )
 }
 
@@ -257,9 +257,9 @@ const toDatabaseError = (error: SqlError) =>
 type WorkItemRow = {
   readonly id: string
   readonly repository_id: string
-  readonly github_issue_number: number
+  readonly issue_number: number
   readonly issue_title: string | null
-  readonly github_pull_request_number: number | null
+  readonly pull_request_number: number | null
   readonly agent_backend: string
   readonly state: WorkItemState
   readonly state_ready_at: number
@@ -354,9 +354,9 @@ const toWorkItemRecord = (
 ): WorkItemRecord => ({
   id: row.id as WorkItemId,
   repositoryId: row.repository_id,
-  githubIssueNumber: row.github_issue_number,
+  issueNumber: row.issue_number,
   issueTitle: row.issue_title,
-  githubPullRequestNumber: row.github_pull_request_number,
+  pullRequestNumber: row.pull_request_number,
   agentBackend: row.agent_backend,
   state: row.state,
   stateReadyAt: new Date(row.state_ready_at),
@@ -383,12 +383,12 @@ const toWorkItemRecord = (
   stepRuns,
 })
 
-const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, github_issue_number, issue_title, agent_backend,
+const WORK_ITEM_SELECT_COLUMNS = `id, repository_id, issue_number, issue_title, agent_backend,
                    state, state_ready_at, paused, waiting_since, waiting_for_blockers, merge_mode,
                    holds_worker_slot,
                    pause_before_step, worktree_path, starting_commit_oid, completion_summary,
                    publication_title, publication_body, session_id,
-                   github_pull_request_number, failure_code,
+                   pull_request_number, failure_code,
                     failure_message, check_start_anchor_at, check_start_anchor_head_sha,
                     check_start_observed_head_sha, check_start_observed_head_at,
                     check_start_last_observed_is_draft,
@@ -639,11 +639,11 @@ export interface WorkItemLifecycleShape {
   >
   readonly implementNow: (
     repositoryId: string,
-    githubIssueNumber: number,
+    issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
   readonly implementLocally: (
     repositoryId: string,
-    githubIssueNumber: number,
+    issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, ImplementNowError>
   /**
    * Parent-level Implement all with auto-merge. Snapshots open direct Child
@@ -656,7 +656,7 @@ export interface WorkItemLifecycleShape {
    */
   readonly implementAllWithAutoMerge: (
     repositoryId: string,
-    parentGithubIssueNumber: number,
+    parentIssueNumber: number,
   ) => Effect.Effect<readonly WorkItemRecord[], ImplementAllWithAutoMergeError>
   /**
    * Queue a Relevant open leaf Issue that has listed blockers: creates a Work
@@ -664,7 +664,7 @@ export interface WorkItemLifecycleShape {
    */
   readonly queue: (
     repositoryId: string,
-    githubIssueNumber: number,
+    issueNumber: number,
   ) => Effect.Effect<WorkItemRecord, QueueError>
   readonly runStep: (
     stepRunId: string,
@@ -687,7 +687,7 @@ export interface WorkItemLifecycleShape {
   ) => Effect.Effect<WorkItemRecord, GetWorkItemError>
   readonly listWorkItemsForIssue: (
     repositoryId: string,
-    githubIssueNumber: number,
+    issueNumber: number,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
   readonly listWorkItemsForRepository: (
     repositoryId: string,
@@ -754,37 +754,37 @@ export class WorkItemLifecycle extends Context.Service<
 
 /** Operator-visible reason when Issue is closed/missing and PR is still open. */
 export const formatIssueClosedWhilePrOpenMessage = (
-  githubIssueNumber: number,
-  githubPullRequestNumber: number,
+  issueNumber: number,
+  pullRequestNumber: number,
 ): string =>
-  `Issue #${githubIssueNumber} is closed or no longer present while pull request #${githubPullRequestNumber} is still open. Reopen the issue if you want to continue, then Start job.`
+  `Issue #${issueNumber} is closed or no longer present while pull request #${pullRequestNumber} is still open. Reopen the issue if you want to continue, then Start job.`
 
 /**
  * Operator-visible reason when Issue is closed/missing and PR status is
  * indeterminate (lookup failed or PR not found). Same Pause policy as open PR.
  */
 export const formatIssueClosedPrStatusIndeterminateMessage = (
-  githubIssueNumber: number,
-  githubPullRequestNumber: number,
+  issueNumber: number,
+  pullRequestNumber: number,
 ): string =>
-  `Issue #${githubIssueNumber} is closed or no longer present while pull request #${githubPullRequestNumber} appears still open or its status could not be confirmed. Reopen the issue if you want to continue, then Start job.`
+  `Issue #${issueNumber} is closed or no longer present while pull request #${pullRequestNumber} appears still open or its status could not be confirmed. Reopen the issue if you want to continue, then Start job.`
 
 /** Operator-visible reason when Issue is closed/missing and PR was closed unmerged. */
 export const formatIssueClosedPrClosedUnmergedMessage = (
-  githubIssueNumber: number,
-  githubPullRequestNumber: number,
+  issueNumber: number,
+  pullRequestNumber: number,
 ): string =>
-  `Issue #${githubIssueNumber} is closed or no longer present and pull request #${githubPullRequestNumber} was closed without merge. Start job after reopening if you want to continue, or Abandon or Reset.`
+  `Issue #${issueNumber} is closed or no longer present and pull request #${pullRequestNumber} was closed without merge. Start job after reopening if you want to continue, or Abandon or Reset.`
 
 /**
  * Step Run history reason when Issue revalidation finds the Issue closed/missing
  * and the owned Work Item PR is already merged — advances to local cleanup.
  */
 export const formatIssueClosedPrMergedMessage = (
-  githubIssueNumber: number,
-  githubPullRequestNumber: number,
+  issueNumber: number,
+  pullRequestNumber: number,
 ): string =>
-  `Issue #${githubIssueNumber} is closed or no longer present and pull request #${githubPullRequestNumber} is merged; advancing to local cleanup`
+  `Issue #${issueNumber} is closed or no longer present and pull request #${pullRequestNumber} is merged; advancing to local cleanup`
 
 export const makeWorkItemLifecycleLive = (
   config: WorkItemLifecycleConfig = {},
@@ -871,18 +871,18 @@ export const makeWorkItemLifecycleLive = (
 
       const findUnfinishedWorkItemId = (
         repositoryId: string,
-        githubIssueNumber: number,
+        issueNumber: number,
       ): Effect.Effect<string | null, WorkItemLifecycleDatabaseError> =>
         Effect.gen(function* () {
           const rows = (yield* sql
             .unsafe(
               `SELECT id FROM work_item
              WHERE repository_id = ?
-               AND github_issue_number = ?
+               AND issue_number = ?
                AND state NOT IN ('complete', 'failed', 'abandoned')
              ORDER BY created_at ASC, rowid ASC
              LIMIT 1`,
-              [repositoryId, githubIssueNumber],
+              [repositoryId, issueNumber],
             )
             .pipe(Effect.mapError(toDatabaseError))) as readonly {
             id: string
@@ -892,7 +892,7 @@ export const makeWorkItemLifecycleLive = (
 
       const unfinishedWorkItemExistsError = (
         repositoryId: string,
-        githubIssueNumber: number,
+        issueNumber: number,
         knownWorkItemId?: string,
       ): Effect.Effect<
         never,
@@ -901,10 +901,10 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const workItemId =
             knownWorkItemId ??
-            (yield* findUnfinishedWorkItemId(repositoryId, githubIssueNumber))
+            (yield* findUnfinishedWorkItemId(repositoryId, issueNumber))
           return yield* new UnfinishedWorkItemExistsError({
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
             workItemId: workItemId ?? "unknown",
           })
         })
@@ -974,15 +974,15 @@ export const makeWorkItemLifecycleLive = (
 
       const listWorkItemsForIssue = Effect.fn(
         "WorkItemLifecycle.listWorkItemsForIssue",
-      )(function* (repositoryId: string, githubIssueNumber: number) {
+      )(function* (repositoryId: string, issueNumber: number) {
         const nowMs = yield* Clock.currentTimeMillis
         const rows = (yield* sql
           .unsafe(
             `SELECT ${WORK_ITEM_SELECT_COLUMNS}
            FROM work_item
-           WHERE repository_id = ? AND github_issue_number = ?
+           WHERE repository_id = ? AND issue_number = ?
            ORDER BY created_at ASC, rowid ASC`,
-            [repositoryId, githubIssueNumber],
+            [repositoryId, issueNumber],
           )
           .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
 
@@ -1043,7 +1043,7 @@ export const makeWorkItemLifecycleLive = (
             `SELECT COUNT(DISTINCT wi.id) AS count
              FROM work_item wi
              INNER JOIN step_run sr ON sr.work_item_id = wi.id
-             WHERE wi.github_pull_request_number IS NOT NULL
+             WHERE wi.pull_request_number IS NOT NULL
                AND sr.step = 'commit'
                AND sr.status = 'succeeded'
                AND sr.finished_at IS NOT NULL
@@ -1355,22 +1355,22 @@ export const makeWorkItemLifecycleLive = (
 
       const classifyHeldIssue = (
         issues: readonly {
-          readonly githubIssueNumber: number
+          readonly issueNumber: number
           readonly state: string
           readonly hasChildren: boolean
           readonly blockedBy: readonly unknown[]
         }[],
-        githubIssueNumber: number,
+        issueNumber: number,
       ): HeldIssueClassification => {
         const issue = issues.find(
-          (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+          (candidate) => candidate.issueNumber === issueNumber,
         )
 
         if (!issue) {
           return {
             _tag: "invalid",
             failureCode: "issue_not_found",
-            failureMessage: `Issue #${githubIssueNumber} is no longer present in the Issue store`,
+            failureMessage: `Issue #${issueNumber} is no longer present in the Issue store`,
           }
         }
 
@@ -1378,7 +1378,7 @@ export const makeWorkItemLifecycleLive = (
           return {
             _tag: "invalid",
             failureCode: "issue_not_open",
-            failureMessage: `Issue #${githubIssueNumber} is ${issue.state}, not OPEN`,
+            failureMessage: `Issue #${issueNumber} is ${issue.state}, not OPEN`,
           }
         }
 
@@ -1386,7 +1386,7 @@ export const makeWorkItemLifecycleLive = (
           return {
             _tag: "invalid",
             failureCode: "issue_is_parent",
-            failureMessage: `Issue #${githubIssueNumber} has children and is no longer a Leaf Issue`,
+            failureMessage: `Issue #${issueNumber} has children and is no longer a Leaf Issue`,
           }
         }
 
@@ -1427,10 +1427,7 @@ export const makeWorkItemLifecycleLive = (
           // the repository pass (or skip post-reconcile Issue notification).
           // Matches syncNeedsHumanMergeHandoffs. Next refresh retries leftovers.
           const didChange = yield* Effect.gen(function* () {
-            const classification = classifyHeldIssue(
-              issues,
-              held.github_issue_number,
-            )
+            const classification = classifyHeldIssue(issues, held.issue_number)
 
             if (classification._tag === "still_blocked") {
               return false
@@ -1604,7 +1601,7 @@ export const makeWorkItemLifecycleLive = (
 
       const revalidateIssue = (
         repositoryId: string,
-        githubIssueNumber: number,
+        issueNumber: number,
       ): Effect.Effect<
         | { readonly ok: true }
         | {
@@ -1617,14 +1614,14 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
-            (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+            (candidate) => candidate.issueNumber === issueNumber,
           )
 
           if (!issue) {
             return {
               ok: false as const,
               failureCode: "issue_not_found",
-              failureMessage: `Issue #${githubIssueNumber} is no longer present in the Issue store`,
+              failureMessage: `Issue #${issueNumber} is no longer present in the Issue store`,
             }
           }
 
@@ -1632,7 +1629,7 @@ export const makeWorkItemLifecycleLive = (
             return {
               ok: false as const,
               failureCode: "issue_not_open",
-              failureMessage: `Issue #${githubIssueNumber} is ${issue.state}, not OPEN`,
+              failureMessage: `Issue #${issueNumber} is ${issue.state}, not OPEN`,
             }
           }
 
@@ -1640,7 +1637,7 @@ export const makeWorkItemLifecycleLive = (
             return {
               ok: false as const,
               failureCode: "issue_is_parent",
-              failureMessage: `Issue #${githubIssueNumber} has children and is no longer a Leaf Issue`,
+              failureMessage: `Issue #${issueNumber} has children and is no longer a Leaf Issue`,
             }
           }
 
@@ -1648,7 +1645,7 @@ export const makeWorkItemLifecycleLive = (
             return {
               ok: false as const,
               failureCode: "issue_blocked",
-              failureMessage: `Issue #${githubIssueNumber} is blocked by ${issue.blockedBy.length} Issue(s)`,
+              failureMessage: `Issue #${issueNumber} is blocked by ${issue.blockedBy.length} Issue(s)`,
             }
           }
 
@@ -1706,7 +1703,7 @@ export const makeWorkItemLifecycleLive = (
           readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
           readonly sessionId?: string
-          readonly githubPullRequestNumber?: number
+          readonly pullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
           readonly refreshCheckStartAnchor?: boolean
           readonly checkStartLastObservedIsDraft?: number | null
@@ -1808,7 +1805,7 @@ export const makeWorkItemLifecycleLive = (
           case "create_pr":
             return steps.createPr(context).pipe(
               Effect.map((result) => ({
-                githubPullRequestNumber: result.pullRequestNumber,
+                pullRequestNumber: result.pullRequestNumber,
                 // Hard-persist copy used this step (includes HEAD seed).
                 publicationTitle: result.publicationTitle,
                 publicationBody: result.publicationBody,
@@ -2327,16 +2324,12 @@ export const makeWorkItemLifecycleLive = (
             return null
           }
           const headRefName = workItemBranchName({
-            githubOwner: repository.githubOwner,
-            githubRepo: repository.githubRepo,
-            githubIssueNumber: row.github_issue_number,
+            projectPath: repository.projectPath,
+            issueNumber: row.issue_number,
             workItemId: row.id,
           })
           return yield* github.getPullRequestLifecycleStatus(
-            {
-              owner: repository.githubOwner,
-              name: repository.githubRepo,
-            },
+            repository,
             headRefName,
           )
         }).pipe(
@@ -2365,7 +2358,7 @@ export const makeWorkItemLifecycleLive = (
 
       const resolveOwnedPrIssueStop = (
         row: WorkItemRow,
-        githubPullRequestNumber: number,
+        pullRequestNumber: number,
       ): Effect.Effect<OwnedPrIssueStop> =>
         Effect.gen(function* () {
           const status = yield* inspectOwnedPrLifecycleStatus(row)
@@ -2374,8 +2367,8 @@ export const makeWorkItemLifecycleLive = (
               _tag: "merged" as const,
               reasonCode: STEP_RUN_REASON.prMerged,
               reasonMessage: formatIssueClosedPrMergedMessage(
-                row.github_issue_number,
-                githubPullRequestNumber,
+                row.issue_number,
+                pullRequestNumber,
               ),
             }
           }
@@ -2384,8 +2377,8 @@ export const makeWorkItemLifecycleLive = (
               _tag: "pause" as const,
               reasonCode: STEP_RUN_REASON.issueClosedPrClosedUnmerged,
               reasonMessage: formatIssueClosedPrClosedUnmergedMessage(
-                row.github_issue_number,
-                githubPullRequestNumber,
+                row.issue_number,
+                pullRequestNumber,
               ),
             }
           }
@@ -2394,8 +2387,8 @@ export const makeWorkItemLifecycleLive = (
               _tag: "pause" as const,
               reasonCode: STEP_RUN_REASON.issueClosedWhilePrOpen,
               reasonMessage: formatIssueClosedWhilePrOpenMessage(
-                row.github_issue_number,
-                githubPullRequestNumber,
+                row.issue_number,
+                pullRequestNumber,
               ),
             }
           }
@@ -2404,8 +2397,8 @@ export const makeWorkItemLifecycleLive = (
             _tag: "pause" as const,
             reasonCode: STEP_RUN_REASON.issueClosedWhilePrOpen,
             reasonMessage: formatIssueClosedPrStatusIndeterminateMessage(
-              row.github_issue_number,
-              githubPullRequestNumber,
+              row.issue_number,
+              pullRequestNumber,
             ),
           }
         })
@@ -2421,7 +2414,7 @@ export const makeWorkItemLifecycleLive = (
           readonly publicationBody?: string | null
           readonly pauseBeforeStep?: OperationalLifecycleStep | null
           readonly sessionId?: string
-          readonly githubPullRequestNumber?: number
+          readonly pullRequestNumber?: number
           readonly handledCheckIds?: readonly string[]
           readonly refreshCheckStartAnchor?: boolean
           readonly checkStartLastObservedIsDraft?: number | null
@@ -2469,20 +2462,19 @@ export const makeWorkItemLifecycleLive = (
               ? workItem.publication_body
               : output.publicationBody
           const sessionId = output.sessionId ?? workItem.session_id
-          const githubPullRequestNumber =
-            output.githubPullRequestNumber ??
-            workItem.github_pull_request_number
+          const pullRequestNumber =
+            output.pullRequestNumber ?? workItem.pull_request_number
 
           // A merged Work Item PR often closes the Issue. Do not Failed the Work
           // Item for issue_not_open / issue_not_found when a PR is already owned;
           // branch on PR lifecycle (open → Pause, merged → cleanup, closed → Pause).
           const deferIssueRevalidationForOwnedPr =
             !revalidation.ok &&
-            githubPullRequestNumber !== null &&
+            pullRequestNumber !== null &&
             (revalidation.failureCode === "issue_not_found" ||
               revalidation.failureCode === "issue_not_open")
           const ownedPrIssueStop = deferIssueRevalidationForOwnedPr
-            ? yield* resolveOwnedPrIssueStop(workItem, githubPullRequestNumber)
+            ? yield* resolveOwnedPrIssueStop(workItem, pullRequestNumber)
             : null
           const nextStep =
             transition?.nextState ?? nextOperationalStep(stepRun.step)
@@ -2573,7 +2565,7 @@ export const makeWorkItemLifecycleLive = (
                        publication_title = ?,
                        publication_body = ?,
                        session_id = ?,
-                       github_pull_request_number = ?,
+                       pull_request_number = ?,
                        waiting_since = NULL,
                        waiting_for_blockers = 0,
                        updated_at = ?
@@ -2586,7 +2578,7 @@ export const makeWorkItemLifecycleLive = (
                       publicationTitle,
                       publicationBody,
                       sessionId,
-                      githubPullRequestNumber,
+                      pullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -2616,7 +2608,7 @@ export const makeWorkItemLifecycleLive = (
                        publication_title = ?,
                        publication_body = ?,
                        session_id = ?,
-                       github_pull_request_number = ?,
+                       pull_request_number = ?,
                        holds_worker_slot = 0,
                        waiting_since = NULL,
                        waiting_for_blockers = 0,
@@ -2630,7 +2622,7 @@ export const makeWorkItemLifecycleLive = (
                       publicationTitle,
                       publicationBody,
                       sessionId,
-                      githubPullRequestNumber,
+                      pullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -2648,7 +2640,7 @@ export const makeWorkItemLifecycleLive = (
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
-                        github_pull_request_number = ?,
+                        pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
                         waiting_for_blockers = 0,
@@ -2664,7 +2656,7 @@ export const makeWorkItemLifecycleLive = (
                       publicationTitle,
                       publicationBody,
                       sessionId,
-                      githubPullRequestNumber,
+                      pullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -2680,7 +2672,7 @@ export const makeWorkItemLifecycleLive = (
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
-                        github_pull_request_number = ?,
+                        pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
                         waiting_for_blockers = 0,
@@ -2694,7 +2686,7 @@ export const makeWorkItemLifecycleLive = (
                       publicationTitle,
                       publicationBody,
                       sessionId,
-                      githubPullRequestNumber,
+                      pullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -2712,7 +2704,7 @@ export const makeWorkItemLifecycleLive = (
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
-                        github_pull_request_number = ?,
+                        pull_request_number = ?,
                         holds_worker_slot = 0,
                         waiting_since = NULL,
                         waiting_for_blockers = 0,
@@ -2728,7 +2720,7 @@ export const makeWorkItemLifecycleLive = (
                       publicationTitle,
                       publicationBody,
                       sessionId,
-                      githubPullRequestNumber,
+                      pullRequestNumber,
                       now,
                       workItem.id,
                     ],
@@ -2771,7 +2763,7 @@ export const makeWorkItemLifecycleLive = (
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
-                        github_pull_request_number = ?,
+                        pull_request_number = ?,
                         updated_at = ?
                    WHERE id = ?`,
                       [
@@ -2784,7 +2776,7 @@ export const makeWorkItemLifecycleLive = (
                         publicationTitle,
                         publicationBody,
                         sessionId,
-                        githubPullRequestNumber,
+                        pullRequestNumber,
                         now,
                         workItem.id,
                       ],
@@ -2804,7 +2796,7 @@ export const makeWorkItemLifecycleLive = (
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
-                        github_pull_request_number = ?,
+                        pull_request_number = ?,
                         updated_at = ?
                    WHERE id = ?`,
                       [
@@ -2817,7 +2809,7 @@ export const makeWorkItemLifecycleLive = (
                         publicationTitle,
                         publicationBody,
                         sessionId,
-                        githubPullRequestNumber,
+                        pullRequestNumber,
                         now,
                         workItem.id,
                       ],
@@ -2834,7 +2826,7 @@ export const makeWorkItemLifecycleLive = (
                         publication_title = ?,
                         publication_body = ?,
                         session_id = ?,
-                        github_pull_request_number = ?,
+                        pull_request_number = ?,
                         updated_at = ?
                    WHERE id = ?`,
                       [
@@ -2847,7 +2839,7 @@ export const makeWorkItemLifecycleLive = (
                         publicationTitle,
                         publicationBody,
                         sessionId,
-                        githubPullRequestNumber,
+                        pullRequestNumber,
                         now,
                         workItem.id,
                       ],
@@ -3470,7 +3462,7 @@ export const makeWorkItemLifecycleLive = (
               const context: LifecycleStepContext = {
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
-                githubIssueNumber: workItem.github_issue_number,
+                issueNumber: workItem.issue_number,
                 issueTitle: workItem.issue_title,
                 agentBackend: workItem.agent_backend,
                 model: selection.model,
@@ -3600,7 +3592,7 @@ export const makeWorkItemLifecycleLive = (
                       ? ({ ok: true } as const)
                       : yield* revalidateIssue(
                           workItem.repository_id,
-                          workItem.github_issue_number,
+                          workItem.issue_number,
                         )
 
                   const completed = yield* completeSuccessfulStep({
@@ -3950,7 +3942,7 @@ export const makeWorkItemLifecycleLive = (
       ): LifecycleStepContext => ({
         workItemId: row.id as WorkItemId,
         repositoryId: row.repository_id,
-        githubIssueNumber: row.github_issue_number,
+        issueNumber: row.issue_number,
         issueTitle: row.issue_title,
         agentBackend: row.agent_backend,
         model: models.model,
@@ -3970,7 +3962,7 @@ export const makeWorkItemLifecycleLive = (
         latestStep: OperationalLifecycleStep | null,
       ): boolean =>
         row.state === "needs_human" &&
-        row.github_pull_request_number !== null &&
+        row.pull_request_number !== null &&
         (latestStep === "decide_pr_merge" || latestStep === "merge_pr")
 
       const loadLatestStep = (
@@ -4319,7 +4311,7 @@ export const makeWorkItemLifecycleLive = (
             reason: "Work Item is already terminal",
           })
         }
-        if (workItem.github_pull_request_number === null) {
+        if (workItem.pull_request_number === null) {
           return yield* new NeedsHumanHandoffNotEligibleError({
             workItemId,
             reason: "Work Item has no Work Item PR",
@@ -4380,7 +4372,7 @@ export const makeWorkItemLifecycleLive = (
                     reason: "Work Item is already terminal",
                   })
                 }
-                if (current.github_pull_request_number === null) {
+                if (current.pull_request_number === null) {
                   return yield* new NeedsHumanHandoffNotEligibleError({
                     workItemId,
                     reason: "Work Item has no Work Item PR",
@@ -4951,7 +4943,7 @@ export const makeWorkItemLifecycleLive = (
 
       const createWorkItem = (
         repositoryId: string,
-        githubIssueNumber: number,
+        issueNumber: number,
         options: {
           readonly pauseBeforeStep: OperationalLifecycleStep | null
           readonly mergeMode?: MergeMode
@@ -4960,20 +4952,20 @@ export const makeWorkItemLifecycleLive = (
         Effect.gen(function* () {
           const issues = yield* db.listIssues(repositoryId)
           const issue = issues.find(
-            (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+            (candidate) => candidate.issueNumber === issueNumber,
           )
 
           if (!issue) {
             return yield* new IssueNotFoundError({
               repositoryId,
-              githubIssueNumber,
+              issueNumber,
             })
           }
 
           if (issue.state !== "OPEN") {
             return yield* new IssueNotOpenError({
               repositoryId,
-              githubIssueNumber,
+              issueNumber,
               state: issue.state,
             })
           }
@@ -4981,21 +4973,21 @@ export const makeWorkItemLifecycleLive = (
           if (issue.hasChildren) {
             return yield* new ParentIssueError({
               repositoryId,
-              githubIssueNumber,
+              issueNumber,
             })
           }
 
           if (issue.blockedBy.length > 0) {
             return yield* new IssueBlockedError({
               repositoryId,
-              githubIssueNumber,
+              issueNumber,
               blockerCount: issue.blockedBy.length,
             })
           }
 
           const existing = yield* listWorkItemsForIssue(
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
           )
           const unfinished = existing.find(
             (item) =>
@@ -5006,7 +4998,7 @@ export const makeWorkItemLifecycleLive = (
           if (unfinished) {
             return yield* unfinishedWorkItemExistsError(
               repositoryId,
-              githubIssueNumber,
+              issueNumber,
               unfinished.id,
             )
           }
@@ -5065,7 +5057,7 @@ export const makeWorkItemLifecycleLive = (
 
                     yield* sql.unsafe(
                       `INSERT INTO work_item (
-                 id, repository_id, github_issue_number, agent_backend,
+                 id, repository_id, issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
@@ -5074,7 +5066,7 @@ export const makeWorkItemLifecycleLive = (
                       [
                         workItemId,
                         repositoryId,
-                        githubIssueNumber,
+                        issueNumber,
                         agentBackendId,
                         issue.title,
                         step,
@@ -5117,7 +5109,7 @@ export const makeWorkItemLifecycleLive = (
                         if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
                           return unfinishedWorkItemExistsError(
                             repositoryId,
-                            githubIssueNumber,
+                            issueNumber,
                           )
                         }
                         return Effect.fail(toDatabaseError(sqlError))
@@ -5149,16 +5141,16 @@ export const makeWorkItemLifecycleLive = (
         })
 
       const implementNow = Effect.fn("WorkItemLifecycle.implementNow")(
-        function* (repositoryId: string, githubIssueNumber: number) {
-          return yield* createWorkItem(repositoryId, githubIssueNumber, {
+        function* (repositoryId: string, issueNumber: number) {
+          return yield* createWorkItem(repositoryId, issueNumber, {
             pauseBeforeStep: null,
           })
         },
       )
 
       const implementLocally = Effect.fn("WorkItemLifecycle.implementLocally")(
-        function* (repositoryId: string, githubIssueNumber: number) {
-          return yield* createWorkItem(repositoryId, githubIssueNumber, {
+        function* (repositoryId: string, issueNumber: number) {
+          return yield* createWorkItem(repositoryId, issueNumber, {
             pauseBeforeStep: "commit",
           })
         },
@@ -5173,38 +5165,37 @@ export const makeWorkItemLifecycleLive = (
        */
       const implementAllWithAutoMerge = Effect.fn(
         "WorkItemLifecycle.implementAllWithAutoMerge",
-      )(function* (repositoryId: string, parentGithubIssueNumber: number) {
+      )(function* (repositoryId: string, parentIssueNumber: number) {
         const issues = yield* db.listIssues(repositoryId)
         const parent = issues.find(
-          (candidate) =>
-            candidate.githubIssueNumber === parentGithubIssueNumber,
+          (candidate) => candidate.issueNumber === parentIssueNumber,
         )
 
         if (!parent) {
           return yield* new IssueNotFoundError({
             repositoryId,
-            githubIssueNumber: parentGithubIssueNumber,
+            issueNumber: parentIssueNumber,
           })
         }
 
         if (!parent.hasChildren) {
           return yield* new NotAParentIssueError({
             repositoryId,
-            githubIssueNumber: parentGithubIssueNumber,
+            issueNumber: parentIssueNumber,
           })
         }
 
         const children = issues.filter(
           (candidate) =>
             candidate.parent !== null &&
-            candidate.parent.githubIssueNumber === parentGithubIssueNumber,
+            candidate.parent.issueNumber === parentIssueNumber,
         )
 
         if (children.some((child) => child.hasChildren)) {
           return yield* new UnsupportedIssueHierarchyError({
             repositoryId,
-            githubIssueNumber: parentGithubIssueNumber,
-            message: `Issue #${parentGithubIssueNumber} has grandchildren and is not a Supported Issue Hierarchy`,
+            issueNumber: parentIssueNumber,
+            message: `Issue #${parentIssueNumber} has grandchildren and is not a Supported Issue Hierarchy`,
           })
         }
 
@@ -5217,14 +5208,14 @@ export const makeWorkItemLifecycleLive = (
             const aPos = a.parentPosition ?? Number.MAX_SAFE_INTEGER
             const bPos = b.parentPosition ?? Number.MAX_SAFE_INTEGER
             if (aPos !== bPos) return aPos - bPos
-            return a.githubIssueNumber - b.githubIssueNumber
+            return a.issueNumber - b.issueNumber
           })
 
         if (openChildren.length === 0) {
           return yield* new ImplementAllWithAutoMergeNotEligibleError({
             repositoryId,
-            githubIssueNumber: parentGithubIssueNumber,
-            reason: `Parent Issue #${parentGithubIssueNumber} has no open Child Issues`,
+            issueNumber: parentIssueNumber,
+            reason: `Parent Issue #${parentIssueNumber} has no open Child Issues`,
           })
         }
 
@@ -5240,12 +5231,12 @@ export const makeWorkItemLifecycleLive = (
             item.state !== "failed" &&
             item.state !== "abandoned"
           ) {
-            unfinishedByIssue.set(item.githubIssueNumber, item.id)
+            unfinishedByIssue.set(item.issueNumber, item.id)
           }
         }
 
         const mayNeedCreate = openChildren.some(
-          (child) => !unfinishedByIssue.has(child.githubIssueNumber),
+          (child) => !unfinishedByIssue.has(child.issueNumber),
         )
 
         const mapTransactionError = (
@@ -5282,8 +5273,8 @@ export const makeWorkItemLifecycleLive = (
               return Effect.fail(
                 new ImplementAllWithAutoMergeNotEligibleError({
                   repositoryId,
-                  githubIssueNumber: parentGithubIssueNumber,
-                  reason: `A concurrent request enrolled a Child Issue of Parent Issue #${parentGithubIssueNumber}`,
+                  issueNumber: parentIssueNumber,
+                  reason: `A concurrent request enrolled a Child Issue of Parent Issue #${parentIssueNumber}`,
                 }),
               )
             }
@@ -5319,10 +5310,10 @@ export const makeWorkItemLifecycleLive = (
                       .unsafe(
                         `SELECT id FROM work_item
                          WHERE repository_id = ?
-                           AND github_issue_number = ?
+                           AND issue_number = ?
                            AND state NOT IN ('complete', 'failed', 'abandoned')
                          LIMIT 1`,
-                        [repositoryId, child.githubIssueNumber],
+                        [repositoryId, child.issueNumber],
                       )
                       .pipe(Effect.mapError(toDatabaseError))) as readonly {
                       readonly id: string
@@ -5350,8 +5341,8 @@ export const makeWorkItemLifecycleLive = (
                         return yield* new ImplementAllWithAutoMergeNotEligibleError(
                           {
                             repositoryId,
-                            githubIssueNumber: parentGithubIssueNumber,
-                            reason: `A concurrent request changed a Child Issue of Parent Issue #${parentGithubIssueNumber}`,
+                            issueNumber: parentIssueNumber,
+                            reason: `A concurrent request changed a Child Issue of Parent Issue #${parentIssueNumber}`,
                           },
                         )
                       }
@@ -5365,8 +5356,8 @@ export const makeWorkItemLifecycleLive = (
                       return yield* new ImplementAllWithAutoMergeNotEligibleError(
                         {
                           repositoryId,
-                          githubIssueNumber: parentGithubIssueNumber,
-                          reason: `A concurrent request changed a Child Issue of Parent Issue #${parentGithubIssueNumber}`,
+                          issueNumber: parentIssueNumber,
+                          reason: `A concurrent request changed a Child Issue of Parent Issue #${parentIssueNumber}`,
                         },
                       )
                     }
@@ -5377,7 +5368,7 @@ export const makeWorkItemLifecycleLive = (
                     if (blocked) {
                       yield* sql.unsafe(
                         `INSERT INTO work_item (
-                     id, repository_id, github_issue_number, agent_backend,
+                     id, repository_id, issue_number, agent_backend,
                       issue_title, state, state_ready_at, paused,
                       waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                       pause_before_step, worktree_path, session_id, failure_code,
@@ -5386,7 +5377,7 @@ export const makeWorkItemLifecycleLive = (
                         [
                           workItemId,
                           repositoryId,
-                          child.githubIssueNumber,
+                          child.issueNumber,
                           agentBackendId,
                           child.title,
                           step,
@@ -5399,7 +5390,7 @@ export const makeWorkItemLifecycleLive = (
                       const admit = occupied < limit
                       yield* sql.unsafe(
                         `INSERT INTO work_item (
-                     id, repository_id, github_issue_number, agent_backend,
+                     id, repository_id, issue_number, agent_backend,
                       issue_title, state, state_ready_at, paused,
                       waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                       pause_before_step, worktree_path, session_id, failure_code,
@@ -5408,7 +5399,7 @@ export const makeWorkItemLifecycleLive = (
                         [
                           workItemId,
                           repositoryId,
-                          child.githubIssueNumber,
+                          child.issueNumber,
                           agentBackendId,
                           child.title,
                           step,
@@ -5493,24 +5484,24 @@ export const makeWorkItemLifecycleLive = (
 
       const queueIssue = Effect.fn("WorkItemLifecycle.queue")(function* (
         repositoryId: string,
-        githubIssueNumber: number,
+        issueNumber: number,
       ) {
         const issues = yield* db.listIssues(repositoryId)
         const issue = issues.find(
-          (candidate) => candidate.githubIssueNumber === githubIssueNumber,
+          (candidate) => candidate.issueNumber === issueNumber,
         )
 
         if (!issue) {
           return yield* new IssueNotFoundError({
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
           })
         }
 
         if (issue.state !== "OPEN") {
           return yield* new IssueNotOpenError({
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
             state: issue.state,
           })
         }
@@ -5518,21 +5509,18 @@ export const makeWorkItemLifecycleLive = (
         if (issue.hasChildren) {
           return yield* new ParentIssueError({
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
           })
         }
 
         if (issue.blockedBy.length === 0) {
           return yield* new IssueNotBlockedError({
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
           })
         }
 
-        const existing = yield* listWorkItemsForIssue(
-          repositoryId,
-          githubIssueNumber,
-        )
+        const existing = yield* listWorkItemsForIssue(repositoryId, issueNumber)
         const unfinished = existing.find(
           (item) =>
             item.state !== "complete" &&
@@ -5542,7 +5530,7 @@ export const makeWorkItemLifecycleLive = (
         if (unfinished) {
           return yield* unfinishedWorkItemExistsError(
             repositoryId,
-            githubIssueNumber,
+            issueNumber,
             unfinished.id,
           )
         }
@@ -5588,7 +5576,7 @@ export const makeWorkItemLifecycleLive = (
                 Effect.gen(function* () {
                   yield* sql.unsafe(
                     `INSERT INTO work_item (
-                 id, repository_id, github_issue_number, agent_backend,
+                 id, repository_id, issue_number, agent_backend,
                   issue_title, state, state_ready_at, paused,
                   waiting_since, waiting_for_blockers, merge_mode, holds_worker_slot,
                   pause_before_step, worktree_path, session_id, failure_code,
@@ -5597,7 +5585,7 @@ export const makeWorkItemLifecycleLive = (
                     [
                       workItemId,
                       repositoryId,
-                      githubIssueNumber,
+                      issueNumber,
                       agentBackendId,
                       issue.title,
                       step,
@@ -5625,7 +5613,7 @@ export const makeWorkItemLifecycleLive = (
                     if (isUnfinishedWorkItemUniqueViolation(sqlError)) {
                       return unfinishedWorkItemExistsError(
                         repositoryId,
-                        githubIssueNumber,
+                        issueNumber,
                       )
                     }
                     return Effect.fail(toDatabaseError(sqlError))

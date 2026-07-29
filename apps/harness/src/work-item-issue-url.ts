@@ -1,6 +1,5 @@
 export const workItemIssueUrl = (
-  githubOwner: string,
-  githubRepo: string,
-  githubIssueNumber: number,
-): string =>
-  `https://github.com/${githubOwner}/${githubRepo}/issues/${githubIssueNumber}`
+  forgeHost: string,
+  projectPath: string,
+  issueNumber: number,
+): string => `https://${forgeHost}/${projectPath}/issues/${issueNumber}`

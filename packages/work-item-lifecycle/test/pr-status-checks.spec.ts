@@ -46,7 +46,7 @@ const mergeable = {
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
   repositoryId: repository.id,
-  githubIssueNumber: 42,
+  issueNumber: 42,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",
@@ -87,14 +87,14 @@ const seedWorkItem = Effect.gen(function* () {
   const now = Date.now()
   yield* sql.unsafe(
     `INSERT INTO repository (
-       id, github_owner, github_repo, local_path, is_bare, paused,
+       id, forge, forge_host, project_path, local_path, is_bare, paused,
        issues_reconciled_at, created_at, updated_at
-     ) VALUES (?, 'acme', 'widgets', '/repos/widgets', 1, 0, NULL, ?, ?)`,
+     ) VALUES (?, 'github', 'github.com', 'acme/widgets', '/repos/widgets', 1, 0, NULL, ?, ?)`,
     [repository.id, now, now],
   )
   yield* sql.unsafe(
     `INSERT INTO work_item (
-       id, repository_id, github_issue_number, state,
+       id, repository_id, issue_number, state,
        state_ready_at, worktree_path, session_id, failure_code, failure_message,
        created_at, updated_at
       ) VALUES (?, ?, 42,

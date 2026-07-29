@@ -1,8 +1,8 @@
 export const workItemPullRequestUrl = (
-  githubOwner: string,
-  githubRepo: string,
-  githubPullRequestNumber: number | null,
+  forgeHost: string,
+  projectPath: string,
+  pullRequestNumber: number | null,
 ): string | null => {
-  if (githubPullRequestNumber === null) return null
-  return `https://github.com/${githubOwner}/${githubRepo}/pull/${githubPullRequestNumber}`
+  if (pullRequestNumber === null) return null
+  return `https://${forgeHost}/${projectPath}/pull/${pullRequestNumber}`
 }

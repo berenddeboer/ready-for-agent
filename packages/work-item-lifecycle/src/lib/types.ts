@@ -89,9 +89,9 @@ export interface StepRunRecord {
 export interface WorkItemRecord {
   readonly id: WorkItemId
   readonly repositoryId: string
-  readonly githubIssueNumber: number
+  readonly issueNumber: number
   readonly issueTitle: string | null
-  readonly githubPullRequestNumber: number | null
+  readonly pullRequestNumber: number | null
   /**
    * Effective Agent Backend captured at creation: provenance and routing
    * authority for Agent Turns and model resolution for the Work Item lifetime.

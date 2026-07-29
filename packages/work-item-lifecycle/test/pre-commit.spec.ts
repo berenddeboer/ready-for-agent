@@ -36,7 +36,7 @@ const baseContext = (
 ): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-test",
-  githubIssueNumber: 90,
+  issueNumber: 90,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",

@@ -1,6 +1,7 @@
 import { Effect, Layer, Schema } from "effect"
 import {
   type GitHubHelperOperation,
+  type GitHubRepository,
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
@@ -187,7 +188,7 @@ const SerializedMergePullRequestResult = Schema.Union([
 ])
 
 const requestError = (
-  repository: { owner: string; name: string },
+  repository: GitHubRepository,
   operation: string,
   detail?: string,
 ) => {
@@ -198,17 +199,28 @@ const requestError = (
   return new GitHubRequestError({
     message:
       cleaned === ""
-        ? `Failed to ${operation} for ${repository.owner}/${repository.name}`
-        : `Failed to ${operation} for ${repository.owner}/${repository.name}: ${cleaned}`,
+        ? `Failed to ${operation} for ${repository.projectPath}`
+        : `Failed to ${operation} for ${repository.projectPath}: ${cleaned}`,
   })
 }
 
 const encodeArgument = (value: string) =>
   Buffer.from(value, "utf8").toString("base64url")
 
+const encodedRepositoryArguments = (repository: GitHubRepository) => {
+  return [
+    encodeArgument(repository.forge),
+    encodeArgument(repository.forgeHost),
+    encodeArgument(repository.projectPath),
+  ] as const
+}
+
+const repositoryUnavailable = (repository: GitHubRepository) =>
+  new GitHubRepositoryUnavailableError(repository)
+
 const parseIssues = (
   stdout: string,
-  repository: { owner: string; name: string },
+  repository: GitHubRepository,
 ): Effect.Effect<readonly ReadyLabeledIssue[], GitHubRequestError> =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(SerializedIssues))(
     stdout,
@@ -226,10 +238,10 @@ export const keymaxxerGitHubLayer = (options: {
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
       const ensureToken = Effect.fn("KeymaxxerGitHub.ensureToken")(
-        (repository: { owner: string; name: string }) =>
+        (repository: GitHubRepository) =>
           keymaxxer.findSecret({
             provider: "github",
-            account: `${repository.owner}/${repository.name}`,
+            account: repository.projectPath,
           }),
       )
       const runGitHubCommand = Effect.fn("KeymaxxerGitHub.runCommand")(
@@ -265,15 +277,15 @@ export const keymaxxerGitHubLayer = (options: {
                 "resolve authenticated GitHub user",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const result = yield* runGitHubBin(
               tokenName,
               "get-authenticated-user-login",
-              [owner, name],
+              [forge, forgeHost, projectPath],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -307,16 +319,16 @@ export const keymaxxerGitHubLayer = (options: {
                 "get open pull request number",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
               "get-open-pr-number",
-              [owner, name, head],
+              [forge, forgeHost, projectPath, head],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -350,16 +362,16 @@ export const keymaxxerGitHubLayer = (options: {
                 "find open pull request number",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
               "find-open-pr-number",
-              [owner, name, head],
+              [forge, forgeHost, projectPath, head],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -397,8 +409,8 @@ export const keymaxxerGitHubLayer = (options: {
                 "create draft pull request",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const payload = encodeArgument(
               JSON.stringify({
                 headRefName: input.headRefName,
@@ -412,10 +424,10 @@ export const keymaxxerGitHubLayer = (options: {
             const result = yield* runGitHubBin(
               tokenName,
               "create-draft-pull-request",
-              [owner, name, payload],
+              [forge, forgeHost, projectPath, payload],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -449,8 +461,8 @@ export const keymaxxerGitHubLayer = (options: {
                 "update open draft pull request copy",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const payload = encodeArgument(
               JSON.stringify({
                 headRefName,
@@ -461,10 +473,10 @@ export const keymaxxerGitHubLayer = (options: {
             const result = yield* runGitHubBin(
               tokenName,
               "update-open-draft-pull-request-copy",
-              [owner, name, payload],
+              [forge, forgeHost, projectPath, payload],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -502,15 +514,15 @@ export const keymaxxerGitHubLayer = (options: {
                 "count open non-draft pull requests",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const result = yield* runGitHubBin(
               tokenName,
               "count-open-non-draft-pull-requests",
-              [owner, name],
+              [forge, forgeHost, projectPath],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -544,16 +556,16 @@ export const keymaxxerGitHubLayer = (options: {
                 "get pull request check status",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
               "get-pr-check-status",
-              [owner, name, head],
+              [forge, forgeHost, projectPath, head],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -594,8 +606,8 @@ export const keymaxxerGitHubLayer = (options: {
                 "get PR Status Check diagnostics",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const checksArg = encodeArgument(
               JSON.stringify(
                 checks.map((check) => ({
@@ -613,11 +625,11 @@ export const keymaxxerGitHubLayer = (options: {
               tokenName,
               "get-pr-status-check-diagnostics",
               logDirectory === ""
-                ? [owner, name, checksArg]
-                : [owner, name, checksArg, logDirectory],
+                ? [forge, forgeHost, projectPath, checksArg]
+                : [forge, forgeHost, projectPath, checksArg, logDirectory],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -653,8 +665,8 @@ export const keymaxxerGitHubLayer = (options: {
                 "observe automated review evidence",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const checksArg = encodeArgument(
               JSON.stringify(
@@ -667,10 +679,10 @@ export const keymaxxerGitHubLayer = (options: {
             const result = yield* runGitHubBin(
               tokenName,
               "observe-automated-review-evidence",
-              [owner, name, head, checksArg],
+              [forge, forgeHost, projectPath, head, checksArg],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -708,16 +720,16 @@ export const keymaxxerGitHubLayer = (options: {
                 "get pull request lifecycle status",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
               "get-pr-lifecycle-status",
-              [owner, name, head],
+              [forge, forgeHost, projectPath, head],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -753,16 +765,16 @@ export const keymaxxerGitHubLayer = (options: {
                 "mark pull request ready for review",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
               "mark-pr-ready-for-review",
-              [owner, name, head],
+              [forge, forgeHost, projectPath, head],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -784,16 +796,16 @@ export const keymaxxerGitHubLayer = (options: {
             if (tokenName === null) {
               return yield* requestError(repository, "merge pull request")
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const head = encodeArgument(headRefName)
             const result = yield* runGitHubBin(
               tokenName,
               "merge-pull-request",
-              [owner, name, head],
+              [forge, forgeHost, projectPath, head],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -824,16 +836,16 @@ export const keymaxxerGitHubLayer = (options: {
             if (tokenName === null) {
               return yield* requestError(repository, "rerun workflow run")
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const runId = encodeArgument(String(workflowRunId))
             const result = yield* runGitHubBin(
               tokenName,
               "rerun-workflow-run",
-              [owner, name, runId],
+              [forge, forgeHost, projectPath, runId],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -861,18 +873,18 @@ export const keymaxxerGitHubLayer = (options: {
                 "complete Issue with summary",
               )
             }
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const number = encodeArgument(String(issueNumber))
             const workItem = encodeArgument(workItemId)
             const summary = encodeArgument(summaryMarkdown)
             const result = yield* runGitHubBin(
               tokenName,
               "ensure-issue-completed-with-summary",
-              [owner, name, number, workItem, summary],
+              [forge, forgeHost, projectPath, number, workItem, summary],
             )
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(
@@ -898,15 +910,16 @@ export const keymaxxerGitHubLayer = (options: {
               )
             }
 
-            const owner = encodeArgument(repository.owner)
-            const name = encodeArgument(repository.name)
+            const [forge, forgeHost, projectPath] =
+              encodedRepositoryArguments(repository)
             const result = yield* runGitHubBin(tokenName, "list-ready-issues", [
-              owner,
-              name,
+              forge,
+              forgeHost,
+              projectPath,
             ])
 
             if (result.exitCode === 2) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* repositoryUnavailable(repository)
             }
             if (result.exitCode !== 0) {
               return yield* requestError(

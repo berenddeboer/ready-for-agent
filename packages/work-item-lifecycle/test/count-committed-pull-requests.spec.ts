@@ -76,9 +76,9 @@ const seedRepository = (repositoryId: string, now: number) =>
     const sql = yield* SqlClient.SqlClient
     yield* sql.unsafe(
       `INSERT INTO repository (
-         id, github_owner, github_repo, local_path, is_bare, paused,
+         id, forge, forge_host, project_path, local_path, is_bare, paused,
          issues_reconciled_at, created_at, updated_at
-       ) VALUES (?, 'acme', ?, ?, 1, 0, NULL, ?, ?)`,
+       ) VALUES (?, 'github', 'github.com', ?, ?, 1, 0, NULL, ?, ?)`,
       [repositoryId, repositoryId, `/tmp/${repositoryId}`, now, now],
     )
   })
@@ -86,8 +86,8 @@ const seedRepository = (repositoryId: string, now: number) =>
 const seedWorkItemWithCommit = (input: {
   readonly workItemId: string
   readonly repositoryId: string
-  readonly githubIssueNumber: number
-  readonly githubPullRequestNumber: number | null
+  readonly issueNumber: number
+  readonly pullRequestNumber: number | null
   readonly commitStatus: string
   readonly finishedAt: number | null
   readonly extraCommitFinishedAt?: number
@@ -97,7 +97,7 @@ const seedWorkItemWithCommit = (input: {
     const sql = yield* SqlClient.SqlClient
     yield* sql.unsafe(
       `INSERT INTO work_item (
-         id, repository_id, github_issue_number, github_pull_request_number,
+         id, repository_id, issue_number, pull_request_number,
          state, state_ready_at,
          worktree_path, session_id, failure_code, failure_message,
          created_at, updated_at
@@ -106,8 +106,8 @@ const seedWorkItemWithCommit = (input: {
       [
         input.workItemId,
         input.repositoryId,
-        input.githubIssueNumber,
-        input.githubPullRequestNumber,
+        input.issueNumber,
+        input.pullRequestNumber,
         input.now,
         input.now,
         input.now,
@@ -168,8 +168,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-today-a",
           repositoryId: "repo-a",
-          githubIssueNumber: 1,
-          githubPullRequestNumber: 10,
+          issueNumber: 1,
+          pullRequestNumber: 10,
           commitStatus: "succeeded",
           finishedAt: midDay,
           now,
@@ -177,8 +177,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-today-b",
           repositoryId: "repo-b",
-          githubIssueNumber: 2,
-          githubPullRequestNumber: 20,
+          issueNumber: 2,
+          pullRequestNumber: 20,
           commitStatus: "succeeded",
           finishedAt: justBeforeEnd,
           now,
@@ -208,8 +208,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-failed",
           repositoryId: "repo-a",
-          githubIssueNumber: 1,
-          githubPullRequestNumber: 10,
+          issueNumber: 1,
+          pullRequestNumber: 10,
           commitStatus: "failed",
           finishedAt: midDay,
           now,
@@ -217,8 +217,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-running",
           repositoryId: "repo-a",
-          githubIssueNumber: 2,
-          githubPullRequestNumber: 11,
+          issueNumber: 2,
+          pullRequestNumber: 11,
           commitStatus: "running",
           finishedAt: null,
           now,
@@ -226,8 +226,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-queued",
           repositoryId: "repo-a",
-          githubIssueNumber: 3,
-          githubPullRequestNumber: 12,
+          issueNumber: 3,
+          pullRequestNumber: 12,
           commitStatus: "queued",
           finishedAt: null,
           now,
@@ -247,8 +247,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-no-pr",
           repositoryId: "repo-a",
-          githubIssueNumber: 1,
-          githubPullRequestNumber: null,
+          issueNumber: 1,
+          pullRequestNumber: null,
           commitStatus: "succeeded",
           finishedAt: midDay,
           now,
@@ -268,7 +268,7 @@ describe("countCommittedPullRequests", () => {
         yield* seedRepository("repo-a", now)
         yield* sql.unsafe(
           `INSERT INTO work_item (
-             id, repository_id, github_issue_number, github_pull_request_number,
+             id, repository_id, issue_number, pull_request_number,
              state, state_ready_at,
              worktree_path, session_id, failure_code, failure_message,
              completion_summary, created_at, updated_at
@@ -306,8 +306,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-retry",
           repositoryId: "repo-a",
-          githubIssueNumber: 1,
-          githubPullRequestNumber: 10,
+          issueNumber: 1,
+          pullRequestNumber: 10,
           commitStatus: "succeeded",
           finishedAt: Date.parse("2026-07-18T08:00:00.000Z"),
           extraCommitFinishedAt: Date.parse("2026-07-18T16:00:00.000Z"),
@@ -328,8 +328,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-start",
           repositoryId: "repo-a",
-          githubIssueNumber: 1,
-          githubPullRequestNumber: 10,
+          issueNumber: 1,
+          pullRequestNumber: 10,
           commitStatus: "succeeded",
           finishedAt: dayStart,
           now,
@@ -337,8 +337,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-end",
           repositoryId: "repo-a",
-          githubIssueNumber: 2,
-          githubPullRequestNumber: 11,
+          issueNumber: 2,
+          pullRequestNumber: 11,
           commitStatus: "succeeded",
           finishedAt: justAtEnd,
           now,
@@ -346,8 +346,8 @@ describe("countCommittedPullRequests", () => {
         yield* seedWorkItemWithCommit({
           workItemId: "wi-yesterday",
           repositoryId: "repo-a",
-          githubIssueNumber: 3,
-          githubPullRequestNumber: 12,
+          issueNumber: 3,
+          pullRequestNumber: 12,
           commitStatus: "succeeded",
           finishedAt: yesterdayStart,
           now,

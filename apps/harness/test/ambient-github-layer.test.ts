@@ -56,8 +56,16 @@ test("ambient GitHub authentication is resolved once", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
       const github = yield* GitHubService
-      yield* github.listReadyIssues({ owner: "acme", name: "one" })
-      yield* github.listReadyIssues({ owner: "acme", name: "two" })
+      yield* github.listReadyIssues({
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/one",
+      })
+      yield* github.listReadyIssues({
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/two",
+      })
     }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 
@@ -87,7 +95,11 @@ test("ambient GitHub authentication refreshes once after a 401", async () => {
   await Effect.runPromise(
     Effect.gen(function* () {
       const github = yield* GitHubService
-      yield* github.listReadyIssues({ owner: "acme", name: "widgets" })
+      yield* github.listReadyIssues({
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+      })
     }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 
@@ -128,8 +140,16 @@ test("concurrent 401 responses share one refreshed token", async () => {
       const github = yield* GitHubService
       yield* Effect.all(
         [
-          github.listReadyIssues({ owner: "acme", name: "one" }),
-          github.listReadyIssues({ owner: "acme", name: "two" }),
+          github.listReadyIssues({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/one",
+          }),
+          github.listReadyIssues({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/two",
+          }),
         ],
         { concurrency: "unbounded" },
       )
@@ -163,7 +183,11 @@ test("ambient GitHub authentication is not refreshed after a 403", async () => {
     Effect.gen(function* () {
       const github = yield* GitHubService
       return yield* Effect.exit(
-        github.listReadyIssues({ owner: "acme", name: "widgets" }),
+        github.listReadyIssues({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+        }),
       )
     }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
@@ -187,10 +211,18 @@ test("failed authentication acquisition is cleared for a later retry", async () 
     Effect.gen(function* () {
       const github = yield* GitHubService
       const first = yield* Effect.exit(
-        github.listReadyIssues({ owner: "acme", name: "widgets" }),
+        github.listReadyIssues({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+        }),
       )
       expect(first._tag).toBe("Failure")
-      yield* github.listReadyIssues({ owner: "acme", name: "widgets" })
+      yield* github.listReadyIssues({
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+      })
     }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
   )
 

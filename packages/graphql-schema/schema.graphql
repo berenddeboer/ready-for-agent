@@ -45,7 +45,7 @@ type Query {
   models: [AgentModel!]!
   issues(repositoryId: ID!): [Issue!]!
   """
-  Work Items for a repository (or one issue when githubIssueNumber is set).
+  Work Items for a repository (or one issue when issueNumber is set).
   Omit listKind/limit for the full list (backward-compatible default).
   listKind WORKING: unfinished Work Items (including retryable failed or
   interrupted Step Runs) plus Needs Human (no history cap from the Jobs card).
@@ -56,7 +56,7 @@ type Query {
   """
   workItems(
     repositoryId: ID!
-    githubIssueNumber: Int
+    issueNumber: Int
     listKind: WorkItemsListKind
     limit: Int
   ): [WorkItem!]!
@@ -221,8 +221,9 @@ type AgentModel {
 
 type Repository {
   id: ID!
-  githubOwner: String!
-  githubRepo: String!
+  forge: String!
+  forgeHost: String!
+  projectPath: String!
   localPath: String!
   isBare: Boolean!
   paused: Boolean!
@@ -277,7 +278,7 @@ enum IssueState {
 type Issue {
   id: ID!
   repositoryId: ID!
-  githubIssueNumber: Int!
+  issueNumber: Int!
   title: String!
   body: String!
   url: String!
@@ -290,8 +291,8 @@ type Issue {
 }
 
 type IssueReference {
-  githubIssueNumber: Int!
-  githubIssueUrl: String!
+  issueNumber: Int!
+  issueUrl: String!
 }
 
 type RefreshJob {
@@ -382,9 +383,9 @@ enum MergeMode {
 type WorkItem {
   id: ID!
   repositoryId: ID!
-  githubIssueNumber: Int!
+  issueNumber: Int!
   issueTitle: String
-  githubPullRequestNumber: Int
+  pullRequestNumber: Int
   """
   Active Agent Backend captured at Work Item creation (provenance).
   """
@@ -418,8 +419,9 @@ type WorkItem {
 }
 
 input AddRepositoryInput {
-  githubOwner: String!
-  githubRepo: String!
+  forge: String!
+  forgeHost: String!
+  projectPath: String!
   localPath: String!
   isBare: Boolean!
 }
@@ -476,11 +478,11 @@ type Mutation {
   addRepositoryGitHubToken(repositoryId: ID!): RepositoryCredential!
   removeRepository(repositoryId: ID!): ID!
   refreshRepository(repositoryId: ID!): RefreshJob!
-  implementNow(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
+  implementNow(repositoryId: ID!, issueNumber: Int!): WorkItem!
   """
   Create a Work Item that runs local steps through Review, then pauses before Commit.
   """
-  implementLocally(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
+  implementLocally(repositoryId: ID!, issueNumber: Int!): WorkItem!
   """
   Parent-level Implement all with auto-merge. Snapshots open direct Child Issues
   and atomically enrolls them: creates ordinary Work Items with Merge Mode ALWAYS
@@ -491,15 +493,12 @@ type Mutation {
   handoff stays stopped. Returns covered child Work Items. Does not create a
   Parent Work Item.
   """
-  implementAllWithAutoMerge(
-    repositoryId: ID!
-    githubIssueNumber: Int!
-  ): [WorkItem!]!
+  implementAllWithAutoMerge(repositoryId: ID!, issueNumber: Int!): [WorkItem!]!
   """
   Queue a Relevant open leaf Issue that has listed blockers: creates a Work Item
   in Waiting for blockers (no Worker Slot, no Step Run).
   """
-  queue(repositoryId: ID!, githubIssueNumber: Int!): WorkItem!
+  queue(repositoryId: ID!, issueNumber: Int!): WorkItem!
   retryWorkItem(workItemId: ID!): WorkItem!
   pauseWorkItem(workItemId: ID!): WorkItem!
   startWorkItem(workItemId: ID!): WorkItem!
