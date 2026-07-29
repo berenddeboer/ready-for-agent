@@ -33,6 +33,12 @@ export const markPrReadyForReview = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
+    if (repository.forge === "gitlab") {
+      return yield* new MarkPrReadyForReviewContextError({
+        message:
+          "GitLab Mark PR Ready for Review requires GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
+      })
+    }
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,

@@ -10,11 +10,11 @@ import {
   type TerminalPrStatusCheck,
 } from "@ready-for-agent/github-service"
 import {
-  AgentTurnGitHubCredentialMissingError,
+  AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
-  agentTurnGitHubCredentialGuidance,
-  resolveAgentTurnGitHubAuth,
-} from "./agent-turn-github-auth.js"
+  agentTurnForgeCredentialGuidance,
+  resolveAgentTurnForgeAuth,
+} from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
@@ -236,6 +236,12 @@ const timingEvidence = (status: {
 export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
+    if (repository.forge === "gitlab") {
+      return yield* new PrStatusChecksContextError({
+        message:
+          "GitLab PR Status Checks require GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
+      })
+    }
     const github = yield* GitHubService
     const status = yield* github.getPullRequestCheckStatus(repository, branch)
     const evidence = timingEvidence(status)
@@ -513,6 +519,7 @@ const formatDiagnosticBlock = (diagnostic: PrStatusCheckDiagnostic): string => {
 }
 
 const buildInvestigationWorkPrompt = (
+  forge: "github" | "gitlab",
   checks: readonly ObservedPrStatusCheckRow[],
   diagnostics: readonly PrStatusCheckDiagnostic[],
 ): string => {
@@ -525,13 +532,20 @@ const buildInvestigationWorkPrompt = (
     lines.push(
       "Diagnose and fix these failing checks when possible:",
       ...redChecks.map(formatRedCheckLine),
-      "Fine-grained GitHub PATs often cannot use the Checks API; HTTP 403 on Checks endpoints is expected and is not a credential failure by itself. Prefer Actions job logs for external ids of the form actions-job:<id>.",
-      "When calling `gh api` with query parameters on GET endpoints, pass `--method GET` with `-f` (or use a GET-safe invocation). Bare `-f` defaults to POST and can produce misleading 404 responses.",
-      "For transient infrastructure failures (for example GitHub 503, runner outages, or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
+      ...(forge === "github"
+        ? [
+            "Fine-grained GitHub PATs often cannot use the Checks API; HTTP 403 on Checks endpoints is expected and is not a credential failure by itself. Prefer Actions job logs for external ids of the form actions-job:<id>.",
+            "When calling `gh api` with query parameters on GET endpoints, pass `--method GET` with `-f` (or use a GET-safe invocation). Bare `-f` defaults to POST and can produce misleading 404 responses.",
+            "For transient infrastructure failures (for example GitHub 503, runner outages, or flaky network during the check), restart the failed checks when appropriate so new executions can run before concluding the handoff cannot progress.",
+          ]
+        : [
+            "Use the supplied GitLab pipeline-job traces first; call the GitLab REST API only when more detail is needed.",
+            "For transient infrastructure failures (for example GitLab 503, runner outages, or flaky network during the job), restart the failed pipeline jobs when appropriate so new executions can run before concluding the handoff cannot progress.",
+          ]),
     )
     if (diagnostics.length > 0) {
       lines.push(
-        "Harness diagnostics for the red checks follow. Use these artifacts first; only call GitHub for additional detail if needed.",
+        `Harness diagnostics for the red checks follow. Use these artifacts first; only call ${forge === "github" ? "GitHub" : "GitLab"} for additional detail if needed.`,
         ...diagnostics.map(formatDiagnosticBlock),
       )
     }
@@ -539,7 +553,7 @@ const buildInvestigationWorkPrompt = (
       "Fix the underlying problem when possible, verify the fix, commit it, and push it to the existing PR branch.",
     )
   }
-  if (hasGreen) {
+  if (hasGreen && forge === "github") {
     lines.push(
       "One or more automated reviews may have completed, but an automated reviewer can stop semantically incomplete even when GitHub reports its check and workflow as successful. Inspect the latest relevant automated-review run and comment, when either exists, before deciding what to do.",
       'Do not assume an automated review exists merely because CI is present. Workflow or job names alone (including names containing "review" or "PR Review") are not positive review evidence. Positive evidence requires an executed reviewer job or step, or a comment from a recognized automated reviewer; ordinary CI, repository configuration, and generic bot activity are not review evidence.',
@@ -563,7 +577,9 @@ const buildInvestigationWorkPrompt = (
 }
 
 /** Shared outcome contract for status-check work, recovery, and fallback. */
-const investigationOutcomeContractLines = (): readonly string[] => [
+const investigationOutcomeContractLines = (
+  forge: "github" | "gitlab" = "github",
+): readonly string[] => [
   "You may include a concise work and verification summary before the result line.",
   "End your final response with exactly one machine-readable result line:",
   "READY_FOR_AGENT_RESULT: CHECKS_TRIGGERED",
@@ -571,9 +587,13 @@ const investigationOutcomeContractLines = (): readonly string[] => [
   "READY_FOR_AGENT_RESULT: PROCESSED",
   "Use PROCESSED when the handoff is handled and no replacement execution is expected: for example a green-only handoff with no relevant automated-review run or comment (including a skipped reviewer with no review output), a successful terminal review with no relevant comment (no feedback), or a genuinely completed review that had nothing to address.",
   "Do not report PROCESSED for a present, positively identified, visibly incomplete automated review that still needs a whole-workflow rerun. Request the rerun instead.",
-  "When positive review evidence shows present, positively identified, visibly incomplete Automated Review Output that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
-  "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
-  "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id> <workflow_name>",
+  ...(forge === "github"
+    ? [
+        "When positive review evidence shows present, positively identified, visibly incomplete Automated Review Output that needs a whole-workflow rerun, do not call GitHub yourself. Report the workflow run id (and optional workflow name) so the harness can authorize and execute the rerun:",
+        "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id>",
+        "READY_FOR_AGENT_RESULT: RERUN_REVIEW: <workflow_run_id> <workflow_name>",
+      ]
+    : []),
   "If this handoff contained red checks and you made no commit, push, check restart, or other action capable of producing a new execution, leaving the PR red, you must not report PROCESSED or CHECKS_TRIGGERED. Report:",
   "READY_FOR_AGENT_RESULT: FAILED: <concise reason>",
   "Also use FAILED when a technical or observability failure prevented you from determining the relevant review state.",
@@ -581,20 +601,25 @@ const investigationOutcomeContractLines = (): readonly string[] => [
   "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
 ]
 
-const buildInvestigationOutcomeFallbackPrompt = (): string =>
+const buildInvestigationOutcomeFallbackPrompt = (
+  forge: "github" | "gitlab" = "github",
+): string =>
   [
     "Based only on the PR status-check work you just did in this session, report the outcome.",
     "Do not make further code changes unless required to answer accurately.",
-    ...investigationOutcomeContractLines(),
+    ...investigationOutcomeContractLines(forge),
   ].join("\n")
 
-const buildInvestigationRecoveryPrompt = (reason: string): string =>
+const buildInvestigationRecoveryPrompt = (
+  reason: string,
+  forge: "github" | "gitlab" = "github",
+): string =>
   [
     "Make one focused recovery attempt to process the PR Status Check Handoff.",
     `Your previous outcome was FAILED: ${reason}`,
     "Re-check the current pull request and retry the failed inspection or any safe action that can produce a replacement check execution, including restarting an appropriate failed workflow.",
     "Do not create an empty or no-op commit merely to restart checks.",
-    ...investigationOutcomeContractLines(),
+    ...investigationOutcomeContractLines(forge),
   ].join("\n")
 
 export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
@@ -611,7 +636,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
     const redChecks = unhandled.filter((check) => check.outcome === "red")
     // Green-only handoffs: skip the Agent Turn when harness-owned observation
     // proves there is no positive automated-review evidence.
-    if (redChecks.length === 0) {
+    if (redChecks.length === 0 && repository.forge === "github") {
       const github = yield* GitHubService
       const evidence = yield* github
         .observeAutomatedReviewEvidence(
@@ -654,23 +679,21 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       }
       // Positive or ambiguous evidence falls through to the Agent Turn path.
     }
-    const auth = yield* resolveAgentTurnGitHubAuth({
-      projectPath: repository.projectPath,
-    }).pipe(
+    const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
       Effect.mapError((cause) => {
         if (
-          cause instanceof AgentTurnGitHubCredentialMissingError ||
+          cause instanceof AgentTurnForgeCredentialMissingError ||
           cause instanceof InvalidCapturedAgentBackendError
         ) {
           return new PrStatusChecksContextError({ message: cause.message })
         }
         return new PrStatusChecksContextError({
-          message: "Failed to resolve the repository GitHub credential",
+          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
         })
       }),
     )
     let diagnostics: readonly PrStatusCheckDiagnostic[] = []
-    if (redChecks.length > 0) {
+    if (redChecks.length > 0 && repository.forge === "github") {
       const github = yield* GitHubService
       const logDirectory = `${worktreePath}/.ready-for-agent/status-check-logs`
       diagnostics = yield* github
@@ -740,7 +763,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         let result = parseInvestigationResult(assistantText)
         if (result === null && !hasInvestigationResultLine(assistantText)) {
           const fallback = yield* continueInvestigationTurn(
-            buildInvestigationOutcomeFallbackPrompt(),
+            buildInvestigationOutcomeFallbackPrompt(repository.forge),
             fallbackPhase,
           )
           result = parseInvestigationResult(fallback.assistantText)
@@ -755,13 +778,16 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
 
     const work = yield* continueInvestigationTurn(
       [
-        buildInvestigationWorkPrompt(unhandled, diagnostics),
-        agentTurnGitHubCredentialGuidance(
+        buildInvestigationWorkPrompt(repository.forge, unhandled, diagnostics),
+        agentTurnForgeCredentialGuidance(
+          repository,
           auth,
-          "GitHub CLI, API, commit, or push access",
+          repository.forge === "github"
+            ? "GitHub CLI, API, commit, or push access"
+            : "GitLab API, commit, or push access",
         ),
         // Outcome contract must remain last so the final-line rule is not diluted.
-        ...investigationOutcomeContractLines(),
+        ...investigationOutcomeContractLines(repository.forge),
       ].join("\n"),
       "work",
     )
@@ -771,7 +797,10 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
     )
     if (typeof investigation !== "string" && investigation._tag === "failed") {
       const recovery = yield* continueInvestigationTurn(
-        buildInvestigationRecoveryPrompt(investigation.reason),
+        buildInvestigationRecoveryPrompt(
+          investigation.reason,
+          repository.forge,
+        ),
         "recovery",
       )
       investigation = yield* parseWithMissingOutcomeFallback(
@@ -798,6 +827,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       typeof investigation !== "string" &&
       investigation._tag === "rerun_review"
     ) {
+      if (repository.forge === "gitlab") {
+        return yield* new PrStatusChecksOpenCodeError({
+          message: `${agentBackendLabel(context.agentBackend)} reported the GitHub-only RERUN_REVIEW outcome for a GitLab Repository`,
+        })
+      }
       const workflowLabel =
         investigation.workflowName ??
         `workflow run ${investigation.workflowRunId}`

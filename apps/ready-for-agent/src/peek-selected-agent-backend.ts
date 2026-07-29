@@ -128,3 +128,64 @@ export const peekSelectedAgentBackendIds = (
     return [defaultAgentBackendId]
   }
 }
+
+export type RepositoryForge = "github" | "gitlab"
+
+/**
+ * Cold-start Forge preflight set from persisted Repositories.
+ *
+ * Missing/empty databases have no Repository tool requirements. A legacy
+ * pre-forge-identity repository table is conservatively GitHub when non-empty,
+ * matching the migration backfill.
+ */
+export const peekRepositoryForges = (
+  databasePath: string,
+): ReadonlyArray<RepositoryForge> => {
+  const filePath = resolveFilePath(databasePath)
+  if (filePath === undefined) {
+    return []
+  }
+
+  try {
+    const db = new Database(filePath, { readonly: true, create: false })
+    try {
+      const table = db
+        .query(
+          `SELECT name
+           FROM sqlite_master
+           WHERE type = 'table' AND name = 'repository'
+           LIMIT 1`,
+        )
+        .get() as { readonly name: string } | null
+      if (table === null) {
+        return []
+      }
+
+      try {
+        const rows = db
+          .query(`SELECT DISTINCT lower(trim(forge)) AS forge FROM repository`)
+          .all() as ReadonlyArray<{ readonly forge: string | null }>
+        const found = new Set(
+          rows
+            .map((row) => row.forge)
+            .filter(
+              (forge): forge is RepositoryForge =>
+                forge === "github" || forge === "gitlab",
+            ),
+        )
+        return (["github", "gitlab"] as const).filter((forge) =>
+          found.has(forge),
+        )
+      } catch {
+        const row = db
+          .query(`SELECT COUNT(*) AS count FROM repository`)
+          .get() as { readonly count: number } | null
+        return Number(row?.count ?? 0) > 0 ? ["github"] : []
+      }
+    } finally {
+      db.close()
+    }
+  } catch {
+    return []
+  }
+}

@@ -359,6 +359,17 @@ export const removeWorktree = (
 ) =>
   Effect.gen(function* () {
     const repository = yield* resolveRepository(context.repositoryId)
+    if (repository.forge === "gitlab") {
+      return yield* new RemoveWorktreeRemoteError({
+        message:
+          "GitLab Remove Worktree requires GitLab PR lifecycle support; refusing to invoke GitHub cleanup for a GitLab Repository",
+        branchName: workItemBranchName({
+          projectPath: repository.projectPath,
+          issueNumber: context.issueNumber,
+          workItemId: context.workItemId,
+        }),
+      })
+    }
     const branchName = yield* removeLocalArtifacts(repository, context, options)
 
     yield* removeRemoteArtifacts({ repository, branchName })

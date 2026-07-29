@@ -5,9 +5,9 @@ export type MakeGrokEnvironmentOptions = {
 }
 
 /**
- * Grok Build Agent Turns use ambient `gh` only: inherit process env (including
- * ambient GitHub tokens), and force auto-update off for the process lifetime.
- * Grok does not support KeymaxxerMcp, so tokens are never stripped.
+ * Grok Build Agent Turns use ambient Forge authentication: inherit process env
+ * (including ambient Forge tokens), and force auto-update off for the process
+ * lifetime. Grok does not support KeymaxxerMcp, so tokens are never stripped.
  */
 export const makeGrokEnvironment = (
   options: MakeGrokEnvironmentOptions = {},
@@ -16,7 +16,7 @@ export const makeGrokEnvironment = (
     options.environment ?? (process.env as Record<string, string | undefined>)
   return {
     ...sanitizeInheritedEnvironment(environment, {
-      stripGitHubTokens: false,
+      stripForgeTokens: false,
     }),
     GROK_DISABLE_AUTOUPDATER: "1",
   }

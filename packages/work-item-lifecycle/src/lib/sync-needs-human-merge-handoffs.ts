@@ -13,13 +13,16 @@ import { workItemBranchName } from "./worktree-names.js"
 export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
   Effect.gen(function* () {
     const lifecycle = yield* WorkItemLifecycle
-    const github = yield* GitHubService
     const db = yield* DbService
     const repositories = yield* db.listRepositories
     const repository = repositories.find(({ id }) => id === repositoryId)
     if (repository === undefined) {
       return 0
     }
+    if (repository.forge === "gitlab") {
+      return 0
+    }
+    const github = yield* GitHubService
 
     const workItems = yield* lifecycle.listWorkItemsForRepository(repositoryId)
     let advanced = 0

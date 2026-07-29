@@ -33,6 +33,12 @@ export const mergePr = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
+    if (repository.forge === "gitlab") {
+      return yield* new MergePrContextError({
+        message:
+          "GitLab Merge PR requires GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
+      })
+    }
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,

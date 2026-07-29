@@ -9,6 +9,7 @@ import {
 } from "@ready-for-agent/github-service"
 import {
   type LifecycleStepContext,
+  MarkPrReadyForReviewContextError,
   makeWorkItemId,
   markPrReadyForReview,
 } from "../src/index.js"
@@ -129,5 +130,38 @@ describe("markPrReadyForReview", () => {
     )
 
     expect(exit._tag).toBe("Failure")
+  })
+
+  it("fails closed before GitHub access for a GitLab Repository", async () => {
+    let githubCalls = 0
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/widgets",
+      localPath: "/repos/widgets",
+    })
+    const gitlabDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([gitlabRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      markPullRequestReadyForReview: () => {
+        githubCalls += 1
+        return Effect.void
+      },
+    } as GitHubServiceShape)
+
+    const error = await Effect.runPromise(
+      markPrReadyForReview(context).pipe(
+        Effect.flip,
+        Effect.provide(Layer.merge(gitlabDb, github)),
+      ),
+    )
+
+    expect(error).toBeInstanceOf(MarkPrReadyForReviewContextError)
+    expect(error.message).toContain(
+      "refusing to query GitHub for a GitLab Repository",
+    )
+    expect(githubCalls).toBe(0)
   })
 })

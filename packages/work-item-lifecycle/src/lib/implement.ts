@@ -3,6 +3,15 @@ import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
+  type AgentTurnForgeAuth,
+  AgentTurnForgeCredentialMissingError,
+  type AgentTurnForgeRepository,
+  InvalidCapturedAgentBackendError,
+  agentTurnForgeCredentialGuidance,
+  resolveAgentTurnForgeAuth,
+} from "./agent-turn-forge-auth.js"
+import {
+  ImplementForgeCredentialError,
   ImplementInvalidWorktreeContextError,
   ImplementIssueContextMissingError,
   ImplementOpenCodeError,
@@ -97,33 +106,64 @@ const resolveIssueNumber = (context: LifecycleStepContext) => {
     return Effect.fail(
       new ImplementIssueContextMissingError({
         workItemId: context.workItemId,
-        message:
-          "Implement requires a positive GitHub issue number on the Work Item",
+        message: "Implement requires a positive issue number on the Work Item",
       }),
     )
   }
   return Effect.succeed(context.issueNumber)
 }
 
-const buildImplementPrompt = (projectPath: string, issueNumber: number) =>
-  [
-    `Implement GitHub issue ${projectPath}#${issueNumber}.`,
-    "Inspect the current GitHub Issue and this Repository's agent/project instructions.",
-    "Make the implementation in this worktree and run appropriate verification.",
-    "Do not merely propose a plan; complete the implementation work for that exact issue.",
-  ].join("\n")
+const gitLabAccessGuidance = (
+  repository: AgentTurnForgeRepository,
+  auth: AgentTurnForgeAuth,
+) =>
+  agentTurnForgeCredentialGuidance(
+    repository,
+    auth,
+    "GitLab Issue or API access",
+  )
+
+const buildImplementPrompt = (
+  repository: AgentTurnForgeRepository,
+  issueNumber: number,
+  gitLabAuth: AgentTurnForgeAuth,
+) =>
+  repository.forge === "github"
+    ? [
+        `Implement GitHub issue ${repository.projectPath}#${issueNumber}.`,
+        "Inspect the current GitHub Issue and this Repository's agent/project instructions.",
+        "Make the implementation in this worktree and run appropriate verification.",
+        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+      ].join("\n")
+    : [
+        `Implement GitLab issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
+        "Inspect the current GitLab Issue and this Repository's agent/project instructions.",
+        gitLabAccessGuidance(repository, gitLabAuth),
+        "Make the implementation in this worktree and run appropriate verification.",
+        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+      ].join("\n")
 
 const buildContinueImplementPrompt = (
-  projectPath: string,
+  repository: AgentTurnForgeRepository,
   issueNumber: number,
+  gitLabAuth: AgentTurnForgeAuth,
 ) =>
-  [
-    `Continue implementing GitHub issue ${projectPath}#${issueNumber}.`,
-    "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
-    "Inspect the current GitHub Issue, this Repository's agent/project instructions, and any partial work already present.",
-    "Finish the implementation in this worktree and run appropriate verification.",
-    "Do not merely propose a plan; complete the implementation work for that exact issue.",
-  ].join("\n")
+  repository.forge === "github"
+    ? [
+        `Continue implementing GitHub issue ${repository.projectPath}#${issueNumber}.`,
+        "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
+        "Inspect the current GitHub Issue, this Repository's agent/project instructions, and any partial work already present.",
+        "Finish the implementation in this worktree and run appropriate verification.",
+        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+      ].join("\n")
+    : [
+        `Continue implementing GitLab issue ${repository.projectPath}#${issueNumber} on ${repository.forgeHost}.`,
+        "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
+        "Inspect the current GitLab Issue, this Repository's agent/project instructions, and any partial work already present.",
+        gitLabAccessGuidance(repository, gitLabAuth),
+        "Finish the implementation in this worktree and run appropriate verification.",
+        "Do not merely propose a plan; complete the implementation work for that exact issue.",
+      ].join("\n")
 
 const priorSessionId = (context: LifecycleStepContext): string | null => {
   const sessionId = context.sessionId
@@ -144,12 +184,33 @@ export const implement = (context: LifecycleStepContext) =>
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepository(context)
     const issueNumber = yield* resolveIssueNumber(context)
+    const gitLabAuth =
+      repository.forge === "gitlab"
+        ? yield* resolveAgentTurnForgeAuth(repository).pipe(
+            Effect.mapError((cause) => {
+              if (
+                cause instanceof AgentTurnForgeCredentialMissingError ||
+                cause instanceof InvalidCapturedAgentBackendError
+              ) {
+                return new ImplementForgeCredentialError({
+                  repositoryId: context.repositoryId,
+                  message: cause.message,
+                })
+              }
+              return new ImplementForgeCredentialError({
+                repositoryId: context.repositoryId,
+                message: `Failed to resolve the repository GitLab credential`,
+                cause,
+              })
+            }),
+          )
+        : ({ _tag: "ambient" } satisfies AgentTurnForgeAuth)
 
     const existingSessionId = priorSessionId(context)
     const prompt =
       existingSessionId === null
-        ? buildImplementPrompt(repository.projectPath, issueNumber)
-        : buildContinueImplementPrompt(repository.projectPath, issueNumber)
+        ? buildImplementPrompt(repository, issueNumber, gitLabAuth)
+        : buildContinueImplementPrompt(repository, issueNumber, gitLabAuth)
 
     const agentBackend = yield* AgentBackend
     const sql = yield* SqlClient.SqlClient

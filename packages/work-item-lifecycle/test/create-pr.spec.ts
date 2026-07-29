@@ -169,6 +169,7 @@ const run = <A, E>(
     | ActiveAgentBackend
   >,
   layers: {
+    db?: Layer.Layer<DbService>
     keymaxxer?: Layer.Layer<KeymaxxerService>
     opencode?: Layer.Layer<AgentBackend>
     github?: Layer.Layer<GitHubService>
@@ -179,7 +180,7 @@ const run = <A, E>(
     effect.pipe(
       Effect.provide(
         Layer.mergeAll(
-          stubDb,
+          layers.db ?? stubDb,
           layers.github ?? stubGitHub(),
           layers.keymaxxer ?? stubKeymaxxer(),
           layers.opencode ?? stubOpencode(),
@@ -229,6 +230,56 @@ describe("createPr", () => {
     const error = await run(createPr(baseContext(missing)).pipe(Effect.flip))
     expect(error).toBeInstanceOf(CreatePrInvalidWorktreeContextError)
   })
+
+  it("fails closed before GitHub access for a GitLab Repository", () =>
+    withTemp(async (root) => {
+      let githubCalls = 0
+      let keymaxxerCalls = 0
+      let agentCalls = 0
+      const gitlabDb = stubDbServiceLayer({
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/widgets",
+            localPath: "/repos/project-widgets",
+          }),
+        ]),
+      })
+
+      const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {
+        db: gitlabDb,
+        github: stubGitHub({
+          findOpenPullRequestNumber: () => {
+            githubCalls += 1
+            return Effect.succeed(null)
+          },
+        }),
+        keymaxxer: stubKeymaxxer({
+          findSecret: () => {
+            keymaxxerCalls += 1
+            return Effect.succeed("GITLAB_TOKEN_PROJECT_WIDGETS")
+          },
+        }),
+        opencode: stubOpencode({
+          continueTurn: () => {
+            agentCalls += 1
+            return Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            })
+          },
+        }),
+      })
+
+      expect(error).toBeInstanceOf(CreatePrPostconditionError)
+      expect((error as CreatePrPostconditionError).message).toContain(
+        "refusing to query GitHub for a GitLab Repository",
+      )
+      expect(githubCalls).toBe(0)
+      expect(keymaxxerCalls).toBe(0)
+      expect(agentCalls).toBe(0)
+    }))
 
   it("reuses an existing exact-branch open PR without creation or Agent Turn", () =>
     withTemp(async (root) => {

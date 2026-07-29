@@ -38,18 +38,26 @@ const alwaysRequiredTools: ReadonlyArray<HostTool> = [
     installHint: "Install Git: https://git-scm.com/downloads",
     required: true,
   },
-  {
+]
+
+const FORGE_HOST_TOOLS = {
+  github: {
     name: "gh",
     installHint: "Install GitHub CLI (gh): https://cli.github.com/",
-    required: true,
   },
-]
+  gitlab: {
+    name: "curl",
+    installHint: "Install curl: https://curl.se/download.html",
+  },
+} as const
+
+type RepositoryForge = keyof typeof FORGE_HOST_TOOLS
 
 const optionalTools: ReadonlyArray<HostTool> = [
   {
     name: "keymaxxer",
     installHint:
-      "Keymaxxer is optional. Install when you want vault-backed secrets; ambient GitHub auth still works without it.",
+      "Keymaxxer is optional. Install when you want vault-backed secrets; ambient Forge auth remains available without it.",
     required: false,
   },
 ]
@@ -69,6 +77,12 @@ export type HostToolsPreflightOptions = {
    * is empty).
    */
   readonly selectedAgentBackendId?: string
+  /**
+   * Distinct Forges represented by persisted Repositories. `gh` is required
+   * only for GitHub; `curl` only for GitLab. Omit for backwards-compatible
+   * GitHub-only behavior; pass an empty list when no Repository exists.
+   */
+  readonly repositoryForges?: ReadonlyArray<string>
 }
 
 export type HostToolsPreflightResult =
@@ -107,13 +121,29 @@ const resolveRequiredAgentBackendBinaries = (
 ): ReadonlyArray<{ readonly name: string; readonly installHint: string }> =>
   resolveRequiredAgentBackendIds(options).map((id) => BACKEND_HOST_TOOLS[id])
 
+const resolveRepositoryForges = (
+  options: HostToolsPreflightOptions,
+): ReadonlyArray<RepositoryForge> => {
+  const raw = options.repositoryForges ?? ["github"]
+  const selected = new Set(
+    raw.filter(
+      (forge): forge is RepositoryForge =>
+        forge === "github" || forge === "gitlab",
+    ),
+  )
+  return (["github", "gitlab"] as const).filter((forge) => selected.has(forge))
+}
+
 export const checkHostTools = (
   commandExists: (command: string) => boolean,
   options: HostToolsPreflightOptions = {},
 ): HostToolsPreflightResult => {
   const backendTools = resolveRequiredAgentBackendBinaries(options)
+  const repositoryForges = resolveRepositoryForges(options)
+  const forgeTools = repositoryForges.map((forge) => FORGE_HOST_TOOLS[forge])
   const hostTools: ReadonlyArray<HostTool> = [
     ...alwaysRequiredTools,
+    ...forgeTools.map((tool) => ({ ...tool, required: true as const })),
     ...backendTools.map((tool) => ({ ...tool, required: true as const })),
     ...optionalTools,
   ]
@@ -135,12 +165,16 @@ export const checkHostTools = (
       ? backendLabels[0]
       : backendLabels.slice(0, -1).join(", ") +
         ` and ${backendLabels[backendLabels.length - 1]}`
+  const requiredBaseTools = [
+    "git",
+    ...forgeTools.map((tool) => tool.name),
+  ].join(" and ")
 
   const lines = [
     "Required host tools are missing from PATH:",
     ...missingRequired.map((tool) => `  - ${tool.name}: ${tool.installHint}`),
     "",
-    `Only selected Agent Backend executable(s) (${backendSummary}) are required alongside git and gh.`,
+    `Only selected Agent Backend executable(s) (${backendSummary}) are required alongside ${requiredBaseTools}.`,
     "Install the tools above, then run ready-for-agent again.",
     "Keymaxxer is optional and does not block start.",
   ]

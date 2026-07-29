@@ -397,11 +397,14 @@ describe("MCP Keymaxxer layer", () => {
 })
 
 describe("MCP process configuration", () => {
-  test("removes GitHub token variables from the child environment", () => {
+  test("removes Forge token variables from the child environment", () => {
     expect(
       keymaxxerEnvironment({
         GITHUB_TOKEN: "generic",
         GITHUB_TOKEN_OWNER_REPO: "repository",
+        GITLAB_TOKEN: "generic-gitlab",
+        GITLAB_TOKEN_GROUP_PROJECT: "repository-gitlab",
+        GITLAB_TOKENPROJECT: "repository-gitlab-without-separator",
         HOME: "/home/test",
       }),
     ).toEqual({ HOME: "/home/test" })

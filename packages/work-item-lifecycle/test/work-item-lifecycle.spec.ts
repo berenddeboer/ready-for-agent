@@ -664,6 +664,68 @@ describe("WorkItemLifecycle", () => {
           })
         }),
       ))
+
+    it("runs a GitLab Issue through Assess Changes, Pre-Commit, and Review before pausing at Commit", () =>
+      runTest(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const db = yield* DbService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/oauth_client",
+            localPath: "/repos/project/oauth_client.git",
+            isBare: true,
+          })
+          const issue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 3601642,
+            ...sampleIssueFields,
+            url: "https://git.drupalcode.org/project/oauth_client/-/issues/3601642",
+          })
+
+          const created = yield* lifecycle.implementLocally(
+            repository.id,
+            issue.issueNumber,
+          )
+          expect(created.pauseBeforeStep).toBe("commit")
+
+          for (const expectedNext of [
+            "install_dependencies",
+            "implement",
+            "assess_changes",
+            "pre_commit",
+            "review",
+            "commit",
+          ] as const) {
+            const result = yield* claimAndRunPending
+            expect(result._tag).toBe("processed")
+            if (result._tag === "processed") {
+              expect(result.workItem.state).toBe(expectedNext)
+              if (expectedNext === "commit") {
+                expect(result.workItem.paused).toBe(true)
+                expect(result.workItem.pauseBeforeStep).toBe("commit")
+                expect(result.workItem.stepRuns.map((run) => run.step)).toEqual(
+                  [
+                    "create_worktree",
+                    "install_dependencies",
+                    "implement",
+                    "assess_changes",
+                    "pre_commit",
+                    "review",
+                  ],
+                )
+              }
+            }
+          }
+
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }),
+      ))
   })
 
   describe("implementAllWithAutoMerge and Merge Mode Always", () => {
@@ -6518,6 +6580,84 @@ describe("WorkItemLifecycle", () => {
               )?.reasonCode,
             ).toBe(STEP_RUN_REASON.issueClosedWhilePrOpen)
           }
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(Effect.provide(layer)),
+      )
+    })
+
+    it("pauses without a GitHub lookup when a GitLab Issue closes with an owned PR", () => {
+      let githubLifecycleLookupCalls = 0
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      const layer = makeTestLayer(steps, {
+        getPullRequestLifecycleStatus: () => {
+          githubLifecycleLookupCalls += 1
+          return Effect.succeed({ _tag: "merged" })
+        },
+      })
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          yield* seedHarnessBuildModel
+          const repository = yield* db.addRepository({
+            forge: "gitlab",
+            forgeHost: "gitlab.example.com",
+            projectPath: "acme/widgets",
+            localPath: "/repos/acme/widgets.git",
+            isBare: true,
+          })
+          const issue = yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber: 42,
+            ...sampleIssueFields,
+            url: "https://gitlab.example.com/acme/widgets/-/issues/42",
+          })
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.paused).toBe(true)
+            expect(afterInvestigate.workItem.failureMessage).toBe(
+              formatIssueClosedPrStatusIndeterminateMessage(
+                issue.issueNumber,
+                101,
+              ),
+            )
+            expect(
+              afterInvestigate.workItem.stepRuns.find(
+                (run) =>
+                  run.step === "investigate_pr_status_checks" &&
+                  run.status === "succeeded",
+              )?.reasonCode,
+            ).toBe(STEP_RUN_REASON.issueClosedWhilePrOpen)
+          }
+          expect(githubLifecycleLookupCalls).toBe(0)
           expect(
             Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
           ).toBe(true)

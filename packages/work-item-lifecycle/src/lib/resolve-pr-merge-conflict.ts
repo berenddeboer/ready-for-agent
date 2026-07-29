@@ -2,12 +2,13 @@ import { Effect, Schema } from "effect"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import {
-  type AgentTurnGitHubAuth,
-  AgentTurnGitHubCredentialMissingError,
+  type AgentTurnForgeAuth,
+  AgentTurnForgeCredentialMissingError,
+  type AgentTurnForgeRepository,
   InvalidCapturedAgentBackendError,
-  agentTurnGitHubCredentialGuidance,
-  resolveAgentTurnGitHubAuth,
-} from "./agent-turn-github-auth.js"
+  agentTurnForgeCredentialGuidance,
+  resolveAgentTurnForgeAuth,
+} from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { DEFAULT_LIFECYCLE_MAX_DURATIONS } from "./types.js"
 
@@ -70,7 +71,10 @@ const mergeConflictOutcomeContractLines = (): readonly string[] => [
   "READY_FOR_AGENT_RESULT: NEEDS_HUMAN: <concise reason>",
 ]
 
-const workPrompt = (auth: AgentTurnGitHubAuth): string =>
+const workPrompt = (
+  repository: AgentTurnForgeRepository,
+  auth: AgentTurnForgeAuth,
+): string =>
   [
     "Resolve the merge conflict on the existing pull request for this worktree by rebasing its branch.",
     "Fetch origin and inspect the pull request to determine its current base branch (normally the repository default branch).",
@@ -79,9 +83,12 @@ const workPrompt = (auth: AgentTurnGitHubAuth): string =>
     "Push the rebased pull-request branch with --force-with-lease. Do not use an unconditional force push.",
     "If the lease is rejected, refetch, incorporate the updated remote PR branch, rebase onto the current remote base again, verify, and retry the --force-with-lease push exactly once. If that second push cannot safely succeed, stop and report human intervention is needed via the NEEDS_HUMAN outcome.",
     "Do not create or merge another pull request and do not do unrelated work.",
-    agentTurnGitHubCredentialGuidance(
+    agentTurnForgeCredentialGuidance(
+      repository,
       auth,
-      "GitHub CLI, API, fetch, or push access",
+      repository.forge === "github"
+        ? "GitHub CLI, API, fetch, or push access"
+        : "GitLab API, fetch, or push access",
     ),
     ...mergeConflictOutcomeContractLines(),
   ].join("\n")
@@ -116,12 +123,10 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
-    const auth = yield* resolveAgentTurnGitHubAuth({
-      projectPath: repository.projectPath,
-    }).pipe(
+    const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
       Effect.mapError((cause) => {
         if (
-          cause instanceof AgentTurnGitHubCredentialMissingError ||
+          cause instanceof AgentTurnForgeCredentialMissingError ||
           cause instanceof InvalidCapturedAgentBackendError
         ) {
           return new ResolvePrMergeConflictContextError({
@@ -129,7 +134,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
           })
         }
         return new ResolvePrMergeConflictContextError({
-          message: "Failed to resolve the repository GitHub credential",
+          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
         })
       }),
     )
@@ -140,7 +145,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
     const work = yield* agentBackend
       .continueTurn({
         sessionId: context.sessionId,
-        prompt: workPrompt(auth),
+        prompt: workPrompt(repository, auth),
         cwd: context.worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,

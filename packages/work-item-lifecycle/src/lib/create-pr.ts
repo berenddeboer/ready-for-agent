@@ -9,11 +9,11 @@ import {
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
-  AgentTurnGitHubCredentialMissingError,
+  AgentTurnForgeCredentialMissingError,
   InvalidCapturedAgentBackendError,
-  agentTurnGitHubCredentialGuidance,
-  resolveAgentTurnGitHubAuth,
-} from "./agent-turn-github-auth.js"
+  agentTurnForgeCredentialGuidance,
+  resolveAgentTurnForgeAuth,
+} from "./agent-turn-forge-auth.js"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import {
   CreatePrCredentialError,
@@ -533,6 +533,13 @@ export const createPr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepositoryRecord(context)
+    if (repository.forge === "gitlab") {
+      return yield* new CreatePrPostconditionError({
+        repositoryId: context.repositoryId,
+        message:
+          "GitLab Create PR requires GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
+      })
+    }
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
@@ -591,12 +598,10 @@ export const createPr = (context: LifecycleStepContext) =>
       return toCreatePrResult(afterNative, "native", copy)
     }
 
-    const auth = yield* resolveAgentTurnGitHubAuth({
-      projectPath: repository.projectPath,
-    }).pipe(
+    const auth = yield* resolveAgentTurnForgeAuth(repository).pipe(
       Effect.mapError((cause) => {
         if (
-          cause instanceof AgentTurnGitHubCredentialMissingError ||
+          cause instanceof AgentTurnForgeCredentialMissingError ||
           cause instanceof InvalidCapturedAgentBackendError
         ) {
           return new CreatePrCredentialError({
@@ -606,7 +611,7 @@ export const createPr = (context: LifecycleStepContext) =>
         }
         return new CreatePrCredentialError({
           repositoryId: context.repositoryId,
-          message: "Failed to resolve the repository GitHub credential",
+          message: `Failed to resolve the repository ${repository.forge === "github" ? "GitHub" : "GitLab"} credential`,
           cause,
         })
       }),
@@ -628,9 +633,12 @@ export const createPr = (context: LifecycleStepContext) =>
           branch,
           title: copy.title,
           body: copy.body,
-          credentialGuidance: agentTurnGitHubCredentialGuidance(
+          credentialGuidance: agentTurnForgeCredentialGuidance(
+            repository,
             auth,
-            "GitHub CLI or API access",
+            repository.forge === "github"
+              ? "GitHub CLI or API access"
+              : "GitLab API or push access",
           ),
           diagnostics,
         }),

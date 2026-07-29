@@ -59,7 +59,7 @@ describe("makeOpencodeEnvironment", () => {
     })
   })
 
-  it("strips GitHub token environment variables when vault MCP is configured", () => {
+  it("strips Forge token environment variables when vault MCP is configured", () => {
     const env = makeEnv({
       keymaxxerMcpUrl: "http://127.0.0.1:6057/cap/mcp",
       environment: {
@@ -67,6 +67,8 @@ describe("makeOpencodeEnvironment", () => {
         GH_TOKEN: "secret",
         GITHUB_TOKEN: "secret",
         GITHUB_TOKEN_ACME_WIDGETS: "secret",
+        GITLAB_TOKEN: "secret",
+        GITLAB_TOKEN_ACME_WIDGETS: "secret",
         KEEP: "yes",
       },
     })
@@ -75,15 +77,19 @@ describe("makeOpencodeEnvironment", () => {
     expect(env.GH_TOKEN).toBeUndefined()
     expect(env.GITHUB_TOKEN).toBeUndefined()
     expect(env.GITHUB_TOKEN_ACME_WIDGETS).toBeUndefined()
+    expect(env.GITLAB_TOKEN).toBeUndefined()
+    expect(env.GITLAB_TOKEN_ACME_WIDGETS).toBeUndefined()
   })
 
-  it("preserves ambient GitHub tokens when vault MCP is not configured", () => {
+  it("preserves ambient Forge tokens when vault MCP is not configured", () => {
     const env = makeEnv({
       environment: {
         PATH: "/usr/bin",
         GH_TOKEN: "secret",
         GITHUB_TOKEN: "secret",
         GITHUB_TOKEN_ACME_WIDGETS: "secret",
+        GITLAB_TOKEN: "secret",
+        GITLAB_TOKEN_ACME_WIDGETS: "secret",
         KEEP: "yes",
       },
     })
@@ -92,6 +98,8 @@ describe("makeOpencodeEnvironment", () => {
     expect(env.GH_TOKEN).toBe("secret")
     expect(env.GITHUB_TOKEN).toBe("secret")
     expect(env.GITHUB_TOKEN_ACME_WIDGETS).toBe("secret")
+    expect(env.GITLAB_TOKEN).toBe("secret")
+    expect(env.GITLAB_TOKEN_ACME_WIDGETS).toBe("secret")
   })
 
   it("does not configure Keymaxxer when its capability URL is missing", () => {

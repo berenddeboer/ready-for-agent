@@ -1,8 +1,8 @@
 # Ready for Agent: Clanker Harness
 
-Agentic software engineering harness which watches the GitHub issue
-queue for issues marked with `ready-for-agent`. Select an issue in the
-UI to start working on it.
+Agentic software engineering harness which watches configured Forge issue
+queues for issues marked with `ready-for-agent`. Select an issue in the UI to
+start working on it.
 
 <img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
 
@@ -91,7 +91,7 @@ worktree, but withoutr creating a PR yet. This allows you to test and verify.
 
 ## Assumptions
 
-- You use GitHub.
+- You use GitHub or GitLab.
 - You have a repo cloned locally, either "normally" or as a bare clone
   (recommended). Install the [git-bare-worktree
   skill](https://github.com/berenddeboer/git-bare-worktree) and let
@@ -108,18 +108,22 @@ worktree, but withoutr creating a PR yet. This allows you to test and verify.
 **Always required on PATH** (start fails fast if missing):
 
 1. [git](https://git-scm.com/)
-2. [GitHub CLI (`gh`)](https://cli.github.com/) — used by the Harness and, for
-   Grok Build Agent Turns, as authenticated ambient `gh` (no raw token is
-   copied into the agent environment)
+
+**Forge-specific tools** (required only when at least one Repository uses that
+Forge):
+
+2. [GitHub CLI (`gh`)](https://cli.github.com/) for GitHub Repositories
+3. [curl](https://curl.se/) for GitLab Repositories. `glab` is an optional
+   ambient credential source, not a required host tool.
 
 **Agent Backend executable** (only the backend selected in Settings is
 required; default is OpenCode):
 
-3. [OpenCode](https://opencode.ai/) (`opencode` on PATH) when OpenCode is the
+4. [OpenCode](https://opencode.ai/) (`opencode` on PATH) when OpenCode is the
    selected Agent Backend
-4. [Codex](https://github.com/openai/codex) (`codex` on PATH) when Codex is the
+5. [Codex](https://github.com/openai/codex) (`codex` on PATH) when Codex is the
    selected Agent Backend
-5. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is the
+6. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is the
    selected Agent Backend
 
 Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
@@ -132,12 +136,13 @@ adapter tests use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` /
 
 **Optional:**
 
-6. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets for
-   Harness-owned GitHub operations and OpenCode Agent Turns.
+7. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets for
+   Harness-owned GitHub operations and GitHub or GitLab OpenCode Agent Turns.
    Resolved as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise
    the `keymaxxer` command on PATH. When neither is available, the harness uses
-   ambient GitHub authentication. Set `KEYMAXXER_ENABLED=false` to force that
-   mode. Grok Build Agent Turns always use ambient `gh` in this release.
+   ambient Forge authentication. Set `KEYMAXXER_ENABLED=false` to force that
+   mode. Grok Build Agent Turns always use ambient Forge authentication and do
+   not configure Keymaxxer MCP.
 
 # KeyMaxxer
 
@@ -163,17 +168,20 @@ Items are unfinished (including Needs Human). Model catalogs and effort
 (thinking) options are backend-local, and build/review prefs are remembered per
 backend.
 
-2. Does the harness support any other backend than GitHub?
+2. Does the harness support a Forge other than GitHub?
 
-Not yet. GitLab might be coming soon though.
+Yes. GitLab Repository identity, Issue reconciliation, and local Agent Turns
+through Review are supported. GitLab Pull Request lifecycle operations are
+being delivered in later phases.
 
 # Architecture
 
-## GitHub is source of truth
+## The Forge is source of truth
 
-GitHub issues remain the source of truth; the local database is book-keeping.
-Style and guidelines come from the target repository—this harness steers an
-agent swarm on `ready-for-agent` labeled work.
+Issues on the configured Repository Forge remain the source of truth; the local
+database is book-keeping. Style and guidelines come from the target
+repository—this harness steers an agent swarm on `ready-for-agent` labeled
+work.
 
 ## Graphql API
 

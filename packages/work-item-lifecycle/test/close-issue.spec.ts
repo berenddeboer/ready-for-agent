@@ -108,6 +108,47 @@ describe("closeIssue", () => {
     expect(error).toBeInstanceOf(CloseIssueContextError)
   })
 
+  it("fails closed before GitHub mutation for a GitLab Repository", async () => {
+    const gitlabRepository = makeRepositoryRecord({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/widgets",
+      localPath: "/repos/project-widgets",
+    })
+    const db = stubDbServiceLayer({
+      listRepositories: Effect.succeed([gitlabRepository]),
+      listIssues: () =>
+        Effect.succeed([
+          {
+            ...openLeaf,
+            repositoryId: gitlabRepository.id,
+            url: "https://git.drupalcode.org/project/widgets/-/issues/42",
+          },
+        ]),
+    })
+    let githubCalls = 0
+    const github = Layer.succeed(GitHubService, {
+      ...unusedGithub,
+      ensureIssueCompletedWithSummary: () => {
+        githubCalls += 1
+        return Effect.void
+      },
+    } satisfies GitHubServiceShape)
+
+    const error = await Effect.runPromise(
+      closeIssue({
+        ...context,
+        repositoryId: gitlabRepository.id,
+      }).pipe(Effect.provide(Layer.merge(db, github)), Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(CloseIssueContextError)
+    expect((error as CloseIssueContextError).message).toContain(
+      "refusing to query GitHub for a GitLab Repository",
+    )
+    expect(githubCalls).toBe(0)
+  })
+
   it("rejects an open parent Issue before mutation", async () => {
     const db = stubDbServiceLayer({
       listRepositories: Effect.succeed([repository]),

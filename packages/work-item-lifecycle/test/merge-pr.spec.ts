@@ -9,6 +9,7 @@ import {
 } from "@ready-for-agent/github-service"
 import {
   type LifecycleStepContext,
+  MergePrContextError,
   makeWorkItemId,
   mergePr,
 } from "../src/index.js"
@@ -126,5 +127,38 @@ describe("mergePr", () => {
     )
 
     expect(exit._tag).toBe("Failure")
+  })
+
+  it("fails closed before GitHub access for a GitLab Repository", async () => {
+    let githubCalls = 0
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/widgets",
+      localPath: "/repos/widgets",
+    })
+    const gitlabDb = stubDbServiceLayer({
+      listRepositories: Effect.succeed([gitlabRepository]),
+    })
+    const github = Layer.succeed(GitHubService, {
+      mergePullRequest: () => {
+        githubCalls += 1
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitHubServiceShape)
+
+    const error = await Effect.runPromise(
+      mergePr(context).pipe(
+        Effect.flip,
+        Effect.provide(Layer.merge(gitlabDb, github)),
+      ),
+    )
+
+    expect(error).toBeInstanceOf(MergePrContextError)
+    expect(error.message).toContain(
+      "refusing to query GitHub for a GitLab Repository",
+    )
+    expect(githubCalls).toBe(0)
   })
 })
