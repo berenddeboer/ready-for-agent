@@ -1,4 +1,4 @@
-import { Effect, Layer, Schema } from "effect"
+import { Deferred, Effect, Exit, Layer, Ref, Schema } from "effect"
 import {
   type GitHubHelperOperation,
   type GitHubRepository,
@@ -13,6 +13,34 @@ import {
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
+
+/**
+ * Successful Keymaxxer-backed open non-draft PR counts may be reused for this
+ * long so concurrent tabs, reconnects, and closely spaced invalidations share
+ * one helper invocation. Kept well below the UI poll interval (30s) so the
+ * automatic visible-tab refresh still observes GitHub changes after expiry.
+ */
+export const OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS = 5_000
+
+type GitHubCountError = GitHubRepositoryUnavailableError | GitHubRequestError
+
+type OpenPullRequestCountCacheEntry =
+  | {
+      readonly kind: "inflight"
+      readonly deferred: Deferred.Deferred<number, GitHubCountError>
+    }
+  | {
+      readonly kind: "success"
+      readonly count: number
+      readonly fetchedAtMs: number
+    }
+
+const openPullRequestCountCacheKey = (repository: GitHubRepository): string =>
+  [
+    repository.forge.toLowerCase(),
+    repository.forgeHost.toLowerCase(),
+    repository.projectPath.toLowerCase(),
+  ].join("\0")
 
 const PositiveInt = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
 const NonNegativeInt = Schema.Int.pipe(
@@ -232,11 +260,26 @@ const parseIssues = (
 
 export const keymaxxerGitHubLayer = (options: {
   readonly workspaceRoot: string
+  /**
+   * Override the successful-count freshness window (tests and experiments).
+   * Defaults to {@link OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS}.
+   */
+  readonly openPullRequestCountFreshnessMs?: number
+  /** Injectable clock for freshness tests. Defaults to `Date.now`. */
+  readonly nowMs?: () => number
 }): Layer.Layer<GitHubService, never, KeymaxxerService> =>
   Layer.effect(
     GitHubService,
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
+      const layerScope = yield* Effect.scope
+      const countFreshnessMs =
+        options.openPullRequestCountFreshnessMs ??
+        OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS
+      const nowMs = options.nowMs ?? Date.now
+      const openPullRequestCountCache = yield* Ref.make(
+        new Map<string, OpenPullRequestCountCacheEntry>(),
+      )
       const ensureToken = Effect.fn("KeymaxxerGitHub.ensureToken")(
         (repository: GitHubRepository) =>
           keymaxxer.findSecret({
@@ -266,6 +309,148 @@ export const keymaxxerGitHubLayer = (options: {
             ),
           ),
       )
+
+      const fetchOpenNonDraftPullRequestCount = (
+        repository: GitHubRepository,
+      ): Effect.Effect<number, GitHubCountError> =>
+        Effect.gen(function* () {
+          const tokenName = yield* ensureToken(repository)
+          if (tokenName === null) {
+            return yield* requestError(
+              repository,
+              "count open non-draft pull requests",
+            )
+          }
+          const [forge, forgeHost, projectPath] =
+            encodedRepositoryArguments(repository)
+          const result = yield* runGitHubBin(
+            tokenName,
+            "count-open-non-draft-pull-requests",
+            [forge, forgeHost, projectPath],
+          )
+          if (result.exitCode === 2) {
+            return yield* repositoryUnavailable(repository)
+          }
+          if (result.exitCode !== 0) {
+            return yield* requestError(
+              repository,
+              "count open non-draft pull requests",
+              result.stderr || result.stdout,
+            )
+          }
+          // Empty body on exit 0 must not become Number("") === 0 and then be
+          // success-cached as a genuine open-PR count of zero.
+          const trimmed = result.stdout.trim()
+          if (trimmed === "") {
+            return yield* requestError(
+              repository,
+              "decode open non-draft pull request count",
+              "empty stdout",
+            )
+          }
+          const count = Number(trimmed)
+          if (!Number.isSafeInteger(count) || count < 0) {
+            return yield* requestError(
+              repository,
+              "decode open non-draft pull request count",
+              result.stdout,
+            )
+          }
+          return count
+        }).pipe(
+          Effect.catchTag("KeymaxxerError", () =>
+            Effect.fail(
+              requestError(repository, "count open non-draft pull requests"),
+            ),
+          ),
+        )
+
+      /**
+       * Process-wide single-flight + short success cache per Repository.
+       * Concurrent callers share one Keymaxxer helper; failures are never
+       * stored as a successful zero.
+       */
+      const countOpenNonDraftPullRequestsCoalesced = Effect.fn(
+        "KeymaxxerGitHub.countOpenNonDraftPullRequests",
+      )(function* (repository: GitHubRepository) {
+        const key = openPullRequestCountCacheKey(repository)
+        const candidate = yield* Deferred.make<number, GitHubCountError>()
+
+        type Claim =
+          | { readonly role: "owner" }
+          | {
+              readonly role: "join"
+              readonly deferred: Deferred.Deferred<number, GitHubCountError>
+            }
+          | { readonly role: "cached"; readonly count: number }
+
+        const claim = yield* Ref.modify(
+          openPullRequestCountCache,
+          (cache): [Claim, Map<string, OpenPullRequestCountCacheEntry>] => {
+            const current = cache.get(key)
+            const observedAt = nowMs()
+            if (
+              current?.kind === "success" &&
+              observedAt - current.fetchedAtMs < countFreshnessMs
+            ) {
+              return [{ role: "cached", count: current.count }, cache]
+            }
+            if (current?.kind === "inflight") {
+              return [{ role: "join", deferred: current.deferred }, cache]
+            }
+            const next = new Map(cache)
+            next.set(key, { kind: "inflight", deferred: candidate })
+            return [{ role: "owner" }, next]
+          },
+        )
+
+        if (claim.role === "cached") {
+          return claim.count
+        }
+        if (claim.role === "join") {
+          return yield* Deferred.await(claim.deferred)
+        }
+
+        // Use Exit (not Effect.result) so interrupt/defect also settles the
+        // shared Deferred and clears inflight; otherwise joiners could hang.
+        // Settle is uninterruptible so layer teardown cannot leave joiners
+        // waiting after the fetch Exit is already known.
+        yield* fetchOpenNonDraftPullRequestCount(repository).pipe(
+          Effect.exit,
+          Effect.flatMap((exit) =>
+            Effect.uninterruptible(
+              Effect.gen(function* () {
+                yield* Ref.update(openPullRequestCountCache, (cache) => {
+                  const next = new Map(cache)
+                  const current = next.get(key)
+                  if (
+                    current?.kind !== "inflight" ||
+                    current.deferred !== candidate
+                  ) {
+                    return cache
+                  }
+                  if (Exit.isSuccess(exit)) {
+                    next.set(key, {
+                      kind: "success",
+                      count: exit.value,
+                      fetchedAtMs: nowMs(),
+                    })
+                  } else {
+                    // Failures / interrupt must not leave a permanent inflight
+                    // entry or be stored as a successful zero.
+                    next.delete(key)
+                  }
+                  return next
+                })
+                yield* Deferred.done(candidate, exit)
+              }),
+            ),
+          ),
+          Effect.forkIn(layerScope, { startImmediately: true }),
+        )
+
+        return yield* Deferred.await(candidate)
+      })
 
       const service: GitHubServiceShape = {
         getAuthenticatedUserLogin: (repository) =>
@@ -505,48 +690,7 @@ export const keymaxxerGitHubLayer = (options: {
               ),
             ),
           ),
-        countOpenNonDraftPullRequests: (repository) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "count open non-draft pull requests",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "count-open-non-draft-pull-requests",
-              [forge, forgeHost, projectPath],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "count open non-draft pull requests",
-                result.stderr || result.stdout,
-              )
-            }
-            const count = Number(result.stdout.trim())
-            if (!Number.isSafeInteger(count) || count < 0) {
-              return yield* requestError(
-                repository,
-                "decode open non-draft pull request count",
-                result.stdout,
-              )
-            }
-            return count
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "count open non-draft pull requests"),
-              ),
-            ),
-          ),
+        countOpenNonDraftPullRequests: countOpenNonDraftPullRequestsCoalesced,
         getPullRequestCheckStatus: (repository, headRefName) =>
           Effect.gen(function* () {
             const tokenName = yield* ensureToken(repository)

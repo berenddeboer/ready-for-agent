@@ -1,25 +1,35 @@
-import { Effect } from "effect"
-import { GitHubService } from "../lib/github-service.js"
-import {
-  decodeArgument,
-  githubRepository,
-  runGitHubCli,
-  writeStandardOutput,
-} from "./cli.js"
+/**
+ * Source-mode Keymaxxer child entrypoint for open non-draft PR counts.
+ *
+ * Kept deliberately free of the full Effect/GitHubService/genql helper graph so
+ * development Keymaxxer children start without loading every GitHub operation.
+ * Product binaries re-enter via {@link runGitHubHelperProcess} and also run this
+ * lightweight count body (but the product re-entry module may still load other
+ * helper imports for non-count operations — cold-start savings are mainly here).
+ */
+import { writeSync } from "node:fs"
+import { runOpenNonDraftPullRequestCountCli } from "../lib/open-non-draft-pull-request-count.js"
 
-export const countOpenNonDraftPullRequestsProgram = (
+/**
+ * Run the count CLI and terminate the process.
+ * Uses synchronous stdio + `process.exit` so (1) HTTP keep-alive from `fetch`
+ * cannot leave a Keymaxxer child hung until the run timeout, and (2) a tiny
+ * success payload is fully flushed before exit (async write + exit can drop
+ * buffered digits, which the harness would decode as a false zero).
+ */
+export const runCountOpenNonDraftPullRequestsProgram = (
   args: ReadonlyArray<string>,
-) =>
-  Effect.gen(function* () {
-    const forge = yield* decodeArgument(args[0], "forge")
-    const forgeHost = yield* decodeArgument(args[1], "forge host")
-    const projectPath = yield* decodeArgument(args[2], "project path")
-    const github = yield* GitHubService
-    const count = yield* github.countOpenNonDraftPullRequests(
-      githubRepository(forge, forgeHost, projectPath),
-    )
-    yield* writeStandardOutput(String(count))
+): Promise<never> =>
+  runOpenNonDraftPullRequestCountCli(args).then((result) => {
+    if (result.stdout !== "") {
+      writeSync(1, result.stdout)
+    }
+    if (result.stderr !== "") {
+      writeSync(2, result.stderr)
+    }
+    process.exit(result.exitCode)
   })
 
-if (import.meta.main)
-  runGitHubCli(countOpenNonDraftPullRequestsProgram(process.argv.slice(2)))
+if (import.meta.main) {
+  void runCountOpenNonDraftPullRequestsProgram(process.argv.slice(2))
+}

@@ -1,6 +1,6 @@
 import type { Effect } from "effect"
 import { runGitHubCli } from "../bin/cli.js"
-import { countOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
+import { runCountOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
 import { createDraftPullRequestProgram } from "../bin/create-draft-pull-request.js"
 import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
 import { findOpenPullRequestNumberProgram } from "../bin/find-open-pr-number.js"
@@ -126,15 +126,19 @@ export const formatGitHubHelperShellCommand = (
 ): string =>
   [spawn.command, ...spawn.args].map((part) => JSON.stringify(part)).join(" ")
 
-const programs: Record<
+type FullHelperOperation = Exclude<
   GitHubHelperOperation,
+  "count-open-non-draft-pull-requests"
+>
+
+const programs: Record<
+  FullHelperOperation,
   (args: ReadonlyArray<string>) => Effect.Effect<void, unknown, GitHubService>
 > = {
   "list-ready-issues": listReadyIssuesProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "get-open-pr-number": getOpenPullRequestNumberProgram,
   "find-open-pr-number": findOpenPullRequestNumberProgram,
-  "count-open-non-draft-pull-requests": countOpenNonDraftPullRequestsProgram,
   "create-draft-pull-request": createDraftPullRequestProgram,
   "update-open-draft-pull-request-copy": updateOpenDraftPullRequestCopyProgram,
   "get-pr-check-status": getPrCheckStatusProgram,
@@ -170,5 +174,13 @@ export const runGitHubHelperProcess = (
     return
   }
   const args = argv.slice(flagIndex + 2)
+  // Count uses the lightweight CLI body (same GraphQL contract as source mode).
+  // Note: this module still top-level-imports other helper programs for non-count
+  // operations, so product-binary re-entry does not get the full cold-start win
+  // that source-mode `count-open-non-draft-pull-requests.ts` does.
+  if (operation === "count-open-non-draft-pull-requests") {
+    void runCountOpenNonDraftPullRequestsProgram(args)
+    return
+  }
   runGitHubCli(programs[operation](args))
 }
