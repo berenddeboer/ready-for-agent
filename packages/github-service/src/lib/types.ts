@@ -17,10 +17,15 @@ export interface TerminalPrStatusCheck {
 
 /**
  * Where a stored PR Status Check external id came from (prefix of the id).
- * Watch emits `actions-job:<id>` for Checks runs and Actions jobs, and
- * `status:<id>` for commit statuses.
+ * Watch emits `actions-job:<id>` for Checks runs and Actions jobs,
+ * `status:<id>` for commit statuses, and `gitlab-job:<id>` for GitLab
+ * head-pipeline jobs.
  */
-export type PrStatusCheckDiagnosticSource = "actions-job" | "status" | "unknown"
+export type PrStatusCheckDiagnosticSource =
+  | "actions-job"
+  | "status"
+  | "gitlab-job"
+  | "unknown"
 
 export type PrStatusCheckLogFetch =
   | {

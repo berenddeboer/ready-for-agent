@@ -269,6 +269,27 @@ export const ambientGitLabLayer = (options: {
             service.countOpenNonDraftPullRequests(repository),
           ),
         ),
+        getPullRequestCheckStatus: Effect.fn(
+          "AmbientGitLab.getPullRequestCheckStatus",
+        )((repository, headRefName) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.getPullRequestCheckStatus(repository, headRefName),
+          ),
+        ),
+        getPrStatusCheckDiagnostics: Effect.fn(
+          "AmbientGitLab.getPrStatusCheckDiagnostics",
+        )((repository, checks, options = {}) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.getPrStatusCheckDiagnostics(repository, checks, options),
+          ),
+        ),
+        markPullRequestReadyForReview: Effect.fn(
+          "AmbientGitLab.markPullRequestReadyForReview",
+        )((repository, headRefName) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.markPullRequestReadyForReview(repository, headRefName),
+          ),
+        ),
         ensureIssueCompletedWithSummary: Effect.fn(
           "AmbientGitLab.ensureIssueCompletedWithSummary",
         )((repository, issueNumber, workItemId, summaryMarkdown) =>

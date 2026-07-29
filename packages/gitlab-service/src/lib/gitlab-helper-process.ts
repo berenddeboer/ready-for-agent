@@ -8,7 +8,10 @@ import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-comp
 import { findOpenPullRequestNumberProgram } from "../bin/find-open-pull-request-number.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
 import { getOpenPullRequestNumberProgram } from "../bin/get-open-pull-request-number.js"
+import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
+import { getPrStatusCheckDiagnosticsProgram } from "../bin/get-pr-status-check-diagnostics.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
+import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { gitlabServiceBinScriptPath } from "../bin-script-path.js"
@@ -27,6 +30,9 @@ export const GITLAB_HELPER_OPERATIONS = [
   "create-draft-pull-request",
   "update-open-draft-pull-request-copy",
   "count-open-non-draft-pull-requests",
+  "get-pr-check-status",
+  "get-pr-status-check-diagnostics",
+  "mark-pr-ready-for-review",
   "ensure-issue-completed-with-summary",
   "close-open-pull-requests-for-branch",
   "delete-branch",
@@ -130,6 +136,9 @@ const programs: Record<
   "create-draft-pull-request": createDraftPullRequestProgram,
   "update-open-draft-pull-request-copy": updateOpenDraftPullRequestCopyProgram,
   "count-open-non-draft-pull-requests": countOpenNonDraftPullRequestsProgram,
+  "get-pr-check-status": getPrCheckStatusProgram,
+  "get-pr-status-check-diagnostics": getPrStatusCheckDiagnosticsProgram,
+  "mark-pr-ready-for-review": markPrReadyForReviewProgram,
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
   "close-open-pull-requests-for-branch": closeOpenPullRequestsForBranchProgram,
   "delete-branch": deleteBranchProgram,

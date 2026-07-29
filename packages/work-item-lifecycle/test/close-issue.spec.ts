@@ -155,6 +155,19 @@ describe("closeIssue", () => {
       createDraftPullRequest: () => Effect.succeed(1),
       updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
+      getPullRequestCheckStatus: () =>
+        Effect.succeed({
+          _tag: "succeeded",
+          terminalChecks: [],
+          mergeability: "mergeable",
+          baseRefName: "main",
+          headPushedAt: null,
+          headSha: null,
+          createdAt: null,
+          isDraft: null,
+        }),
+      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+      markPullRequestReadyForReview: () => Effect.void,
       ensureIssueCompletedWithSummary: (
         repository,
         issueNumber,

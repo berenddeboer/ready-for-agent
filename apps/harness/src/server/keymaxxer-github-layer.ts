@@ -121,7 +121,7 @@ const SerializedPrStatusCheckLogFetch = Schema.Union([
 const SerializedPrStatusCheckDiagnostic = Schema.Struct({
   externalId: Schema.String,
   name: Schema.String,
-  source: Schema.Literals(["actions-job", "status", "unknown"]),
+  source: Schema.Literals(["actions-job", "status", "gitlab-job", "unknown"]),
   htmlUrl: Schema.NullOr(Schema.String),
   logFetch: SerializedPrStatusCheckLogFetch,
 })

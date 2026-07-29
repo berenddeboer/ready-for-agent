@@ -5317,7 +5317,7 @@ describe("WorkItemLifecycle", () => {
                 expect(
                   stopped.workItem.stepRuns.at(-1)?.reasonMessage,
                 ).toContain(
-                  "fix or rerun the checks on GitHub, then click Retry checks",
+                  "fix or rerun the checks on the pull request, then click Retry checks",
                 )
               }
 

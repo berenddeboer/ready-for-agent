@@ -2014,7 +2014,7 @@ export const makeWorkItemLifecycleLive = (
                     }
                     return yield* new PrStatusChecksUnresolvedError({
                       message:
-                        "Manual fixing may be required. GitHub status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on GitHub, then click Retry checks.",
+                        "Manual fixing may be required. Status checks remained failed without a new check execution to investigate. Please fix or rerun the checks on the pull request, then click Retry checks.",
                     })
                   }
                   // Settled: no_checks, expected, and all-terminal success.

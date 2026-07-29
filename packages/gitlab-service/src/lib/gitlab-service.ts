@@ -1,5 +1,11 @@
 import { Context, type Effect } from "effect"
 import type {
+  PrStatusCheckDiagnostic,
+  PrStatusCheckDiagnosticsOptions,
+  PrStatusCheckDiagnosticsRequest,
+  PullRequestCheckStatus,
+} from "@ready-for-agent/github-service"
+import type {
   GitLabProjectUnavailableError,
   GitLabRequestError,
 } from "./errors.js"
@@ -88,6 +94,32 @@ export interface GitLabServiceShape {
   readonly countOpenNonDraftPullRequests: (
     repository: GitLabRepository,
   ) => Effect.Effect<number, GitLabServiceError>
+  /**
+   * Observe the open MR's head pipeline at job granularity as PR Status Checks.
+   * Each job is one check; `allow_failure` failures and manual/canceled/skipped
+   * jobs never contribute red/green terminals. GitLab never reports Expected.
+   */
+  readonly getPullRequestCheckStatus: (
+    repository: GitLabRepository,
+    headRefName: string,
+  ) => Effect.Effect<PullRequestCheckStatus, GitLabServiceError>
+  /**
+   * Load harness diagnostics (job metadata + bounded pipeline-job trace) for
+   * red PR Status Checks identified as `gitlab-job:<id>`.
+   */
+  readonly getPrStatusCheckDiagnostics: (
+    repository: GitLabRepository,
+    checks: readonly PrStatusCheckDiagnosticsRequest[],
+    options?: PrStatusCheckDiagnosticsOptions,
+  ) => Effect.Effect<readonly PrStatusCheckDiagnostic[], GitLabServiceError>
+  /**
+   * Clear the open MR's Draft flag (boolean + title prefix) so it is ready
+   * for review. Idempotent when the MR is already non-draft.
+   */
+  readonly markPullRequestReadyForReview: (
+    repository: GitLabRepository,
+    headRefName: string,
+  ) => Effect.Effect<void, GitLabServiceError>
   /**
    * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)
    * and the Issue is closed. Idempotent across retries and already-closed Issues.
