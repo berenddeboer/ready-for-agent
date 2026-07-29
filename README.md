@@ -8,7 +8,8 @@ UI to start working on it.
 
 It does this by creating a new worktree, installing packages, and
 asking a selectable headless Agent Backend
-([OpenCode](https://opencode.ai/) or [Grok Build](https://docs.x.ai/))
+([OpenCode](https://opencode.ai/), [Codex](https://github.com/openai/codex), or
+[Grok Build](https://docs.x.ai/))
 to implement the issue, review the issue, create a PR, and merge if allowed.
 
 The goal of this clanker harness is to get you to that 50+ PRs merged
@@ -114,8 +115,12 @@ worktree, but withoutr creating a PR yet. This allows you to test and verify.
 **Agent Backend executable** (only the backend selected in Settings is
 required; default is OpenCode):
 
-3. [OpenCode](https://opencode.ai) when OpenCode is the selected Agent Backend
-4. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is selected
+3. [OpenCode](https://opencode.ai/) (`opencode` on PATH) when OpenCode is the
+   selected Agent Backend
+4. [Codex](https://github.com/openai/codex) (`codex` on PATH) when Codex is the
+   selected Agent Backend
+5. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is the
+   selected Agent Backend
 
 Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
 Agent Turns. Harness-launched Grok processes disable auto-update for that
@@ -127,7 +132,7 @@ adapter tests use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` /
 
 **Optional:**
 
-5. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets for
+6. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets for
    Harness-owned GitHub operations and OpenCode Agent Turns.
    Resolved as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise
    the `keymaxxer` command on PATH. When neither is available, the harness uses
@@ -151,10 +156,12 @@ KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 
 1. Is there support for agents other than OpenCode?
 
-Yes. Settings can select **OpenCode** or **Grok Build** as the instance-wide
-Agent Backend. The change hot-activates on Save when no Work Items are
-unfinished (including Needs Human). Model catalogs and effort (thinking)
-options are backend-local, and build/review prefs are remembered per backend.
+Yes. Settings can select [OpenCode](https://opencode.ai/),
+[Codex](https://github.com/openai/codex), or [Grok Build](https://docs.x.ai/) as
+the instance-wide Agent Backend. The change hot-activates on Save when no Work
+Items are unfinished (including Needs Human). Model catalogs and effort
+(thinking) options are backend-local, and build/review prefs are remembered per
+backend.
 
 2. Does the harness support any other backend than GitHub?
 
