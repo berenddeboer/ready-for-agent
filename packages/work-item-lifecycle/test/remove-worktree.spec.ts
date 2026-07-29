@@ -6,6 +6,10 @@ import { Effect, Layer, type Layer as LayerType } from "effect"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   KeymaxxerError,
   KeymaxxerService,
   type KeymaxxerServiceShape,
@@ -39,6 +43,26 @@ const stubKeymaxxer = (
     ...overrides,
   })
 
+const stubGitLab = (
+  overrides: Partial<GitLabServiceShape> = {},
+): Layer.Layer<GitLabService> =>
+  Layer.succeed(GitLabService, {
+    verifyProject: () => Effect.void,
+    getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    hasCredentials: () => Effect.succeed(true),
+    hasAmbientCredentials: () => Effect.succeed(true),
+    getOpenPullRequestNumber: () => Effect.succeed(1),
+    findOpenPullRequestNumber: () => Effect.succeed(null),
+    createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    closeOpenPullRequestsForBranch: () => Effect.void,
+    deleteBranch: () => Effect.void,
+    ...overrides,
+  } satisfies GitLabServiceShape)
+
 const run = <A, E>(
   effect: Effect.Effect<
     A,
@@ -46,14 +70,17 @@ const run = <A, E>(
     | LayerType.Layer.Success<typeof PlatformLayer>
     | LayerType.Layer.Success<typeof DbServiceLive>
     | KeymaxxerService
+    | GitLabService
   >,
   keymaxxerLayer: Layer.Layer<KeymaxxerService> = stubKeymaxxer(),
+  gitlabLayer: Layer.Layer<GitLabService> = stubGitLab(),
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(DbServiceLive),
       Effect.provide(DatabaseTest),
       Effect.provide(keymaxxerLayer),
+      Effect.provide(gitlabLayer),
       Effect.provide(PlatformLayer),
     ),
   )
@@ -92,14 +119,16 @@ const initBareRepository = async (root: string) => {
 }
 
 describe("removeWorktree", () => {
-  it("fails closed before local or GitHub cleanup for a GitLab Repository", async () => {
+  it("cleans up GitLab remote MRs and branch via GitLabService", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-gitlab-"))
     try {
       const bare = await initBareRepository(root)
       const workItemId = makeWorkItemId()
       let keymaxxerCalls = 0
+      const closedBranches: string[] = []
+      const deletedBranches: string[] = []
 
-      const { error, path, branch } = await run(
+      const { path, branch } = await run(
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
@@ -127,12 +156,11 @@ describe("removeWorktree", () => {
             sessionId: null,
           } as const
           const created = yield* createWorktree(context)
-          const error = yield* removeWorktree({
+          yield* removeWorktree({
             ...context,
             worktreePath: created.worktreePath,
-          }).pipe(Effect.flip)
+          })
           return {
-            error,
             path: created.worktreePath,
             branch: workItemBranchName({
               projectPath: "project/widgets",
@@ -151,14 +179,22 @@ describe("removeWorktree", () => {
             return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
           },
         }),
+        stubGitLab({
+          closeOpenPullRequestsForBranch: (_repository, headRefName) =>
+            Effect.sync(() => {
+              closedBranches.push(headRefName)
+            }),
+          deleteBranch: (_repository, branchName) =>
+            Effect.sync(() => {
+              deletedBranches.push(branchName)
+            }),
+        }),
       )
 
-      expect(error).toBeInstanceOf(RemoveWorktreeRemoteError)
-      expect((error as RemoveWorktreeRemoteError).message).toContain(
-        "refusing to invoke GitHub cleanup for a GitLab Repository",
-      )
-      expect(await Bun.file(join(path, "README.md")).exists()).toBe(true)
-      expect(await git(bare, ["branch", "--list", branch])).toContain(branch)
+      expect(await Bun.file(join(path, "README.md")).exists()).toBe(false)
+      expect(await git(bare, ["branch", "--list", branch])).toBe("")
+      expect(closedBranches).toEqual([branch])
+      expect(deletedBranches).toEqual([branch])
       expect(keymaxxerCalls).toBe(0)
     } finally {
       await rm(root, { recursive: true, force: true })

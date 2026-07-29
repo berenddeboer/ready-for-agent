@@ -141,6 +141,7 @@ function PipelineTicket({
       : repository === undefined
         ? null
         : workItemIssueUrl(
+            repository.forge,
             repository.forgeHost,
             repository.projectPath,
             workItem.issueNumber,
@@ -149,6 +150,7 @@ function PipelineTicket({
     repository === undefined
       ? null
       : workItemPullRequestUrl(
+          repository.forge,
           repository.forgeHost,
           repository.projectPath,
           workItem.pullRequestNumber,

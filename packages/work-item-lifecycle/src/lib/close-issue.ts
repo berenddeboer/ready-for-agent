@@ -1,6 +1,7 @@
 import { Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   CloseIssueContextError,
   CloseIssueEligibilityError,
@@ -12,7 +13,7 @@ import type { LifecycleStepContext } from "./lifecycle-steps.js"
  * Production Close Issue Lifecycle Step for a confirmed No-Change Outcome.
  * Revalidates Issue eligibility immediately before mutation (open Leaf Issues
  * with no blockers; already-closed Issues are accepted), then idempotently
- * publishes the summary and closes the Issue as COMPLETED via GitHubService.
+ * publishes the summary and closes the Issue via the Repository's Forge service.
  */
 export const closeIssue = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -34,13 +35,6 @@ export const closeIssue = (context: LifecycleStepContext) =>
       return yield* new CloseIssueContextError({
         workItemId: context.workItemId,
         message: `Repository ${context.repositoryId} was not found`,
-      })
-    }
-    if (repository.forge === "gitlab") {
-      return yield* new CloseIssueContextError({
-        workItemId: context.workItemId,
-        message:
-          "GitLab Close Issue requires GitLab issue lifecycle support; refusing to query GitHub for a GitLab Repository",
       })
     }
 
@@ -73,13 +67,25 @@ export const closeIssue = (context: LifecycleStepContext) =>
       }
     }
 
+    const forgeRepository = {
+      forge: repository.forge,
+      forgeHost: repository.forgeHost,
+      projectPath: repository.projectPath,
+    }
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      yield* gitlab.ensureIssueCompletedWithSummary(
+        forgeRepository,
+        context.issueNumber,
+        context.workItemId,
+        summary,
+      )
+      return
+    }
+
     const github = yield* GitHubService
     yield* github.ensureIssueCompletedWithSummary(
-      {
-        forge: repository.forge,
-        forgeHost: repository.forgeHost,
-        projectPath: repository.projectPath,
-      },
+      forgeRepository,
       context.issueNumber,
       context.workItemId,
       summary,

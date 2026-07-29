@@ -10,6 +10,10 @@ import type {
   GitHubRequestError,
   MergePullRequestResult,
 } from "@ready-for-agent/github-service"
+import type {
+  GitLabProjectUnavailableError,
+  GitLabRequestError,
+} from "@ready-for-agent/gitlab-service"
 import type { KeymaxxerError } from "@ready-for-agent/keymaxxer-service"
 import type { AssessChangesResult } from "./assess-changes.js"
 import type { AssessChangesError } from "./assess-changes-errors.js"
@@ -121,6 +125,8 @@ export type LifecycleStepError =
   | RepositoryNotFoundError
   | GitHubRequestError
   | GitHubRepositoryUnavailableError
+  | GitLabRequestError
+  | GitLabProjectUnavailableError
   | KeymaxxerError
   | PlatformError
   | SqlError

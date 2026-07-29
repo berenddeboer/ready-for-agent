@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Stream } from "effect"
+import { Duration, Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
@@ -7,6 +7,10 @@ import {
   type GitHubRepository,
   GitHubService,
 } from "@ready-for-agent/github-service"
+import {
+  type GitLabRepository,
+  GitLabService,
+} from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   AgentTurnForgeCredentialMissingError,
@@ -184,7 +188,8 @@ export const buildDeterministicPullRequestBody = (
   ].join("\n")
 
 /**
- * Hard lookup of an open PR. Failures surface as CreatePrLookupError.
+ * Soft lookup of an open PR/MR (null when none). Transport/API failures
+ * surface as CreatePrLookupError so callers can choose hard-fail vs soft-null.
  */
 const findExistingOpenPr = (
   context: LifecycleStepContext,
@@ -192,6 +197,21 @@ const findExistingOpenPr = (
   branch: string,
 ) =>
   Effect.gen(function* () {
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      return yield* gitlab
+        .findOpenPullRequestNumber(toGitLabRepository(repository), branch)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new CreatePrLookupError({
+                repositoryId: context.repositoryId,
+                message: `Failed to look up an open merge request for ${repository.projectPath}:${branch}`,
+                cause,
+              }),
+          ),
+        )
+    }
     const github = yield* GitHubService
     return yield* github
       .findOpenPullRequestNumber(toGitHubRepository(repository), branch)
@@ -226,6 +246,21 @@ const resolveRequiredOpenPr = (
   branch: string,
 ) =>
   Effect.gen(function* () {
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      return yield* gitlab
+        .getOpenPullRequestNumber(toGitLabRepository(repository), branch)
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new CreatePrLookupError({
+                repositoryId: context.repositoryId,
+                message: `Failed to resolve the open merge request for ${repository.projectPath}:${branch}`,
+                cause,
+              }),
+          ),
+        )
+    }
     const github = yield* GitHubService
     return yield* github
       .getOpenPullRequestNumber(toGitHubRepository(repository), branch)
@@ -245,44 +280,108 @@ const resolveRequiredOpenPr = (
  * Vault secret name for native push when Keymaxxer is enabled; null for ambient
  * (Keymaxxer disabled) or when no repository secret is configured.
  */
-const resolveNativePushTokenName = (
-  repositoryId: string,
-  projectPath: string,
-) =>
+const resolveNativePushTokenName = (repository: RepositoryRecord) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
     if (keymaxxer.enabled === false) {
       return null
     }
+    const isGitLab = repository.forge === "gitlab"
     return yield* keymaxxer
       .findSecret({
-        provider: "github",
-        account: projectPath,
+        provider: isGitLab ? "gitlab" : "github",
+        account: isGitLab
+          ? `${repository.forgeHost}/${repository.projectPath}`
+          : repository.projectPath,
       })
       .pipe(
         Effect.mapError(
           (cause) =>
             new CreatePrCredentialError({
-              repositoryId,
-              message:
-                "Failed to resolve the repository GitHub credential for native push",
+              repositoryId: repository.id,
+              message: `Failed to resolve the repository ${isGitLab ? "GitLab" : "GitHub"} credential for native push`,
               cause,
             }),
         ),
       )
   })
 
+const gitlabHttpsRemoteUrl = (repository: RepositoryRecord): string =>
+  `https://${repository.forgeHost}/${repository.projectPath}.git`
+
+/**
+ * Resolve ambient GitLab token for HTTPS push (Keymaxxer path unavailable).
+ * Prefers GITLAB_TOKEN, then glab host-scoped config.
+ */
+const GLAB_TOKEN_TIMEOUT = Duration.seconds(60)
+
+const resolveAmbientGitLabToken = (forgeHost: string) =>
+  Effect.gen(function* () {
+    const fromEnv = process.env.GITLAB_TOKEN?.trim()
+    if (fromEnv !== undefined && fromEnv !== "") {
+      return fromEnv
+    }
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const command = ChildProcess.make(
+      "glab",
+      ["config", "get", "token", "--host", forgeHost],
+      { stdin: "ignore" },
+    )
+    const output = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const handle = yield* spawner.spawn(command)
+        const [exitCode, stdout, stderr] = yield* Effect.all(
+          [
+            handle.exitCode,
+            Stream.decodeText(handle.stdout).pipe(Stream.mkString),
+            Stream.decodeText(handle.stderr).pipe(Stream.mkString),
+          ],
+          { concurrency: 3 },
+        )
+        return {
+          exitCode: Number(exitCode),
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+        }
+      }),
+    ).pipe(
+      Effect.timeout(GLAB_TOKEN_TIMEOUT),
+      Effect.catch((cause) =>
+        Effect.succeed({
+          exitCode: 1,
+          stdout: "",
+          stderr: errorMessage(cause),
+        }),
+      ),
+    )
+    if (output.exitCode !== 0 || output.stdout === "") {
+      return null
+    }
+    return output.stdout
+  })
+
 /**
  * Push the Work Item branch via the harness credential path when a vault
  * secret is available (Keymaxxer runWithSecrets + HTTPS Authorization header).
- * Ambient mode (Keymaxxer disabled) uses plain git push.
+ * Ambient GitHub uses plain git push to origin. Ambient GitLab pushes over
+ * HTTPS to the Forge Host with token auth and never modifies origin.
  */
 const attemptNativePush = (
   worktreePath: string,
   branch: string,
+  repository: RepositoryRecord,
   tokenName: string | null,
 ) =>
   Effect.gen(function* () {
+    if (repository.forge === "gitlab") {
+      return yield* attemptGitLabHttpsPush(
+        worktreePath,
+        branch,
+        repository,
+        tokenName,
+      )
+    }
+
     if (tokenName === null) {
       const push = yield* runGitInWorktree(worktreePath, [
         "push",
@@ -355,12 +454,133 @@ const attemptNativePush = (
     return { ok: true as const }
   })
 
+/**
+ * Push to https://<forge-host>/<project-path>.git with token auth. Leaves the
+ * operator's SSH origin untouched (never git remote set-url).
+ */
+const attemptGitLabHttpsPush = (
+  worktreePath: string,
+  branch: string,
+  repository: RepositoryRecord,
+  tokenName: string | null,
+) =>
+  Effect.gen(function* () {
+    const remoteUrl = gitlabHttpsRemoteUrl(repository)
+    const host = repository.forgeHost
+    const refspec = `${branch}:${branch}`
+
+    if (tokenName !== null) {
+      const keymaxxer = yield* KeymaxxerService
+      // Basic auth: username oauth2, password = token (GitLab HTTPS git).
+      // Expand the vault secret inside the Keymaxxer child, then base64.
+      // Use a real assignment + `&&` — not a simple-command prefix assignment
+      // (`BASIC=… git … $BASIC`), which bash does not apply to later-word
+      // expansion (same gotcha documented for the GitHub bearer path above).
+      const command = [
+        `BASIC="$(printf 'oauth2:%s' "$${tokenName}" | (base64 -w0 2>/dev/null || base64 | tr -d '\\n'))"`,
+        "&&",
+        "git",
+        "-C",
+        shellQuote(worktreePath),
+        "-c",
+        `"http.https://${host}/.extraheader=Authorization: Basic $BASIC"`,
+        "push",
+        shellQuote(remoteUrl),
+        shellQuote(refspec),
+      ].join(" ")
+
+      const result = yield* keymaxxer
+        .runWithSecrets({
+          command,
+          cwd: worktreePath,
+          secrets: [tokenName],
+          timeoutMs: NATIVE_PUSH_TIMEOUT_MS,
+        })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.succeed({
+              exitCode: 1,
+              stdout: "",
+              stderr: `Keymaxxer runWithSecrets failed: ${errorMessage(cause)}`,
+            }),
+          ),
+        )
+
+      if (result.exitCode !== 0) {
+        const output = [result.stdout, result.stderr]
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+          .join("\n")
+        return {
+          ok: false as const,
+          diagnostics: boundDiagnostics(
+            `credentialed GitLab HTTPS push failed (exit ${result.exitCode})\n${output}`,
+          ),
+        }
+      }
+      return { ok: true as const }
+    }
+
+    const ambientToken = yield* resolveAmbientGitLabToken(host)
+    if (ambientToken === null) {
+      return {
+        ok: false as const,
+        diagnostics: boundDiagnostics(
+          `No ambient GitLab token available for HTTPS push to ${remoteUrl} (set GITLAB_TOKEN or authenticate glab for ${host})`,
+        ),
+      }
+    }
+
+    const basic = Buffer.from(`oauth2:${ambientToken}`, "utf8").toString(
+      "base64",
+    )
+    const push = yield* runGitInWorktree(worktreePath, [
+      "-c",
+      `http.https://${host}/.extraheader=Authorization: Basic ${basic}`,
+      "push",
+      remoteUrl,
+      refspec,
+    ])
+    if (push.exitCode !== 0) {
+      return {
+        ok: false as const,
+        diagnostics: boundDiagnostics(
+          `GitLab HTTPS push failed (exit ${push.exitCode})\n${push.output}`,
+        ),
+      }
+    }
+    return { ok: true as const }
+  })
+
 const attemptNativeCreateDraft = (
   repository: RepositoryRecord,
   branch: string,
   copy: PublicationCopy,
 ) =>
   Effect.gen(function* () {
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      return yield* gitlab
+        .createDraftPullRequest(toGitLabRepository(repository), {
+          headRefName: branch,
+          title: copy.title,
+          body: copy.body,
+        })
+        .pipe(
+          Effect.map((pullRequestNumber) => ({
+            ok: true as const,
+            pullRequestNumber,
+          })),
+          Effect.catch((cause) =>
+            Effect.succeed({
+              ok: false as const,
+              diagnostics: boundDiagnostics(
+                `createDraftPullRequest failed: ${errorMessage(cause)}`,
+              ),
+            }),
+          ),
+        )
+    }
     const github = yield* GitHubService
     return yield* github
       .createDraftPullRequest(toGitHubRepository(repository), {
@@ -426,6 +646,30 @@ const softReconcileDraftCopy = (
   pullRequestNumber: number,
 ) =>
   Effect.gen(function* () {
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      yield* gitlab
+        .updateOpenDraftPullRequestCopy(
+          toGitLabRepository(repository),
+          branch,
+          {
+            title: copy.title,
+            body: copy.body,
+          },
+        )
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning(
+              "Failed to reconcile draft MR title/body to canonical publication copy; reusing open MR",
+              {
+                pullRequestNumber,
+                cause,
+              },
+            ).pipe(Effect.as(pullRequestNumber)),
+          ),
+        )
+      return
+    }
     const github = yield* GitHubService
     yield* github
       .updateOpenDraftPullRequestCopy(toGitHubRepository(repository), branch, {
@@ -448,6 +692,14 @@ const softReconcileDraftCopy = (
 const toGitHubRepository = (
   repository: RepositoryRecord,
 ): GitHubRepository => ({
+  forge: repository.forge,
+  forgeHost: repository.forgeHost,
+  projectPath: repository.projectPath,
+})
+
+const toGitLabRepository = (
+  repository: RepositoryRecord,
+): GitLabRepository => ({
   forge: repository.forge,
   forgeHost: repository.forgeHost,
   projectPath: repository.projectPath,
@@ -522,24 +774,17 @@ const resolveRepositoryRecord = (context: LifecycleStepContext) =>
 
 /**
  * Production Create PR Lifecycle Step.
- * Looks up an existing open PR for the exact Work Item branch (reconciling
+ * Looks up an existing open PR/MR for the exact Work Item branch (reconciling
  * draft title/body to canonical copy), otherwise pushes (harness credential
- * path) and creates a draft through the harness-owned GitHub service with the
+ * path) and creates a draft through the harness-owned Forge service with the
  * same publication copy as Commit. Continues the Implement Session only when
  * the native path does not establish the postcondition (repair fallback).
- * Success requires resolving the open PR identity for persistence.
+ * Success requires resolving the open PR/MR identity for persistence.
  */
 export const createPr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepositoryRecord(context)
-    if (repository.forge === "gitlab") {
-      return yield* new CreatePrPostconditionError({
-        repositoryId: context.repositoryId,
-        message:
-          "GitLab Create PR requires GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
-      })
-    }
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
@@ -547,7 +792,7 @@ export const createPr = (context: LifecycleStepContext) =>
     })
     const copy = yield* resolvePublicationCopyForCreatePr(context, worktreePath)
 
-    // Reuse an existing exact-branch open PR (also covers Retry / indeterminate).
+    // Reuse an existing exact-branch open PR/MR (also covers Retry / indeterminate).
     // Hard-fail only on lookup: without a reliable answer we must not create a
     // duplicate. Draft title/body reconcile is best-effort and must not fail
     // the step when an open PR already exists.
@@ -557,11 +802,13 @@ export const createPr = (context: LifecycleStepContext) =>
       return toCreatePrResult(existing, "native", copy)
     }
 
-    const pushTokenName = yield* resolveNativePushTokenName(
-      context.repositoryId,
-      repository.projectPath,
+    const pushTokenName = yield* resolveNativePushTokenName(repository)
+    const push = yield* attemptNativePush(
+      worktreePath,
+      branch,
+      repository,
+      pushTokenName,
     )
-    const push = yield* attemptNativePush(worktreePath, branch, pushTokenName)
     let nativeDiagnostics: string | null = push.ok ? null : push.diagnostics
 
     if (push.ok) {

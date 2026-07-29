@@ -7,6 +7,10 @@ import {
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
+import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
 import type { LifecycleStepContext } from "../src/index.js"
 import {
   CloseIssueContextError,
@@ -108,7 +112,7 @@ describe("closeIssue", () => {
     expect(error).toBeInstanceOf(CloseIssueContextError)
   })
 
-  it("fails closed before GitHub mutation for a GitLab Repository", async () => {
+  it("closes a GitLab Issue via GitLabService without calling GitHub", async () => {
     const gitlabRepository = makeRepositoryRecord({
       forge: "gitlab",
       forgeHost: "git.drupalcode.org",
@@ -127,6 +131,12 @@ describe("closeIssue", () => {
         ]),
     })
     let githubCalls = 0
+    const calls: Array<{
+      issueNumber: number
+      workItemId: string
+      summary: string
+      projectPath: string
+    }> = []
     const github = Layer.succeed(GitHubService, {
       ...unusedGithub,
       ensureIssueCompletedWithSummary: () => {
@@ -134,19 +144,51 @@ describe("closeIssue", () => {
         return Effect.void
       },
     } satisfies GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      verifyProject: () => Effect.void,
+      getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+      listReadyIssues: () => Effect.succeed([]),
+      hasCredentials: () => Effect.succeed(true),
+      hasAmbientCredentials: () => Effect.succeed(true),
+      getOpenPullRequestNumber: () => Effect.succeed(1),
+      findOpenPullRequestNumber: () => Effect.succeed(null),
+      createDraftPullRequest: () => Effect.succeed(1),
+      updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+      countOpenNonDraftPullRequests: () => Effect.succeed(0),
+      ensureIssueCompletedWithSummary: (
+        repository,
+        issueNumber,
+        workItemId,
+        summaryMarkdown,
+      ) =>
+        Effect.sync(() => {
+          calls.push({
+            issueNumber,
+            workItemId,
+            summary: summaryMarkdown,
+            projectPath: repository.projectPath,
+          })
+        }),
+      closeOpenPullRequestsForBranch: () => Effect.void,
+      deleteBranch: () => Effect.void,
+    } satisfies GitLabServiceShape)
 
-    const error = await Effect.runPromise(
+    await Effect.runPromise(
       closeIssue({
         ...context,
         repositoryId: gitlabRepository.id,
-      }).pipe(Effect.provide(Layer.merge(db, github)), Effect.flip),
+      }).pipe(Effect.provide(Layer.mergeAll(db, github, gitlab))),
     )
 
-    expect(error).toBeInstanceOf(CloseIssueContextError)
-    expect((error as CloseIssueContextError).message).toContain(
-      "refusing to query GitHub for a GitLab Repository",
-    )
     expect(githubCalls).toBe(0)
+    expect(calls).toEqual([
+      {
+        issueNumber: 42,
+        workItemId: context.workItemId,
+        summary: "Findings complete.",
+        projectPath: "project/widgets",
+      },
+    ])
   })
 
   it("rejects an open parent Issue before mutation", async () => {

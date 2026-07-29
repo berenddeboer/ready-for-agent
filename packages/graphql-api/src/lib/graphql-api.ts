@@ -685,17 +685,29 @@ export const createGraphqlApi = (
           }) =>
             runGraphql(
               Effect.gen(function* () {
+                const forgeRepository = {
+                  forge: repository.forge,
+                  forgeHost: repository.forgeHost,
+                  projectPath: repository.projectPath,
+                }
+                // Forge is authoritative: open non-draft PRs/MRs regardless of
+                // Work Item ownership. Credential/API failures degrade to zero
+                // so the repository list still renders.
+                if (repository.forge === "gitlab") {
+                  const gitlab = yield* GitLabService
+                  return yield* gitlab
+                    .countOpenNonDraftPullRequests(forgeRepository)
+                    .pipe(
+                      Effect.catchTags({
+                        GitLabProjectUnavailableError: () => Effect.succeed(0),
+                        GitLabRequestError: () => Effect.succeed(0),
+                      }),
+                    )
+                }
                 if (repository.forge !== "github") return 0
                 const github = yield* GitHubService
-                // GitHub is authoritative: open non-draft PRs regardless of Work
-                // Item ownership. Credential/API failures degrade to zero so the
-                // repository list still renders.
                 return yield* github
-                  .countOpenNonDraftPullRequests({
-                    forge: repository.forge,
-                    forgeHost: repository.forgeHost,
-                    projectPath: repository.projectPath,
-                  })
+                  .countOpenNonDraftPullRequests(forgeRepository)
                   .pipe(
                     Effect.catchTags({
                       GitHubRepositoryUnavailableError: () => Effect.succeed(0),

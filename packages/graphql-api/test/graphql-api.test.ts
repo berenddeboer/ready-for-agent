@@ -202,6 +202,14 @@ const defaultGitlab: GitLabServiceShape = {
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
   hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
 }
 
 const makeRuntime = (
@@ -2108,6 +2116,52 @@ describe("GraphQL API", () => {
     const third = await createGraphqlApi(runtime).fetch(graphqlRequest(query))
     expect(await third.json()).toEqual({
       data: { repositories: [{ id: repository.id, pullRequestCount: 0 }] },
+    })
+  })
+
+  test("pullRequestCount uses GitLab open non-draft MRs for GitLab Repositories", async () => {
+    await runtime.dispose()
+    const gitlabRepository = makeRepositoryRecord({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      localPath: "/repos/oauth-client",
+    })
+    let openNonDraft = 2
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: () => Effect.succeed(openNonDraft),
+      },
+    )
+
+    const query = {
+      query: `query {
+        repositories { id pullRequestCount }
+      }`,
+    }
+
+    const first = await createGraphqlApi(runtime).fetch(graphqlRequest(query))
+    expect(await first.json()).toEqual({
+      data: {
+        repositories: [{ id: gitlabRepository.id, pullRequestCount: 2 }],
+      },
+    })
+
+    openNonDraft = 5
+    const second = await createGraphqlApi(runtime).fetch(graphqlRequest(query))
+    expect(await second.json()).toEqual({
+      data: {
+        repositories: [{ id: gitlabRepository.id, pullRequestCount: 5 }],
+      },
     })
   })
 

@@ -1,5 +1,9 @@
 export const workItemIssueUrl = (
+  forge: string,
   forgeHost: string,
   projectPath: string,
   issueNumber: number,
-): string => `https://${forgeHost}/${projectPath}/issues/${issueNumber}`
+): string =>
+  forge === "gitlab"
+    ? `https://${forgeHost}/${projectPath}/-/issues/${issueNumber}`
+    : `https://${forgeHost}/${projectPath}/issues/${issueNumber}`

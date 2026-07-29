@@ -19,6 +19,17 @@ const platformLayer = BunChildProcessSpawner.layer.pipe(
   Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
 )
 
+const gitlabLifecycleStub = {
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
+} as const
+
 const repository = {
   forge: "gitlab",
   forgeHost: "git.drupalcode.org",
@@ -327,6 +338,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
             ambientChecked = true
             return false
           }),
+        ...gitlabLifecycleStub,
       }),
       makeAnonymousService: () => ({
         verifyProject: () => Effect.void,
@@ -334,6 +346,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
         listReadyIssues: () => Effect.succeed([]),
         hasCredentials: () => Effect.succeed(false),
         hasAmbientCredentials: () => Effect.succeed(false),
+        ...gitlabLifecycleStub,
       }),
     }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
 
@@ -375,6 +388,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
         },
         hasCredentials: () => Effect.succeed(true),
         hasAmbientCredentials: () => Effect.succeed(true),
+        ...gitlabLifecycleStub,
       }),
     }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
 
@@ -417,6 +431,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
         },
         hasCredentials: () => Effect.succeed(true),
         hasAmbientCredentials: () => Effect.succeed(true),
+        ...gitlabLifecycleStub,
       }),
     }).pipe(Layer.provide(keymaxxerLayer), Layer.provide(platformLayer))
 

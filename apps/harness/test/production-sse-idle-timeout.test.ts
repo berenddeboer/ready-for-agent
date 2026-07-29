@@ -108,6 +108,14 @@ const defaultGitlab: GitLabServiceShape = {
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
   hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
 }
 
 const freePort = async (): Promise<number> => {

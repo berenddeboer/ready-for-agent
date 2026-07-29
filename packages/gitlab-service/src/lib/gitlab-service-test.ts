@@ -1,8 +1,5 @@
 import { Effect, Layer } from "effect"
-import {
-  GitLabProjectUnavailableError,
-  type GitLabRequestError,
-} from "./errors.js"
+import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
 import { GitLabService } from "./gitlab-service.js"
 import type { GitLabReadyLabeledIssue, GitLabRepository } from "./types.js"
 
@@ -10,6 +7,8 @@ export interface GitLabServiceTestFixture {
   readonly repository: GitLabRepository
   readonly issues?: readonly GitLabReadyLabeledIssue[]
   readonly operatorLogin?: string
+  readonly openPullRequestByBranch?: Readonly<Record<string, number>>
+  readonly openNonDraftPullRequestCount?: number
   readonly error?: GitLabRequestError
 }
 
@@ -25,39 +24,70 @@ export const makeGitLabServiceTest = (
   const fixtureFor = (repository: GitLabRepository) =>
     byRepository.get(key(repository))
 
+  const failOr = <A>(
+    repository: GitLabRepository,
+    succeed: (fixture: GitLabServiceTestFixture) => Effect.Effect<A, never>,
+  ) => {
+    const fixture = fixtureFor(repository)
+    if (fixture === undefined) {
+      return Effect.fail(new GitLabProjectUnavailableError(repository))
+    }
+    if (fixture.error !== undefined) return Effect.fail(fixture.error)
+    return succeed(fixture)
+  }
+
   return Layer.succeed(GitLabService, {
-    verifyProject: (repository) => {
-      const fixture = fixtureFor(repository)
-      if (fixture === undefined) {
-        return Effect.fail(new GitLabProjectUnavailableError(repository))
-      }
-      return fixture.error === undefined
-        ? Effect.void
-        : Effect.fail(fixture.error)
-    },
-    getAuthenticatedUserLogin: (repository) => {
-      const fixture = fixtureFor(repository)
-      if (fixture === undefined) {
-        return Effect.fail(new GitLabProjectUnavailableError(repository))
-      }
-      if (fixture.error !== undefined) return Effect.fail(fixture.error)
-      return Effect.succeed(fixture.operatorLogin ?? "operator")
-    },
-    listReadyIssues: (repository) => {
-      const fixture = fixtureFor(repository)
-      if (fixture === undefined) {
-        return Effect.fail(new GitLabProjectUnavailableError(repository))
-      }
-      if (fixture.error !== undefined) return Effect.fail(fixture.error)
-      return Effect.succeed(
-        [...(fixture.issues ?? [])].sort(
-          (left, right) => left.number - right.number,
+    verifyProject: (repository) => failOr(repository, () => Effect.void),
+    getAuthenticatedUserLogin: (repository) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(fixture.operatorLogin ?? "operator"),
+      ),
+    listReadyIssues: (repository) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(
+          [...(fixture.issues ?? [])].sort(
+            (left, right) => left.number - right.number,
+          ),
         ),
-      )
-    },
+      ),
     hasCredentials: (repository) =>
       Effect.succeed(fixtureFor(repository) !== undefined),
     hasAmbientCredentials: (repository) =>
       Effect.succeed(fixtureFor(repository) !== undefined),
+    getOpenPullRequestNumber: (repository, headRefName) => {
+      const fixture = fixtureFor(repository)
+      if (fixture === undefined) {
+        return Effect.fail(new GitLabProjectUnavailableError(repository))
+      }
+      if (fixture.error !== undefined) return Effect.fail(fixture.error)
+      const number = fixture.openPullRequestByBranch?.[headRefName]
+      if (number === undefined) {
+        return Effect.fail(
+          new GitLabRequestError({
+            message: `No open merge request found for ${repository.projectPath}:${headRefName}`,
+          }),
+        )
+      }
+      return Effect.succeed(number)
+    },
+    findOpenPullRequestNumber: (repository, headRefName) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(fixture.openPullRequestByBranch?.[headRefName] ?? null),
+      ),
+    createDraftPullRequest: (repository) =>
+      failOr(repository, () => Effect.succeed(1)),
+    updateOpenDraftPullRequestCopy: (repository, headRefName) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(fixture.openPullRequestByBranch?.[headRefName] ?? null),
+      ),
+    countOpenNonDraftPullRequests: (repository) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(fixture.openNonDraftPullRequestCount ?? 0),
+      ),
+    ensureIssueCompletedWithSummary: (repository) =>
+      failOr(repository, () => Effect.void),
+    closeOpenPullRequestsForBranch: (repository) =>
+      failOr(repository, () => Effect.void),
+    deleteBranch: (repository) => failOr(repository, () => Effect.void),
   })
 }

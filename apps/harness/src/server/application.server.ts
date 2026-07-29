@@ -233,6 +233,7 @@ export const createApplication = async (
     Layer.provideMerge(activeLayer),
     Layer.provideMerge(keymaxxerLayer),
     Layer.provideMerge(githubLayer),
+    Layer.provideMerge(gitlabLayer),
     Layer.provide(platformLayer),
   )
   const workerLayer = JobWorkerLive.pipe(

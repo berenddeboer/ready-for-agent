@@ -19,6 +19,10 @@ import {
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
 import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   KeymaxxerError,
   KeymaxxerService,
   type KeymaxxerServiceShape,
@@ -126,6 +130,26 @@ const stubGitHub = (
     }),
   )
 
+const stubGitLab = (
+  overrides: Partial<GitLabServiceShape> = {},
+): Layer.Layer<GitLabService> =>
+  Layer.succeed(GitLabService, {
+    verifyProject: () => Effect.void,
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    hasCredentials: () => Effect.succeed(true),
+    hasAmbientCredentials: () => Effect.succeed(true),
+    getOpenPullRequestNumber: () => Effect.succeed(321),
+    findOpenPullRequestNumber: () => Effect.succeed(null),
+    createDraftPullRequest: () => Effect.succeed(321),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    closeOpenPullRequestsForBranch: () => Effect.void,
+    deleteBranch: () => Effect.void,
+    ...overrides,
+  } satisfies GitLabServiceShape)
+
 const stubOpencode = (
   overrides: {
     continueTurn?: (input: {
@@ -164,6 +188,7 @@ const run = <A, E>(
     E,
     | DbService
     | GitHubService
+    | GitLabService
     | KeymaxxerService
     | AgentBackend
     | ActiveAgentBackend
@@ -173,6 +198,7 @@ const run = <A, E>(
     keymaxxer?: Layer.Layer<KeymaxxerService>
     opencode?: Layer.Layer<AgentBackend>
     github?: Layer.Layer<GitHubService>
+    gitlab?: Layer.Layer<GitLabService>
     activeBackend?: Layer.Layer<ActiveAgentBackend>
   } = {},
 ): Promise<A> =>
@@ -182,6 +208,7 @@ const run = <A, E>(
         Layer.mergeAll(
           layers.db ?? stubDb,
           layers.github ?? stubGitHub(),
+          layers.gitlab ?? stubGitLab(),
           layers.keymaxxer ?? stubKeymaxxer(),
           layers.opencode ?? stubOpencode(),
           layers.activeBackend ?? stubActiveAgentBackendLayer(),
@@ -231,10 +258,15 @@ describe("createPr", () => {
     expect(error).toBeInstanceOf(CreatePrInvalidWorktreeContextError)
   })
 
-  it("fails closed before GitHub access for a GitLab Repository", () =>
+  it("creates a draft GitLab MR without calling GitHub", () =>
     withTemp(async (root) => {
       let githubCalls = 0
-      let keymaxxerCalls = 0
+      let created: {
+        headRefName: string
+        title: string
+        body: string
+      } | null = null
+      const pushCommands: string[] = []
       let agentCalls = 0
       const gitlabDb = stubDbServiceLayer({
         listRepositories: Effect.succeed([
@@ -246,19 +278,49 @@ describe("createPr", () => {
           }),
         ]),
       })
+      const context = baseContext(root, {
+        issueNumber: 3601642,
+        publicationTitle: "feat: refresh tokens",
+        publicationBody: "Implements refresh.\n\nCloses #3601642",
+      })
+      const expectedBranch = workItemBranchName({
+        projectPath: "project/widgets",
+        issueNumber: 3601642,
+        workItemId: context.workItemId,
+      })
 
-      const error = await run(createPr(baseContext(root)).pipe(Effect.flip), {
+      const result = await run(createPr(context), {
         db: gitlabDb,
         github: stubGitHub({
           findOpenPullRequestNumber: () => {
             githubCalls += 1
             return Effect.succeed(null)
           },
+          createDraftPullRequest: () => {
+            githubCalls += 1
+            return Effect.succeed(1)
+          },
+        }),
+        gitlab: stubGitLab({
+          findOpenPullRequestNumber: () => Effect.succeed(null),
+          createDraftPullRequest: (_repository, input) => {
+            created = input
+            return Effect.succeed(91)
+          },
+          updateOpenDraftPullRequestCopy: () => Effect.succeed(91),
         }),
         keymaxxer: stubKeymaxxer({
-          findSecret: () => {
-            keymaxxerCalls += 1
+          enabled: true,
+          findSecret: (input) => {
+            expect(input).toEqual({
+              provider: "gitlab",
+              account: "git.drupalcode.org/project/widgets",
+            })
             return Effect.succeed("GITLAB_TOKEN_PROJECT_WIDGETS")
+          },
+          runWithSecrets: (input) => {
+            pushCommands.push(input.command)
+            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
           },
         }),
         opencode: stubOpencode({
@@ -272,13 +334,93 @@ describe("createPr", () => {
         }),
       })
 
-      expect(error).toBeInstanceOf(CreatePrPostconditionError)
-      expect((error as CreatePrPostconditionError).message).toContain(
-        "refusing to query GitHub for a GitLab Repository",
-      )
+      expect(result).toMatchObject({
+        pullRequestNumber: 91,
+        completion: "native",
+        publicationTitle: "feat: refresh tokens",
+        publicationBody: "Implements refresh.\n\nCloses #3601642",
+      })
+      expect(created).toEqual({
+        headRefName: expectedBranch,
+        title: "feat: refresh tokens",
+        body: "Implements refresh.\n\nCloses #3601642",
+      })
       expect(githubCalls).toBe(0)
-      expect(keymaxxerCalls).toBe(0)
       expect(agentCalls).toBe(0)
+      expect(pushCommands).toHaveLength(1)
+      const pushCommand = pushCommands[0]!
+      expect(pushCommand).toContain(
+        "https://git.drupalcode.org/project/widgets.git",
+      )
+      expect(pushCommand).not.toContain(" origin ")
+      expect(pushCommand).toContain("Authorization: Basic $BASIC")
+      // Real shell assignment before git — not BASIC=… git … $BASIC prefix form.
+      expect(pushCommand).toContain(')" && git ')
+    }))
+  it("reuses an existing exact-branch open GitLab MR without creation", () =>
+    withTemp(async (root) => {
+      let createCalls = 0
+      let githubCalls = 0
+      let reconciled: { title: string; body: string } | null = null
+      const gitlabDb = stubDbServiceLayer({
+        listRepositories: Effect.succeed([
+          makeRepositoryRecord({
+            forge: "gitlab",
+            forgeHost: "git.drupalcode.org",
+            projectPath: "project/widgets",
+            localPath: "/repos/project-widgets",
+          }),
+        ]),
+      })
+      const context = baseContext(root, {
+        issueNumber: 3601642,
+        publicationTitle: "feat: refresh tokens",
+        publicationBody: "Implements refresh.\n\nCloses #3601642",
+      })
+
+      const result = await run(createPr(context), {
+        db: gitlabDb,
+        github: stubGitHub({
+          findOpenPullRequestNumber: () => {
+            githubCalls += 1
+            return Effect.succeed(null)
+          },
+        }),
+        gitlab: stubGitLab({
+          findOpenPullRequestNumber: () => Effect.succeed(77),
+          createDraftPullRequest: () => {
+            createCalls += 1
+            return Effect.succeed(91)
+          },
+          updateOpenDraftPullRequestCopy: (_repository, _branch, input) => {
+            reconciled = input
+            return Effect.succeed(77)
+          },
+        }),
+        keymaxxer: stubKeymaxxer({
+          enabled: false,
+          findSecret: () => Effect.succeed(null),
+        }),
+        opencode: stubOpencode({
+          continueTurn: () =>
+            Effect.succeed({
+              sessionId: "ses_implement_session",
+              assistantText: "",
+            }),
+        }),
+      })
+
+      expect(result).toMatchObject({
+        pullRequestNumber: 77,
+        completion: "native",
+        publicationTitle: "feat: refresh tokens",
+      })
+      expect(createCalls).toBe(0)
+      expect(githubCalls).toBe(0)
+      expect(reconciled).toEqual({
+        title: "feat: refresh tokens",
+        body: "Implements refresh.\n\nCloses #3601642",
+      })
     }))
 
   it("reuses an existing exact-branch open PR without creation or Agent Turn", () =>
