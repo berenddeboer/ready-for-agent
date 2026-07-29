@@ -68,7 +68,9 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(lifecycle).toContain(
       "const canRetry = compact && workItem.canRetry && !heldForBlockers",
     )
-    expect(lifecycle).toContain("const canReset = compact")
+    expect(lifecycle).toContain("canShowWorkItemResetAction({")
+    expect(lifecycle).toContain("isTerminal: workItem.isTerminal")
+    expect(lifecycle).toContain('isNeedsHuman: status === "NEEDS_HUMAN"')
     expect(lifecycle).toContain("resetWorkItem")
     expect(lifecycle).toContain(
       'aria-label={reset.isPending ? "Resetting job" : "Reset job"}',
