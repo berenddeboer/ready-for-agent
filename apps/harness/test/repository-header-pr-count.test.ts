@@ -18,10 +18,40 @@ const openPrCountLiveSource = () =>
   )
 
 describe("repository header pull request count", () => {
-  test("repositories query requests open pullRequestCount", () => {
+  test("main repositories query does not request pullRequestCount", () => {
     const source = homeSource()
-    expect(source).toContain("pullRequestCount: true")
-    expect(source).toContain("pullRequestCount: number")
+    // Dedicated projection owns the count field; the Configured Repositories
+    // selection must not include it.
+    expect(source).toContain("Intentionally omits pullRequestCount")
+    const repositoriesQueryStart = source.indexOf(
+      "export const repositoriesQuery = {",
+    )
+    const openCountsStart = source.indexOf(
+      "export const openPullRequestCountsQuery = {",
+    )
+    expect(repositoriesQueryStart).toBeGreaterThan(-1)
+    expect(openCountsStart).toBeGreaterThan(repositoriesQueryStart)
+    const repositoriesQueryBody = source.slice(
+      repositoriesQueryStart,
+      openCountsStart,
+    )
+    expect(repositoriesQueryBody).not.toContain("pullRequestCount: true")
+  })
+
+  test("dedicated openPullRequestCountsQuery requests pullRequestCount", () => {
+    const source = homeSource()
+    expect(source).toContain("export const openPullRequestCountsQuery")
+    expect(source).toContain("openPullRequestCountsQueryKey")
+    const openCountsStart = source.indexOf(
+      "export const openPullRequestCountsQuery = {",
+    )
+    const openCountsEnd = source.indexOf(
+      "export type Repository",
+      openCountsStart,
+    )
+    const body = source.slice(openCountsStart, openCountsEnd)
+    expect(body).toContain("pullRequestCount: true")
+    expect(body).toContain("id: true")
   })
 
   test("header renders the count immediately after the repository name", () => {
@@ -35,7 +65,7 @@ describe("repository header pull request count", () => {
     expect(headerEnd).toBeGreaterThan(titleIndex)
     const header = source.slice(headerStart, headerEnd)
     const nameInHeader = header.indexOf("{repositoryLabel}")
-    const countInHeader = header.indexOf("{repository.pullRequestCount}")
+    const countInHeader = header.indexOf("{pullRequestCountDisplay}")
     expect(nameInHeader).toBeGreaterThan(-1)
     expect(countInHeader).toBeGreaterThan(nameInHeader)
     expect(header).toContain('className="sr-only"')
@@ -45,29 +75,55 @@ describe("repository header pull request count", () => {
     expect(header).toContain("tabular-nums")
   })
 
-  test("labels describe open PRs; zero uses plural without dropping the digit", () => {
+  test("header uses presentation helper with isPending and isFetching", () => {
     const source = homeSource()
-    expect(source).toContain('? "1 open pull request"')
-    expect(source).toContain("open pull requests`")
-    expect(source).toContain("repository.pullRequestCount === 1")
+    expect(source).toContain("openPullRequestCountPresentation")
+    expect(source).toContain("isFetching: openPullRequestCountsFetching")
+    expect(source).toContain("isPending: openPullRequestCountsPending")
+    expect(source).toContain(
+      "aria-busy={pullRequestCountLoading ? true : undefined}",
+    )
   })
 
-  test("uses GitHub-backed live refresh independent of Work Item SSE", () => {
+  test("uses dedicated GitHub-backed live refresh independent of repositoriesQuery", () => {
     const home = homeSource()
     expect(home).toContain("followOpenPullRequestCountLive")
-    expect(home).toContain("repositoriesQuery")
+    expect(home).toContain("openPullRequestCountsQuery")
+    // Follower must receive the dedicated query, not repositoriesQuery.
+    expect(home).toMatch(
+      /followOpenPullRequestCountLive\(\{\s*queryClient,\s*openPullRequestCountsQuery,/,
+    )
+    // Repository membership SSE fire-and-forgets dedicated counts, then awaits
+    // repositories only — never couples membership catch-up to count latency.
+    expect(home).toContain("streamRepositoryChanges")
+    expect(home).toMatch(
+      /invalidateQueries\(\{\s*queryKey:\s*openPullRequestCountsQueryKey\s*\}\)/,
+    )
+    expect(home).toMatch(
+      /invalidateQueries\(\{\s*queryKey:\s*openPullRequestCountsQueryKey[\s\S]*?fetchQuery\(\{\s*\.\.\.repositoriesQuery/,
+    )
 
     const live = openPrCountLiveSource()
     expect(live).toContain("OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS")
+    expect(live).toContain("openPullRequestCountsQueryKey")
+    expect(live).toContain("openPullRequestCountPresentation")
     expect(live).toContain("visibilitychange")
     expect(live).toContain("GitHub-authoritative")
     expect(live).toContain("External PR changes do not emit Work Item SSE")
+    expect(live).toContain("Never cancels")
+    expect(live).toContain("Configured Repositories")
   })
 
-  test("work-item live refresh still invalidates repositories as a secondary path", () => {
+  test("work-item live refresh fire-and-forgets dedicated count without awaiting", () => {
     const source = refreshSource()
-    expect(source).toContain("pullRequestCount")
-    expect(source).toContain("followOpenPullRequestCountLive")
+    expect(source).toContain("openPullRequestCountsQueryKey")
+    expect(source).toContain("scheduleOpenPullRequestCounts")
+    expect(source).toContain("Fire-and-forget")
+    expect(source).toContain("openPrCountsRefreshPending")
     expect(source).toContain('const repositoriesQueryKey = ["repositories"]')
+    // Must not await the dedicated count projection on the SSE path.
+    expect(source).toMatch(
+      /scheduleOpenPullRequestCounts\(\)\s*\n\s*await Promise\.all/,
+    )
   })
 })

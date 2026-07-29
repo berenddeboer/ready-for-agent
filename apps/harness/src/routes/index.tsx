@@ -31,7 +31,11 @@ import {
   isParentImplementAllWithAutoMergeEligible,
 } from "../parent-issue-actions-menu.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
-import { followOpenPullRequestCountLive } from "../refresh-open-pull-request-count-live.js"
+import {
+  followOpenPullRequestCountLive,
+  openPullRequestCountPresentation,
+  openPullRequestCountsQueryKey,
+} from "../refresh-open-pull-request-count-live.js"
 import {
   committedPullRequestsCountQueryKeyPrefix,
   followRepositoryWorkItemsLive,
@@ -185,6 +189,10 @@ const reconcileVariantForModel = (
 export const repositoriesQuery = {
   queryKey: ["repositories"],
   queryFn: async () => {
+    // Intentionally omits pullRequestCount: GitHub-authoritative open non-draft
+    // PR counting is a dedicated projection (openPullRequestCountsQuery) so
+    // Keymaxxer-backed count latency cannot delay Configured Repositories,
+    // credentials, Issues, Work Items, or controls.
     const result = await graphql.query({
       repositories: {
         id: true,
@@ -205,7 +213,6 @@ export const repositoriesQuery = {
         waitForReadyForReviewChecks: true,
         issuesReconciledAt: true,
         blockingUnfinishedWorkItemCount: true,
-        pullRequestCount: true,
       },
       repositoryCredentials: {
         repositoryId: true,
@@ -223,6 +230,29 @@ export const repositoriesQuery = {
       }
       return { ...repository, credential }
     })
+  },
+}
+
+/**
+ * Dedicated cache identity for GitHub open non-draft Pull Request counts.
+ * Independent of {@link repositoriesQuery}: a slow or failed count must not
+ * cancel or block the Configured Repositories projection.
+ */
+export const openPullRequestCountsQuery = {
+  queryKey: openPullRequestCountsQueryKey,
+  queryFn: async (): Promise<Readonly<Record<string, number>>> => {
+    const result = await graphql.query({
+      repositories: {
+        id: true,
+        pullRequestCount: true,
+      },
+    })
+    return Object.fromEntries(
+      result.repositories.map(({ id, pullRequestCount }) => [
+        id,
+        pullRequestCount,
+      ]),
+    )
   },
 }
 
@@ -293,7 +323,6 @@ export type Repository = {
   waitForReadyForReviewChecks: boolean
   issuesReconciledAt: string | null
   blockingUnfinishedWorkItemCount: number
-  pullRequestCount: number
   credential: RepositoryCredential
 }
 
@@ -708,6 +737,11 @@ function RepositoryCards() {
       }, 10_000)
     }
     const refresh = async () => {
+      // Membership catch-up: repositories first; dedicated open-PR counts are
+      // fire-and-forget so Keymaxxer counting cannot delay or block this path.
+      void queryClient
+        .invalidateQueries({ queryKey: openPullRequestCountsQueryKey })
+        .catch(() => undefined)
       await queryClient.fetchQuery({ ...repositoriesQuery, staleTime: 0 })
       if (cancelled) return
       if (warningTimer !== undefined) clearTimeout(warningTimer)
@@ -789,14 +823,14 @@ function RepositoryCards() {
     return () => controller.abort()
   }, [queryClient])
 
-  // GitHub-authoritative open non-draft PR header counts: poll while visible
-  // and refetch immediately when a backgrounded tab returns (external PRs do
-  // not emit Work Item SSE events).
+  // GitHub-authoritative open non-draft PR header counts: dedicated projection
+  // only — poll while visible and refetch when a backgrounded tab returns
+  // (external PRs do not emit Work Item SSE events). Never touches repositoriesQuery.
   useEffect(() => {
     const controller = new AbortController()
     void followOpenPullRequestCountLive({
       queryClient,
-      repositoriesQuery,
+      openPullRequestCountsQuery,
       signal: controller.signal,
     })
     return () => controller.abort()
@@ -901,7 +935,6 @@ function AddRepositoryGuidance({
           waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,
           blockingUnfinishedWorkItemCount: true,
-          pullRequestCount: true,
         },
       })
       return result.addRepository
@@ -912,6 +945,9 @@ function AddRepositoryGuidance({
       setInspection(null)
       await queryClient.invalidateQueries({
         queryKey: repositoriesQuery.queryKey,
+      })
+      void queryClient.invalidateQueries({
+        queryKey: openPullRequestCountsQuery.queryKey,
       })
     },
     onError: (error) => {
@@ -1252,7 +1288,6 @@ function RepositoryCard({
           waitForReadyForReviewChecks: true,
           issuesReconciledAt: true,
           blockingUnfinishedWorkItemCount: true,
-          pullRequestCount: true,
         },
       })
       return result.updateRepositorySettings
@@ -1642,6 +1677,9 @@ function RepositoryCard({
       await queryClient.invalidateQueries({
         queryKey: repositoriesQuery.queryKey,
       })
+      void queryClient.invalidateQueries({
+        queryKey: openPullRequestCountsQuery.queryKey,
+      })
       // Dropping a repo may shrink selected-or-in-use Active backends.
       void queryClient.invalidateQueries({
         queryKey: ["agentBackendStatus"],
@@ -1780,10 +1818,21 @@ function RepositoryCard({
     ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
     : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
   const repositoryLabel = `${repository.projectPath}`
-  const pullRequestCountLabel =
-    repository.pullRequestCount === 1
-      ? "1 open pull request"
-      : `${repository.pullRequestCount} open pull requests`
+  // Dedicated count projection: loading/last-known must not block the card.
+  const {
+    data: openPullRequestCounts,
+    isPending: openPullRequestCountsPending,
+    isFetching: openPullRequestCountsFetching,
+  } = useQuery(openPullRequestCountsQuery)
+  const {
+    label: pullRequestCountLabel,
+    display: pullRequestCountDisplay,
+    loading: pullRequestCountLoading,
+  } = openPullRequestCountPresentation({
+    count: openPullRequestCounts?.[repository.id],
+    isPending: openPullRequestCountsPending,
+    isFetching: openPullRequestCountsFetching,
+  })
   const {
     collapsed: repositoryCollapsed,
     toggleCollapsed: toggleRepositoryCollapsed,
@@ -1805,9 +1854,10 @@ function RepositoryCard({
           <span
             className="shrink-0 font-mono text-sm font-semibold tracking-normal text-ink-faint tabular-nums"
             title={pullRequestCountLabel}
+            aria-busy={pullRequestCountLoading ? true : undefined}
           >
             <span className="sr-only">{pullRequestCountLabel}</span>
-            <span aria-hidden="true">{repository.pullRequestCount}</span>
+            <span aria-hidden="true">{pullRequestCountDisplay}</span>
           </span>
         </h2>
         <div className="flex shrink-0 items-center gap-1">
