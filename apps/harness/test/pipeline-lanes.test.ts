@@ -65,8 +65,12 @@ describe("pipelineLaneFor", () => {
       status: "WAITING_FOR_WORKER_SLOT",
       lane: "queue",
     },
-    { state: "CREATE_WORKTREE", status: "RUNNING", lane: "queue" },
-    { state: "INSTALL_DEPENDENCIES", status: "RUNNING", lane: "queue" },
+    { state: "CREATE_WORKTREE", status: "QUEUED", lane: "queue" },
+    {
+      state: "INSTALL_DEPENDENCIES",
+      status: "WAITING_FOR_WORKER_SLOT",
+      lane: "queue",
+    },
   ] satisfies readonly LaneCase[])(
     "places $state with $status in Queue",
     ({ state, status, lane }) => {
@@ -75,6 +79,8 @@ describe("pipelineLaneFor", () => {
   )
 
   test.each([
+    { state: "CREATE_WORKTREE", status: "RUNNING", lane: "build" },
+    { state: "INSTALL_DEPENDENCIES", status: "RUNNING", lane: "build" },
     { state: "IMPLEMENT", status: "RUNNING", lane: "build" },
     { state: "ASSESS_CHANGES", status: "RUNNING", lane: "build" },
     { state: "PRE_COMMIT", status: "RUNNING", lane: "build" },

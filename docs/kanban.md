@@ -29,8 +29,8 @@ The board has six ordered lanes:
 
 | Lane | Meaning | Derived from |
 | --- | --- | --- |
-| Queue | Work has not reached an active implementation step. | `QUEUED`, `WAITING_FOR_WORKER_SLOT`, `CREATE_WORKTREE`, `INSTALL_DEPENDENCIES` |
-| Build | Implementation work is in progress. | `IMPLEMENT`, `ASSESS_CHANGES`, `PRE_COMMIT` |
+| Queue | Work has not begun active lifecycle execution. | `QUEUED`, `WAITING_FOR_WORKER_SLOT` |
+| Build | Active startup and implementation work is in progress. | `CREATE_WORKTREE`, `INSTALL_DEPENDENCIES`, `IMPLEMENT`, `ASSESS_CHANGES`, `PRE_COMMIT` |
 | Review | A pull request or review/check handoff is in progress. | `REVIEW`, `WATCH_PR_STATUS_CHECKS`, `RESOLVE_PR_MERGE_CONFLICT`, `INVESTIGATE_PR_STATUS_CHECKS` |
 | Ship | Work is beyond review but not terminal. | Any non-terminal lifecycle state not classified above |
 | Attention | An operator or remediation decision is needed. | Failed, interrupted, needs-human statuses or states |
