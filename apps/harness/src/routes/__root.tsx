@@ -169,10 +169,23 @@ function RootDocument({ children }: { children: ReactNode }) {
   )
 }
 
+// Shared layout only — Router merges className with active/inactive props, so
+// mutually exclusive visual utilities must not live on the base class string.
+const primaryNavLinkClassName =
+  "inline-flex items-center border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] uppercase transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+
+const primaryNavLinkInactiveClassName =
+  "border-rule-2 bg-panel text-ink-2 hover:border-ink-soft hover:bg-paper-2"
+
+const primaryNavLinkActiveClassName = "border-ink bg-ink text-paper"
+
 function RootComponent() {
   return (
     <div className="mx-auto min-h-screen w-full max-w-[88rem] px-5 py-6 sm:px-8 lg:px-12">
-      <nav className="mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 border-b-2 border-ink pb-3">
+      <nav
+        aria-label="Primary"
+        className="mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 border-b-2 border-ink pb-3"
+      >
         <div className="grid gap-1">
           <h1 className="m-0 font-serif text-[clamp(1.6rem,3.2vw,2.25rem)] leading-none font-semibold tracking-[-0.012em]">
             <Link
@@ -190,6 +203,25 @@ function RootComponent() {
           >
             {READY_FOR_AGENT_VERSION_LABEL}
           </span>
+        </div>
+        <div className="flex items-center gap-2 self-center">
+          <Link
+            to="/"
+            activeOptions={{ exact: true }}
+            className={primaryNavLinkClassName}
+            inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+            activeProps={{ className: primaryNavLinkActiveClassName }}
+          >
+            Home
+          </Link>
+          <Link
+            to="/kanban"
+            className={primaryNavLinkClassName}
+            inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+            activeProps={{ className: primaryNavLinkActiveClassName }}
+          >
+            Kanban
+          </Link>
         </div>
         <SettingsButton />
       </nav>
