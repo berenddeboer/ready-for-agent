@@ -172,12 +172,52 @@ function RootDocument({ children }: { children: ReactNode }) {
 // Shared layout only — Router merges className with active/inactive props, so
 // mutually exclusive visual utilities must not live on the base class string.
 const primaryNavLinkClassName =
-  "inline-flex items-center border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] uppercase transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+  "inline-flex items-center gap-2 border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] uppercase transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
 
+// Inactive: muted gray-out; hover still reads as clickable.
 const primaryNavLinkInactiveClassName =
-  "border-rule-2 bg-panel text-ink-2 hover:border-ink-soft hover:bg-paper-2"
+  "border-rule-2 bg-panel text-ink-faint hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2"
 
-const primaryNavLinkActiveClassName = "border-ink bg-ink text-paper"
+// Selected: restrained contrast (stronger border/text, light fill — not a solid ink pill).
+const primaryNavLinkActiveClassName = "border-ink bg-paper-2 text-ink"
+
+// Settings is a non-route action; keep it in the same family as inactive nav.
+const primaryNavActionClassName =
+  "inline-flex items-center gap-2 border border-rule-2 bg-panel px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-ink-faint uppercase transition hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+
+function HomeNavIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5 9.5V21h14V9.5" />
+      <path d="M9 21v-6h6v6" />
+    </svg>
+  )
+}
+
+function KanbanNavIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <rect x="3.5" y="4" width="4.5" height="16" rx="0.5" />
+      <rect x="9.75" y="4" width="4.5" height="10" rx="0.5" />
+      <rect x="16" y="4" width="4.5" height="13" rx="0.5" />
+    </svg>
+  )
+}
 
 function RootComponent() {
   return (
@@ -204,26 +244,31 @@ function RootComponent() {
             {READY_FOR_AGENT_VERSION_LABEL}
           </span>
         </div>
-        <div className="flex items-center gap-2 self-center">
-          <Link
-            to="/"
-            activeOptions={{ exact: true }}
-            className={primaryNavLinkClassName}
-            inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-            activeProps={{ className: primaryNavLinkActiveClassName }}
-          >
-            Home
-          </Link>
-          <Link
-            to="/kanban"
-            className={primaryNavLinkClassName}
-            inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-            activeProps={{ className: primaryNavLinkActiveClassName }}
-          >
-            Kanban
-          </Link>
-        </div>
-        <SettingsButton />
+        <SettingsButton
+          leading={
+            <>
+              <Link
+                to="/"
+                activeOptions={{ exact: true }}
+                className={primaryNavLinkClassName}
+                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+                activeProps={{ className: primaryNavLinkActiveClassName }}
+              >
+                <HomeNavIcon />
+                Home
+              </Link>
+              <Link
+                to="/kanban"
+                className={primaryNavLinkClassName}
+                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+                activeProps={{ className: primaryNavLinkActiveClassName }}
+              >
+                <KanbanNavIcon />
+                Kanban
+              </Link>
+            </>
+          }
+        />
       </nav>
       <Outlet />
       <ReactQueryDevtools buttonPosition="bottom-left" />
@@ -232,7 +277,7 @@ function RootComponent() {
   )
 }
 
-function SettingsButton() {
+function SettingsButton({ leading }: { leading: ReactNode }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -675,25 +720,30 @@ function SettingsButton() {
           </button>
         </div>
       )}
-      <button
-        type="button"
-        className="ml-auto inline-flex items-center gap-2 border border-rule-2 bg-panel px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-ink-2 uppercase transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-        onClick={openSettings}
-        aria-haspopup="dialog"
-      >
-        <svg
-          aria-hidden="true"
-          className="size-3.5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
+      {/* Home / Kanban / Settings share one right-aligned control cluster.
+          Status banners above stay nav-level siblings (outside the cluster). */}
+      <div className="ml-auto flex items-center gap-2 self-center">
+        {leading}
+        <button
+          type="button"
+          className={primaryNavActionClassName}
+          onClick={openSettings}
+          aria-haspopup="dialog"
         >
-          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" />
-        </svg>
-        Settings
-      </button>
+          <svg
+            aria-hidden="true"
+            className="size-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+          </svg>
+          Settings
+        </button>
+      </div>
 
       <dialog
         ref={dialogRef}
