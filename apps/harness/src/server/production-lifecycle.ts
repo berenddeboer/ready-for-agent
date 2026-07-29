@@ -376,20 +376,54 @@ export const startProductionLifecycle = async (
   let shuttingDown = false
   let removeSignalHandlers = () => {}
   let childFailed = false
+  /** Shared disposal promise so concurrent callers await the same cleanup. */
+  let disposePromise: Promise<void> | undefined
 
-  const dispose = async () => {
-    if (shuttingDown) return
-    shuttingDown = true
+  const runDisposal = async (): Promise<void> => {
     onEvent("shutdown-start")
     removeSignalHandlers()
+
+    const failures: unknown[] = []
+
     if (server !== undefined) {
-      await server.stop(true)
+      try {
+        await server.stop(true)
+      } catch (error) {
+        failures.push(error)
+      }
     }
+
     if (application !== undefined) {
-      await application.dispose()
+      try {
+        await application.dispose()
+      } catch (error) {
+        failures.push(error)
+      }
     }
-    ownedChild?.kill("SIGTERM")
+
+    try {
+      ownedChild?.kill("SIGTERM")
+    } catch (error) {
+      failures.push(error)
+    }
+
     onEvent("shutdown-complete")
+
+    if (failures.length === 1) {
+      throw failures[0]
+    }
+    if (failures.length > 1) {
+      throw new AggregateError(failures, "Production lifecycle disposal failed")
+    }
+  }
+
+  const dispose = (): Promise<void> => {
+    if (disposePromise !== undefined) {
+      return disposePromise
+    }
+    shuttingDown = true
+    disposePromise = runDisposal()
+    return disposePromise
   }
 
   try {
@@ -406,7 +440,18 @@ export const startProductionLifecycle = async (
       context: application.context,
     })
   } catch (error) {
-    await dispose()
+    try {
+      await dispose()
+    } catch (disposalError) {
+      // Prefer the original startup error, but keep disposal failures diagnosable.
+      logError(
+        `Production lifecycle disposal failed during startup recovery: ${
+          disposalError instanceof Error
+            ? disposalError.message
+            : String(disposalError)
+        }`,
+      )
+    }
     throw error
   }
 
@@ -430,6 +475,24 @@ export const startProductionLifecycle = async (
     onEvent("browser-open")
   }
 
+  /**
+   * Await disposal for process-exit paths without leaving rejections unhandled.
+   * Exit runs only after cleanup has settled (success or failure).
+   */
+  const disposeThenExit = (exit: () => void) => {
+    void dispose()
+      .catch((disposalError: unknown) => {
+        logError(
+          `Production lifecycle disposal failed: ${
+            disposalError instanceof Error
+              ? disposalError.message
+              : String(disposalError)
+          }`,
+        )
+      })
+      .finally(exit)
+  }
+
   if (ownedChild !== undefined) {
     ownedChild.on("exit", (code, signal) => {
       if (shuttingDown) return
@@ -438,14 +501,14 @@ export const startProductionLifecycle = async (
       logError(
         `Keymaxxer Sidecar exited while the Harness was running (code ${code ?? "?"}${signal ? `, signal ${signal}` : ""})`,
       )
-      void dispose().finally(() => {
+      disposeThenExit(() => {
         exitProcess(1)
       })
     })
   }
 
   removeSignalHandlers = installSignalHandlers((signal) => {
-    void dispose().finally(() => {
+    disposeThenExit(() => {
       if (childFailed) {
         exitProcess(1)
         return
