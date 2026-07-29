@@ -251,10 +251,10 @@ describe("Repository live updates", () => {
         cancelled = true
         return originalCancel(reason)
       }
-      reader.read = async () => {
+      reader.read = (async () => {
         if (cancelled) throw new Error("read rejected after cancel")
         return originalRead()
-      }
+      }) as typeof reader.read
       return reader
     }
 

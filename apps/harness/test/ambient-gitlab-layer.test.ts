@@ -54,7 +54,7 @@ test("GITLAB_TOKEN takes precedence over glab and is cached per host", async () 
         ...repository,
         projectPath: "project/other",
       })
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(resolutions).toBe(0)
@@ -80,7 +80,7 @@ test("glab tokens are resolved independently per GitLab host", async () => {
         ...repository,
         forgeHost: "gitlab.example.com",
       })
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(hosts).toEqual(["git.drupalcode.org", "gitlab.example.com"])
@@ -110,7 +110,7 @@ test("authentication refreshes once after a GitLab 401", async () => {
     Effect.gen(function* () {
       const gitlab = yield* GitLabService
       yield* gitlab.listReadyIssues(repository)
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(resolutions).toBe(2)
@@ -138,7 +138,7 @@ test("public project verification falls back to anonymous access", async () => {
       const gitlab = yield* GitLabService
       expect(yield* gitlab.hasCredentials(repository)).toBe(false)
       yield* gitlab.verifyProject(repository)
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(anonymousVerifications).toBe(1)

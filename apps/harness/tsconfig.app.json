@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
     "composite": false,
     "declaration": false,
     "declarationMap": false,
@@ -14,7 +15,15 @@
     "tsBuildInfoFile": "./out-tsc/app/tsconfig.app.tsbuildinfo",
     "types": ["bun", "vite/client"]
   },
-  "include": ["server.ts", "src/**/*.ts", "src/**/*.tsx"],
+  "include": [
+    "server.ts",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "e2e/**/*.ts",
+    "playwright.config.ts"
+  ],
   "references": [
     {
       "path": "../../packages/work-item-lifecycle/tsconfig.lib.json"

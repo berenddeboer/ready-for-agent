@@ -43,8 +43,7 @@ test("application disposal closes a lazily created authentication client", async
   try {
     await Effect.runPromise(
       runConfiguredMigrations().pipe(
-        Effect.provide(DatabaseLive),
-        Effect.provide(configLayer),
+        Effect.provide(DatabaseLive.pipe(Layer.provide(configLayer))),
       ),
     )
     const databaseLayer = DbServiceLive.pipe(
