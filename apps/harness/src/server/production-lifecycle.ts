@@ -15,8 +15,8 @@ import { READY_FOR_AGENT_VERSION } from "../generated/version.js"
 import { type Application, createApplication } from "./application.server.js"
 import { environmentConfigLayer, loadPort } from "./application-config.js"
 import {
-  browserOpenCommand,
   hasNoOpenFlag,
+  launchDetachedBrowser,
   shouldOpenBrowser,
 } from "./browser-open.js"
 import {
@@ -229,15 +229,9 @@ const startOwnedSidecar = (input: {
   })
 
 const openDefaultBrowser = (url: string) => {
-  const launch = browserOpenCommand(process.platform, url)
-  try {
-    spawn(launch.command, [...launch.args], {
-      detached: true,
-      stdio: "ignore",
-    }).unref()
-  } catch {
-    // Browser open is best-effort; start still succeeds.
-  }
+  // Best-effort only: missing/failing openers must not fail production start.
+  // The GUI remains detached (see launchDetachedBrowser).
+  launchDetachedBrowser(process.platform, url)
 }
 
 const defaultServeHttp = async (input: {

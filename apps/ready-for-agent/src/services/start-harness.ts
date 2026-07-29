@@ -137,30 +137,44 @@ export class StartHarness extends Context.Service<
         }
         yield* ensureDatabaseParentDir()
 
-        if (
-          shouldOpenBrowser({
-            noOpenFlag: options.noOpen === true,
-            env: config.browserEnv,
-          })
-        ) {
-          openBrowserWhenReady(config.platform, resolveUiUrl(config.browserEnv))
-        }
+        // Scope owns the readiness poll fiber so it cancels with startMonorepo
+        // (Harness exit, failure, or interrupt). The browser GUI stays detached.
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            if (
+              shouldOpenBrowser({
+                noOpenFlag: options.noOpen === true,
+                env: config.browserEnv,
+              })
+            ) {
+              const url = resolveUiUrl(config.browserEnv)
+              // Best-effort: never fail start; AbortSignal cancels the poll only.
+              yield* Effect.promise(async (signal) => {
+                try {
+                  await openBrowserWhenReady(config.platform, url, { signal })
+                } catch {
+                  // Opener / poll failures must not surface as fiber failures.
+                }
+              }).pipe(Effect.forkScoped({ startImmediately: true }))
+            }
 
-        const code = yield* spawner.exitCode(
-          ChildProcess.make("bun", ["nx", "run", "harness:dev"], {
-            cwd: root,
-            env: { SQLITE_DATABASE_PATH: config.databasePath },
-            extendEnv: true,
-            stdin: "inherit",
-            stdout: "inherit",
-            stderr: "inherit",
+            const code = yield* spawner.exitCode(
+              ChildProcess.make("bun", ["nx", "run", "harness:dev"], {
+                cwd: root,
+                env: { SQLITE_DATABASE_PATH: config.databasePath },
+                extendEnv: true,
+                stdin: "inherit",
+                stdout: "inherit",
+                stderr: "inherit",
+              }),
+            )
+            if (Number(code) !== 0) {
+              return yield* new StartHarnessFailed({
+                detail: `Harness exited with code ${code}`,
+              })
+            }
           }),
         )
-        if (Number(code) !== 0) {
-          return yield* new StartHarnessFailed({
-            detail: `Harness exited with code ${code}`,
-          })
-        }
       })
 
       const start = Effect.fn("StartHarness.start")(function* (

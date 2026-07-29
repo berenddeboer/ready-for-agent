@@ -1,6 +1,8 @@
 import {
+  type BrowserSpawn,
   browserOpenCommand,
   hasNoOpenFlag,
+  launchDetachedBrowser,
   resolveUiUrl,
   shouldOpenBrowser,
 } from "../src/server/browser-open.ts"
@@ -32,5 +34,57 @@ describe("production browser open policy", () => {
       command: "xdg-open",
       args: ["http://127.0.0.1:6056/"],
     })
+  })
+})
+
+describe("launchDetachedBrowser", () => {
+  test("registers error handler before unref", () => {
+    const order: string[] = []
+    const spawnImpl: BrowserSpawn = () => ({
+      on(event) {
+        if (event === "error") {
+          order.push("on-error")
+        }
+        return undefined
+      },
+      unref() {
+        order.push("unref")
+        return undefined
+      },
+    })
+
+    launchDetachedBrowser("linux", "http://127.0.0.1:6056/", spawnImpl)
+    expect(order).toEqual(["on-error", "unref"])
+  })
+
+  test("swallows asynchronous spawn errors without throwing", async () => {
+    let errorListener: ((error: Error) => void) | undefined
+    const spawnImpl: BrowserSpawn = () => ({
+      on(event, listener) {
+        if (event === "error") {
+          errorListener = listener
+        }
+        return undefined
+      },
+      unref() {
+        return undefined
+      },
+    })
+
+    expect(() =>
+      launchDetachedBrowser("linux", "http://127.0.0.1:6056/", spawnImpl),
+    ).not.toThrow()
+    expect(errorListener).toBeTypeOf("function")
+    expect(() => errorListener?.(new Error("ENOENT"))).not.toThrow()
+    await Bun.sleep(0)
+  })
+
+  test("swallows synchronous spawn throws without throwing", () => {
+    const spawnImpl: BrowserSpawn = () => {
+      throw new Error("spawn sync failure")
+    }
+    expect(() =>
+      launchDetachedBrowser("linux", "http://127.0.0.1:6056/", spawnImpl),
+    ).not.toThrow()
   })
 })
