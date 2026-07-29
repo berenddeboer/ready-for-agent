@@ -15,6 +15,7 @@ const COMMITTED_PULL_REQUEST_PERIODS = [
   "Yesterday",
   "This week",
   "Last week",
+  "Two weeks ago",
 ] as const
 
 const primaryNav = (page: Page) =>

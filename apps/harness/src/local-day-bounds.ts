@@ -13,6 +13,8 @@ export const localCommittedPullRequestDayBounds = (now = new Date()) => {
   startOfThisWeek.setDate(startOfThisWeek.getDate() - daysSinceMonday)
   const startOfLastWeek = new Date(startOfThisWeek)
   startOfLastWeek.setDate(startOfLastWeek.getDate() - 7)
+  const startOfTwoWeeksAgo = new Date(startOfLastWeek)
+  startOfTwoWeeksAgo.setDate(startOfTwoWeeksAgo.getDate() - 7)
   return {
     todayFrom: startOfToday.toISOString(),
     todayTo: startOfTomorrow.toISOString(),
@@ -22,6 +24,8 @@ export const localCommittedPullRequestDayBounds = (now = new Date()) => {
     thisWeekTo: startOfTomorrow.toISOString(),
     lastWeekFrom: startOfLastWeek.toISOString(),
     lastWeekTo: startOfThisWeek.toISOString(),
+    twoWeeksAgoFrom: startOfTwoWeeksAgo.toISOString(),
+    twoWeeksAgoTo: startOfLastWeek.toISOString(),
   }
 }
 

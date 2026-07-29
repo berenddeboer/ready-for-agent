@@ -19,6 +19,7 @@ describe("localCommittedPullRequestDayBounds", () => {
     const yesterdayStart = new Date(2026, 6, 17, 0, 0, 0, 0)
     const thisWeekStart = new Date(2026, 6, 13, 0, 0, 0, 0) // Monday
     const lastWeekStart = new Date(2026, 6, 6, 0, 0, 0, 0) // previous Monday
+    const twoWeeksAgoStart = new Date(2026, 5, 29, 0, 0, 0, 0) // Monday before that
     expect(bounds.todayFrom).toBe(todayStart.toISOString())
     expect(bounds.todayTo).toBe(tomorrowStart.toISOString())
     expect(bounds.yesterdayFrom).toBe(yesterdayStart.toISOString())
@@ -27,6 +28,8 @@ describe("localCommittedPullRequestDayBounds", () => {
     expect(bounds.thisWeekTo).toBe(tomorrowStart.toISOString())
     expect(bounds.lastWeekFrom).toBe(lastWeekStart.toISOString())
     expect(bounds.lastWeekTo).toBe(thisWeekStart.toISOString())
+    expect(bounds.twoWeeksAgoFrom).toBe(twoWeeksAgoStart.toISOString())
+    expect(bounds.twoWeeksAgoTo).toBe(lastWeekStart.toISOString())
   })
 
   test("mid-week Wednesday: this week and last week do not overlap", () => {
@@ -45,7 +48,14 @@ describe("localCommittedPullRequestDayBounds", () => {
     expect(bounds.lastWeekTo).toBe(
       new Date(2026, 6, 20, 0, 0, 0, 0).toISOString(),
     )
+    expect(bounds.twoWeeksAgoFrom).toBe(
+      new Date(2026, 6, 6, 0, 0, 0, 0).toISOString(),
+    )
+    expect(bounds.twoWeeksAgoTo).toBe(
+      new Date(2026, 6, 13, 0, 0, 0, 0).toISOString(),
+    )
     expect(bounds.lastWeekTo).toBe(bounds.thisWeekFrom)
+    expect(bounds.twoWeeksAgoTo).toBe(bounds.lastWeekFrom)
     expect(bounds.yesterdayFrom >= bounds.lastWeekTo).toBe(true)
     expect(bounds.todayFrom >= bounds.thisWeekFrom).toBe(true)
     expect(bounds.todayTo).toBe(bounds.thisWeekTo)
@@ -58,10 +68,13 @@ describe("localCommittedPullRequestDayBounds", () => {
     const monday = new Date(2026, 6, 20, 0, 0, 0, 0)
     const tuesday = new Date(2026, 6, 21, 0, 0, 0, 0)
     const prevMonday = new Date(2026, 6, 13, 0, 0, 0, 0)
+    const twoWeeksAgoMonday = new Date(2026, 6, 6, 0, 0, 0, 0)
     expect(bounds.thisWeekFrom).toBe(monday.toISOString())
     expect(bounds.thisWeekTo).toBe(tuesday.toISOString())
     expect(bounds.lastWeekFrom).toBe(prevMonday.toISOString())
     expect(bounds.lastWeekTo).toBe(monday.toISOString())
+    expect(bounds.twoWeeksAgoFrom).toBe(twoWeeksAgoMonday.toISOString())
+    expect(bounds.twoWeeksAgoTo).toBe(prevMonday.toISOString())
     expect(bounds.todayFrom).toBe(monday.toISOString())
   })
 
@@ -80,6 +93,12 @@ describe("localCommittedPullRequestDayBounds", () => {
     )
     expect(bounds.lastWeekTo).toBe(
       new Date(2026, 2, 9, 0, 0, 0, 0).toISOString(),
+    )
+    expect(bounds.twoWeeksAgoFrom).toBe(
+      new Date(2026, 1, 23, 0, 0, 0, 0).toISOString(),
+    )
+    expect(bounds.twoWeeksAgoTo).toBe(
+      new Date(2026, 2, 2, 0, 0, 0, 0).toISOString(),
     )
   })
 
@@ -106,20 +125,34 @@ describe("localCommittedPullRequestDayBounds", () => {
     expect(bounds.lastWeekTo).toBe(
       new Date(2025, 11, 29, 0, 0, 0, 0).toISOString(),
     )
+    expect(bounds.twoWeeksAgoFrom).toBe(
+      new Date(2025, 11, 15, 0, 0, 0, 0).toISOString(),
+    )
+    expect(bounds.twoWeeksAgoTo).toBe(
+      new Date(2025, 11, 22, 0, 0, 0, 0).toISOString(),
+    )
   })
 
-  test("last week is previous complete Mon–Sun local calendar week", () => {
+  test("last week and two weeks ago are complete Mon–Sun local calendar weeks", () => {
     const now = new Date(2026, 2, 15, 12, 0, 0, 0)
     const bounds = localCommittedPullRequestDayBounds(now)
     const lastWeekFrom = new Date(bounds.lastWeekFrom)
     const lastWeekTo = new Date(bounds.lastWeekTo)
     const thisWeekFrom = new Date(bounds.thisWeekFrom)
+    const twoWeeksAgoFrom = new Date(bounds.twoWeeksAgoFrom)
+    const twoWeeksAgoTo = new Date(bounds.twoWeeksAgoTo)
     expect(lastWeekTo.getTime()).toBe(thisWeekFrom.getTime())
+    expect(twoWeeksAgoTo.getTime()).toBe(lastWeekFrom.getTime())
     expect(lastWeekFrom.getDay()).toBe(1)
     expect(lastWeekTo.getDay()).toBe(1)
+    expect(twoWeeksAgoFrom.getDay()).toBe(1)
+    expect(twoWeeksAgoTo.getDay()).toBe(1)
     const msPerDay = 24 * 60 * 60 * 1000
     expect(
       (lastWeekTo.getTime() - lastWeekFrom.getTime()) / msPerDay,
+    ).toBeCloseTo(7, 5)
+    expect(
+      (twoWeeksAgoTo.getTime() - twoWeeksAgoFrom.getTime()) / msPerDay,
     ).toBeCloseTo(7, 5)
     // When yesterday is still in the current week, it is outside last week.
     expect(bounds.yesterdayFrom >= bounds.lastWeekTo).toBe(true)
@@ -130,6 +163,12 @@ describe("localCommittedPullRequestDayBounds", () => {
     // 2026-03-09 is a Monday
     const afterSpringForward = new Date(2026, 2, 9, 10, 0, 0, 0)
     const bounds = localCommittedPullRequestDayBounds(afterSpringForward)
+    expect(bounds.twoWeeksAgoFrom).toBe(
+      new Date(2026, 1, 23, 0, 0, 0, 0).toISOString(),
+    )
+    expect(bounds.twoWeeksAgoTo).toBe(
+      new Date(2026, 2, 2, 0, 0, 0, 0).toISOString(),
+    )
     expect(bounds.lastWeekFrom).toBe(
       new Date(2026, 2, 2, 0, 0, 0, 0).toISOString(),
     )
@@ -165,6 +204,12 @@ describe("localCommittedPullRequestDayBounds", () => {
     // 2026-11-02 is a Monday
     const afterFallBack = new Date(2026, 10, 2, 10, 0, 0, 0)
     const bounds = localCommittedPullRequestDayBounds(afterFallBack)
+    expect(bounds.twoWeeksAgoFrom).toBe(
+      new Date(2026, 9, 19, 0, 0, 0, 0).toISOString(),
+    )
+    expect(bounds.twoWeeksAgoTo).toBe(
+      new Date(2026, 9, 26, 0, 0, 0, 0).toISOString(),
+    )
     expect(bounds.lastWeekFrom).toBe(
       new Date(2026, 9, 26, 0, 0, 0, 0).toISOString(),
     )
@@ -184,7 +229,7 @@ describe("localCommittedPullRequestDayBounds", () => {
 })
 
 describe("Committed pull requests dashboard UI", () => {
-  test("renders above the Jobs card with Today, Yesterday, This week, and Last week labels", () => {
+  test("renders above the Jobs card with Today, Yesterday, This week, Last week, and Two weeks ago labels", () => {
     const source = homeSource()
     const dashboardIndex = source.indexOf(
       'aria-label="Committed pull requests"',
@@ -196,6 +241,7 @@ describe("Committed pull requests dashboard UI", () => {
     expect(source).toContain("Yesterday")
     expect(source).toContain("This week")
     expect(source).toContain("Last week")
+    expect(source).toContain("Two weeks ago")
     expect(source).toContain("function CommittedPullRequestsDashboard()")
   })
 
@@ -215,6 +261,8 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("bounds.thisWeekTo")
     expect(dashboard).toContain("bounds.lastWeekFrom")
     expect(dashboard).toContain("bounds.lastWeekTo")
+    expect(dashboard).toContain("bounds.twoWeeksAgoFrom")
+    expect(dashboard).toContain("bounds.twoWeeksAgoTo")
     expect(dashboard).not.toContain("workItems")
     expect(dashboard).not.toContain("JOBS_COMPLETED_LIMIT")
   })
@@ -254,7 +302,7 @@ describe("Committed pull requests dashboard UI", () => {
     expect(source).toContain('aria-label="Loading committed pull requests"')
     expect(source).toContain('role="status"')
     expect(source).toContain('aria-busy="true"')
-    expect(source).toContain("grid-cols-4")
+    expect(source).toContain("grid-cols-5")
     expect(source).toContain(
       "Could not load committed pull requests. Please try again.",
     )
@@ -268,7 +316,7 @@ describe("Committed pull requests dashboard UI", () => {
     expect(homeBody).not.toContain("Suspense fallback={<Committed")
   })
 
-  test("waits for all four counts before leaving the loading state", () => {
+  test("waits for all five counts before leaving the loading state", () => {
     const source = homeSource()
     const dashboard = source.slice(
       source.indexOf("function CommittedPullRequestsDashboard()"),
@@ -278,6 +326,8 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("thisWeekQuery.isError")
     expect(dashboard).toContain("lastWeekQuery.isLoading")
     expect(dashboard).toContain("lastWeekQuery.isError")
+    expect(dashboard).toContain("twoWeeksAgoQuery.isLoading")
+    expect(dashboard).toContain("twoWeeksAgoQuery.isError")
     expect(dashboard).toContain("todayQuery.isLoading")
     expect(dashboard).toContain("yesterdayQuery.isLoading")
   })
@@ -292,10 +342,12 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("yesterdayQuery.data ?? 0")
     expect(dashboard).toContain("thisWeekQuery.data ?? 0")
     expect(dashboard).toContain("lastWeekQuery.data ?? 0")
+    expect(dashboard).toContain("twoWeeksAgoQuery.data ?? 0")
     expect(dashboard).toContain("{today}")
     expect(dashboard).toContain("{yesterday}")
     expect(dashboard).toContain("{thisWeek}")
     expect(dashboard).toContain("{lastWeek}")
+    expect(dashboard).toContain("{twoWeeksAgo}")
   })
 
   test("hides PR dashboard and Jobs when no repositories are configured", () => {
