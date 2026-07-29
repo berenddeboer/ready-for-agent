@@ -45,7 +45,7 @@ const PIPELINE_LANE_LABELS = {
   queue: "Queue",
   build: "Build",
   review: "Review",
-  ship: "Ship",
+  pr: "PR",
   attention: "Attention",
   complete: "Complete",
 } as const satisfies Record<PipelineLaneId, string>

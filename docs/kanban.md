@@ -4,7 +4,7 @@
 
 The Kanban Pipeline is an alternate Harness work view for an operator who
 needs to understand flow at a glance: what is waiting, being built, under
-review, ready to ship, blocked, or complete.
+review, in the PR path, blocked, or complete.
 
 It was prototyped in the `redesign/kanban-pipeline` branch. The prototype
 demonstrates the interaction model and visual direction; it is not currently
@@ -29,17 +29,26 @@ The board has six ordered lanes:
 
 | Lane | Meaning | Derived from |
 | --- | --- | --- |
-| Queue | Work has not begun active lifecycle execution. | `QUEUED`, `WAITING_FOR_WORKER_SLOT` |
-| Build | Active startup and implementation work is in progress. | `CREATE_WORKTREE`, `INSTALL_DEPENDENCIES`, `IMPLEMENT`, `ASSESS_CHANGES`, `PRE_COMMIT` |
-| Review | A pull request or review/check handoff is in progress. | `REVIEW`, `WATCH_PR_STATUS_CHECKS`, `RESOLVE_PR_MERGE_CONFLICT`, `INVESTIGATE_PR_STATUS_CHECKS` |
-| Ship | Work is beyond review but not terminal. | Any non-terminal lifecycle state not classified above |
+| Queue | Work cannot begin yet: waiting for blockers or a worker slot. | `WAITING_FOR_BLOCKERS`, `WAITING_FOR_WORKER_SLOT` |
+| Build | Startup and implementation work (including queued later Build steps). | `CREATE_WORKTREE`, `INSTALL_DEPENDENCIES`, `IMPLEMENT`, `ASSESS_CHANGES`, `PRE_COMMIT` |
+| Review | Local review is in progress (including a queued Review step). | `REVIEW` |
+| PR | Commit through cleanup on the pull-request path (including queued Watch and later PR steps). | `COMMIT`, `CREATE_PR`, `WATCH_PR_STATUS_CHECKS`, `RESOLVE_PR_MERGE_CONFLICT`, `INVESTIGATE_PR_STATUS_CHECKS`, `MARK_PR_READY_FOR_REVIEW`, `DECIDE_PR_MERGE`, `MERGE_PR`, `CLOSE_ISSUE`, `LOCAL_CLEANUP` |
 | Attention | An operator or remediation decision is needed. | Failed, interrupted, needs-human statuses or states |
 | Complete | The Work Item has reached a terminal successful or abandoned state. | Complete, succeeded, or abandoned statuses or states |
 
 Lane assignment is a pure function of the current Work Item state and status.
-The function must give Attention and Complete precedence over lifecycle-step
-classification. For example, a Work Item whose last step was Review but whose
-status is `NEEDS_HUMAN` belongs in Attention.
+Placement is driven by **lifecycle progress**, not scheduler status:
+
+- Attention and Complete take precedence over every lifecycle lane.
+- Queue is only for genuine blocked or not-admitted work. A `QUEUED` step run
+  (status-check poll, agent turn, or later lifecycle step) stays in Build,
+  Review, or PR according to its state.
+- Once work has entered Build, Review, or PR, queued execution of a later step
+  in that path must not return it to Queue or an earlier lane.
+
+For example, a Work Item whose last step was Review but whose status is
+`NEEDS_HUMAN` belongs in Attention. A Work Item in `WATCH_PR_STATUS_CHECKS`
+with status `QUEUED` (pending poll cycle) stays in PR, not Queue.
 
 ## Layout And Visual Language
 
@@ -47,7 +56,7 @@ The prototype uses an industrial control-board language:
 
 - Dense, six-column board with high-contrast lane headers.
 - Fixed lane colors make the flow memorable: Queue yellow, Build blue, Review
-  violet, Ship green, Attention orange, and Complete black.
+  violet, PR green, Attention orange, and Complete black.
 - Tickets use a narrow colored edge to retain their lane association while
   keeping title, repository, status, controls, session, and worktree visible.
 - Empty lanes explicitly say `Lane clear`; an empty lane is operational
@@ -149,6 +158,8 @@ systems.
 - Board placement never changes a Work Item, repository, or lifecycle state.
 - Attention wins over lifecycle-step placement; terminal status wins over
   lifecycle-step placement.
+- Queued status-check polls and other queued later steps stay in their
+  lifecycle lane; only blockers / worker-slot holds appear in Queue.
 - Every ticket preserves access to its existing operational actions.
 - Existing Working, Failed, and Completed views remain available and keyboard
   accessible.

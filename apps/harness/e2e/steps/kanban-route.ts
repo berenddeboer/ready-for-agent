@@ -5,7 +5,7 @@ const PIPELINE_LANE_HEADERS = [
   "Queue",
   "Build",
   "Review",
-  "Ship",
+  "PR",
   "Attention",
   "Complete",
 ] as const
