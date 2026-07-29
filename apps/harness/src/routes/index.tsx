@@ -37,10 +37,13 @@ import {
   openPullRequestCountsQueryKey,
 } from "../refresh-open-pull-request-count-live.js"
 import {
+  followRepositoryMembershipLive,
+  liveUpdatesWarningPresentation,
+} from "../refresh-repositories-live.js"
+import {
   committedPullRequestsCountQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
-import { streamRepositoryChanges } from "../repository-live.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
@@ -724,69 +727,18 @@ function RepositoryCards() {
   const repositoryIdsRef = useRef(repositories.map(({ id }) => id))
   repositoryIdsRef.current = repositories.map(({ id }) => id)
 
+  // Repository membership SSE: transport health drives the live-updates
+  // warning; authoritative catch-up and dedicated open-PR counts run
+  // independently and cannot mark a healthy stream unavailable.
   useEffect(() => {
-    let cancelled = false
-    let controller: AbortController | undefined
-    let finishRetry: (() => void) | undefined
-    let retryTimer: ReturnType<typeof setTimeout> | undefined
-    let warningTimer: ReturnType<typeof setTimeout> | undefined
-
-    const startWarningTimer = () => {
-      warningTimer ??= setTimeout(() => {
-        if (!cancelled) setLiveUpdatesUnavailable(true)
-      }, 10_000)
-    }
-    const refresh = async () => {
-      // Membership catch-up: repositories first; dedicated open-PR counts are
-      // fire-and-forget so Keymaxxer counting cannot delay or block this path.
-      void queryClient
-        .invalidateQueries({ queryKey: openPullRequestCountsQueryKey })
-        .catch(() => undefined)
-      await queryClient.fetchQuery({ ...repositoriesQuery, staleTime: 0 })
-      if (cancelled) return
-      if (warningTimer !== undefined) clearTimeout(warningTimer)
-      warningTimer = undefined
-      setLiveUpdatesUnavailable(false)
-    }
-    const subscribe = async () => {
-      startWarningTimer()
-      while (!cancelled) {
-        controller = new AbortController()
-        try {
-          await streamRepositoryChanges({
-            signal: controller.signal,
-            onConnected: refresh,
-            onChange: refresh,
-          })
-        } catch {
-          if (cancelled) return
-        }
-        controller.abort()
-        startWarningTimer()
-        await new Promise<void>((resolve) => {
-          finishRetry = resolve
-          retryTimer = setTimeout(resolve, 1_000)
-        })
-        finishRetry = undefined
-      }
-    }
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") {
-        void refresh().catch(startWarningTimer)
-      }
-    }
-
-    document.addEventListener("visibilitychange", refreshWhenVisible)
-    void subscribe()
-
-    return () => {
-      cancelled = true
-      controller?.abort()
-      if (retryTimer !== undefined) clearTimeout(retryTimer)
-      finishRetry?.()
-      if (warningTimer !== undefined) clearTimeout(warningTimer)
-      document.removeEventListener("visibilitychange", refreshWhenVisible)
-    }
+    const controller = new AbortController()
+    void followRepositoryMembershipLive({
+      queryClient,
+      repositoriesQuery,
+      signal: controller.signal,
+      onLiveUpdatesUnavailable: setLiveUpdatesUnavailable,
+    })
+    return () => controller.abort()
   }, [queryClient])
 
   useEffect(() => {
@@ -836,14 +788,18 @@ function RepositoryCards() {
     return () => controller.abort()
   }, [queryClient])
 
-  const warning = liveUpdatesUnavailable ? (
-    <p
-      className="mb-4 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep"
-      role="status"
-    >
-      Live updates are unavailable. Repository information may be out of date.
-    </p>
-  ) : null
+  const warningPresentation = liveUpdatesWarningPresentation(
+    liveUpdatesUnavailable,
+  )
+  const warning =
+    warningPresentation !== null ? (
+      <p
+        className="mb-4 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep"
+        role="status"
+      >
+        {warningPresentation.message}
+      </p>
+    ) : null
 
   if (repositories.length === 0) {
     return (
