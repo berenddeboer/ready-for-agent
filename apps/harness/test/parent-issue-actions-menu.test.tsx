@@ -89,7 +89,7 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [{ issueNumber: 2, hasChildren: true, blockedBy: [] }],
-        directChildren: [{ issueNumber: 2, hasChildren: true, blockedBy: [] }],
+        directChildren: [{ hasChildren: true }],
         workItems: [],
         workItemsLoading: false,
       }),

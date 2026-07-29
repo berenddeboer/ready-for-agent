@@ -25,6 +25,12 @@ export const parseWorkItemsSubscriptionEvent = (
   return result.data?.repositoryWorkItemsChanged ?? null
 }
 
+/** Minimal fetch surface used by the Work Items subscription stream. */
+export type WorkItemsLiveFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
 export const streamWorkItemsChanged = async ({
   signal,
   onConnected,
@@ -34,7 +40,7 @@ export const streamWorkItemsChanged = async ({
   signal: AbortSignal
   onConnected: () => void | Promise<void>
   onChange: (repositoryId: string) => void | Promise<void>
-  fetch?: typeof fetch
+  fetch?: WorkItemsLiveFetch
 }): Promise<void> => {
   const operation = generateSubscriptionOp({
     repositoryWorkItemsChanged: true,

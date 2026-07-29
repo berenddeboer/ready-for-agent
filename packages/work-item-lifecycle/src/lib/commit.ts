@@ -530,8 +530,12 @@ const attemptNativeCommit = (worktreePath: string, message: string) =>
       }
     }
 
-    // Respect repository hooks and commit-message validation; do not bypass.
+    // Respect repository hooks and commit-message validation; do not bypass
+    // hooks. Disable GPG signing for this harness-owned non-interactive commit
+    // so a global commit.gpgsign=true cannot hang waiting for pinentry.
     const commitResult = yield* runGitInWorktree(worktreePath, [
+      "-c",
+      "commit.gpgsign=false",
       "commit",
       "-m",
       message,

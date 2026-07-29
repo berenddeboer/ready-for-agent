@@ -9,12 +9,16 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import {
   KeymaxxerService,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
 import { FIXTURE_REPOSITORY, FIXTURE_SECRET_NAME } from "./constants.ts"
+
+class CloneFixtureError extends Data.TaggedError("CloneFixtureError")<{
+  readonly message: string
+}> {}
 
 const supportDir = dirname(fileURLToPath(import.meta.url))
 const workspaceRoot = resolve(supportDir, "../../../..")
@@ -155,7 +159,9 @@ const cloneViaSidecar = async (checkoutParent: string, sidecarUrl: string) => {
       account: FIXTURE_REPOSITORY,
     })
     if (secretName === null) {
-      return yield* Effect.fail(new Error(missingCredentialMessage))
+      return yield* new CloneFixtureError({
+        message: missingCredentialMessage,
+      })
     }
     const cloneCommand = [
       "git",
@@ -172,16 +178,14 @@ const cloneViaSidecar = async (checkoutParent: string, sidecarUrl: string) => {
       timeoutMs: 180_000,
     })
     if (result.exitCode !== 0 || !existsSync(join(dest, ".git"))) {
-      return yield* Effect.fail(
-        new Error(
-          [
-            `Failed to clone ${FIXTURE_REPOSITORY} through Keymaxxer Sidecar.`,
-            result.stderr.trim() ||
-              result.stdout.trim() ||
-              `exit ${result.exitCode}`,
-          ].join("\n"),
-        ),
-      )
+      return yield* new CloneFixtureError({
+        message: [
+          `Failed to clone ${FIXTURE_REPOSITORY} through Keymaxxer Sidecar.`,
+          result.stderr.trim() ||
+            result.stdout.trim() ||
+            `exit ${result.exitCode}`,
+        ].join("\n"),
+      })
     }
     return dest
   })

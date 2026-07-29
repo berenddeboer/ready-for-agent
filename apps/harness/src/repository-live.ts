@@ -70,6 +70,12 @@ export const parseSubscriptionEvent = (
 /** How a Repository SSE stream ended when it did not throw. */
 export type RepositoryLiveStreamEnd = "complete" | "stream_ended"
 
+/** Minimal fetch surface used by the Repository subscription stream. */
+export type RepositoryLiveFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
 /**
  * Open the Repository-changed GraphQL SSE subscription and consume the body
  * immediately.
@@ -100,7 +106,7 @@ export const streamRepositoryChanges = async ({
   /** Invoked on every stream activity (heartbeats and application events). */
   onActivity?: (info: { readonly kind: "chunk" | "comment" | "next" }) => void
   staleAfterMs?: number
-  fetch?: typeof fetch
+  fetch?: RepositoryLiveFetch
 }): Promise<RepositoryLiveStreamEnd> => {
   const response = await fetchRequest("/graphql", {
     method: "POST",

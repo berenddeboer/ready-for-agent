@@ -229,15 +229,19 @@ describe("Repository Issue live-query coordination", () => {
 
     await onChange?.(repositoryId)
     expect(issueFetches).toBe(2)
-    expect(queryClient.getQueryData(issuesQuery.queryKey)).toEqual([
-      { title: "After reconciliation" },
-    ])
+    expect(
+      queryClient.getQueryData<ReadonlyArray<{ title: string }>>(
+        issuesQuery.queryKey,
+      ),
+    ).toEqual([{ title: "After reconciliation" }])
 
     resolveStale?.([{ title: "Before reconciliation" }])
     await staleFetch.catch(() => undefined)
-    expect(queryClient.getQueryData(issuesQuery.queryKey)).toEqual([
-      { title: "After reconciliation" },
-    ])
+    expect(
+      queryClient.getQueryData<ReadonlyArray<{ title: string }>>(
+        issuesQuery.queryKey,
+      ),
+    ).toEqual([{ title: "After reconciliation" }])
 
     controller.abort()
     await live

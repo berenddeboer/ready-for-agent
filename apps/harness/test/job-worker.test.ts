@@ -7,8 +7,17 @@ import {
   Logger,
   ManagedRuntime,
   Option,
+  type Scope,
 } from "effect"
-import { AgentBackend } from "@ready-for-agent/agent-backend"
+import {
+  ActiveAgentBackend,
+  type ActiveAgentBackendShape,
+  type AgentBackendId,
+  type AgentBackendRuntimeStatus,
+  type AgentBackendStatus,
+  missingSessionTelemetry,
+  toAgentBackendStatus,
+} from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import {
   DatabaseError,
@@ -72,12 +81,12 @@ import {
 import { describe, expect, test } from "bun:test"
 
 const repository = makeRepositoryRecord({
-  id: "repo-01J00000000000000000000000",
+  id: RepositoryId.make("repo-01J00000000000000000000000"),
   paused: true,
 })
 
 const otherRepository = makeRepositoryRecord({
-  id: "repo-01J00000000000000000000001",
+  id: RepositoryId.make("repo-01J00000000000000000000001"),
   forge: "github",
   forgeHost: "github.com",
   projectPath: "acme/gadgets",
@@ -278,13 +287,76 @@ const queueLayer = (
     }),
   )
 
-const runScoped = <A, E, R>(
-  effect: Effect.Effect<A, E, R>,
-  layer: Layer.Layer<R>,
-) =>
+const runScoped = <A, E, R, LE>(
+  effect: Effect.Effect<A, E, R | Scope.Scope>,
+  layer: Layer.Layer<R, LE, never>,
+): Promise<A> =>
   Effect.runPromise(
     Effect.scoped(effect).pipe(Effect.provide(layer), Effect.orDie),
   )
+
+const readyRuntimeStatus = (): AgentBackendRuntimeStatus => ({
+  backend: { id: "opencode", label: "OpenCode" },
+  kind: "ready",
+  reason: null,
+  models: [
+    {
+      id: "opencode/deepseek-v4-flash-free",
+      thinkingLevels: ["low", "high"],
+    },
+  ],
+})
+
+const readyStatus = (): AgentBackendStatus =>
+  toAgentBackendStatus(readyRuntimeStatus())
+
+const stubActiveAgentBackend = (): ActiveAgentBackendShape => {
+  const ready = readyRuntimeStatus()
+  return {
+    listStatuses: Effect.succeed([ready]),
+    getBackendStatus: (backendId: AgentBackendId) =>
+      Effect.succeed(backendId === ready.backend.id ? ready : null),
+    getStatus: Effect.succeed(readyStatus()),
+    setSelectedOrInUse: () => Effect.succeed([ready]),
+    recheck: () => Effect.succeed(ready),
+    requireAgentTurnsAllowed: () => Effect.void,
+    activate: () => Effect.succeed(ready),
+    drop: () => Effect.void,
+    preview: () =>
+      Effect.succeed({
+        backend: { id: "opencode", label: "OpenCode" },
+        kind: "ready" as const,
+        reason: null,
+        models: readyStatus().models,
+      }),
+    withConfigCoordination: (effect) => effect,
+    getRegistration: () =>
+      Effect.succeed({
+        descriptor: { id: "opencode", label: "OpenCode" },
+        capabilities: [
+          { _tag: "SessionTelemetry", supported: true },
+          { _tag: "KeymaxxerMcp", supported: true },
+        ],
+      }),
+    getActiveRegistration: Effect.succeed({
+      descriptor: { id: "opencode", label: "OpenCode" },
+      capabilities: [
+        { _tag: "SessionTelemetry", supported: true },
+        { _tag: "KeymaxxerMcp", supported: true },
+      ],
+    }),
+    startTurn: () => Effect.die("unused"),
+    continueTurn: () => Effect.die("unused"),
+    inspectBackend: () => Effect.die("unused"),
+    getSessionTelemetry: (input) =>
+      Effect.succeed(
+        missingSessionTelemetry(input.sessionId ?? "", {
+          id: "opencode",
+          label: "OpenCode",
+        }),
+      ),
+  }
+}
 
 describe("Job worker", () => {
   test("enqueues a validated Refresh Job on the issue-refresh queue", async () => {
@@ -693,9 +765,9 @@ describe("Job worker", () => {
               unchanged: 0,
             }
           }
-          return yield* Effect.fail(
-            new DatabaseError({ message: "reconciliation failed" }),
-          )
+          return yield* new DatabaseError({
+            message: "reconciliation failed",
+          })
         }),
     } satisfies IssueReconcilerShape)
 
@@ -743,9 +815,9 @@ describe("Job worker", () => {
         Effect.gen(function* () {
           reconciliations += 1
           if (reconciliations === 2) {
-            return yield* Effect.fail(
-              new DatabaseError({ message: "reconciliation failed" }),
-            )
+            return yield* new DatabaseError({
+              message: "reconciliation failed",
+            })
           }
           return {
             fetched: 0,
@@ -756,11 +828,6 @@ describe("Job worker", () => {
           }
         }),
     } satisfies IssueReconcilerShape)
-    const opencode = Layer.succeed(AgentBackend, {
-      startTurn: () => Effect.die("not used"),
-      continueTurn: () => Effect.die("not used"),
-      inspect: () => Effect.die("not used"),
-    })
     const sessionStore = Layer.succeed(OpencodeSessionStore, {
       getSession: (id) =>
         Effect.succeed({
@@ -787,7 +854,7 @@ describe("Job worker", () => {
         queue,
         reconciler,
         keymaxxerLayer(),
-        opencode,
+        Layer.succeed(ActiveAgentBackend, stubActiveAgentBackend()),
         sessionStore,
         defaultGithubLayer,
         localGit,
@@ -2108,6 +2175,7 @@ describe("Job worker", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            defaultGithubLayer,
             database,
             queue,
             reconciler,
@@ -2135,12 +2203,10 @@ describe("Job worker", () => {
         Effect.gen(function* () {
           findSecretCalls += 1
           if (findSecretCalls < 3) {
-            return yield* Effect.fail(
-              new KeymaxxerError({
-                operation: "findSecret",
-                message: "Keymaxxer unavailable",
-              }),
-            )
+            return yield* new KeymaxxerError({
+              operation: "findSecret",
+              message: "Keymaxxer unavailable",
+            })
           }
           return provider === "github" &&
             account === `${repository.projectPath}`
@@ -2229,6 +2295,7 @@ describe("Job worker", () => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
+            defaultGithubLayer,
             database,
             queue,
             Layer.succeed(IssueReconciler, {

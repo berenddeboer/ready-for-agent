@@ -139,7 +139,11 @@ describe("Repository Work Item live-query coordination", () => {
     expect(selectedWorkItemsFetches).toBeGreaterThan(
       fetchesBeforeInvalidation.selectedWorkItems,
     )
-    expect(queryClient.getQueryData(configQuery.queryKey)).toEqual({
+    expect(
+      queryClient.getQueryData<{ unfinishedWorkItemCount: number }>(
+        configQuery.queryKey,
+      ),
+    ).toEqual({
       unfinishedWorkItemCount: 0,
     })
     expect(configFetches).toBeGreaterThan(fetchesBeforeInvalidation.config)
@@ -217,15 +221,19 @@ describe("Repository Work Item live-query coordination", () => {
 
     await onChange?.(repositoryId)
     expect(workItemFetches).toBe(2)
-    expect(queryClient.getQueryData(workItemsQuery.queryKey)).toEqual([
-      { status: "RUNNING" },
-    ])
+    expect(
+      queryClient.getQueryData<ReadonlyArray<{ status: string }>>(
+        workItemsQuery.queryKey,
+      ),
+    ).toEqual([{ status: "RUNNING" }])
 
     resolveStale?.([{ status: "QUEUED" }])
     await staleFetch.catch(() => undefined)
-    expect(queryClient.getQueryData(workItemsQuery.queryKey)).toEqual([
-      { status: "RUNNING" },
-    ])
+    expect(
+      queryClient.getQueryData<ReadonlyArray<{ status: string }>>(
+        workItemsQuery.queryKey,
+      ),
+    ).toEqual([{ status: "RUNNING" }])
 
     controller.abort()
     await live
@@ -345,12 +353,12 @@ describe("Repository Work Item live-query coordination", () => {
     await connectedPromise
     const fetchesAfterConnect = countFetches
     expect(fetchesAfterConnect).toBeGreaterThan(1)
-    expect(queryClient.getQueryData(todayKey)).toBe(22)
+    expect(queryClient.getQueryData<number>(todayKey)).toBe(22)
 
     count = 23
     await onChange?.(repositoryId)
     await waitFor(() => countFetches > fetchesAfterConnect)
-    expect(queryClient.getQueryData(todayKey)).toBe(23)
+    expect(queryClient.getQueryData<number>(todayKey)).toBe(23)
 
     controller.abort()
     await live
@@ -728,7 +736,9 @@ describe("Repository Work Item live-query coordination", () => {
     await waitFor(() => pendingEvents.length === 0)
     // Two delayed retries after the first failed event-triggered pass.
     await waitFor(() => countFetches === fetchesAfterConnect + 3)
-    expect(queryClient.getQueryData(todayKey)).toBe(fetchesAfterConnect + 3)
+    expect(queryClient.getQueryData<number>(todayKey)).toBe(
+      fetchesAfterConnect + 3,
+    )
 
     controller.abort()
     await live
@@ -1081,7 +1091,9 @@ describe("Repository Work Item live-query coordination", () => {
     releaseCountFetch?.()
     // Failed pass must not drop the pending notification's trailing refresh.
     await waitFor(() => countFetches === fetchesAfterConnect + 2)
-    expect(queryClient.getQueryData(todayKey)).toBe(fetchesAfterConnect + 2)
+    expect(queryClient.getQueryData<number>(todayKey)).toBe(
+      fetchesAfterConnect + 2,
+    )
 
     controller.abort()
     await live
@@ -1146,8 +1158,10 @@ describe("Repository Work Item live-query coordination", () => {
     await Bun.sleep(20)
 
     expect(workItemFetches).toBe(fetchesAfterConnect + 1)
-    expect(queryClient.getQueryData(workItemsQuery.queryKey)).toEqual([
-      { id: `wi-${fetchesAfterConnect}` },
-    ])
+    expect(
+      queryClient.getQueryData<ReadonlyArray<{ id: string }>>(
+        workItemsQuery.queryKey,
+      ),
+    ).toEqual([{ id: `wi-${fetchesAfterConnect}` }])
   })
 })

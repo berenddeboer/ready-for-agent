@@ -9,8 +9,14 @@ import { mcpToolCallTimeoutMs } from "./config.js"
 import { type KeymaxxerError, keymaxxerError } from "./models.js"
 import { KeymaxxerService } from "./service.js"
 
+/** Minimal fetch surface used by sidecar TCP/HTTP readiness probes. */
+export type SidecarFetch = (
+  input: string | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
 export type SidecarLayerOptions = {
-  readonly fetch?: typeof globalThis.fetch
+  readonly fetch?: SidecarFetch
   readonly retryDelayMs?: number
   readonly startupTimeoutMs?: number
   readonly createClient?: () => Promise<KeymaxxerToolClient>

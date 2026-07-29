@@ -630,7 +630,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(runs[0]?.command).toContain("merge-pull-request.ts")
     expect(runs[0]?.command).toContain('"--conditions"')
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
-    expect(outcomes).toEqual(serializedOutcomes)
+    expect(outcomes).toEqual([...serializedOutcomes])
   })
 
   test("rejects malformed Ready Issue fields through Schema", async () => {

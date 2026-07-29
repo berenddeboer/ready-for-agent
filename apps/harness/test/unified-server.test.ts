@@ -24,9 +24,20 @@ test("routes /graphql through the injected GraphQL handler", async () => {
     },
   }
 
-  const post = Route.options.server?.handlers?.POST
+  const handlers = Route.options.server?.handlers
+  expect(handlers).toBeDefined()
+  if (handlers === undefined || typeof handlers === "function") {
+    throw new Error("expected GraphQL route object handlers")
+  }
+  const post = handlers.POST
   expect(post).toBeTypeOf("function")
-  const response = await post!({ request, context } as never)
+  if (post === undefined) {
+    throw new Error("expected GraphQL POST handler")
+  }
+  const response = await post({ request, context } as never)
+  if (!(response instanceof Response)) {
+    throw new Error("expected Response from GraphQL POST handler")
+  }
 
   expect(response.status).toBe(200)
   expect(delegatedUrl).toBe("http://127.0.0.1:6056/graphql")

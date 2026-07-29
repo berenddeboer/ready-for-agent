@@ -9,7 +9,7 @@ import {
   missingSessionTelemetry,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
-import { DbService } from "@ready-for-agent/db-service"
+import { DbService, RepositoryId } from "@ready-for-agent/db-service"
 import {
   makeRepositoryRecord,
   stubDbService,
@@ -48,7 +48,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 const YOGA_SSE_HEARTBEAT_INTERVAL_SECONDS = 12
 
 const repository = makeRepositoryRecord({
-  id: "repo-01J00000000000000000000000",
+  id: RepositoryId.make("repo-01J00000000000000000000000"),
   localPath: "/repos/acme/widgets.git",
   paused: true,
 })

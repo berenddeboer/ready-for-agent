@@ -114,7 +114,7 @@ test("ambient GitHub authentication is resolved once", async () => {
         forgeHost: "github.com",
         projectPath: "acme/two",
       })
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(resolutions).toBe(1)
@@ -148,7 +148,7 @@ test("ambient GitHub authentication refreshes once after a 401", async () => {
         forgeHost: "github.com",
         projectPath: "acme/widgets",
       })
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(resolutions).toBe(2)
@@ -251,7 +251,7 @@ test("concurrent 401 responses share one refreshed token", async () => {
         ],
         { concurrency: "unbounded" },
       )
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(expiredCalls).toBe(2)
@@ -287,7 +287,7 @@ test("ambient GitHub authentication is not refreshed after a 403", async () => {
           projectPath: "acme/widgets",
         }),
       )
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(resolutions).toBe(1)
@@ -321,7 +321,7 @@ test("failed authentication acquisition is cleared for a later retry", async () 
         forgeHost: "github.com",
         projectPath: "acme/widgets",
       })
-    }).pipe(Effect.provide(layer), Effect.provide(processLayer)),
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
   expect(resolutions).toBe(2)

@@ -23,6 +23,12 @@ export const parseIssuesSubscriptionEvent = (event: string): string | null => {
   return result.data?.repositoryIssuesChanged ?? null
 }
 
+/** Minimal fetch surface used by the Issues subscription stream. */
+export type IssuesLiveFetch = (
+  input: RequestInfo | URL,
+  init?: RequestInit,
+) => Promise<Response>
+
 export const streamIssuesChanged = async ({
   signal,
   onConnected,
@@ -32,7 +38,7 @@ export const streamIssuesChanged = async ({
   signal: AbortSignal
   onConnected: () => void | Promise<void>
   onChange: (repositoryId: string) => void | Promise<void>
-  fetch?: typeof fetch
+  fetch?: IssuesLiveFetch
 }): Promise<void> => {
   const operation = generateSubscriptionOp({
     repositoryIssuesChanged: true,
