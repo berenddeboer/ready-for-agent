@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query"
+import { openPullRequestCountsQueryKey } from "./refresh-open-pull-request-count-live.js"
 import { streamWorkItemsChanged } from "./work-items-live.js"
 
 export const committedPullRequestsCountQueryKeyPrefix = [
@@ -8,9 +9,11 @@ export const committedPullRequestsCountQueryKeyPrefix = [
 const configQueryKey = ["config"] as const
 /**
  * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) lives here.
- * GitHub-authoritative open non-draft PR count (`pullRequestCount`) is kept
- * live by {@link followOpenPullRequestCountLive}; Work Item events still
- * refetch repositories as a secondary path when harness-owned PRs change.
+ * GitHub-authoritative open non-draft PR count is a dedicated projection
+ * (`openPullRequestCountsQuery` / {@link followOpenPullRequestCountLive}).
+ * Work Item events may invalidate that projection fire-and-forget for faster
+ * harness-owned PR freshness, but never cancel, await, or couple their
+ * completion or subscription lifetime to count refresh.
  */
 const repositoriesQueryKey = ["repositories"] as const
 
@@ -95,6 +98,8 @@ export const followRepositoryWorkItemsLive = async ({
   let committedCountsRefresh: Promise<void> | undefined
   let committedCountsRefreshPending = false
   let committedCountsRetryLoop: Promise<void> | undefined
+  let openPrCountsRefresh: Promise<void> | undefined
+  let openPrCountsRefreshPending = false
   let fullRefreshRetryLoop: Promise<void> | undefined
   let fullRefreshPending = false
 
@@ -210,11 +215,46 @@ export const followRepositoryWorkItemsLive = async ({
     await refreshCachedQueries(queryKey)
   }
 
+  /**
+   * Secondary freshness for header open-PR counts when harness-owned Work Item
+   * PRs change. Fire-and-forget and coalesced: a burst of Work Item events
+   * shares one trailing invalidate of the dedicated projection. Never awaited
+   * by the SSE path and never cancels repositories. Poll/visibility on the
+   * dedicated follower remain authoritative for external GitHub PRs that do
+   * not emit Work Item SSE.
+   */
+  const scheduleOpenPullRequestCounts = () => {
+    if (signal.aborted) return
+    openPrCountsRefreshPending = true
+    if (openPrCountsRefresh !== undefined) return
+
+    openPrCountsRefresh = (async () => {
+      try {
+        while (openPrCountsRefreshPending && !signal.aborted) {
+          openPrCountsRefreshPending = false
+          try {
+            await queryClient.invalidateQueries({
+              queryKey: openPullRequestCountsQueryKey,
+            })
+          } catch {
+            // Secondary path: keep the follower alive on transient failures.
+          }
+        }
+      } finally {
+        openPrCountsRefresh = undefined
+        if (openPrCountsRefreshPending && !signal.aborted) {
+          scheduleOpenPullRequestCounts()
+        }
+      }
+    })()
+  }
+
   const refresh = async (repositoryId: string) => {
     // Do not await counts here: the SSE subscriber awaits each onChange, so
     // awaiting aggregates would serialize one full count refresh per event and
     // defeat coalescing under bursty lifecycle notifications.
     scheduleCommittedPullRequestsCounts()
+    scheduleOpenPullRequestCounts()
     await Promise.all([
       refreshWorkItems(repositoryId),
       // Harness Settings includes the global unfinished Work Item count.
@@ -227,6 +267,9 @@ export const followRepositoryWorkItemsLive = async ({
   const refreshAll = async () => {
     if (signal.aborted) return
     const repositoryIds = getRepositoryIds()
+    // Open PR counts: schedule only — do not await so SSE reconnect catch-up
+    // cannot couple to Keymaxxer-backed GitHub counting.
+    scheduleOpenPullRequestCounts()
     await Promise.all([
       ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
       refreshCommittedPullRequestsCounts(),
@@ -270,11 +313,14 @@ export const followRepositoryWorkItemsLive = async ({
 
   const cancelOwnedQueries = () => {
     committedCountsRefreshPending = false
+    openPrCountsRefreshPending = false
     fullRefreshPending = false
     void queryClient.cancelQueries({
       queryKey: committedPullRequestsCountQueryKeyPrefix,
     })
     void queryClient.cancelQueries({ queryKey: ["work-items"] })
+    // Do not cancel openPullRequestCountsQueryKey: that projection is owned by
+    // followOpenPullRequestCountLive; this follower only schedules invalidation.
   }
   signal.addEventListener("abort", cancelOwnedQueries, { once: true })
 

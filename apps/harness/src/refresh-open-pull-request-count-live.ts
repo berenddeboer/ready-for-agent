@@ -7,28 +7,85 @@ import type { QueryClient } from "@tanstack/react-query"
  */
 export const OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS = 30_000
 
+/**
+ * Dedicated TanStack Query cache identity for GitHub-authoritative open
+ * non-draft Pull Request counts. Independent of the Configured Repositories
+ * projection so count latency cannot cancel, block, or invalidate Repository
+ * cards, credentials, Issues, Work Items, or controls.
+ */
+export const openPullRequestCountsQueryKey = [
+  "open-pull-request-counts",
+] as const
+
 export type OpenPullRequestCountLiveQuery = {
   readonly queryKey: readonly unknown[]
   readonly queryFn: () => Promise<unknown>
 }
 
 /**
- * Keeps `Repository.pullRequestCount` current via GitHub-backed repositories
- * query refetch: periodic polling while the tab is visible, plus an immediate
- * refetch when a backgrounded tab becomes visible again.
+ * Header presentation for one Repository's open non-draft PR count.
+ *
+ * A missing per-repo value is loading whenever the dedicated projection is
+ * pending or fetching (e.g. after add-repository while a stale map still
+ * lacks the new id). "Unavailable" only applies when the query is settled
+ * without a count for that Repository.
+ */
+export const openPullRequestCountPresentation = ({
+  count,
+  isPending,
+  isFetching,
+}: {
+  readonly count: number | undefined
+  readonly isPending: boolean
+  readonly isFetching: boolean
+}): {
+  readonly label: string
+  readonly display: string
+  readonly loading: boolean
+} => {
+  if (count !== undefined) {
+    return {
+      label:
+        count === 1 ? "1 open pull request" : `${count} open pull requests`,
+      display: String(count),
+      loading: false,
+    }
+  }
+  const loading = isPending || isFetching
+  if (loading) {
+    return {
+      label: "Loading open pull requests",
+      display: "…",
+      loading: true,
+    }
+  }
+  return {
+    label: "Open pull requests unavailable",
+    display: "—",
+    loading: false,
+  }
+}
+
+/**
+ * Keeps the dedicated open Pull Request count projection current via
+ * GitHub-backed refetch: periodic polling while the tab is visible, plus an
+ * immediate refetch when a backgrounded tab becomes visible again.
+ *
+ * Refreshes only the dedicated count query identity. Never cancels,
+ * invalidates, fetches, or awaits the main Configured Repositories query.
  *
  * Transient fetch failures are swallowed so a single GraphQL/network blip does
  * not tear down the poller; the next poll tick or visibility event retries.
  */
 export const followOpenPullRequestCountLive = async ({
   queryClient,
-  repositoriesQuery,
+  openPullRequestCountsQuery,
   signal,
   documentRef = typeof document === "undefined" ? undefined : document,
   pollIntervalMs = OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS,
 }: {
   queryClient: QueryClient
-  repositoriesQuery: OpenPullRequestCountLiveQuery
+  openPullRequestCountsQuery: OpenPullRequestCountLiveQuery
   signal: AbortSignal
   documentRef?: Pick<
     Document,
@@ -40,12 +97,12 @@ export const followOpenPullRequestCountLive = async ({
     if (signal.aborted) return
     try {
       await queryClient.cancelQueries({
-        queryKey: repositoriesQuery.queryKey,
+        queryKey: openPullRequestCountsQuery.queryKey,
         exact: true,
       })
       if (signal.aborted) return
       await queryClient.fetchQuery({
-        ...repositoriesQuery,
+        ...openPullRequestCountsQuery,
         staleTime: 0,
       })
     } catch {
@@ -94,7 +151,7 @@ export const followOpenPullRequestCountLive = async ({
   } finally {
     documentRef?.removeEventListener("visibilitychange", refreshWhenVisible)
     void queryClient.cancelQueries({
-      queryKey: repositoriesQuery.queryKey,
+      queryKey: openPullRequestCountsQuery.queryKey,
       exact: true,
     })
   }

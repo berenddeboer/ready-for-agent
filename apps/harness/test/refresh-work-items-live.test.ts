@@ -1,4 +1,5 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
+import { openPullRequestCountsQueryKey } from "../src/refresh-open-pull-request-count-live.js"
 import {
   committedPullRequestsCountQueryKeyPrefix,
   followRepositoryWorkItemsLive,
@@ -350,6 +351,78 @@ describe("Repository Work Item live-query coordination", () => {
     await onChange?.(repositoryId)
     await waitFor(() => countFetches > fetchesAfterConnect)
     expect(queryClient.getQueryData(todayKey)).toBe(23)
+
+    controller.abort()
+    await live
+    stopObserving()
+  })
+
+  test("an invalidation fire-and-forgets open PR counts without awaiting them", async () => {
+    const repositoryId = "repo-01JSELECTED000000000000000"
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    let openPrCountFetches = 0
+    let workItemsFetches = 0
+    let releaseOpenPrCount: (() => void) | undefined
+    const openPrCountHeld = new Promise<void>((resolve) => {
+      releaseOpenPrCount = resolve
+    })
+    const openPrCountQuery = {
+      queryKey: openPullRequestCountsQueryKey,
+      queryFn: async () => {
+        openPrCountFetches += 1
+        if (openPrCountFetches > 1) {
+          await openPrCountHeld
+        }
+        return { [repositoryId]: openPrCountFetches }
+      },
+    }
+    const stopObserving = observeQuery(queryClient, openPrCountQuery)
+    await queryClient.fetchQuery(openPrCountQuery)
+    expect(openPrCountFetches).toBe(1)
+
+    let onChange: ((repositoryId: string) => void | Promise<void>) | undefined
+    let connected: (() => void) | undefined
+    const connectedPromise = new Promise<void>((resolve) => {
+      connected = resolve
+    })
+    const controller = new AbortController()
+    const live = followRepositoryWorkItemsLive({
+      getRepositoryIds: () => [repositoryId],
+      queryClient,
+      queries: {
+        workItems: (id: string) => ({
+          queryKey: ["work-items", id] as const,
+          queryFn: async () => {
+            workItemsFetches += 1
+            return []
+          },
+        }),
+      },
+      signal: controller.signal,
+      stream: async ({ onConnected, onChange: handleChange, signal }) => {
+        onChange = handleChange
+        await onConnected()
+        connected?.()
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+      },
+    })
+
+    await connectedPromise
+    await waitFor(() => openPrCountFetches >= 2)
+    const workItemsAfterConnect = workItemsFetches
+    expect(workItemsAfterConnect).toBeGreaterThan(0)
+
+    // Event path must finish even while open-PR count refresh is held pending.
+    const changeDone = onChange?.(repositoryId)
+    await changeDone
+    expect(workItemsFetches).toBeGreaterThan(workItemsAfterConnect)
+
+    releaseOpenPrCount?.()
+    await waitFor(() => openPrCountFetches >= 3)
 
     controller.abort()
     await live

@@ -51,7 +51,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test"
+        "command": "bun --conditions=@ready-for-agent/source test"
       },
       "inputs": ["default", "^production"],
       "cache": true,

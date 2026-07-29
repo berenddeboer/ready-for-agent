@@ -1956,6 +1956,127 @@ describe("GraphQL API", () => {
     })
   })
 
+  test("repositories without pullRequestCount does not invoke GitHub counting", async () => {
+    await runtime.dispose()
+    let countCalls = 0
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository]),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: () => {
+          countCalls += 1
+          return Effect.succeed(9)
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          repositories {
+            id
+            projectPath
+            paused
+            blockingUnfinishedWorkItemCount
+          }
+        }`,
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: {
+        repositories: [
+          {
+            id: repository.id,
+            projectPath: repository.projectPath,
+            paused: repository.paused,
+            blockingUnfinishedWorkItemCount: 0,
+          },
+        ],
+      },
+    })
+    expect(countCalls).toBe(0)
+  })
+
+  test("base repositories query completes while pullRequestCount is held pending", async () => {
+    await runtime.dispose()
+    let releaseCount: (() => void) | undefined
+    const countHeld = new Promise<void>((resolve) => {
+      releaseCount = resolve
+    })
+    let countStarted = false
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([repository]),
+      },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: () =>
+          Effect.gen(function* () {
+            countStarted = true
+            yield* Effect.promise(() => countHeld)
+            return 4
+          }),
+      },
+    )
+
+    const api = createGraphqlApi(runtime)
+
+    const baseResponsePromise = api.fetch(
+      graphqlRequest({
+        query: `query {
+          repositories {
+            id
+            projectPath
+            blockingUnfinishedWorkItemCount
+          }
+        }`,
+      }),
+    )
+
+    const countResponsePromise = api.fetch(
+      graphqlRequest({
+        query: `query {
+          repositories { id pullRequestCount }
+        }`,
+      }),
+    )
+
+    // Base Configured Repositories selection must finish without awaiting count.
+    const baseResponse = await baseResponsePromise
+    expect(await baseResponse.json()).toEqual({
+      data: {
+        repositories: [
+          {
+            id: repository.id,
+            projectPath: repository.projectPath,
+            blockingUnfinishedWorkItemCount: 0,
+          },
+        ],
+      },
+    })
+
+    // Allow the held count request a brief moment to start, then release it.
+    await Bun.sleep(20)
+    expect(countStarted).toBe(true)
+    releaseCount?.()
+    const countResponse = await countResponsePromise
+    expect(await countResponse.json()).toEqual({
+      data: {
+        repositories: [{ id: repository.id, pullRequestCount: 4 }],
+      },
+    })
+  })
+
   test("pullRequestCount degrades to zero when GitHub is unavailable", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
