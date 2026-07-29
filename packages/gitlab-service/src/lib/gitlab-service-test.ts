@@ -1,5 +1,9 @@
 import { Effect, Layer } from "effect"
-import type { PullRequestCheckStatus } from "@ready-for-agent/github-service"
+import type {
+  MergePullRequestResult,
+  PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
+} from "@ready-for-agent/github-service"
 import { GitLabProjectUnavailableError, GitLabRequestError } from "./errors.js"
 import { GitLabService } from "./gitlab-service.js"
 import type { GitLabReadyLabeledIssue, GitLabRepository } from "./types.js"
@@ -11,6 +15,8 @@ export interface GitLabServiceTestFixture {
   readonly openPullRequestByBranch?: Readonly<Record<string, number>>
   readonly openNonDraftPullRequestCount?: number
   readonly pullRequestCheckStatus?: PullRequestCheckStatus
+  readonly pullRequestLifecycleStatus?: PullRequestLifecycleStatus
+  readonly mergePullRequestResult?: MergePullRequestResult
   readonly error?: GitLabRequestError
 }
 
@@ -105,6 +111,20 @@ export const makeGitLabServiceTest = (
       failOr(repository, () => Effect.succeed([])),
     markPullRequestReadyForReview: (repository) =>
       failOr(repository, () => Effect.void),
+    getPullRequestLifecycleStatus: (repository) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(
+          fixture.pullRequestLifecycleStatus ??
+            ({ _tag: "open" } satisfies PullRequestLifecycleStatus),
+        ),
+      ),
+    mergePullRequest: (repository) =>
+      failOr(repository, (fixture) =>
+        Effect.succeed(
+          fixture.mergePullRequestResult ??
+            ({ _tag: "merged" } satisfies MergePullRequestResult),
+        ),
+      ),
     ensureIssueCompletedWithSummary: (repository) =>
       failOr(repository, () => Effect.void),
     closeOpenPullRequestsForBranch: (repository) =>

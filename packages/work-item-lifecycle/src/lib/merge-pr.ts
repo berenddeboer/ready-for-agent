@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -13,8 +14,9 @@ export class MergePrContextError extends Schema.TaggedErrorClass<MergePrContextE
 
 /**
  * Production Merge PR Lifecycle Step.
- * After Decide PR Merge chooses clanker merge, squash-merges the open PR on the
- * Work Item branch via the GitHub GraphQL API (token-backed, no `gh`).
+ * After Decide PR Merge chooses clanker merge, merges the open PR/MR on the
+ * Work Item branch via the Forge API (token-backed; expected head SHA).
+ * GitHub squash-merges; GitLab defers merge method to project settings.
  */
 export const mergePr = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -33,17 +35,15 @@ export const mergePr = (context: LifecycleStepContext) =>
         message: `Repository ${context.repositoryId} was not found`,
       })
     }
-    if (repository.forge === "gitlab") {
-      return yield* new MergePrContextError({
-        message:
-          "GitLab Merge PR requires GitLab PR lifecycle support; refusing to query GitHub for a GitLab Repository",
-      })
-    }
     const branch = workItemBranchName({
       projectPath: repository.projectPath,
       issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
+    if (repository.forge === "gitlab") {
+      const gitlab = yield* GitLabService
+      return yield* gitlab.mergePullRequest(repository, branch)
+    }
     const github = yield* GitHubService
     return yield* github.mergePullRequest(repository, branch)
   })

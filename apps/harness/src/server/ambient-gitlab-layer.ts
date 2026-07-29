@@ -290,6 +290,19 @@ export const ambientGitLabLayer = (options: {
             service.markPullRequestReadyForReview(repository, headRefName),
           ),
         ),
+        getPullRequestLifecycleStatus: Effect.fn(
+          "AmbientGitLab.getPullRequestLifecycleStatus",
+        )((repository, headRefName) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.getPullRequestLifecycleStatus(repository, headRefName),
+          ),
+        ),
+        mergePullRequest: Effect.fn("AmbientGitLab.mergePullRequest")(
+          (repository, headRefName) =>
+            authenticated(repository.forgeHost, (service) =>
+              service.mergePullRequest(repository, headRefName),
+            ),
+        ),
         ensureIssueCompletedWithSummary: Effect.fn(
           "AmbientGitLab.ensureIssueCompletedWithSummary",
         )((repository, issueNumber, workItemId, summaryMarkdown) =>

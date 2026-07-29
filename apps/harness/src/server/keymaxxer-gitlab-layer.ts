@@ -156,6 +156,29 @@ const SerializedPullRequestCheckStatus = Schema.Union([
   }),
 ])
 
+const SerializedPullRequestLifecycleStatus = Schema.Union([
+  Schema.TaggedStruct("open", {}),
+  Schema.TaggedStruct("merged", {}),
+  Schema.TaggedStruct("closed", {}),
+  Schema.TaggedStruct("not_found", {}),
+])
+
+const SerializedMergePullRequestResult = Schema.Union([
+  Schema.TaggedStruct("merged", {}),
+  Schema.TaggedStruct("revalidation", {
+    reason: Schema.Literals([
+      "head_changed",
+      "checks_not_green",
+      "mergeability_changed",
+    ]),
+    message: RequiredString,
+  }),
+  Schema.TaggedStruct("needs_human", {
+    reason: Schema.Literals(["closed_unmerged", "merge_rejected"]),
+    message: RequiredString,
+  }),
+])
+
 const decodeOptionalInstant = (value: string | null): Date | null => {
   if (value === null) {
     return null
@@ -720,6 +743,66 @@ export const keymaxxerGitLabLayer = (options: {
                 headRefName,
               ),
           ),
+        ),
+        getPullRequestLifecycleStatus: Effect.fn(
+          "KeymaxxerGitLab.getPullRequestLifecycleStatus",
+        )((repository, headRefName) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "get-pr-lifecycle-status",
+                (stdout) =>
+                  Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(SerializedPullRequestLifecycleStatus),
+                  )(stdout).pipe(
+                    Effect.mapError(() =>
+                      requestError(
+                        repository,
+                        "decode pull request lifecycle status",
+                        stdout,
+                      ),
+                    ),
+                  ),
+                "get pull request lifecycle status",
+                [encodeArgument(headRefName)],
+              ),
+            (ambientService) =>
+              ambientService.getPullRequestLifecycleStatus(
+                repository,
+                headRefName,
+              ),
+          ),
+        ),
+        mergePullRequest: Effect.fn("KeymaxxerGitLab.mergePullRequest")(
+          (repository, headRefName) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                runVaultHelper(
+                  repository,
+                  tokenName,
+                  "merge-pull-request",
+                  (stdout) =>
+                    Schema.decodeUnknownEffect(
+                      Schema.fromJsonString(SerializedMergePullRequestResult),
+                    )(stdout).pipe(
+                      Effect.mapError(() =>
+                        requestError(
+                          repository,
+                          "decode merge pull request result",
+                          stdout,
+                        ),
+                      ),
+                    ),
+                  "merge pull request",
+                  [encodeArgument(headRefName)],
+                ),
+              (ambientService) =>
+                ambientService.mergePullRequest(repository, headRefName),
+            ),
         ),
         ensureIssueCompletedWithSummary: Effect.fn(
           "KeymaxxerGitLab.ensureIssueCompletedWithSummary",

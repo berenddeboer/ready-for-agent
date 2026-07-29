@@ -32,6 +32,7 @@ import {
   formatUserFacingError,
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   type AcknowledgeError,
   EnqueueError,
@@ -797,6 +798,7 @@ export const makeWorkItemLifecycleLive = (
   | LifecycleSteps
   | ActiveAgentBackend
   | GitHubService
+  | GitLabService
 > =>
   Layer.effect(
     WorkItemLifecycle,
@@ -807,6 +809,7 @@ export const makeWorkItemLifecycleLive = (
       const steps = yield* LifecycleSteps
       const activeAgentBackend = yield* ActiveAgentBackend
       const github = yield* GitHubService
+      const gitlab = yield* GitLabService
       /**
        * Resolve build/review models for a backend id (create: effective;
        * turns: captured). Uses repository flat columns (project effective)
@@ -2323,14 +2326,20 @@ export const makeWorkItemLifecycleLive = (
           if (repository === undefined) {
             return null
           }
-          if (repository.forge !== "github") {
-            return null
-          }
           const headRefName = workItemBranchName({
             projectPath: repository.projectPath,
             issueNumber: row.issue_number,
             workItemId: row.id,
           })
+          if (repository.forge === "gitlab") {
+            return yield* gitlab.getPullRequestLifecycleStatus(
+              repository,
+              headRefName,
+            )
+          }
+          if (repository.forge !== "github") {
+            return null
+          }
           return yield* github.getPullRequestLifecycleStatus(
             repository,
             headRefName,

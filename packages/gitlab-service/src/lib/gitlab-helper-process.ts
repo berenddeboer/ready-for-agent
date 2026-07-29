@@ -9,9 +9,11 @@ import { findOpenPullRequestNumberProgram } from "../bin/find-open-pull-request-
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
 import { getOpenPullRequestNumberProgram } from "../bin/get-open-pull-request-number.js"
 import { getPrCheckStatusProgram } from "../bin/get-pr-check-status.js"
+import { getPrLifecycleStatusProgram } from "../bin/get-pr-lifecycle-status.js"
 import { getPrStatusCheckDiagnosticsProgram } from "../bin/get-pr-status-check-diagnostics.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
 import { markPrReadyForReviewProgram } from "../bin/mark-pr-ready-for-review.js"
+import { mergePullRequestProgram } from "../bin/merge-pull-request.js"
 import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { gitlabServiceBinScriptPath } from "../bin-script-path.js"
@@ -33,6 +35,8 @@ export const GITLAB_HELPER_OPERATIONS = [
   "get-pr-check-status",
   "get-pr-status-check-diagnostics",
   "mark-pr-ready-for-review",
+  "get-pr-lifecycle-status",
+  "merge-pull-request",
   "ensure-issue-completed-with-summary",
   "close-open-pull-requests-for-branch",
   "delete-branch",
@@ -139,6 +143,8 @@ const programs: Record<
   "get-pr-check-status": getPrCheckStatusProgram,
   "get-pr-status-check-diagnostics": getPrStatusCheckDiagnosticsProgram,
   "mark-pr-ready-for-review": markPrReadyForReviewProgram,
+  "get-pr-lifecycle-status": getPrLifecycleStatusProgram,
+  "merge-pull-request": mergePullRequestProgram,
   "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
   "close-open-pull-requests-for-branch": closeOpenPullRequestsForBranchProgram,
   "delete-branch": deleteBranchProgram,

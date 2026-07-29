@@ -16,6 +16,7 @@ import {
   WorkItemLifecycle,
   WorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
+  stubGitLabServiceLayer,
   syncNeedsHumanMergeHandoffs,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -108,12 +109,13 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   const makeLayerWithStatus = (
     getStatus: () => PullRequestLifecycleStatus,
     steps: LifecycleStepsShape = successfulSteps,
+    gitlab: Parameters<typeof stubGitLabServiceLayer>[0] = {},
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
-      // githubWith alone satisfies WorkItemLifecycle's GitHubService requirement
-      // and controls PR lifecycle for syncNeedsHumanMergeHandoffs.
+      // githubWith controls GitHub PR lifecycle for syncNeedsHumanMergeHandoffs.
       Layer.provideMerge(githubWith(getStatus)),
+      Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -286,8 +288,9 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     )
   })
 
-  it("skips GitHub PR reconciliation for persisted GitLab Work Items", async () => {
+  it("uses GitLab PR lifecycle for persisted GitLab Work Items", async () => {
     let githubCalls = 0
+    let gitlabCalls = 0
     await Effect.runPromise(
       Effect.gen(function* () {
         const { repository, created, lifecycle } =
@@ -296,13 +299,45 @@ describe("syncNeedsHumanMergeHandoffs", () => {
           (yield* lifecycle.getWorkItem(created.id)).pullRequestNumber,
         ).toBe(101)
 
-        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const resumed = yield* lifecycle.getWorkItem(created.id)
+        expect(resumed.state).toBe("local_cleanup")
         expect(githubCalls).toBe(0)
+        expect(gitlabCalls).toBeGreaterThan(0)
       }).pipe(
         Effect.provide(
-          makeLayerWithStatus(() => {
-            githubCalls += 1
-            return { _tag: "merged" }
+          makeLayerWithStatus(
+            () => {
+              githubCalls += 1
+              return { _tag: "merged" }
+            },
+            successfulSteps,
+            {
+              getPullRequestLifecycleStatus: () => {
+                gitlabCalls += 1
+                return Effect.succeed({ _tag: "merged" })
+              },
+            },
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("abandons GitLab merge-related Needs Human when the MR is closed unmerged", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToNeedsHuman("gitlab")
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const abandoned = yield* lifecycle.getWorkItem(created.id)
+        expect(abandoned.state).toBe("abandoned")
+        expect(abandoned.worktreePath).toBeNull()
+      }).pipe(
+        Effect.provide(
+          makeLayerWithStatus(() => ({ _tag: "open" }), successfulSteps, {
+            getPullRequestLifecycleStatus: () =>
+              Effect.succeed({ _tag: "closed" }),
           }),
         ),
       ),

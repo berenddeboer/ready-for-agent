@@ -220,6 +220,9 @@ const defaultGitlab: GitLabServiceShape = {
     }),
   getPrStatusCheckDiagnostics: () => Effect.succeed([]),
   markPullRequestReadyForReview: () => Effect.void,
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,

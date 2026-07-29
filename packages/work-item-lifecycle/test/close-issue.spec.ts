@@ -168,6 +168,9 @@ describe("closeIssue", () => {
         }),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       markPullRequestReadyForReview: () => Effect.void,
+      getPullRequestLifecycleStatus: () =>
+        Effect.succeed({ _tag: "open" as const }),
+      mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
       ensureIssueCompletedWithSummary: (
         repository,
         issueNumber,
