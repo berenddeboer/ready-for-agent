@@ -5,6 +5,7 @@ import {
   type KeymaxxerToolClient,
   makeKeymaxxerClientService,
 } from "./client-service.js"
+import { mcpToolCallTimeoutMs } from "./config.js"
 import { type KeymaxxerError, keymaxxerError } from "./models.js"
 import { KeymaxxerService } from "./service.js"
 
@@ -139,7 +140,11 @@ const createStreamableHttpClient = async (
   await client.connect(transport)
   return {
     callTool: (input) =>
-      client.callTool(input).then((result) => result as never),
+      client
+        .callTool(input, undefined, {
+          timeout: mcpToolCallTimeoutMs(input.name, input.arguments),
+        })
+        .then((result) => result as never),
     close: () => transport.close(),
   }
 }

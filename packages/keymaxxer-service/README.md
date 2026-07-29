@@ -31,12 +31,17 @@ result; transport, protocol, and execution failures use `KeymaxxerError`.
   Once unlocked, metadata-only `keymaxxer_list` may proceed while a dialog
   operation waits for secret-use approval. Side-effecting failures are not
   replayed; transport failures invalidate the upstream for the next request.
-  Operator logs cover vault unlock (and wrong-passphrase retries) only; the
-  facade does **not** emit a per-call "may require operator interaction" line
-  for every `keymaxxer_run` / `keymaxxer_add`, because it cannot know whether
-  Keymaxxer will show a dialog after Allow-session is set. Dialog-capable
-  ops still share one serialized dialog lane (concurrent already-approved
-  runs are not implemented yet; many GitHub helper calls queue on that lane).
+  Harness→sidecar and sidecar→keyholder MCP tool calls use an explicit
+  human-dialog timeout of at least `KEYMAXXER_HUMAN_DIALOG_TIMEOUT_MS` (300s);
+  `keymaxxer_run` adds the declared child `timeoutMs` to that budget while the
+  child still enforces `timeoutMs` independently. Cancelled callers that have
+  not yet acquired the global dialog lane are removed and never invoke upstream;
+  an already-forwarded operation is not replayed and does not clear shared vault
+  approvals. Operator logs distinguish dialog-lane queue wait, execution failure,
+  and timeout without logging secret names, values, command output, or capability
+  URLs. Dialog-capable ops still share one serialized dialog lane (concurrent
+  already-approved runs are not implemented yet; many GitHub helper calls queue
+  on that lane).
 - `runKeymaxxerSidecarProcess()` — sidecar process body (listen, bootstrap URL,
   signals). Uses zod only for MCP SDK tool `inputSchema` registration; Effect
   client payloads use Schema.

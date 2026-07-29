@@ -86,16 +86,29 @@ describe("compiled host binary ambient-auth smoke", () => {
       throw new Error(hostSelection.message)
     }
 
+    // Call the compile script directly. Nested `bun nx run …:compile` under
+    // `nx affected` (pre-commit) can race the Nx project-graph SQLite DB and
+    // fail with FOREIGN KEY constraint errors even after a successful compile.
+    // `ready-for-agent:test` already depends on generate-embed / graphql generate.
     const compile = Bun.spawnSync(
-      ["bun", "nx", "run", "ready-for-agent:compile", "--args=--platform=host"],
+      [
+        "bun",
+        "--conditions",
+        "@ready-for-agent/source",
+        join(appRoot, "scripts/compile-platform-binary.ts"),
+        "host",
+      ],
       {
         cwd: workspaceRoot,
         stdio: ["ignore", "inherit", "inherit"],
-        env: process.env,
+        env: {
+          ...process.env,
+          NX_DAEMON: "false",
+        },
       },
     )
     if (compile.exitCode !== 0) {
-      throw new Error("ready-for-agent:compile failed")
+      throw new Error("ready-for-agent host compile failed")
     }
 
     const binary = Bun.file(binaryPath)

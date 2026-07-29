@@ -6,6 +6,7 @@ import {
   type KeymaxxerToolClient,
   makeKeymaxxerClientService,
 } from "./client-service.js"
+import { mcpToolCallTimeoutMs } from "./config.js"
 import { KeymaxxerService } from "./service.js"
 
 export type { KeymaxxerToolClient, ToolResult } from "./client-service.js"
@@ -48,7 +49,11 @@ const createToolClient = async (
 
   return {
     callTool: (input) =>
-      client.callTool(input).then((result) => result as never),
+      client
+        .callTool(input, undefined, {
+          timeout: mcpToolCallTimeoutMs(input.name, input.arguments),
+        })
+        .then((result) => result as never),
     close: () => transport.close(),
   }
 }
