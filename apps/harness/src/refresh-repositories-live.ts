@@ -19,7 +19,7 @@ export const LIVE_UPDATES_UNAVAILABLE_MESSAGE =
   "Live updates are unavailable. Repository information may be out of date."
 
 /** Cap for exponential catch-up retry backoff after repeated failures. */
-export const CATCH_UP_RETRY_MAX_DELAY_MS = 30_000
+const CATCH_UP_RETRY_MAX_DELAY_MS = 30_000
 
 /**
  * Presentation for the Repository live-updates warning. Transport health only:
