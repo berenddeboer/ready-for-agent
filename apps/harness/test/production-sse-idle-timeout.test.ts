@@ -107,6 +107,7 @@ const defaultGitlab: GitLabServiceShape = {
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
 }
 
 const freePort = async (): Promise<number> => {

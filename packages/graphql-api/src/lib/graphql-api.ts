@@ -22,7 +22,10 @@ import {
 } from "@ready-for-agent/agent-backend"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
-import { GitLabService } from "@ready-for-agent/gitlab-service"
+import {
+  GitLabService,
+  gitlabVaultAccount,
+} from "@ready-for-agent/gitlab-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
@@ -51,6 +54,8 @@ import {
   RepositoryCredentialError,
   activatePollingIfCredentialed,
   githubTokenSecretName,
+  gitlabHasAmbientCredentialsBounded,
+  gitlabTokenSecretName,
   repositoryCredential,
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
@@ -384,6 +389,9 @@ export const createGraphqlApi = (
                 const githubRepositories = repositories.filter(
                   ({ forge }) => forge === "github",
                 )
+                const gitlabRepositories = repositories.filter(
+                  ({ forge }) => forge === "gitlab",
+                )
                 const githubTokenNames = ambientAuthentication
                   ? githubRepositories.map(() => null)
                   : githubRepositories.length === 0
@@ -398,19 +406,56 @@ export const createGraphqlApi = (
                         keymaxxerMetadataTimeout,
                         "findSecrets",
                       )
-                const gitlab = yield* GitLabService
+                // GitLab vault batch: on timeout/error, treat every repo as a
+                // vault miss and fall through to ambient hasCredentials so
+                // ambient-only GitLab stays usable when the vault is locked.
+                const gitlabTokenNames = ambientAuthentication
+                  ? gitlabRepositories.map(() => null)
+                  : gitlabRepositories.length === 0
+                    ? []
+                    : yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecrets(
+                          gitlabRepositories.map((repository) => ({
+                            provider: "gitlab",
+                            account: gitlabVaultAccount(repository),
+                          })),
+                        ),
+                        keymaxxerMetadataTimeout,
+                        "findSecrets",
+                      ).pipe(
+                        Effect.catchTag("KeymaxxerError", () =>
+                          Effect.succeed(
+                            gitlabRepositories.map(() => null as string | null),
+                          ),
+                        ),
+                      )
                 let githubIndex = 0
+                let gitlabIndex = 0
                 return yield* Effect.forEach(
                   repositories,
                   (repository) => {
                     if (repository.forge === "gitlab") {
-                      return gitlab
-                        .hasCredentials(repository)
-                        .pipe(
-                          Effect.map((configured) =>
-                            repositoryCredential(repository, null, configured),
+                      const vaultTokenName =
+                        gitlabTokenNames[gitlabIndex++] ?? null
+                      if (vaultTokenName !== null) {
+                        return Effect.succeed(
+                          repositoryCredential(
+                            repository,
+                            vaultTokenName,
+                            true,
                           ),
                         )
+                      }
+                      // Ambient-only: vault already probed (batch miss or
+                      // timeout) — do not re-enter findSecret or re-apply the
+                      // full metadata timeout (avoids stacking waits).
+                      return gitlabHasAmbientCredentialsBounded(
+                        repository,
+                      ).pipe(
+                        Effect.map((configured) =>
+                          repositoryCredential(repository, null, configured),
+                        ),
+                      )
                     }
                     const tokenName = githubTokenNames[githubIndex++] ?? null
                     return Effect.succeed(
@@ -1109,6 +1154,12 @@ export const createGraphqlApi = (
                         repositoryId: args.repositoryId,
                       })
                     }
+                    if (repository.forge !== "github") {
+                      return yield* new RepositoryCredentialError({
+                        message:
+                          "addRepositoryGitHubToken is only valid for GitHub Repositories",
+                      })
+                    }
 
                     const keymaxxer = yield* KeymaxxerService
                     const account = repository.projectPath
@@ -1181,6 +1232,103 @@ export const createGraphqlApi = (
                   }),
                 )
                 .pipe(Effect.withSpan("graphql-api.addRepositoryGitHubToken")),
+            ),
+          addRepositoryGitLabToken: async (
+            _parent: unknown,
+            args: RepositoryCredentialArgs,
+          ) =>
+            runGraphql(
+              tokenProvisioning
+                .withPermits(1)(
+                  Effect.gen(function* () {
+                    const db = yield* DbService
+                    const repositories = yield* db.listRepositories
+                    const repository = repositories.find(
+                      ({ id }) => id === args.repositoryId,
+                    )
+                    if (repository === undefined) {
+                      return yield* new RepositoryNotFoundError({
+                        repositoryId: args.repositoryId,
+                      })
+                    }
+                    if (repository.forge !== "gitlab") {
+                      return yield* new RepositoryCredentialError({
+                        message:
+                          "addRepositoryGitLabToken is only valid for GitLab Repositories",
+                      })
+                    }
+
+                    const keymaxxer = yield* KeymaxxerService
+                    const account = gitlabVaultAccount(repository)
+                    const existingToken = yield* withKeymaxxerMetadataTimeout(
+                      keymaxxer.findSecret({
+                        provider: "gitlab",
+                        account,
+                      }),
+                      keymaxxerMetadataTimeout,
+                      "findSecret",
+                    )
+                    let tokenName = existingToken
+                    if (tokenName === null) {
+                      tokenName = gitlabTokenSecretName(repository)
+                      if (
+                        yield* withKeymaxxerMetadataTimeout(
+                          keymaxxer.hasSecret(tokenName),
+                          keymaxxerMetadataTimeout,
+                          "hasSecret",
+                        )
+                      ) {
+                        return yield* new RepositoryCredentialError({
+                          message: `Keymaxxer secret ${tokenName} already exists for another account`,
+                        })
+                      }
+                      // Interactive secret entry/approval: intentionally not
+                      // wrapped in the short metadata timeout. Holds
+                      // tokenProvisioning until the operator finishes or cancels.
+                      const added = yield* keymaxxer.addSecret({
+                        name: tokenName,
+                        provider: "gitlab",
+                        account,
+                        environment: "prod",
+                        access: "read-write",
+                        description: `GitLab personal access token for Ready for Agent on ${account}`,
+                        tags: "ready-for-agent,harness,gitlab",
+                      })
+                      if (!added) {
+                        return yield* new RepositoryCredentialError({
+                          message: "Keymaxxer GitLab token setup was cancelled",
+                        })
+                      }
+                      tokenName = yield* withKeymaxxerMetadataTimeout(
+                        keymaxxer.findSecret({
+                          provider: "gitlab",
+                          account,
+                        }),
+                        keymaxxerMetadataTimeout,
+                        "findSecret",
+                      )
+                      if (tokenName === null) {
+                        return yield* new RepositoryCredentialError({
+                          message:
+                            "The saved Keymaxxer secret does not match this GitLab repository",
+                        })
+                      }
+                    }
+                    yield* activateRepositoryPolling(repository.id).pipe(
+                      Effect.catch((error) =>
+                        Effect.logWarning(
+                          "Automatic Repository polling was not activated",
+                          {
+                            repositoryId: repository.id,
+                            error,
+                          },
+                        ),
+                      ),
+                    )
+                    return repositoryCredential(repository, tokenName)
+                  }),
+                )
+                .pipe(Effect.withSpan("graphql-api.addRepositoryGitLabToken")),
             ),
           removeRepository: async (
             _parent: unknown,

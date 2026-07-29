@@ -154,6 +154,7 @@ const defaultGitlabLayer = Layer.succeed(GitLabService, {
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
 } satisfies GitLabServiceShape)
 
 const defaultGithubLayer = Layer.merge(

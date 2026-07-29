@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect"
+import { Duration, Effect, Schema } from "effect"
 import {
   ActiveAgentBackend,
   type AgentBackendId,
@@ -6,6 +6,10 @@ import {
   capabilitySupported,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
+import {
+  GITLAB_VAULT_METADATA_BUDGET_SECONDS,
+  gitlabVaultAccount,
+} from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   CurrentCapturedAgentBackendId,
@@ -56,6 +60,12 @@ const resolveAgentTurnKeymaxxerAuth = (input: {
   readonly provider: "github" | "gitlab"
   readonly account: string
   readonly credentialDescription: string
+  /**
+   * When set, vault metadata is budgeted; miss/timeout/KeymaxxerError yields
+   * ambient instead of fail-closed missing credential (GitLab policy).
+   */
+  readonly vaultMetadataBudget?: Duration.Duration
+  readonly ambientOnVaultUnavailable?: boolean
 }) =>
   Effect.gen(function* () {
     const active = yield* ActiveAgentBackend
@@ -95,11 +105,24 @@ const resolveAgentTurnKeymaxxerAuth = (input: {
     if (!effective) {
       return { _tag: "ambient" } satisfies AgentTurnForgeAuth
     }
-    const tokenName = yield* keymaxxer.findSecret({
+    const lookup = keymaxxer.findSecret({
       provider: input.provider,
       account: input.account,
     })
+    const tokenName =
+      input.vaultMetadataBudget === undefined
+        ? yield* lookup
+        : yield* lookup.pipe(
+            Effect.timeout(input.vaultMetadataBudget),
+            Effect.catchTags({
+              TimeoutError: () => Effect.succeed(null),
+              KeymaxxerError: () => Effect.succeed(null),
+            }),
+          )
     if (tokenName === null) {
+      if (input.ambientOnVaultUnavailable === true) {
+        return { _tag: "ambient" } satisfies AgentTurnForgeAuth
+      }
       return yield* new AgentTurnForgeCredentialMissingError({
         message: `No ${input.credentialDescription} is configured for ${input.account}`,
       })
@@ -120,20 +143,46 @@ export const resolveAgentTurnGitHubAuth = (input: {
   })
 
 /**
+ * Keymaxxer vault account for a GitLab Repository (`<forge-host>/<project-path>`).
+ * Same formatter as harness forge ops — re-export, not a parallel implementation.
+ */
+export const agentTurnGitLabVaultAccount = gitlabVaultAccount
+
+/**
+ * Vault metadata budget for GitLab Agent Turns before ambient fallback.
+ * Shared constant with harness layer (`GITLAB_VAULT_METADATA_BUDGET_SECONDS`).
+ */
+export const AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET = Duration.seconds(
+  GITLAB_VAULT_METADATA_BUDGET_SECONDS,
+)
+
+/**
  * Resolve Agent Turn authentication at the Forge boundary.
  *
- * GitLab uses the Repository's Forge identity for named-secret lookup when
- * vault access is effective, otherwise ambient `GITLAB_TOKEN` or `glab`.
+ * GitLab vault-first: when Keymaxxer MCP is effective and a per-Repository
+ * secret exists (`provider: gitlab`, `account: <forge-host>/<project-path>`),
+ * use `keymaxxer_run`. When no secret exists — or vault metadata times out /
+ * errors — ambient `GITLAB_TOKEN` / `glab` remains the fallback (unlike
+ * GitHub, which fails closed without a vault secret on Keymaxxer-capable
+ * backends).
  */
 export const resolveAgentTurnForgeAuth = (
   repository: AgentTurnForgeRepository,
+  options?: {
+    /** Override GitLab vault metadata budget (tests). */
+    readonly gitlabVaultMetadataBudget?: Duration.Duration
+  },
 ) =>
   Effect.gen(function* () {
     if (repository.forge === "gitlab") {
       return yield* resolveAgentTurnKeymaxxerAuth({
         provider: "gitlab",
-        account: `${repository.forgeHost}/${repository.projectPath}`,
+        account: gitlabVaultAccount(repository),
         credentialDescription: "GitLab credential",
+        vaultMetadataBudget:
+          options?.gitlabVaultMetadataBudget ??
+          AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET,
+        ambientOnVaultUnavailable: true,
       })
     }
     return yield* resolveAgentTurnGitHubAuth({

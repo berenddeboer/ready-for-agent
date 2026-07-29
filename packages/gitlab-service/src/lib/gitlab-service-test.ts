@@ -57,5 +57,7 @@ export const makeGitLabServiceTest = (
     },
     hasCredentials: (repository) =>
       Effect.succeed(fixtureFor(repository) !== undefined),
+    hasAmbientCredentials: (repository) =>
+      Effect.succeed(fixtureFor(repository) !== undefined),
   })
 }

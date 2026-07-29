@@ -210,6 +210,7 @@ const defaultGitLabLayer = Layer.succeed(GitLabService, {
   getAuthenticatedUserLogin: () => Effect.succeed("operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
+  hasAmbientCredentials: () => Effect.succeed(true),
 } satisfies GitLabServiceShape)
 
 const runReconciliation = <A, E>(
@@ -305,6 +306,7 @@ describe("IssueReconciler", () => {
           return issues
         }),
       hasCredentials: () => Effect.succeed(true),
+      hasAmbientCredentials: () => Effect.succeed(true),
     } satisfies GitLabServiceShape)
     const github = makeGitHubLayer([], db.actions)
 

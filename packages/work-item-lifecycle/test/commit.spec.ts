@@ -132,6 +132,9 @@ const initWorktree = async (root: string) => {
   await git(root, ["init", "-b", "main"])
   await git(root, ["config", "user.email", "test@example.com"])
   await git(root, ["config", "user.name", "Test"])
+  // Local-only: global commit.gpgsign would hang harness-owned git commit on
+  // pinentry during tests (production worktrees inherit the operator's config).
+  await git(root, ["config", "commit.gpgsign", "false"])
   await writeFile(join(root, "README.md"), "# widgets\n")
   await git(root, ["add", "README.md"])
   await git(root, ["commit", "--no-verify", "-m", "initial"])

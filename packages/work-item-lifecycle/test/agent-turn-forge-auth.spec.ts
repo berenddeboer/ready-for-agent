@@ -1,14 +1,18 @@
-import { Effect, Layer } from "effect"
+import { Duration, Effect, Layer } from "effect"
+import { GITLAB_VAULT_METADATA_BUDGET_SECONDS } from "@ready-for-agent/gitlab-service"
 import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
+  keymaxxerError,
 } from "@ready-for-agent/keymaxxer-service"
 import {
+  AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET,
   CurrentCapturedAgentBackendId,
   CurrentStepRun,
   InvalidCapturedAgentBackendError,
   agentTurnForgeCredentialGuidance,
   agentTurnGitHubCredentialGuidance,
+  agentTurnGitLabVaultAccount,
   isAgentTurnKeymaxxerEffective,
   resolveAgentTurnForgeAuth,
   stubActiveAgentBackendLayer,
@@ -163,12 +167,16 @@ describe("resolveAgentTurnForgeAuth", () => {
       readonly provider: string
       readonly account: string
     }[] = []
+    const repository = {
+      forge: "gitlab" as const,
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    }
+    expect(agentTurnGitLabVaultAccount(repository)).toBe(
+      "git.drupalcode.org/project/oauth_client",
+    )
     const auth = await Effect.runPromise(
-      resolveAgentTurnForgeAuth({
-        forge: "gitlab",
-        forgeHost: "git.drupalcode.org",
-        projectPath: "project/oauth_client",
-      }).pipe(
+      resolveAgentTurnForgeAuth(repository).pipe(
         Effect.provide(
           Layer.mergeAll(
             Layer.succeed(KeymaxxerService, {
@@ -195,9 +203,96 @@ describe("resolveAgentTurnForgeAuth", () => {
     expect(findSecretCalls).toEqual([
       {
         provider: "gitlab",
-        account: "git.drupalcode.org/project/oauth_client",
+        account: agentTurnGitLabVaultAccount(repository),
       },
     ])
+  })
+
+  it("falls back to ambient GitLab auth when no vault secret exists", async () => {
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth({
+        forge: "gitlab",
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(false),
+              findSecret: () => Effect.succeed(null),
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({ _tag: "ambient" })
+  })
+
+  it("falls back to ambient GitLab auth when vault findSecret errors", async () => {
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth({
+        forge: "gitlab",
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(true),
+              findSecret: () =>
+                Effect.fail(keymaxxerError("findSecret", "sidecar down")),
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({ _tag: "ambient" })
+  })
+
+  it("falls back to ambient GitLab auth when vault findSecret hangs past budget", async () => {
+    expect(Duration.toMillis(AGENT_TURN_GITLAB_VAULT_METADATA_BUDGET)).toBe(
+      GITLAB_VAULT_METADATA_BUDGET_SECONDS * 1000,
+    )
+    const started = Date.now()
+    const auth = await Effect.runPromise(
+      resolveAgentTurnForgeAuth(
+        {
+          forge: "gitlab",
+          forgeHost: "git.drupalcode.org",
+          projectPath: "project/oauth_client",
+        },
+        { gitlabVaultMetadataBudget: Duration.millis(40) },
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.succeed(KeymaxxerService, {
+              initialize: Effect.void,
+              hasSecret: () => Effect.succeed(true),
+              findSecret: () => Effect.never,
+              findSecrets: () => Effect.succeed([]),
+              addSecret: () => Effect.succeed(true),
+              runWithSecrets: () =>
+                Effect.succeed({ exitCode: 0, stdout: "", stderr: "" }),
+            } satisfies KeymaxxerServiceShape),
+            stubActiveAgentBackendLayer(),
+          ),
+        ),
+      ),
+    )
+    expect(auth).toEqual({ _tag: "ambient" })
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 })
 

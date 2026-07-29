@@ -17,6 +17,9 @@
       "path": "../keymaxxer-service/tsconfig.lib.json"
     },
     {
+      "path": "../gitlab-service/tsconfig.lib.json"
+    },
+    {
       "path": "../github-service/tsconfig.lib.json"
     },
     {

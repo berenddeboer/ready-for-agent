@@ -17,7 +17,7 @@
   "exclude": ["src/**/*.test.ts"],
   "references": [
     {
-      "path": "../../packages/agent-backend/tsconfig.lib.json"
+      "path": "../../packages/local-git/tsconfig.lib.json"
     },
     {
       "path": "../../packages/keymaxxer-service/tsconfig.lib.json"
@@ -26,10 +26,13 @@
       "path": "../../packages/graphql-client/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/gitlab-service/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/github-service/tsconfig.lib.json"
     },
     {
-      "path": "../../packages/local-git/tsconfig.lib.json"
+      "path": "../../packages/agent-backend/tsconfig.lib.json"
     },
     {
       "path": "../../packages/release-versioning/tsconfig.lib.json"
