@@ -373,7 +373,10 @@ type LifecycleLabel {
   label: String!
   status: WorkItemStatus!
   """
-  Execution duration in milliseconds; null when the step has not started.
+  Cumulative wall-clock execution duration in milliseconds across every Step
+  Run for this phase in the same Work Item (including failed, timed-out, and
+  Needs Human attempts). Null only when no attempt has started yet (for
+  example a first attempt still queued).
   """
   durationMs: Float
 }
