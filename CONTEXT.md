@@ -1,15 +1,27 @@
 # Ready for Agent
 
-Opinionated agentic software engineering harness that works GitHub issues into PRs for configured repositories.
+Opinionated agentic software engineering harness that works Forge issues into pull requests for configured Repositories.
 
 ## Language
 
+**Forge**:
+A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub or GitLab. A Repository belongs to exactly one Forge, chosen when the Repository is added.
+_Avoid_: Provider (overloaded with model provider and credential metadata), issue source (too narrow — the Forge also hosts Pull Requests and checks), platform
+
+**Forge Host**:
+The hostname of the Forge instance serving a Repository — `github.com` for GitHub, or a self-managed GitLab instance such as `git.drupalcode.org`. It is part of Repository identity: the same Project Path on two different Forge Hosts denotes two different Repositories. The git remote's hostname is not authoritative for the Forge Host — an instance may serve SSH on a different hostname (git.drupal.org vs git.drupalcode.org) — so the Forge Host is guessed from the remote, verified against the Forge API, and correctable in Repository settings.
+_Avoid_: Instance URL, server, domain
+
+**Project Path**:
+The Forge's own slash-separated path addressing the project within its Forge Host — `owner/name` for GitHub, a group or nested subgroup path for GitLab (e.g., `project/oauth_client`). Case-insensitive identity; display casing preserved.
+_Avoid_: Owner/repo pair (cannot express nested GitLab paths), clone URL (too many spellings for one project)
+
 **Repository**:
-A GitHub repository the harness is configured to work on, identified by owner and name (case-insensitive identity; display casing preserved). One row per GitHub repo; the harness keeps a single local clone of it (bare or working). Displayed as `owner/name` — no separate display label.
+A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per project; the harness keeps a single local clone of it (bare or working). Displayed as `Project Path` — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository.
 _Avoid_: Repo (in formal docs), target, project, checkout
 
 **End-to-End Fixture Repository**:
-A dedicated Repository whose stable GitHub state is controlled as a fixture for end-to-end validation. It contains a permanent open, Ready-labeled sentinel Issue with fixed identity and content, no hierarchy or blockers, and no Issue-closing PR; scenarios need not reject unrelated Issues.
+A dedicated Repository whose stable Forge state is controlled as a fixture for end-to-end validation. It contains a permanent open, Ready-labeled sentinel Issue with fixed identity and content, no hierarchy or blockers, and no Issue-closing PR; scenarios need not reject unrelated Issues.
 _Avoid_: Test repo, sandbox Repository, mutable fixture
 
 **Paused**:
@@ -17,7 +29,7 @@ A Repository state in which the harness does not autonomously select work for th
 _Avoid_: Disabled, inactive, enabled=false, Pause Work Item
 
 **Repository settings**:
-Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while any Work Item for that Repository is unfinished.
+Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while any Work Item for that Repository is unfinished.
 _Avoid_: Project config, repo config file
 
 **Harness Config**:
@@ -29,30 +41,30 @@ A Repository setting that, when enabled, lets Decide PR Merge ask whether a clan
 _Avoid_: Automerge (GitHub product), auto-approve
 
 **Merge Mode**:
-Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, GitHub requirements, or technical Needs Human outcomes. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts. A merge-related Needs Human handoff reached before the mode became `always` is not revoked.
+Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, Forge requirements, or technical Needs Human outcomes. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts. A merge-related Needs Human handoff reached before the mode became `always` is not revoked.
 _Avoid_: Auto-merge (Repository setting), force merge, skip checks
 
 **Include all Issue Authors**:
-A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, the Issue Reconciler keeps only Issues whose Issue Author matches the Operator GitHub User (case-insensitive); missing or ghost authors never match. When true, author does not filter relevance.
+A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, the Issue Reconciler keeps only Issues whose Issue Author matches the Operator Forge User (case-insensitive); missing or ghost authors never match. When true, author does not filter relevance.
 _Avoid_: Show all authors, mine only toggle (as a separate UI control)
 
 **Issue Author**:
-The GitHub login of the user who opened an Issue, when GitHub provides one; otherwise null. Fetched with Ready-labeled Issues, stored on the local Issue record, and used for author-scoped relevance when Include all Issue Authors is off.
-_Avoid_: Assignee, reporter (unless matching GitHub’s author field)
+The Forge username of the user who opened an Issue, when the Forge provides one (the GitHub login or GitLab username); otherwise null. Fetched with Ready-labeled Issues, stored on the local Issue record, and used for author-scoped relevance when Include all Issue Authors is off.
+_Avoid_: Assignee, reporter (unless matching the Forge’s author field)
 
-**Operator GitHub User**:
-The GitHub login of the authenticated principal for a Repository’s GitHub credential path (Keymaxxer-injected token or ambient `gh` auth). Resolved via the GitHub API viewer for that token during reconciliation when Include all Issue Authors is off; not a separate harness user account.
+**Operator Forge User**:
+The Forge username of the authenticated principal for a Repository’s Forge credential path (Keymaxxer-injected token or ambient Forge CLI auth). Resolved via the Forge API viewer endpoint for that token during reconciliation when Include all Issue Authors is off; not a separate harness user account.
 _Avoid_: Harness user, local operator account
 
 **Issue**:
-A GitHub issue belonging to a Repository, identified within that Repository by a positive integer GitHub issue number and represented locally with its title, body, web URL, creation time, GitHub state, and optional Issue Author. The harness may retain a local representation for later use, but GitHub remains authoritative.
+An issue on the Repository's Forge, identified within that Repository by a positive integer issue number (the iid in GitLab) and represented locally with its title, body, web URL, creation time, Forge state, and optional Issue Author. The harness may retain a local representation for later use, but the Forge remains authoritative. GitLab issues and merge requests come from separate per-project number sequences, so a bare GitLab number is ambiguous across the two kinds — unlike GitHub's single shared sequence.
 _Avoid_: Ticket, task (unless referring to a broader concept)
 
 **Issue store**:
 The harness capability that retains the Repository's current working set of Relevant Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues.
 
 **Issue Reconciler**:
-The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from GitHub's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
+The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from the Forge's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation.
 _Avoid_: GitHub Reconciler (too broad), Issue Synchronizer (suggests bidirectional updates)
 
 **Refresh Job**:
@@ -60,7 +72,7 @@ A durable request for the Issue Reconciler to reconcile one Repository. Acceptan
 _Avoid_: Refresh (ambiguous between the request and its execution), sync job
 
 **Issue Polling**:
-The autonomous recurring initiation of Issue reconciliation for every credentialed Repository, including Paused Repositories. Adding a Repository's matching GitHub credential through the Harness activates polling; removing it suspends polling. Polling is serial: only one scheduled or manual Refresh Job executes at a time. A Repository's next scheduled attempt becomes eligible 120 to 150 seconds after its previous scheduled attempt finishes, whether that attempt succeeded or failed. Manual Refresh Jobs take precedence over scheduled attempts but neither interrupt a running attempt nor alter the Repository's polling cadence.
+The autonomous recurring initiation of Issue reconciliation for every credentialed Repository, including Paused Repositories. Adding a Repository's matching Forge credential through the Harness activates polling; removing it suspends polling. Polling is serial: only one scheduled or manual Refresh Job executes at a time. A Repository's next scheduled attempt becomes eligible 120 to 150 seconds after its previous scheduled attempt finishes, whether that attempt succeeded or failed. Manual Refresh Jobs take precedence over scheduled attempts but neither interrupt a running attempt nor alter the Repository's polling cadence.
 _Avoid_: Issue synchronization (suggests bidirectional updates), refresh interval (ambiguous about eligibility and execution)
 
 **Polling Auto-heal Job**:
@@ -143,29 +155,33 @@ _Avoid_: Step that usually avoids the agent, non-OpenCode step
 A slash command invoked verbatim by a Lifecycle Step and expected to have common semantics across Agent Backends. `/review` is the only required Agent Command; its availability is not checked by Recheck Agent Backend, so a missing command fails the Review Step Run when invoked.
 _Avoid_: Backend-specific prompt template, readiness capability
 
-**Agent GitHub Access**:
-Authentication available to GitHub commands invoked during Agent Turns. A backend may integrate the Keymaxxer named-secret tools, but need not; otherwise it uses authenticated ambient `gh` access, and the Harness never copies raw GitHub tokens into the Agent Turn environment.
-_Avoid_: Required Keymaxxer support, injected GitHub token
+**Agent Forge Access**:
+Authentication available to Forge commands invoked during Agent Turns. A backend may integrate the Keymaxxer named-secret tools, but need not; otherwise it uses authenticated ambient Forge access (the `gh` CLI on GitHub; a `GITLAB_TOKEN` environment variable or `glab` CLI on GitLab), and the Harness never copies raw Forge tokens into the Agent Turn environment.
+_Avoid_: Required Keymaxxer support, injected Forge token
 
 **Ready-labeled Issue**:
-An Issue carrying the `ready-for-agent` GitHub label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, GitHub state, and Issue Author (login when GitHub provides one) so consumers can decide whether it is actionable.
+An Issue carrying the `ready-for-agent` Forge label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, Forge state, and Issue Author (username when the Forge provides one) so consumers can decide whether it is actionable.
 _Avoid_: Ready Issue (can imply that the Issue is open and actionable)
 
 **Issue-closing PR**:
-A GitHub pull request that GitHub associates with an Issue through closing semantics, such as a supported closing keyword. A mere mention or other cross-reference does not make a pull request an Issue-closing PR.
-_Avoid_: Related PR, linked PR (both can include incidental references)
+A pull request that the Forge associates with an Issue through closing semantics, such as a supported closing keyword. GitLab calls a pull request a merge request; both are Pull Requests in harness language. A mere mention or other cross-reference does not make a pull request an Issue-closing PR.
+_Avoid_: Merge request, MR (as separate harness terms), related PR, linked PR (both can include incidental references)
 
 **Work Item PR**:
-A GitHub pull request whose exact identity is recorded by a Work Item. A matching Issue number or Git branch alone does not establish that the PR belongs to the Work Item. The PR need not use Issue-closing semantics. Complete, Failed, Needs Human, and Abandoned Work Items retain their Work Item PR; Reset relinquishes ownership by deleting the Work Item. When an Issue has multiple Issue-closing PRs, one matching Work Item PR is sufficient to establish that the harness is managing the Issue.
+A pull request whose exact identity is recorded by a Work Item. A matching Issue number or Git branch alone does not establish that the PR belongs to the Work Item. The PR need not use Issue-closing semantics. Complete, Failed, Needs Human, and Abandoned Work Items retain their Work Item PR; Reset relinquishes ownership by deleting the Work Item. When an Issue has multiple Issue-closing PRs, one matching Work Item PR is sufficient to establish that the harness is managing the Issue.
 _Avoid_: Our PR, harness PR, associated PR
 
 **Last PR Change**:
-The later of a Work Item PR's creation and the push of its current head commit, both of which are Check-Start Anchors. When GitHub omits the current head's push time, the time that head is first observed is the conservative substitute.
+The later of a Work Item PR's creation and the push of its current head commit, both of which are Check-Start Anchors. When the Forge omits the current head's push time, the time that head is first observed is the conservative substitute.
 _Avoid_: Last commit time (ambiguous with author or commit timestamps), Watch start time
 
 **Supported Issue Hierarchy**:
-A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety.
+A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety. GitLab Issues do not participate in a hierarchy: every GitLab Issue is a root with no children and is therefore structurally a Standalone Issue.
 _Avoid_: Issue tree (implies arbitrary depth), nested Issues
+
+**Listed Blockers**:
+The other Issues recorded as blocking an Issue. On GitHub they are the Issue's native blocked-by issue dependencies. On GitLab they are parsed from a `Blocked by: #n` line in the Issue body, since a GitLab instance cannot be assumed to offer native blocking links. An Issue with no Listed Blockers is unblocked.
+_Avoid_: Dependencies (overloaded), linked issues (GitLab relates-to links are informational and do not block)
 
 **Parent Issue**:
 A root Issue with one or more direct children. It organizes related work and may receive Implement All with Auto-merge, but is not itself a unit the harness works directly.
@@ -188,11 +204,11 @@ An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf
 _Avoid_: Actionable Issue (actionability also depends on workflow constraints)
 
 **Work Item**:
-A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns, and a durable Merge Mode (ordinary by default). Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and GitHub issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical agent-authored publication title and body after Commit generates them (shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
+A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns, and a durable Merge Mode (ordinary by default). Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical agent-authored publication title and body after Commit generates them (shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time.
 _Avoid_: Issue lifecycle, implementation job, attempt
 
 **Implement**:
-The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective. Completion may change repository files, produce findings, create or update GitHub artifacts, or perform other work required by the Issue; repository changes are not required.
+The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective. Completion may change repository files, produce findings, create or update Forge artifacts, or perform other work required by the Issue; repository changes are not required.
 _Avoid_: Edit code, generate code
 
 **No-Change Outcome**:
@@ -244,7 +260,7 @@ The Lifecycle Step after successful Review that creates the local git commit for
 _Avoid_: Create PR, git commit hook, Pre-Commit
 
 **Close Issue**:
-The Lifecycle Step that publishes the No-Change Outcome's completion summary on the Work Item's GitHub Issue and closes that Issue after Assess Changes. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried.
+The Lifecycle Step that publishes the No-Change Outcome's completion summary on the Work Item's Issue and closes that Issue after Assess Changes. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried.
 _Avoid_: Complete Work Item, local cleanup
 
 **Worker Slot**:
@@ -292,19 +308,19 @@ The next action required for a Work Item: Create Worktree, Install Dependencies,
 _Avoid_: Last completed step, phase
 
 **Merge Revalidation Outcome**:
-A handled Merge PR attempt in which GitHub does not merge because the pull request or its base changed after approval. The first three outcomes return the Work Item to Watch PR Status Checks; a fourth requires a human, while operational or API failures remain failed Merge PR Step Runs eligible for Retry.
+A handled Merge PR attempt in which the Forge does not merge because the pull request or its base changed after approval. The first three outcomes return the Work Item to Watch PR Status Checks; a fourth requires a human, while operational or API failures remain failed Merge PR Step Runs eligible for Retry.
 _Avoid_: Merge failure, automatic Retry
 
 **PR Status Check**:
-An individual GitHub check run or commit status context associated with a pull request. An execution is green on explicit success and red on explicit failure, error, timeout, action-required, or startup-failure; neutral, skipped, cancelled, stale, and pending results do not trigger a handoff.
-_Avoid_: Aggregate status-check rollup, workflow run
+An individual GitHub check run or commit status context associated with a pull request; on GitLab, one job of the pull request's head pipeline. An execution is green on explicit success and red on explicit failure, error, timeout, action-required, or startup-failure; on GitLab a failed job that allows failure is not red. Neutral, skipped, cancelled, stale, and pending results do not trigger a handoff; nor do GitLab manual or canceled jobs.
+_Avoid_: Aggregate status-check rollup, workflow run, pipeline (the container of jobs, not a check)
 
 **Expected PR Status Check**:
-A required status context for which GitHub has not reported an execution. It may block final advancement before the Check-Start Deadline, but it is not a started check and no longer blocks at or after the deadline.
+A required status context for which GitHub has not reported an execution. It may block final advancement before the Check-Start Deadline, but it is not a started check and no longer blocks at or after the deadline. GitLab has no required status contexts, so a GitLab pull request never has Expected PR Status Checks.
 _Avoid_: Pending PR Status Check, queued check, running check
 
 **Check-Start Anchor**:
-The latest known event expected to start PR Status Checks: the Last PR Change, marking the Work Item PR ready for review, or a successful request to rerun or restart checks. Each new anchor gives GitHub another catch-up window in which replacement checks may appear.
+The latest known event expected to start PR Status Checks: the Last PR Change, marking the Work Item PR ready for review, or a successful request to rerun or restart checks. Each new anchor gives the Forge another catch-up window in which replacement checks may appear.
 _Avoid_: Last PR Change (when a ready transition, rerun, or restart is newer), Watch start time
 
 **Check-Start Deadline**:
@@ -320,7 +336,7 @@ Feedback published by a recognized automated reviewer for a PR Status Check, tre
 _Avoid_: Eventually consistent review comment, pending comment
 
 **Status Check Handoff**:
-A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks, including available red-check diagnostics and relevant Automated Review Output. Terminal green executions accumulate while GitHub still reports an actual pending execution; Watch hands them off only after the aggregate settles, so staggered greens produce one investigation. Unhandled red executions and merge conflicts still hand off immediately. It is handled as processed when no replacement is expected, as a Checks Triggered Outcome when an action should create new executions, or as an explicit failure or human handoff; terminal review output never creates a waiting outcome. For a settled green-only batch, harness-owned GitHub observation may complete the handoff as processed without an Agent Turn when there is demonstrably no positive automated-review evidence (`green-no-review-evidence`); positive or ambiguous review evidence and every batch containing a red check still use the Investigate Agent Turn.
+A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks, including available red-check diagnostics and relevant Automated Review Output. Terminal green executions accumulate while the Forge still reports an actual pending execution; Watch hands them off only after the aggregate settles, so staggered greens produce one investigation. Unhandled red executions and merge conflicts still hand off immediately. It is handled as processed when no replacement is expected, as a Checks Triggered Outcome when an action should create new executions, or as an explicit failure or human handoff; terminal review output never creates a waiting outcome. For a settled green-only batch, harness-owned Forge observation may complete the handoff as processed without an Agent Turn when there is demonstrably no positive automated-review evidence (`green-no-review-evidence`); positive or ambiguous review evidence and every batch containing a red check still use the Investigate Agent Turn.
 _Avoid_: Check classification, one prompt per check
 
 **Checks Triggered Outcome**:
@@ -360,13 +376,13 @@ A terminal Work Item that cannot advance because a lifecycle precondition was no
 _Avoid_: Failed Step Run, Abandoned, Pause Work Item for closed Issue with owned PR
 
 **Needs Human Work Item**:
-A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, Decide PR Merge requires a human (including when Auto-merge is disabled), Merge PR cannot proceed after its revalidation budget is exhausted or GitHub rejects an unchanged mergeable PR, or Review exhausts its Review Fix Round limit without a clean or deferred outcome. It records a concise intervention reason. Entering Needs Human releases its Worker Slot. It is terminal for ordinary Lifecycle Step advancement, Pause, and Start, and it blocks a second Implement Now or Implement Locally for the same Issue. A Needs Human outcome from Investigate PR Status Checks or from exhausting Review Fix Rounds may be retried after intervention; other Needs Human outcomes are not eligible for Retry. A Refresh Job may still leave Needs Human when a Work Item PR is present: a merged Work Item PR advances to local cleanup toward Complete (superseding the handoff). When the latest step was Decide PR Merge or Merge PR and the PR was closed unmerged, Refresh Abandons after local cleanup succeeds. Those Refresh-driven resumptions must re-acquire a Worker Slot; if none is free, the Work Item becomes Waiting for Worker Slot until admitted. Other Needs Human causes are not auto-resumed by Refresh when the PR is still open.
+A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, Decide PR Merge requires a human (including when Auto-merge is disabled), Merge PR cannot proceed after its revalidation budget is exhausted or the Forge rejects an unchanged mergeable PR, or Review exhausts its Review Fix Round limit without a clean or deferred outcome. It records a concise intervention reason. Entering Needs Human releases its Worker Slot. It is terminal for ordinary Lifecycle Step advancement, Pause, and Start, and it blocks a second Implement Now or Implement Locally for the same Issue. A Needs Human outcome from Investigate PR Status Checks or from exhausting Review Fix Rounds may be retried after intervention; other Needs Human outcomes are not eligible for Retry. A Refresh Job may still leave Needs Human when a Work Item PR is present: a merged Work Item PR advances to local cleanup toward Complete (superseding the handoff). When the latest step was Decide PR Merge or Merge PR and the PR was closed unmerged, Refresh Abandons after local cleanup succeeds. Those Refresh-driven resumptions must re-acquire a Worker Slot; if none is free, the Work Item becomes Waiting for Worker Slot until admitted. Other Needs Human causes are not auto-resumed by Refresh when the PR is still open.
 _Avoid_: Failed Work Item, Failed Step Run
 
 **Complete Work Item**:
-A terminal Work Item whose remote outcome is finished and whose local cleanup has finished. For changed work, the Work Item PR is merged, either by the harness after a clanker Decide PR Merge decision or by a human (or other external merge). Confirmed merge advances cleanup when known at Step Run Issue revalidation, or later via a Refresh Job—including when that merge supersedes an unfinished operational Lifecycle Step such as Watch or Investigate PR Status Checks, or a Work Item paused because the Issue closed while the Work Item PR was still open. Closing the linked Issue as part of the merge does not turn the Work Item into a Failed Work Item. Owning a Work Item PR number alone never Completes. For a No-Change Outcome, the GitHub Issue is closed without a pull request.
+A terminal Work Item whose remote outcome is finished and whose local cleanup has finished. For changed work, the Work Item PR is merged, either by the harness after a clanker Decide PR Merge decision or by a human (or other external merge). Confirmed merge advances cleanup when known at Step Run Issue revalidation, or later via a Refresh Job—including when that merge supersedes an unfinished operational Lifecycle Step such as Watch or Investigate PR Status Checks, or a Work Item paused because the Issue closed while the Work Item PR was still open. Closing the linked Issue as part of the merge does not turn the Work Item into a Failed Work Item. Owning a Work Item PR number alone never Completes. For a No-Change Outcome, the Issue is closed without a pull request.
 _Avoid_: Approved, done Issue
 
 **Relevant Issue**:
-A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no open or merged Issue-closing PR, or have at least one open or merged Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. Closed unmerged (abandoned) Issue-closing PRs are ignored for this test. An Issue-closing PR affects only its own Issue rather than the Issue's parent or children. Unless Include all Issue Authors is on for the Repository, the Issue’s own Issue Author must match the Operator GitHub User (case-insensitive); missing or ghost authors never match, and parent authorship does not include or exclude children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned open or merged Issue-closing PRs is not relevant.
+A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no open or merged Issue-closing PR, or have at least one open or merged Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. Closed unmerged (abandoned) Issue-closing PRs are ignored for this test. An Issue-closing PR affects only its own Issue rather than the Issue's parent or children. Unless Include all Issue Authors is on for the Repository, the Issue’s own Issue Author must match the Operator Forge User (case-insensitive); missing or ghost authors never match, and parent authorship does not include or exclude children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned open or merged Issue-closing PRs is not relevant.
 _Avoid_: Active Issue (a Relevant Issue may be closed), Actionable Issue (actionability also depends on workflow constraints), Visible Issue (presentation-specific)
