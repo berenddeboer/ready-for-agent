@@ -462,6 +462,63 @@ describe("createWorktree", () => {
     }
   })
 
+  it("creates a worktree while another process holds the shared config lock", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-wt-config-lock-"))
+    try {
+      const bare = await initBareRepository(root)
+      await git(bare, [
+        "config",
+        "remote.origin.fetch",
+        "+refs/heads/*:refs/remotes/origin/*",
+      ])
+      await writeFile(join(bare, "config.lock"), "held by another process")
+      const workItemId = makeWorkItemId()
+
+      const path = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+
+          return (yield* createWorktree({
+            workItemId,
+            repositoryId: repository.id,
+            issueNumber: 42,
+            issueTitle: null,
+            agentBackend: "opencode",
+            model: "opencode/test",
+            thinkingLevel: "low",
+            reviewModel: "opencode/test",
+            reviewThinkingLevel: "low",
+            worktreePath: null,
+            startingCommitOid: null,
+            completionSummary: null,
+            publicationTitle: null,
+            publicationBody: null,
+            sessionId: null,
+          })).worktreePath
+        }),
+      )
+
+      expect(await git(path, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe(
+        workItemBranchName({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          issueNumber: 42,
+          workItemId,
+        }),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it("fails when the planned path exists but is not this Work Item worktree", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-wt-conflict-path-"))
     try {

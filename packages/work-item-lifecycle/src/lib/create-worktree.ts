@@ -268,6 +268,7 @@ export const createWorktree = (
     yield* runGit(gitRepository, [
       "worktree",
       "add",
+      "--no-track",
       "-b",
       branchName,
       worktreePath,
