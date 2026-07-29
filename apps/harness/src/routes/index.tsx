@@ -3542,56 +3542,57 @@ function JobsCard() {
                       <WorkItemPauseButton workItem={workItem} />
                     </div>
                   </div>
-                  {selectedTab === "completed" && (
-                    <p className="mt-1 mb-0 font-mono text-xs text-ink-faint">
+                  <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
+                    <span className="shrink-0 font-mono text-xs text-ink-faint">
                       {workItem.agentBackend.label}
-                    </p>
-                  )}
-                  {(sessionId !== null || worktreePath !== null) && (
-                    <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
-                      {sessionId !== null &&
-                        (selectedTab === "completed" ? (
-                          <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-                            <button
-                              type="button"
-                              className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-                              title={sessionId}
-                              onClick={() => {
-                                setSessionDialog({
-                                  workItemId: workItem.id,
-                                  sessionId,
-                                })
-                              }}
-                            >
-                              {sessionId}
-                            </button>
-                            <Copy
-                              value={sessionId}
-                              className="shrink-0"
-                              showValue={false}
-                            />
-                          </span>
-                        ) : (
+                    </span>
+                    {(sessionId !== null || worktreePath !== null) && (
+                      <span className="shrink-0 font-mono text-xs text-ink-faint">
+                        -
+                      </span>
+                    )}
+                    {sessionId !== null &&
+                      (selectedTab === "completed" ? (
+                        <span className="inline-flex min-w-0 max-w-full items-center gap-1">
+                          <button
+                            type="button"
+                            className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+                            title={sessionId}
+                            onClick={() => {
+                              setSessionDialog({
+                                workItemId: workItem.id,
+                                sessionId,
+                              })
+                            }}
+                          >
+                            {sessionId}
+                          </button>
                           <Copy
                             value={sessionId}
-                            className="min-w-0 max-w-full"
-                            textClassName="font-mono text-xs text-ink-faint"
+                            className="shrink-0"
+                            showValue={false}
                           />
-                        ))}
-                      {sessionId !== null && worktreePath !== null && (
-                        <span className="shrink-0 font-mono text-xs text-ink-faint">
-                          -
                         </span>
-                      )}
-                      {worktreePath !== null && (
+                      ) : (
                         <Copy
-                          value={worktreePath}
+                          value={sessionId}
                           className="min-w-0 max-w-full"
                           textClassName="font-mono text-xs text-ink-faint"
                         />
-                      )}
-                    </p>
-                  )}
+                      ))}
+                    {sessionId !== null && worktreePath !== null && (
+                      <span className="shrink-0 font-mono text-xs text-ink-faint">
+                        -
+                      </span>
+                    )}
+                    {worktreePath !== null && (
+                      <Copy
+                        value={worktreePath}
+                        className="min-w-0 max-w-full"
+                        textClassName="font-mono text-xs text-ink-faint"
+                      />
+                    )}
+                  </p>
                   <WorkItemLifecycleStatus
                     workItem={workItem}
                     compact

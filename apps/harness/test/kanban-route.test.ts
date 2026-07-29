@@ -74,6 +74,26 @@ describe("/kanban route", () => {
     expect(ticket).not.toContain('laneId === "complete"')
   })
 
+  test("shows agent backend label inline before session id on pipeline tickets", () => {
+    const source = kanbanSource()
+    const ticket = source.slice(
+      source.indexOf("function PipelineTicket("),
+      source.indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain("{workItem.agentBackend.label}")
+    expect(ticket).toContain('className="job-ticket-runtime"')
+    // Runtime row is unconditional so the label shows before a session exists.
+    expect(ticket).not.toContain(
+      "(sessionId !== null || worktreePath !== null) && (",
+    )
+    const labelIndex = ticket.indexOf("{workItem.agentBackend.label}")
+    const sessionButtonIndex = ticket.indexOf(
+      "onOpenSession(workItem.id, sessionId)",
+    )
+    expect(labelIndex).toBeGreaterThan(-1)
+    expect(sessionButtonIndex).toBeGreaterThan(labelIndex)
+  })
+
   test("reuses existing queries and live invalidation without polling", () => {
     const source = kanbanSource()
     expect(source).toContain("jobsWorkingWorkItemsQuery")
