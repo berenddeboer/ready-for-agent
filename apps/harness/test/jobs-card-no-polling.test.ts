@@ -145,6 +145,18 @@ describe("JobsCard live updates", () => {
     expect(jobsCard).not.toContain("Session ")
   })
 
+  test("shows agent backend label inline before session id on every tab", () => {
+    const { jobsCard } = jobsCardSource()
+    expect(jobsCard).toContain("{workItem.agentBackend.label}")
+    expect(jobsCard).not.toContain('selectedTab === "completed" && (')
+    // Label always renders; separator only when session or worktree follows.
+    expect(jobsCard).toContain("sessionId !== null || worktreePath !== null")
+    const labelIndex = jobsCard.indexOf("{workItem.agentBackend.label}")
+    const sessionValueIndex = jobsCard.indexOf("value={sessionId}")
+    expect(labelIndex).toBeGreaterThan(-1)
+    expect(sessionValueIndex).toBeGreaterThan(labelIndex)
+  })
+
   test("Completed Session id opens usage dialog; Working/Failed keep plain copy", () => {
     const { source, jobsCard } = jobsCardSource()
     expect(jobsCard).toContain('selectedTab === "completed"')

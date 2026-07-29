@@ -182,10 +182,16 @@ function PipelineTicket({
         <span className="job-ticket-state">{workItem.stateLabel}</span>
         <WorkItemPauseButton workItem={workItem} />
       </div>
-      {(sessionId !== null || worktreePath !== null) && (
-        <div className="job-ticket-runtime">
+      <div className="job-ticket-runtime">
+        <div className="flex min-w-0 items-center gap-1">
+          <span className="shrink-0 font-mono text-xs text-ink-faint">
+            {workItem.agentBackend.label}
+          </span>
           {sessionId !== null && (
-            <div className="flex min-w-0 items-center gap-1">
+            <>
+              <span className="shrink-0 font-mono text-xs text-ink-faint">
+                -
+              </span>
               <button
                 type="button"
                 className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline"
@@ -195,17 +201,17 @@ function PipelineTicket({
                 {sessionId}
               </button>
               <Copy value={sessionId} showValue={false} className="shrink-0" />
-            </div>
-          )}
-          {worktreePath !== null && (
-            <Copy
-              value={worktreePath}
-              className="min-w-0 max-w-full"
-              textClassName="font-mono text-xs text-ink-faint"
-            />
+            </>
           )}
         </div>
-      )}
+        {worktreePath !== null && (
+          <Copy
+            value={worktreePath}
+            className="min-w-0 max-w-full"
+            textClassName="font-mono text-xs text-ink-faint"
+          />
+        )}
+      </div>
       <WorkItemLifecycleStatus
         workItem={workItem}
         compact
