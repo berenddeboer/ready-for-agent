@@ -504,7 +504,26 @@ const runLifecycleClaimLoop = (
       }
 
       const job = claimed.value
-      yield* queue.extendVisibility(job.jobId, lifecycleJobVisibilityTimeout)
+      const leaseExtended = yield* queue
+        .extendVisibility(job.jobId, lifecycleJobVisibilityTimeout)
+        .pipe(
+          Effect.as(true),
+          Effect.catchTags({
+            JobNotFoundError: () =>
+              Effect.logWarning("Skipped stale Lifecycle Job delivery", {
+                jobId: job.jobId,
+                stepRunId: job.payload.stepRunId,
+              }).pipe(Effect.as(false)),
+            AcknowledgeError: (error) =>
+              Effect.logError("Lifecycle Job lease extension failed", {
+                jobId: job.jobId,
+                stepRunId: job.payload.stepRunId,
+                error: formatLogError(error),
+              }).pipe(Effect.as(false)),
+          }),
+        )
+      if (!leaseExtended) continue
+
       yield* Ref.update(activeRuns, (n) => n + 1)
       yield* Effect.gen(function* () {
         const result = yield* Effect.result(
