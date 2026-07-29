@@ -24,7 +24,7 @@ type GitLabServiceError = GitLabProjectUnavailableError | GitLabRequestError
  * Shorter than Keymaxxer human-dialog waits so ambient-only Repositories are
  * not stalled for the full unlock/dialog window when Keymaxxer is enabled.
  */
-export const GITLAB_VAULT_METADATA_BUDGET = Duration.seconds(
+const GITLAB_VAULT_METADATA_BUDGET = Duration.seconds(
   GITLAB_VAULT_METADATA_BUDGET_SECONDS,
 )
 

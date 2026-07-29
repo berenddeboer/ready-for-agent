@@ -31,7 +31,7 @@ export const gitlabTokenSecretName = (repository: Repository) =>
     .replace(/[^A-Za-z0-9_]/g, "_")
     .toUpperCase()
 
-export const tokenSecretName = (repository: Repository) =>
+const tokenSecretName = (repository: Repository) =>
   repository.forge === "gitlab"
     ? gitlabTokenSecretName(repository)
     : githubTokenSecretName(repository)
@@ -58,10 +58,10 @@ const githubTokenCreationUrl = (repository: Repository) => {
 }
 
 /** Instance-correct GitLab personal access token creation page. */
-export const gitlabTokenCreationUrl = (repository: Repository) =>
+const gitlabTokenCreationUrl = (repository: Repository) =>
   `https://${repository.forgeHost}/-/user_settings/personal_access_tokens`
 
-export const tokenCreationUrl = (repository: Repository) =>
+const tokenCreationUrl = (repository: Repository) =>
   repository.forge === "gitlab"
     ? gitlabTokenCreationUrl(repository)
     : githubTokenCreationUrl(repository)
