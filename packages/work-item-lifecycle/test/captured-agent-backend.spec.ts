@@ -28,6 +28,7 @@ import {
   resolveAgentModelsForBackend,
   stubActiveAgentBackendLayer,
   stubGitHubServiceLayer,
+  stubGitLabServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -121,6 +122,7 @@ const lifecycleLayer = (
   WorkItemLifecycleLive.pipe(
     Layer.provideMerge(active),
     Layer.provideMerge(stubGitHubServiceLayer()),
+    Layer.provideMerge(stubGitLabServiceLayer()),
     Layer.provideMerge(Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps))),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),

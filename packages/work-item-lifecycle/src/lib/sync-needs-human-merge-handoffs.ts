@@ -1,6 +1,10 @@
 import { Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
-import { GitHubService } from "@ready-for-agent/github-service"
+import {
+  GitHubService,
+  type PullRequestLifecycleStatus,
+} from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { WorkItemLifecycle } from "./work-item-lifecycle.js"
 import { workItemBranchName } from "./worktree-names.js"
 
@@ -8,7 +12,7 @@ import { workItemBranchName } from "./worktree-names.js"
  * After Issue reconciliation, advance Work Items whose Work Item PR was merged
  * (any unfinished operational step or Needs Human with a Work Item PR) to local
  * cleanup, and Abandon merge-related Needs Human when the PR was closed
- * unmerged. GitHub lookup failures are skipped so Refresh still succeeds.
+ * unmerged. Forge lookup failures are skipped so Refresh still succeeds.
  */
 export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
   Effect.gen(function* () {
@@ -19,10 +23,8 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
     if (repository === undefined) {
       return 0
     }
-    if (repository.forge === "gitlab") {
-      return 0
-    }
     const github = yield* GitHubService
+    const gitlab = yield* GitLabService
 
     const workItems = yield* lifecycle.listWorkItemsForRepository(repositoryId)
     let advanced = 0
@@ -54,20 +56,26 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         workItemId: workItem.id,
       })
 
-      const status = yield* github
-        .getPullRequestLifecycleStatus(repository, headRefName)
-        .pipe(
-          Effect.catch((error) =>
-            Effect.logWarning(
-              "Skipping Work Item PR merge outcome: PR lifecycle lookup failed",
-              {
-                workItemId: workItem.id,
-                repositoryId,
-                error: String(error),
-              },
-            ).pipe(Effect.as(null)),
-          ),
-        )
+      const lifecycleLookup: Effect.Effect<
+        PullRequestLifecycleStatus,
+        unknown
+      > =
+        repository.forge === "gitlab"
+          ? gitlab.getPullRequestLifecycleStatus(repository, headRefName)
+          : github.getPullRequestLifecycleStatus(repository, headRefName)
+
+      const status = yield* lifecycleLookup.pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(
+            "Skipping Work Item PR merge outcome: PR lifecycle lookup failed",
+            {
+              workItemId: workItem.id,
+              repositoryId,
+              error: String(error),
+            },
+          ).pipe(Effect.as(null)),
+        ),
+      )
 
       if (status === null) {
         continue

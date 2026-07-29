@@ -65,10 +65,12 @@ import {
   formatIssueClosedPrClosedUnmergedMessage,
   formatIssueClosedPrMergedMessage,
   formatIssueClosedPrStatusIndeterminateMessage,
+  formatIssueClosedWhilePrOpenMessage,
   isTerminalWorkItemState,
   makeWorkItemLifecycleLive,
   stubActiveAgentBackendLayer,
   stubGitHubServiceLayer,
+  stubGitLabServiceLayer,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -141,6 +143,7 @@ describe("WorkItemLifecycle", () => {
   const TestLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(stubActiveAgentBackendLayer()),
     Layer.provideMerge(stubGitHubServiceLayer()),
+    Layer.provideMerge(stubGitLabServiceLayer()),
     Layer.provideMerge(SuccessfulStepsLive),
     Layer.provideMerge(DbServiceLive),
     Layer.provideMerge(SqliteQueueServiceLive),
@@ -156,10 +159,12 @@ describe("WorkItemLifecycle", () => {
   const makeTestLayer = (
     steps: LifecycleStepsShape,
     github: Parameters<typeof stubGitHubServiceLayer>[0] = {},
+    gitlab: Parameters<typeof stubGitLabServiceLayer>[0] = {},
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(stubGitHubServiceLayer(github)),
+      Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -172,6 +177,7 @@ describe("WorkItemLifecycle", () => {
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       Layer.provideMerge(stubGitHubServiceLayer()),
+      Layer.provideMerge(stubGitLabServiceLayer()),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
       ),
@@ -545,6 +551,7 @@ describe("WorkItemLifecycle", () => {
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1076,6 +1083,7 @@ describe("WorkItemLifecycle", () => {
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -1325,6 +1333,7 @@ describe("WorkItemLifecycle", () => {
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -2079,6 +2088,7 @@ describe("WorkItemLifecycle", () => {
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(NonTransactionalQueueLive),
@@ -6587,8 +6597,9 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("pauses without a GitHub lookup when a GitLab Issue closes with an owned PR", () => {
+    it("uses GitLab lifecycle status (not GitHub) when a GitLab Issue closes with an owned MR", () => {
       let githubLifecycleLookupCalls = 0
+      let gitlabLifecycleLookupCalls = 0
       const steps: LifecycleStepsShape = {
         ...successfulSteps,
         watchPrStatusChecks: () =>
@@ -6603,12 +6614,21 @@ describe("WorkItemLifecycle", () => {
           Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
       }
 
-      const layer = makeTestLayer(steps, {
-        getPullRequestLifecycleStatus: () => {
-          githubLifecycleLookupCalls += 1
-          return Effect.succeed({ _tag: "merged" })
+      const layer = makeTestLayer(
+        steps,
+        {
+          getPullRequestLifecycleStatus: () => {
+            githubLifecycleLookupCalls += 1
+            return Effect.succeed({ _tag: "merged" })
+          },
         },
-      })
+        {
+          getPullRequestLifecycleStatus: () => {
+            gitlabLifecycleLookupCalls += 1
+            return Effect.succeed({ _tag: "open" })
+          },
+        },
+      )
 
       return Effect.runPromise(
         Effect.gen(function* () {
@@ -6644,10 +6664,7 @@ describe("WorkItemLifecycle", () => {
           if (afterInvestigate._tag === "processed") {
             expect(afterInvestigate.workItem.paused).toBe(true)
             expect(afterInvestigate.workItem.failureMessage).toBe(
-              formatIssueClosedPrStatusIndeterminateMessage(
-                issue.issueNumber,
-                101,
-              ),
+              formatIssueClosedWhilePrOpenMessage(issue.issueNumber, 101),
             )
             expect(
               afterInvestigate.workItem.stepRuns.find(
@@ -6658,6 +6675,7 @@ describe("WorkItemLifecycle", () => {
             ).toBe(STEP_RUN_REASON.issueClosedWhilePrOpen)
           }
           expect(githubLifecycleLookupCalls).toBe(0)
+          expect(gitlabLifecycleLookupCalls).toBeGreaterThan(0)
           expect(
             Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
           ).toBe(true)
@@ -7726,6 +7744,7 @@ describe("WorkItemLifecycle", () => {
       const layer = WorkItemLifecycleLive.pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(SuccessfulStepsLive),
         Layer.provideMerge(DbServiceLive),
         Layer.provideMerge(
@@ -7919,6 +7938,7 @@ describe("WorkItemLifecycle", () => {
       }).pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(slowSteps)),
         ),
@@ -8797,6 +8817,7 @@ describe("WorkItemLifecycle", () => {
       }).pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),
@@ -8896,6 +8917,7 @@ describe("WorkItemLifecycle", () => {
       }).pipe(
         Layer.provideMerge(stubActiveAgentBackendLayer()),
         Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
         Layer.provideMerge(
           Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
         ),

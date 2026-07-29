@@ -38,6 +38,9 @@ const gitlabLifecycleStub = {
     }),
   getPrStatusCheckDiagnostics: () => Effect.succeed([]),
   markPullRequestReadyForReview: () => Effect.void,
+  getPullRequestLifecycleStatus: () =>
+    Effect.succeed({ _tag: "open" as const }),
+  mergePullRequest: () => Effect.succeed({ _tag: "merged" as const }),
   ensureIssueCompletedWithSummary: () => Effect.void,
   closeOpenPullRequestsForBranch: () => Effect.void,
   deleteBranch: () => Effect.void,
@@ -658,6 +661,87 @@ describe("Keymaxxer-backed GitLab layer", () => {
 
     expect(runs[0]?.command).toContain("mark-pr-ready-for-review")
     expect(runs[0]?.command).toContain('GITLAB_TOKEN="$')
+    expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
+  })
+
+  test("merges a merge request through the vault secret", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: ({ account }) =>
+        Effect.succeed(
+          account === vaultAccount ? "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT" : null,
+        ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({ _tag: "merged" }),
+          stderr: "",
+        })
+      },
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.mergePullRequest(
+          repository,
+          "rfa/project-oauth-client/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result).toEqual({ _tag: "merged" })
+    expect(runs[0]?.command).toContain("merge-pull-request")
+    expect(runs[0]?.command).toContain('GITLAB_TOKEN="$')
+    expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
+  })
+
+  test("loads merge request lifecycle status through the vault secret", async () => {
+    const runs: RunWithSecretsInput[] = []
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: ({ account }) =>
+        Effect.succeed(
+          account === vaultAccount ? "GITLAB_TOKEN_PROJECT_OAUTH_CLIENT" : null,
+        ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) => {
+        runs.push(input)
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({ _tag: "open" }),
+          stderr: "",
+        })
+      },
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const status = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.getPullRequestLifecycleStatus(
+          repository,
+          "rfa/project-oauth-client/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(status).toEqual({ _tag: "open" })
+    expect(runs[0]?.command).toContain("get-pr-lifecycle-status")
     expect(runs[0]?.secrets).toEqual(["GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"])
   })
 })

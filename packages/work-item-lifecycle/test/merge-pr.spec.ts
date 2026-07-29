@@ -8,8 +8,11 @@ import {
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
 import {
+  GitLabService,
+  type GitLabServiceShape,
+} from "@ready-for-agent/gitlab-service"
+import {
   type LifecycleStepContext,
-  MergePrContextError,
   makeWorkItemId,
   mergePr,
 } from "../src/index.js"
@@ -129,7 +132,8 @@ describe("mergePr", () => {
     expect(exit._tag).toBe("Failure")
   })
 
-  it("fails closed before GitHub access for a GitLab Repository", async () => {
+  it("merges the deterministic Work Item branch MR for GitLab", async () => {
+    let requestedBranch = ""
     let githubCalls = 0
     const gitlabRepository = makeRepositoryRecord({
       id: repository.id,
@@ -147,18 +151,20 @@ describe("mergePr", () => {
         return Effect.succeed({ _tag: "merged" as const })
       },
     } as GitHubServiceShape)
+    const gitlab = Layer.succeed(GitLabService, {
+      mergePullRequest: (_repository, branch) => {
+        requestedBranch = branch
+        return Effect.succeed({ _tag: "merged" as const })
+      },
+    } as GitLabServiceShape)
 
-    const error = await Effect.runPromise(
+    await Effect.runPromise(
       mergePr(context).pipe(
-        Effect.flip,
-        Effect.provide(Layer.merge(gitlabDb, github)),
+        Effect.provide(Layer.mergeAll(gitlabDb, github, gitlab)),
       ),
     )
 
-    expect(error).toBeInstanceOf(MergePrContextError)
-    expect(error.message).toContain(
-      "refusing to query GitHub for a GitLab Repository",
-    )
+    expect(requestedBranch).toBe(`rfa/project-widgets/42/${context.workItemId}`)
     expect(githubCalls).toBe(0)
   })
 })

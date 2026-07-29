@@ -10,8 +10,10 @@ import {
   Schema,
 } from "effect"
 import type {
+  MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
   PullRequestMergeability,
   TerminalPrStatusCheck,
 } from "@ready-for-agent/github-service"
@@ -365,6 +367,30 @@ const isDraftMergeRequest = (mergeRequest: {
   readonly title?: string | null
 }): boolean =>
   mergeRequest.draft === true || hasDraftTitlePrefix(mergeRequest.title ?? "")
+
+/**
+ * True when the MR tip and the attached head_pipeline SHA are both known and
+ * disagree. Watch must not settle green, and Merge must not treat the pipeline
+ * as green, until GitLab attaches a pipeline for the current tip.
+ */
+const isStaleHeadPipelineForTip = (mergeRequest: {
+  readonly sha?: string | null
+  readonly head_pipeline?: {
+    readonly sha?: string | null
+  } | null
+}): boolean => {
+  const headPipeline = mergeRequest.head_pipeline
+  if (headPipeline === null || headPipeline === undefined) return false
+  const mrHead =
+    typeof mergeRequest.sha === "string" && mergeRequest.sha.trim() !== ""
+      ? mergeRequest.sha.trim()
+      : null
+  const pipelineSha =
+    typeof headPipeline.sha === "string" && headPipeline.sha.trim() !== ""
+      ? headPipeline.sha.trim()
+      : null
+  return mrHead !== null && pipelineSha !== null && pipelineSha !== mrHead
+}
 
 const apiBase = (repository: GitLabRepository): string =>
   `https://${repository.forgeHost}/api/v4`
@@ -1053,6 +1079,15 @@ export const makeGitLabService = (options: {
           ...snapshot,
         } satisfies PullRequestCheckStatus
       }
+      // Pipeline still reports a prior tip after a concurrent push: keep
+      // watching (pending) so Merge does not thrash revalidation on a stale green.
+      if (isStaleHeadPipelineForTip(mergeRequest)) {
+        return {
+          _tag: "pending",
+          terminalChecks: emptyTerminalChecks,
+          ...snapshot,
+        } satisfies PullRequestCheckStatus
+      }
 
       /**
        * List pipeline jobs or bridges. 404 is empty (missing/expired pipeline
@@ -1314,6 +1349,373 @@ export const makeGitLabService = (options: {
         })
       }
     }),
+    getPullRequestLifecycleStatus: Effect.fn(
+      "GitLabService.getPullRequestLifecycleStatus",
+    )(function* (repository, headRefName) {
+      const mergeRequestIid = yield* resolveMergeRequestIidForBranch(
+        repository,
+        headRefName,
+      )
+      if (mergeRequestIid === null) {
+        return { _tag: "not_found" } satisfies PullRequestLifecycleStatus
+      }
+      const project = projectApiPath(repository)
+      const mergeRequestLoad = yield* requestUnknown(
+        repository,
+        `${project}/merge_requests/${mergeRequestIid}`,
+        `Failed to load merge request !${mergeRequestIid} for ${repository.projectPath}`,
+      ).pipe(
+        Effect.flatMap((value) =>
+          decodeMergeRequestCheck(
+            value,
+            `GitLab returned an invalid merge request for ${repository.projectPath}:${headRefName}`,
+          ),
+        ),
+        Effect.result,
+      )
+      if (Result.isFailure(mergeRequestLoad)) {
+        if (
+          mergeRequestLoad.failure instanceof GitLabRequestError &&
+          mergeRequestLoad.failure.statusCode === 404
+        ) {
+          return { _tag: "not_found" } satisfies PullRequestLifecycleStatus
+        }
+        return yield* mergeRequestLoad.failure
+      }
+      const mergeRequest = mergeRequestLoad.success
+      if (mergeRequest.state === "merged") {
+        return { _tag: "merged" } satisfies PullRequestLifecycleStatus
+      }
+      if (mergeRequest.state === "closed") {
+        return { _tag: "closed" } satisfies PullRequestLifecycleStatus
+      }
+      // opened | locked: still open for lifecycle purposes (locked is mid-merge).
+      if (mergeRequest.state === "opened" || mergeRequest.state === "locked") {
+        return { _tag: "open" } satisfies PullRequestLifecycleStatus
+      }
+      return yield* new GitLabRequestError({
+        message: `GitLab returned an invalid merge request state for ${repository.projectPath}:${headRefName}`,
+      })
+    }),
+    mergePullRequest: Effect.fn("GitLabService.mergePullRequest")(
+      function* (repository, headRefName) {
+        const loadMergeRequest = (): Effect.Effect<
+          MergeRequestCheck | null,
+          GitLabServiceError
+        > =>
+          Effect.gen(function* () {
+            const mergeRequestIid = yield* resolveMergeRequestIidForBranch(
+              repository,
+              headRefName,
+            )
+            if (mergeRequestIid === null) return null
+            const project = projectApiPath(repository)
+            const mergeRequestLoad = yield* requestUnknown(
+              repository,
+              `${project}/merge_requests/${mergeRequestIid}`,
+              `Failed to load merge request !${mergeRequestIid} for ${repository.projectPath}`,
+            ).pipe(
+              Effect.flatMap((value) =>
+                decodeMergeRequestCheck(
+                  value,
+                  `GitLab returned an invalid merge request for ${repository.projectPath}:${headRefName}`,
+                ),
+              ),
+              Effect.result,
+            )
+            if (Result.isFailure(mergeRequestLoad)) {
+              if (
+                mergeRequestLoad.failure instanceof GitLabRequestError &&
+                mergeRequestLoad.failure.statusCode === 404
+              ) {
+                return null
+              }
+              return yield* mergeRequestLoad.failure
+            }
+            return mergeRequestLoad.success
+          })
+
+        /**
+         * Job-level pipeline rollup for merge pre-checks. Matches Watch so
+         * allow_failure failures and manual/canceled/skipped jobs do not block
+         * merge, while hard-fail and still-running pipelines revalidate.
+         * A head_pipeline whose SHA is not the MR tip is treated as not green so
+         * a concurrent push cannot merge an untested head under a stale success
+         * (same tip-freshness rule as Watch pending).
+         */
+        const pipelineBlockingReason = (
+          mergeRequest: MergeRequestCheck,
+        ): Effect.Effect<"checks_not_green" | null, GitLabServiceError> =>
+          Effect.gen(function* () {
+            const headPipeline = mergeRequest.head_pipeline
+            if (headPipeline === null || headPipeline === undefined) {
+              return null
+            }
+            if (isStaleHeadPipelineForTip(mergeRequest)) {
+              return "checks_not_green" as const
+            }
+            const project = projectApiPath(repository)
+            const listPipelineJobsOrEmpty = (
+              pathSuffix: "jobs" | "bridges",
+              message: string,
+            ): Effect.Effect<readonly PipelineJob[], GitLabServiceError> =>
+              requestPages(
+                repository,
+                `${project}/pipelines/${headPipeline.id}/${pathSuffix}`,
+                message,
+              ).pipe(
+                Effect.flatMap((values) =>
+                  decodeEffect(
+                    Schema.Array(PipelineJobSchema),
+                    values,
+                    `GitLab returned invalid pipeline ${pathSuffix} for ${repository.projectPath}`,
+                  ),
+                ),
+                Effect.catch((error) =>
+                  error instanceof GitLabRequestError &&
+                  error.statusCode === 404
+                    ? Effect.succeed([] as readonly PipelineJob[])
+                    : Effect.fail(error),
+                ),
+              )
+            const ordinaryJobs = yield* listPipelineJobsOrEmpty(
+              "jobs",
+              `Failed to list pipeline jobs for ${repository.projectPath} pipeline ${headPipeline.id}`,
+            )
+            const bridgeJobs = yield* listPipelineJobsOrEmpty(
+              "bridges",
+              `Failed to list pipeline bridge jobs for ${repository.projectPath} pipeline ${headPipeline.id}`,
+            )
+            const jobs = mergePipelineJobs(ordinaryJobs, bridgeJobs)
+            let aggregate = aggregatePipelineStatus(jobs)
+            if (aggregate === "no_checks" && jobs.length === 0) {
+              aggregate = aggregateEmptyJobsFromPipelineStatus(
+                headPipeline.status,
+              )
+            }
+            if (aggregate === "pending" || aggregate === "failed") {
+              return "checks_not_green" as const
+            }
+            return null
+          })
+
+        const classifyOpenMergeRequest = (
+          mergeRequest: MergeRequestCheck,
+        ): Effect.Effect<
+          | MergePullRequestResult
+          | { readonly _tag: "ready"; readonly sha: string },
+          GitLabServiceError
+        > =>
+          Effect.gen(function* () {
+            if (mergeRequest.state === "merged") {
+              return { _tag: "merged" } as const
+            }
+            if (mergeRequest.state === "closed") {
+              return {
+                _tag: "needs_human" as const,
+                reason: "closed_unmerged" as const,
+                message: `Merge request for ${repository.projectPath}:${headRefName} was closed without merging`,
+              }
+            }
+            if (mergeRequest.state === "locked") {
+              return {
+                _tag: "revalidation" as const,
+                reason: "mergeability_changed" as const,
+                message: `Merge request is locked (merge in progress) for ${repository.projectPath}:${headRefName}`,
+              }
+            }
+            if (mergeRequest.state !== "opened") {
+              return yield* new GitLabRequestError({
+                message: `GitLab returned an invalid merge request state for ${repository.projectPath}:${headRefName}`,
+              })
+            }
+            if (isDraftMergeRequest(mergeRequest)) {
+              return {
+                _tag: "revalidation" as const,
+                reason: "mergeability_changed" as const,
+                message: `Merge request is still a draft for ${repository.projectPath}:${headRefName}`,
+              }
+            }
+            const headSha =
+              typeof mergeRequest.sha === "string" &&
+              mergeRequest.sha.trim() !== ""
+                ? mergeRequest.sha
+                : null
+            if (headSha === null) {
+              return yield* new GitLabRequestError({
+                message: `GitLab returned an invalid merge request head for ${repository.projectPath}:${headRefName}`,
+              })
+            }
+            const pipelineBlock = yield* pipelineBlockingReason(mergeRequest)
+            if (pipelineBlock === "checks_not_green") {
+              return {
+                _tag: "revalidation" as const,
+                reason: "checks_not_green" as const,
+                message: `Merge request pipeline is no longer successful for ${repository.projectPath}:${headRefName}`,
+              }
+            }
+            const mergeability = mapMergeability(mergeRequest)
+            if (mergeability !== "mergeable") {
+              return {
+                _tag: "revalidation" as const,
+                reason: "mergeability_changed" as const,
+                message: `Merge request mergeability is ${mergeability} for ${repository.projectPath}:${headRefName}`,
+              }
+            }
+            return { _tag: "ready" as const, sha: headSha }
+          })
+
+        const initial = yield* loadMergeRequest()
+        if (initial === null) {
+          return yield* new GitLabRequestError({
+            message: `No merge request found for ${repository.projectPath}:${headRefName}`,
+          })
+        }
+        const prepared = yield* classifyOpenMergeRequest(initial)
+        if (prepared._tag !== "ready") {
+          return prepared
+        }
+        const expectedHeadSha = prepared.sha
+        const mergeRequestIid = initial.iid
+        const project = projectApiPath(repository)
+
+        // Do not set squash / merge_commit_message: project GitLab settings govern.
+        const mergeResult = yield* requestUnknown(
+          repository,
+          `${project}/merge_requests/${mergeRequestIid}/merge`,
+          `Failed to merge merge request !${mergeRequestIid} for ${repository.projectPath}`,
+          {
+            method: "PUT",
+            body: {
+              sha: expectedHeadSha,
+            },
+          },
+        ).pipe(Effect.result)
+
+        if (Result.isSuccess(mergeResult)) {
+          const merged = yield* decodeMergeRequestCheck(
+            mergeResult.success,
+            `GitLab returned an invalid merge request after merge for ${repository.projectPath}:${headRefName}`,
+          )
+          if (merged.state === "merged") {
+            return { _tag: "merged" } as const
+          }
+          if (merged.state === "closed") {
+            return {
+              _tag: "needs_human" as const,
+              reason: "closed_unmerged" as const,
+              message: `Merge request for ${repository.projectPath}:${headRefName} was concurrently closed without merging`,
+            }
+          }
+          // Unexpected non-merged success body: re-fetch and classify.
+        } else {
+          const failure = mergeResult.failure
+          const statusCode = failure.statusCode
+          // Operational: auth, missing project, transport, 5xx, etc.
+          // Handled rejections (405/406/409/422) re-fetch and classify.
+          if (
+            statusCode !== 405 &&
+            statusCode !== 406 &&
+            statusCode !== 409 &&
+            statusCode !== 422
+          ) {
+            return yield* failure
+          }
+        }
+
+        const refreshed = yield* loadMergeRequest()
+        if (refreshed === null) {
+          return yield* new GitLabRequestError({
+            message: `GitLab did not return a merge request after merge for ${repository.projectPath}:${headRefName}`,
+          })
+        }
+        if (refreshed.state === "merged") {
+          return { _tag: "merged" } as const
+        }
+        if (refreshed.state === "closed") {
+          return {
+            _tag: "needs_human" as const,
+            reason: "closed_unmerged" as const,
+            message: `Merge request for ${repository.projectPath}:${headRefName} was concurrently closed without merging`,
+          }
+        }
+        if (refreshed.state === "locked") {
+          return {
+            _tag: "revalidation" as const,
+            reason: "mergeability_changed" as const,
+            message: `Merge request became locked while merging ${repository.projectPath}:${headRefName}`,
+          }
+        }
+        if (refreshed.state !== "opened") {
+          return yield* new GitLabRequestError({
+            message: `GitLab returned an invalid merge request state after merge for ${repository.projectPath}:${headRefName}`,
+          })
+        }
+        // Match pre-check: draft is repairable revalidation, not merge_rejected.
+        if (isDraftMergeRequest(refreshed)) {
+          return {
+            _tag: "revalidation" as const,
+            reason: "mergeability_changed" as const,
+            message: `Merge request is still a draft for ${repository.projectPath}:${headRefName}`,
+          }
+        }
+        const refreshedSha =
+          typeof refreshed.sha === "string" && refreshed.sha.trim() !== ""
+            ? refreshed.sha
+            : null
+        if (refreshedSha === null) {
+          return yield* new GitLabRequestError({
+            message: `GitLab returned an invalid merge request head after merge for ${repository.projectPath}:${headRefName}`,
+          })
+        }
+        if (refreshedSha !== expectedHeadSha) {
+          return {
+            _tag: "revalidation" as const,
+            reason: "head_changed" as const,
+            message: `Merge request head changed while merging ${repository.projectPath}:${headRefName}`,
+          }
+        }
+        // GitLab 409 means the expected head SHA was rejected. Always classify
+        // as head_changed after refresh (authoritative even if the re-fetched
+        // tip still equals expectedHeadSha — e.g. eventual consistency).
+        if (
+          Result.isFailure(mergeResult) &&
+          mergeResult.failure.statusCode === 409
+        ) {
+          return {
+            _tag: "revalidation" as const,
+            reason: "head_changed" as const,
+            message: `Merge request head changed while merging ${repository.projectPath}:${headRefName}`,
+          }
+        }
+        const pipelineBlock = yield* pipelineBlockingReason(refreshed)
+        if (pipelineBlock === "checks_not_green") {
+          return {
+            _tag: "revalidation" as const,
+            reason: "checks_not_green" as const,
+            message: `Merge request pipeline changed while merging ${repository.projectPath}:${headRefName}`,
+          }
+        }
+        const mergeability = mapMergeability(refreshed)
+        if (mergeability === "conflicting" || mergeability === "unknown") {
+          return {
+            _tag: "revalidation" as const,
+            reason: "mergeability_changed" as const,
+            message: `Merge request mergeability changed while merging ${repository.projectPath}:${headRefName}`,
+          }
+        }
+        if (mergeability !== "mergeable") {
+          return yield* new GitLabRequestError({
+            message: `GitLab returned invalid mergeability after merge for ${repository.projectPath}:${headRefName}`,
+          })
+        }
+        return {
+          _tag: "needs_human" as const,
+          reason: "merge_rejected" as const,
+          message: `GitLab rejected the unchanged, open, green, mergeable merge request for ${repository.projectPath}:${headRefName}`,
+        } satisfies MergePullRequestResult
+      },
+    ),
     ensureIssueCompletedWithSummary: Effect.fn(
       "GitLabService.ensureIssueCompletedWithSummary",
     )(function* (repository, issueNumber, workItemId, summaryMarkdown) {

@@ -1,9 +1,11 @@
 import { Context, type Effect } from "effect"
 import type {
+  MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticsOptions,
   PrStatusCheckDiagnosticsRequest,
   PullRequestCheckStatus,
+  PullRequestLifecycleStatus,
 } from "@ready-for-agent/github-service"
 import type {
   GitLabProjectUnavailableError,
@@ -120,6 +122,25 @@ export interface GitLabServiceShape {
     repository: GitLabRepository,
     headRefName: string,
   ) => Effect.Effect<void, GitLabServiceError>
+  /**
+   * Lifecycle state of the merge request on a source branch, or not found.
+   * Used to detect harness or external merge/close outcomes on Refresh.
+   */
+  readonly getPullRequestLifecycleStatus: (
+    repository: GitLabRepository,
+    headRefName: string,
+  ) => Effect.Effect<PullRequestLifecycleStatus, GitLabServiceError>
+  /**
+   * Merge the open MR on the exact source branch with the expected head SHA.
+   * Project merge method settings govern squash vs merge commit (no harness
+   * override). Already-merged is success; closed-unmerged and state races use
+   * the shared MergePullRequestResult ladder (revalidation / needs_human).
+   * Credential and transport failures remain GitLabServiceError.
+   */
+  readonly mergePullRequest: (
+    repository: GitLabRepository,
+    headRefName: string,
+  ) => Effect.Effect<MergePullRequestResult, GitLabServiceError>
   /**
    * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)
    * and the Issue is closed. Idempotent across retries and already-closed Issues.
