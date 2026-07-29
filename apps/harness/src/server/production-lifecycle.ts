@@ -108,6 +108,13 @@ export type ProductionLifecycleHandle = {
   readonly dispose: () => Promise<void>
 }
 
+/**
+ * Production Bun.serve idle timeout (seconds). Must stay strictly longer than
+ * GraphQL Yoga's production SSE heartbeat (12s interval pings). Bun's default
+ * is 10s, which closes quiet subscriptions before the first interval ping.
+ */
+export const PRODUCTION_HTTP_IDLE_TIMEOUT_SECONDS = 30
+
 const defaultClientDirectory = resolve(
   fileURLToPath(new URL("../../dist/client", import.meta.url)),
 )
@@ -242,6 +249,7 @@ const defaultServeHttp = async (input: {
   const server = Bun.serve({
     hostname: input.hostname,
     port: input.port,
+    idleTimeout: PRODUCTION_HTTP_IDLE_TIMEOUT_SECONDS,
     async fetch(request) {
       if (new URL(request.url).hostname !== input.hostname) {
         return new Response("Invalid Host", { status: 421 })
