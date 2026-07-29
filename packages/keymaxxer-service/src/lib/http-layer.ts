@@ -129,6 +129,55 @@ const waitForTcp = (
   return attempt()
 }
 
+/** Bound for Layer A HTTP DELETE so dispose cannot hang on a wedged Sidecar. */
+export const SESSION_TERMINATE_TIMEOUT_MS = 2_000
+
+export type CloseStreamableHttpClientOptions = {
+  readonly terminateTimeoutMs?: number
+}
+
+/**
+ * Close a Streamable HTTP MCP client, terminating its Layer A session first.
+ *
+ * `transport.close()` only aborts local streams; without `terminateSession()`
+ * the Sidecar retains the HTTP session until process stop (leaked reloads).
+ * DELETE must run before local close — terminateSession uses the abort signal.
+ * Teardown is time-bounded so a never-answering DELETE cannot stall dispose.
+ */
+export const closeStreamableHttpClient = async (
+  transport: StreamableHTTPClientTransport,
+  client: Client,
+  options: CloseStreamableHttpClientOptions = {},
+): Promise<void> => {
+  const terminateTimeoutMs =
+    options.terminateTimeoutMs ?? SESSION_TERMINATE_TIMEOUT_MS
+  // Absorb success and failure so a late abort after timeout cannot surface as
+  // an unhandledRejection when client.close() aborts the in-flight DELETE.
+  const terminate = transport.terminateSession().then(
+    () => undefined,
+    () => undefined,
+  )
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      terminate,
+      new Promise<void>((resolve) => {
+        timeoutId = setTimeout(resolve, terminateTimeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId)
+  }
+  // Local close always runs: session may already be gone, server may return
+  // 405, DELETE may race a half-closed stream, or the Sidecar may never
+  // answer. Residual Layer A leaks are observable via activeHttpSessionCount.
+  await client.close().catch(() => undefined)
+  // Do not await `terminate` again: it is already fully absorbed, and a
+  // never-settling DELETE (abort ignored) must not stall dispose. Post-close
+  // aborts settle asynchronously without unhandledRejection.
+  void terminate
+}
+
 const createStreamableHttpClient = async (
   url: string,
 ): Promise<KeymaxxerToolClient> => {
@@ -145,6 +194,6 @@ const createStreamableHttpClient = async (
           timeout: mcpToolCallTimeoutMs(input.name, input.arguments),
         })
         .then((result) => result as never),
-    close: () => transport.close(),
+    close: () => closeStreamableHttpClient(transport, client),
   }
 }

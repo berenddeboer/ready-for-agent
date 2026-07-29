@@ -35,6 +35,11 @@ export type FacadeHandle = {
   readonly url: string
   readonly port: number
   readonly hostname: string
+  /**
+   * Number of live Layer A Streamable HTTP MCP sessions.
+   * Client DELETE / transport close drops a session; does not include Layer B.
+   */
+  readonly activeHttpSessionCount: () => number
   readonly stop: () => Promise<void>
 }
 
@@ -708,6 +713,7 @@ export const startKeymaxxerFacade = async (
     url,
     port,
     hostname: host,
+    activeHttpSessionCount: () => transports.size,
     stop: async () => {
       for (const transport of transports.values()) {
         await transport.close().catch(() => undefined)

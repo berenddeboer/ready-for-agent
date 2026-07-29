@@ -16,7 +16,9 @@ result; transport, protocol, and execution failures use `KeymaxxerError`.
 
 - `sidecarKeymaxxerLayer(url)` — MCP client for a capability URL
   `http://127.0.0.1:<port>/<capability>/mcp`. Methods are `Effect.fn` / `Effect.gen`;
-  `tryPromise` only at MCP SDK connect/callTool.
+  `tryPromise` only at MCP SDK connect/callTool. Layer release terminates the
+  Layer A Streamable HTTP session (`DELETE` then local close) without stopping
+  the Sidecar process or the shared Layer B vault session.
 - `mcpKeymaxxerLayer()` — lazy stdio MCP client (tests / direct keyholder).
 - `testKeymaxxerLayer(secretNames)` — in-memory implementation for tests.
 - `disabledKeymaxxerLayer` — ambient-env command runner when Keymaxxer is off
