@@ -4,6 +4,7 @@ import {
   Duration,
   Effect,
   Layer,
+  Logger,
   ManagedRuntime,
   Option,
 } from "effect"
@@ -41,7 +42,9 @@ import {
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import { OpencodeSessionStore } from "@ready-for-agent/opencode"
 import {
+  AcknowledgeError,
   ClaimError,
+  JobNotFoundError,
   QueueService,
   type RawJob,
   makeJobId,
@@ -192,7 +195,8 @@ const queueLayer = (
   onExtendVisibility: (
     jobId: string,
     timeout: Duration.Duration,
-  ) => Effect.Effect<unknown> = () => Effect.void,
+  ) => Effect.Effect<unknown, AcknowledgeError | JobNotFoundError> = () =>
+    Effect.void,
   recoverOrphanedStepRuns: Effect.Effect<number> = Effect.succeed(0),
   onPostponeKeyed: (
     jobId: string,
@@ -367,6 +371,132 @@ describe("Job worker", () => {
         dbLayer(),
         Layer.succeed(IssueReconciler, { reconcile: unused }),
         keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("skips a stale Lifecycle Job and processes a later delivery", async () => {
+    const staleStepRunId = makeStepRunId()
+    const laterStepRunId = makeStepRunId()
+    const staleJob = rawJob(
+      WorkItemStepJob.make({ stepRunId: staleStepRunId }),
+      JOBS_QUEUE,
+    )
+    const laterJob = rawJob(
+      WorkItemStepJob.make({ stepRunId: laterStepRunId }),
+      JOBS_QUEUE,
+    )
+    const processed = await Effect.runPromise(Deferred.make<string>())
+    const extendedJobIds: string[] = []
+    const dispatchedStepRunIds: string[] = []
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        expect(
+          yield* Deferred.await(processed).pipe(Effect.timeout("100 millis")),
+        ).toBe(laterStepRunId)
+        expect(extendedJobIds).toEqual([staleJob.jobId, laterJob.jobId])
+        expect(dispatchedStepRunIds).toEqual([laterStepRunId])
+      }),
+      Layer.mergeAll(
+        defaultGithubLayer,
+        queueLayer(
+          [staleJob, laterJob],
+          undefined,
+          undefined,
+          undefined,
+          (stepRunId) =>
+            Effect.gen(function* () {
+              dispatchedStepRunIds.push(stepRunId)
+              yield* Deferred.succeed(processed, stepRunId)
+              return { _tag: "noop" as const }
+            }),
+          (jobId) =>
+            Effect.gen(function* () {
+              extendedJobIds.push(jobId)
+              if (jobId === staleJob.jobId) {
+                return yield* new JobNotFoundError({ jobId })
+              }
+            }),
+        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, { reconcile: unused }),
+        keymaxxerLayer(),
+      ),
+    )
+  })
+
+  test("keeps Issue refresh operational and logs context after a Lifecycle lease extension failure", async () => {
+    const stepRunId = makeStepRunId()
+    const lifecycleJob = rawJob(WorkItemStepJob.make({ stepRunId }), JOBS_QUEUE)
+    const refreshJob = rawJob(refreshPayload)
+    const extensionAttempted = await Effect.runPromise(Deferred.make<void>())
+    const refreshAcknowledged = await Effect.runPromise(Deferred.make<string>())
+    const dispatchedStepRunIds: string[] = []
+    const logs: unknown[] = []
+    const logger = Logger.make(({ message }) => {
+      logs.push(message)
+    })
+
+    await runScoped(
+      Effect.gen(function* () {
+        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        expect(
+          yield* Deferred.await(refreshAcknowledged).pipe(
+            Effect.timeout("100 millis"),
+          ),
+        ).toBe(refreshJob.jobId)
+        expect(dispatchedStepRunIds).toEqual([])
+        expect(logs).toContainEqual([
+          "Lifecycle Job lease extension failed",
+          expect.objectContaining({
+            jobId: lifecycleJob.jobId,
+            stepRunId,
+            error: "temporary lease extension failure",
+          }),
+        ])
+      }),
+      Layer.mergeAll(
+        defaultGithubLayer,
+        queueLayer(
+          [lifecycleJob, refreshJob],
+          (jobId) => Deferred.succeed(refreshAcknowledged, jobId),
+          undefined,
+          undefined,
+          (receivedStepRunId) =>
+            Effect.sync(() => {
+              dispatchedStepRunIds.push(receivedStepRunId)
+              return { _tag: "noop" as const }
+            }),
+          (jobId) =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(extensionAttempted, undefined)
+              return yield* new AcknowledgeError({
+                jobId,
+                message: "temporary lease extension failure",
+              })
+            }),
+        ),
+        dbLayer(),
+        Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Deferred.await(extensionAttempted).pipe(
+              Effect.as({
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }),
+            ),
+        }),
+        keymaxxerLayer(),
+        Logger.layer([logger]),
       ),
     )
   })
