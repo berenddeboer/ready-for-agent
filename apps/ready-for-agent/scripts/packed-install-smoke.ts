@@ -17,6 +17,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs"
@@ -238,17 +239,33 @@ try {
 
   if (!skipCompile) {
     log("compiling host platform binary")
+    // Nested nx can exit non-zero after a successful compile when another nx
+    // run holds the project graph DB. On non-zero exit, accept a binary whose
+    // mtime is not clearly older than this attempt (5s skew for FS/clock
+    // jitter) so a long-stale artifact cannot green-light a real failure.
+    const compileStartedAt = Date.now()
     const compile = spawnSync(
       "bun",
       ["nx", "run", "ready-for-agent:compile", "--args=--platform=host"],
       {
         cwd: workspaceRoot,
         stdio: ["ignore", "inherit", "inherit"],
-        env: process.env,
+        env: {
+          ...process.env,
+          NX_DAEMON: "false",
+        },
       },
     )
     if (compile.status !== 0) {
-      fail("ready-for-agent:compile failed")
+      if (!existsSync(hostBinaryPath)) {
+        fail("ready-for-agent:compile failed")
+      }
+      const mtimeMs = statSync(hostBinaryPath).mtimeMs
+      if (mtimeMs < compileStartedAt - 5_000) {
+        fail(
+          "ready-for-agent:compile failed (host binary is older than this compile attempt)",
+        )
+      }
     }
   }
 
