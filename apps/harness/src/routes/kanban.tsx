@@ -317,12 +317,7 @@ function KanbanJobsBoard() {
   )
 
   if (loading && activeItems.length === 0) {
-    return (
-      <>
-        <KanbanLiveUpdates repositoryIds={repositoryIds} />
-        <JobsCardSkeleton />
-      </>
-    )
+    return <JobsCardSkeleton />
   }
 
   if (failed) {

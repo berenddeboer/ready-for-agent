@@ -88,6 +88,21 @@ describe("/kanban route", () => {
     expect(source).not.toContain("refetchInterval")
   })
 
+  test("starts live invalidation after the initial board queries settle", () => {
+    const source = kanbanSource()
+    const loadingBranch = source.slice(
+      source.indexOf("if (loading && activeItems.length === 0)"),
+      source.indexOf("if (failed)"),
+    )
+    expect(loadingBranch).toContain("<JobsCardSkeleton />")
+    expect(loadingBranch).not.toContain("<KanbanLiveUpdates")
+
+    const settledBranch = source.slice(
+      source.indexOf("return (\n    <article>"),
+    )
+    expect(settledBranch).toContain("<KanbanLiveUpdates")
+  })
+
   test("ports the six-column industrial board and responsive lane selector", () => {
     const source = stylesSource()
     expect(source).toContain(".pipeline-board")
