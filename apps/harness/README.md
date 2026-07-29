@@ -69,11 +69,10 @@ without wrapping the Harness in a second coordinator process.
 
 ## Live end-to-end
 
-One Gherkin operator journey (`e2e/features/add-and-refresh-repository.feature`)
-runs the production build against a fresh isolated Harness database, clones the
-private End-to-End Fixture Repository through Keymaxxer, adds it with the real
-operator binary, and waits for credential activation's automatic first Refresh
-Job.
+The Gherkin operator journeys under `e2e/features/` run the production build
+against a fresh isolated Harness database. They verify adding and refreshing
+the private End-to-End Fixture Repository through the real operator binary, as
+well as the dedicated Kanban pipeline route.
 
 ```bash
 bunx nx run harness:e2e
