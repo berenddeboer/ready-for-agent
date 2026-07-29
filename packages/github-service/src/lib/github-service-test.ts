@@ -26,8 +26,8 @@ export type GitHubServiceTestFixture =
   | GitHubServiceTestIssuesFixture
   | GitHubServiceTestErrorFixture
 
-const repositoryKey = ({ owner, name }: GitHubRepository): string =>
-  `${owner.toLowerCase()}/${name.toLowerCase()}`
+const repositoryKey = ({ forge, forgeHost, projectPath }: GitHubRepository) =>
+  `${forge.toLowerCase()}/${forgeHost.toLowerCase()}/${projectPath.toLowerCase()}`
 
 export const makeGitHubServiceTest = (
   fixtures: readonly GitHubServiceTestFixture[],

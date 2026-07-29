@@ -93,10 +93,7 @@ const resolveRepository = (context: LifecycleStepContext) =>
   })
 
 const resolveIssueNumber = (context: LifecycleStepContext) => {
-  if (
-    !Number.isInteger(context.githubIssueNumber) ||
-    context.githubIssueNumber <= 0
-  ) {
+  if (!Number.isInteger(context.issueNumber) || context.issueNumber <= 0) {
     return Effect.fail(
       new ImplementIssueContextMissingError({
         workItemId: context.workItemId,
@@ -105,28 +102,23 @@ const resolveIssueNumber = (context: LifecycleStepContext) => {
       }),
     )
   }
-  return Effect.succeed(context.githubIssueNumber)
+  return Effect.succeed(context.issueNumber)
 }
 
-const buildImplementPrompt = (
-  githubOwner: string,
-  githubRepo: string,
-  githubIssueNumber: number,
-) =>
+const buildImplementPrompt = (projectPath: string, issueNumber: number) =>
   [
-    `Implement GitHub issue ${githubOwner}/${githubRepo}#${githubIssueNumber}.`,
+    `Implement GitHub issue ${projectPath}#${issueNumber}.`,
     "Inspect the current GitHub Issue and this Repository's agent/project instructions.",
     "Make the implementation in this worktree and run appropriate verification.",
     "Do not merely propose a plan; complete the implementation work for that exact issue.",
   ].join("\n")
 
 const buildContinueImplementPrompt = (
-  githubOwner: string,
-  githubRepo: string,
-  githubIssueNumber: number,
+  projectPath: string,
+  issueNumber: number,
 ) =>
   [
-    `Continue implementing GitHub issue ${githubOwner}/${githubRepo}#${githubIssueNumber}.`,
+    `Continue implementing GitHub issue ${projectPath}#${issueNumber}.`,
     "A previous Implement attempt was interrupted or failed; resume from the existing session and worktree state.",
     "Inspect the current GitHub Issue, this Repository's agent/project instructions, and any partial work already present.",
     "Finish the implementation in this worktree and run appropriate verification.",
@@ -151,21 +143,13 @@ export const implement = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepository(context)
-    const githubIssueNumber = yield* resolveIssueNumber(context)
+    const issueNumber = yield* resolveIssueNumber(context)
 
     const existingSessionId = priorSessionId(context)
     const prompt =
       existingSessionId === null
-        ? buildImplementPrompt(
-            repository.githubOwner,
-            repository.githubRepo,
-            githubIssueNumber,
-          )
-        : buildContinueImplementPrompt(
-            repository.githubOwner,
-            repository.githubRepo,
-            githubIssueNumber,
-          )
+        ? buildImplementPrompt(repository.projectPath, issueNumber)
+        : buildContinueImplementPrompt(repository.projectPath, issueNumber)
 
     const agentBackend = yield* AgentBackend
     const sql = yield* SqlClient.SqlClient

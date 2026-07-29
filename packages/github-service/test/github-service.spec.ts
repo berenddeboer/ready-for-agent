@@ -20,7 +20,12 @@ import {
   makeGitHubService,
 } from "../src/lib/github-service-live.js"
 
-const repository = { owner: "acme", name: "widgets" }
+const repository = {
+  forge: "github",
+  forgeHost: "github.com",
+  projectPath: "acme/widgets",
+}
+const apiRepository = { owner: "acme", name: "widgets" }
 
 const issue = (
   number: number,
@@ -126,7 +131,7 @@ describe("GitHubService live implementation", () => {
     ).toBe(321)
     expect(request).toEqual({
       repository: {
-        __args: repository,
+        __args: apiRepository,
         pullRequests: {
           __args: {
             first: 1,
@@ -367,7 +372,7 @@ describe("GitHubService live implementation", () => {
     expect(requests).toEqual([
       {
         repository: {
-          __args: repository,
+          __args: apiRepository,
           pullRequests: {
             __args: {
               first: 100,
@@ -380,7 +385,7 @@ describe("GitHubService live implementation", () => {
       },
       {
         repository: {
-          __args: repository,
+          __args: apiRepository,
           pullRequests: {
             __args: {
               first: 100,
@@ -2764,7 +2769,7 @@ describe("GitHubService live implementation", () => {
         }
       }
     }
-    expect(firstRequest.repository.__args).toEqual(repository)
+    expect(firstRequest.repository.__args).toEqual(apiRepository)
     expect(firstRequest.repository.issues.__args).toEqual({
       first: 100,
       after: null,
@@ -3350,9 +3355,9 @@ describe("user-facing error formatting", () => {
 describe("CLI arguments", () => {
   it.effect("reports a missing argument as a typed failure", () =>
     Effect.gen(function* () {
-      const error = yield* decodeArgument(undefined, "owner").pipe(Effect.flip)
+      const error = yield* decodeArgument(undefined, "forge").pipe(Effect.flip)
       expect(error._tag).toBe("CliArgumentError")
-      expect(error.message).toBe("Missing owner argument")
+      expect(error.message).toBe("Missing forge argument")
     }),
   )
 
@@ -3372,7 +3377,7 @@ describe("CLI arguments", () => {
     )
 
     expect(result.status).toBe(1)
-    expect(result.stderr).toContain("Missing owner argument")
+    expect(result.stderr).toContain("Missing forge argument")
     expect(result.stderr.includes(`${String.fromCharCode(0x1b)}[`)).toBe(false)
     expect(result.stderr).not.toMatch(/_tag/)
   })
@@ -3464,7 +3469,11 @@ describe("makeGitHubServiceTest", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const github = yield* GitHubService
-        return yield* github.listReadyIssues({ owner: "ACME", name: "Widgets" })
+        return yield* github.listReadyIssues({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "ACME/Widgets",
+        })
       }).pipe(Effect.provide(layer)),
     )
 

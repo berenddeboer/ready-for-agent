@@ -117,8 +117,7 @@ export const resolvePrMergeConflict = (context: LifecycleStepContext) =>
       })
     }
     const auth = yield* resolveAgentTurnGitHubAuth({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
+      projectPath: repository.projectPath,
     }).pipe(
       Effect.mapError((cause) => {
         if (

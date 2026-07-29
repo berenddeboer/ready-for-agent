@@ -195,18 +195,16 @@ export const createWorktree = (
       : repository.localPath
 
     const branchName = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
 
     const plannedPath = workItemWorktreePath({
       localPath: worktreeLocalPath,
       isBare: repository.isBare,
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
       tmpDir: options.tmpDir,
     })
@@ -216,8 +214,7 @@ export const createWorktree = (
       worktreeParentPath({
         localPath: worktreeLocalPath,
         isBare: repository.isBare,
-        githubOwner: repository.githubOwner,
-        githubRepo: repository.githubRepo,
+        projectPath: repository.projectPath,
         tmpDir: options.tmpDir,
       }),
     )

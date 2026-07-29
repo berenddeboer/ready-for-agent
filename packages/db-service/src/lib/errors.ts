@@ -3,7 +3,7 @@ import { Schema } from "effect"
 export class InvalidRepositoryInputError extends Schema.TaggedErrorClass<InvalidRepositoryInputError>()(
   "InvalidRepositoryInputError",
   {
-    field: Schema.Literals(["githubOwner", "githubRepo", "localPath"]),
+    field: Schema.Literals(["forge", "forgeHost", "projectPath", "localPath"]),
     message: Schema.String,
   },
 ) {}
@@ -11,8 +11,9 @@ export class InvalidRepositoryInputError extends Schema.TaggedErrorClass<Invalid
 export class RepositoryAlreadyExistsError extends Schema.TaggedErrorClass<RepositoryAlreadyExistsError>()(
   "RepositoryAlreadyExistsError",
   {
-    githubOwner: Schema.String,
-    githubRepo: Schema.String,
+    forge: Schema.String,
+    forgeHost: Schema.String,
+    projectPath: Schema.String,
   },
 ) {}
 
@@ -43,7 +44,7 @@ export class InvalidIssueInputError extends Schema.TaggedErrorClass<InvalidIssue
   "InvalidIssueInputError",
   {
     field: Schema.Literals([
-      "githubIssueNumber",
+      "issueNumber",
       "title",
       "url",
       "state",

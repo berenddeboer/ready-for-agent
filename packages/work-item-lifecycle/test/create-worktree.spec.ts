@@ -112,8 +112,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -121,7 +122,7 @@ describe("createWorktree", () => {
           return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -143,17 +144,19 @@ describe("createWorktree", () => {
       const expected = workItemWorktreePath({
         localPath: bare,
         isBare: true,
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId,
       })
       expect(path).toBe(expected)
 
       const branch = workItemBranchName({
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId,
       })
       const checkedOut = await git(path, ["rev-parse", "--abbrev-ref", "HEAD"])
@@ -189,8 +192,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -198,7 +202,7 @@ describe("createWorktree", () => {
           return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 99,
+            issueNumber: 99,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -241,8 +245,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "pf",
-            githubRepo: "monorepo",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "pf/monorepo",
             localPath: bare,
             isBare: true,
           })
@@ -250,7 +255,7 @@ describe("createWorktree", () => {
           return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 2039,
+            issueNumber: 2039,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -273,9 +278,10 @@ describe("createWorktree", () => {
         workItemWorktreePath({
           localPath: bare,
           isBare: true,
-          githubOwner: "pf",
-          githubRepo: "monorepo",
-          githubIssueNumber: 2039,
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "pf/monorepo",
+          issueNumber: 2039,
           workItemId,
         }),
       )
@@ -296,8 +302,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "processfocus",
-            githubRepo: "monorepo",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "processfocus/monorepo",
             localPath: project,
             isBare: true,
           })
@@ -305,7 +312,7 @@ describe("createWorktree", () => {
           return (yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 2039,
+            issueNumber: 2039,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -328,9 +335,10 @@ describe("createWorktree", () => {
         workItemWorktreePath({
           localPath: bare,
           isBare: true,
-          githubOwner: "processfocus",
-          githubRepo: "monorepo",
-          githubIssueNumber: 2039,
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "processfocus/monorepo",
+          issueNumber: 2039,
           workItemId,
         }),
       )
@@ -350,8 +358,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: repo,
             isBare: false,
           })
@@ -360,7 +369,7 @@ describe("createWorktree", () => {
             {
               workItemId,
               repositoryId: repository.id,
-              githubIssueNumber: 7,
+              issueNumber: 7,
               issueTitle: null,
               agentBackend: "opencode",
               model: "opencode/test",
@@ -385,9 +394,10 @@ describe("createWorktree", () => {
         workItemWorktreePath({
           localPath: repo,
           isBare: false,
-          githubOwner: "acme",
-          githubRepo: "widgets",
-          githubIssueNumber: 7,
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          issueNumber: 7,
           workItemId,
           tmpDir,
         }),
@@ -409,8 +419,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -418,7 +429,7 @@ describe("createWorktree", () => {
           const context = {
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -459,9 +470,10 @@ describe("createWorktree", () => {
       const planned = workItemWorktreePath({
         localPath: bare,
         isBare: true,
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId,
       })
       await mkdir(planned, { recursive: true })
@@ -471,8 +483,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -480,7 +493,7 @@ describe("createWorktree", () => {
           return yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -511,9 +524,10 @@ describe("createWorktree", () => {
       const bare = await initBareRepository(root)
       const workItemId = makeWorkItemId()
       const branch = workItemBranchName({
-        githubOwner: "acme",
-        githubRepo: "widgets",
-        githubIssueNumber: 42,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
         workItemId,
       })
       await git(bare, ["branch", branch, "HEAD"])
@@ -522,8 +536,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: bare,
             isBare: true,
           })
@@ -531,7 +546,7 @@ describe("createWorktree", () => {
           return yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",
@@ -567,8 +582,9 @@ describe("createWorktree", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: emptyBare,
             isBare: true,
           })
@@ -576,7 +592,7 @@ describe("createWorktree", () => {
           return yield* createWorktree({
             workItemId,
             repositoryId: repository.id,
-            githubIssueNumber: 1,
+            issueNumber: 1,
             issueTitle: null,
             agentBackend: "opencode",
             model: "opencode/test",

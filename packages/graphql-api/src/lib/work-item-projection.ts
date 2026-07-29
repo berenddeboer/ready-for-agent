@@ -22,7 +22,7 @@ const compareChildIssues = (left: IssueRecord, right: IssueRecord): number =>
   childIssueCategory(left) - childIssueCategory(right) ||
   (left.parentPosition ?? Number.MAX_SAFE_INTEGER) -
     (right.parentPosition ?? Number.MAX_SAFE_INTEGER) ||
-  left.githubIssueNumber - right.githubIssueNumber
+  left.issueNumber - right.issueNumber
 
 export const workIssueProjection = (
   issues: readonly IssueRecord[],
@@ -30,17 +30,17 @@ export const workIssueProjection = (
   const childrenByParent = new Map<number, IssueRecord[]>()
   for (const issue of issues) {
     if (issue.parent === null) continue
-    const children = childrenByParent.get(issue.parent.githubIssueNumber) ?? []
+    const children = childrenByParent.get(issue.parent.issueNumber) ?? []
     children.push(issue)
-    childrenByParent.set(issue.parent.githubIssueNumber, children)
+    childrenByParent.set(issue.parent.issueNumber, children)
   }
 
   return issues
     .filter((issue) => issue.parent === null)
-    .sort((left, right) => right.githubIssueNumber - left.githubIssueNumber)
+    .sort((left, right) => right.issueNumber - left.issueNumber)
     .flatMap((issue) => {
       if (!issue.hasChildren) return [issue]
-      const children = childrenByParent.get(issue.githubIssueNumber) ?? []
+      const children = childrenByParent.get(issue.issueNumber) ?? []
       if (children.length === 0) return []
       return [issue, ...children.sort(compareChildIssues)]
     })

@@ -12,17 +12,21 @@ const SqlBoolean = Schema.Union([Schema.Boolean, Schema.BooleanFromBit])
 export const IssueState = Schema.Literals(["OPEN", "CLOSED"])
 export type IssueState = typeof IssueState.Type
 
+export const Forge = Schema.Literals(["github", "gitlab"])
+export type Forge = typeof Forge.Type
+
 export const IssueReference = Schema.Struct({
-  githubIssueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
-  githubIssueUrl: Schema.String,
+  issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+  issueUrl: Schema.String,
 })
 export type IssueReference = typeof IssueReference.Type
 
 export type IssueDependency = IssueReference
 
 export const AddRepositoryInput = Schema.Struct({
-  githubOwner: Schema.String,
-  githubRepo: Schema.String,
+  forge: Forge,
+  forgeHost: Schema.String,
+  projectPath: Schema.String,
   localPath: Schema.String,
   isBare: Schema.Boolean,
 })
@@ -30,8 +34,9 @@ export type AddRepositoryInput = typeof AddRepositoryInput.Type
 
 export const RepositoryRecord = Schema.Struct({
   id: RepositoryId,
-  githubOwner: Schema.String,
-  githubRepo: Schema.String,
+  forge: Forge,
+  forgeHost: Schema.String,
+  projectPath: Schema.String,
   localPath: Schema.String,
   isBare: Schema.Boolean,
   paused: Schema.Boolean,
@@ -118,7 +123,7 @@ export type UpdateConfigInput = typeof UpdateConfigInput.Type
 
 export const StoreIssueInput = Schema.Struct({
   repositoryId: Schema.String,
-  githubIssueNumber: Schema.Finite,
+  issueNumber: Schema.Finite,
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,
@@ -135,7 +140,7 @@ export type StoreIssueInput = typeof StoreIssueInput.Type
 export const IssueRecord = Schema.Struct({
   id: Schema.String,
   repositoryId: RepositoryId,
-  githubIssueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+  issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,
@@ -152,18 +157,17 @@ export const IssueRecord = Schema.Struct({
 export type IssueRecord = typeof IssueRecord.Type
 
 export const WorkItemPullRequest = Schema.Struct({
-  githubIssueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
-  githubPullRequestNumber: Schema.Int.pipe(
-    Schema.check(Schema.isGreaterThan(0)),
-  ),
+  issueNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
+  pullRequestNumber: Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
 })
 export type WorkItemPullRequest = typeof WorkItemPullRequest.Type
 
 /** Wire shape of `repository` SELECT rows (snake_case columns). */
 export const RepositorySqlRow = Schema.Struct({
   id: RepositoryId,
-  githubOwner: Schema.String,
-  githubRepo: Schema.String,
+  forge: Forge,
+  forgeHost: Schema.String,
+  projectPath: Schema.String,
   localPath: Schema.String,
   isBare: SqlBoolean,
   paused: SqlBoolean,
@@ -179,8 +183,9 @@ export const RepositorySqlRow = Schema.Struct({
   issuesReconciledAt: Schema.NullOr(Schema.DateFromMillis),
 }).pipe(
   Schema.encodeKeys({
-    githubOwner: "github_owner",
-    githubRepo: "github_repo",
+    forge: "forge",
+    forgeHost: "forge_host",
+    projectPath: "project_path",
     localPath: "local_path",
     isBare: "is_bare",
     selectedAgentBackend: "selected_agent_backend",
@@ -223,25 +228,25 @@ export type ConfigSqlRow = typeof ConfigSqlRow.Type
 export const IssueSqlRow = Schema.Struct({
   id: Schema.String,
   repositoryId: RepositoryId,
-  githubIssueNumber: Schema.Int,
+  issueNumber: Schema.Int,
   title: Schema.String,
   body: Schema.String,
   url: Schema.String,
   state: IssueState,
   githubCreatedAt: Schema.Finite,
   issueAuthor: Schema.NullOr(Schema.String),
-  parentGithubIssueNumber: Schema.NullOr(Schema.Int),
-  parentGithubIssueUrl: Schema.NullOr(Schema.String),
+  parentIssueNumber: Schema.NullOr(Schema.Int),
+  parentIssueUrl: Schema.NullOr(Schema.String),
   parentPosition: Schema.NullOr(Schema.Int),
   hasChildren: SqlBoolean,
 }).pipe(
   Schema.encodeKeys({
     repositoryId: "repository_id",
-    githubIssueNumber: "github_issue_number",
+    issueNumber: "issue_number",
     githubCreatedAt: "github_created_at",
     issueAuthor: "issue_author",
-    parentGithubIssueNumber: "parent_github_issue_number",
-    parentGithubIssueUrl: "parent_github_issue_url",
+    parentIssueNumber: "parent_issue_number",
+    parentIssueUrl: "parent_issue_url",
     parentPosition: "parent_position",
     hasChildren: "has_children",
   }),
@@ -250,24 +255,24 @@ export type IssueSqlRow = typeof IssueSqlRow.Type
 
 export const IssueDependencySqlRow = Schema.Struct({
   issueId: Schema.String,
-  githubIssueNumber: Schema.Int,
-  githubIssueUrl: Schema.String,
+  issueNumber: Schema.Int,
+  issueUrl: Schema.String,
 }).pipe(
   Schema.encodeKeys({
     issueId: "issue_id",
-    githubIssueNumber: "blocking_github_issue_number",
-    githubIssueUrl: "blocking_github_issue_url",
+    issueNumber: "blocking_issue_number",
+    issueUrl: "blocking_issue_url",
   }),
 )
 export type IssueDependencySqlRow = typeof IssueDependencySqlRow.Type
 
 export const WorkItemPullRequestSqlRow = Schema.Struct({
-  githubIssueNumber: Schema.Int,
-  githubPullRequestNumber: Schema.Int,
+  issueNumber: Schema.Int,
+  pullRequestNumber: Schema.Int,
 }).pipe(
   Schema.encodeKeys({
-    githubIssueNumber: "github_issue_number",
-    githubPullRequestNumber: "github_pull_request_number",
+    issueNumber: "issue_number",
+    pullRequestNumber: "pull_request_number",
   }),
 )
 export type WorkItemPullRequestSqlRow = typeof WorkItemPullRequestSqlRow.Type

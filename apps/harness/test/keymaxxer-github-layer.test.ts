@@ -37,7 +37,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* Effect.exit(
-          github.listReadyIssues({ owner: "foo-bar", name: "baz" }),
+          github.listReadyIssues({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "foo-bar/baz",
+          }),
         )
       }).pipe(Effect.provide(layer)),
     )
@@ -71,8 +75,16 @@ describe("Keymaxxer-backed GitHub layer", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const github = yield* GitHubService
-        yield* github.listReadyIssues({ owner: "foo-bar", name: "baz" })
-        yield* github.listReadyIssues({ owner: "foo", name: "bar-baz" })
+        yield* github.listReadyIssues({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "foo-bar/baz",
+        })
+        yield* github.listReadyIssues({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "foo/bar-baz",
+        })
       }).pipe(Effect.provide(layer)),
     )
 
@@ -137,8 +149,16 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const github = yield* GitHubService
         return yield* Effect.all(
           [
-            github.listReadyIssues({ owner: "acme", name: "widgets" }),
-            github.listReadyIssues({ owner: "acme", name: "widgets" }),
+            github.listReadyIssues({
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+            }),
+            github.listReadyIssues({
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+            }),
           ],
           { concurrency: "unbounded" },
         )
@@ -219,7 +239,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.getPullRequestCheckStatus(
-          { owner: "acme", name: "widgets" },
+          {
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          },
           "rfa/acme-widgets/42/wi-test",
         )
       }).pipe(Effect.provide(layer)),
@@ -267,7 +291,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.getOpenPullRequestNumber(
-          { owner: "acme", name: "widgets" },
+          {
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          },
           "rfa/acme-widgets/42/wi-test",
         )
       }).pipe(Effect.provide(layer)),
@@ -299,8 +327,9 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.countOpenNonDraftPullRequests({
-          owner: "acme",
-          name: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
         })
       }).pipe(Effect.provide(layer)),
     )
@@ -359,7 +388,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.getPullRequestCheckStatus(
-          { owner: "acme", name: "widgets" },
+          {
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          },
           "branch",
         )
       }).pipe(Effect.provide(layer)),
@@ -378,7 +411,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github.getPullRequestCheckStatus(
-          { owner: "acme", name: "widgets" },
+          {
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          },
           "branch",
         )
       }).pipe(Effect.provide(layer)),
@@ -426,7 +463,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         yield* github.markPullRequestReadyForReview(
-          { owner: "acme", name: "widgets" },
+          {
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          },
           "rfa/acme-widgets/42/wi-test",
         )
       }).pipe(Effect.provide(layer)),
@@ -462,7 +503,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const github = yield* GitHubService
         return yield* github
           .getPullRequestCheckStatus(
-            { owner: "processfocus", name: "monorepo" },
+            {
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "processfocus/monorepo",
+            },
             "branch",
           )
           .pipe(Effect.flip)
@@ -516,7 +561,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const github = yield* GitHubService
         return yield* Effect.forEach(serializedOutcomes, () =>
           github.mergePullRequest(
-            { owner: "acme", name: "widgets" },
+            {
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+            },
             "rfa/acme-widgets/42/wi-test",
           ),
         )
@@ -566,7 +615,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
       Effect.gen(function* () {
         const github = yield* GitHubService
         return yield* github
-          .listReadyIssues({ owner: "acme", name: "widgets" })
+          .listReadyIssues({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          })
           .pipe(Effect.flip)
       }).pipe(Effect.provide(layer)),
     )

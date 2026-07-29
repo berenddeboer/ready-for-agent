@@ -57,7 +57,7 @@ import type { WorkItemId } from "./types.js"
 export interface LifecycleStepContext {
   readonly workItemId: WorkItemId
   readonly repositoryId: string
-  readonly githubIssueNumber: number
+  readonly issueNumber: number
   /**
    * Issue title captured on the Work Item for identification after the Issue
    * leaves the store.

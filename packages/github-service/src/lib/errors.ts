@@ -3,8 +3,9 @@ import { Schema } from "effect"
 export class GitHubRepositoryUnavailableError extends Schema.TaggedErrorClass<GitHubRepositoryUnavailableError>()(
   "GitHubRepositoryUnavailableError",
   {
-    owner: Schema.String,
-    name: Schema.String,
+    forge: Schema.String,
+    forgeHost: Schema.String,
+    projectPath: Schema.String,
   },
 ) {}
 

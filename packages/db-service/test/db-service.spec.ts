@@ -25,8 +25,9 @@ describe("DbService", () => {
   ): Promise<A> => Effect.runPromise(Effect.provide(test, TestLayer))
 
   const sampleInput = {
-    githubOwner: "acme",
-    githubRepo: "widgets",
+    forge: "github",
+    forgeHost: "github.com",
+    projectPath: "acme/widgets",
     localPath: "/repos/acme/widgets.git",
     isBare: true,
   }
@@ -209,7 +210,7 @@ describe("DbService", () => {
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                worktree_path, session_id, failure_code, failure_message,
                created_at, updated_at
              ) VALUES (?, ?, 42, 'needs_human', ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -242,8 +243,9 @@ describe("DbService", () => {
           const sql = yield* SqlClient.SqlClient
           const inheriting = yield* db.addRepository(sampleInput)
           const overridden = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "other",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
             localPath: "/repos/acme/other.git",
             isBare: true,
           })
@@ -263,7 +265,7 @@ describe("DbService", () => {
           // Unfinished only on the explicit-override repository.
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                worktree_path, session_id, failure_code, failure_message,
                created_at, updated_at
              ) VALUES (?, ?, 1, 'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -272,7 +274,7 @@ describe("DbService", () => {
           // Terminal WIP on inheriting repo must not block.
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                worktree_path, session_id, failure_code, failure_message,
                created_at, updated_at
              ) VALUES (?, ?, 2, 'complete', ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -301,8 +303,9 @@ describe("DbService", () => {
           const sql = yield* SqlClient.SqlClient
           const inheriting = yield* db.addRepository(sampleInput)
           const overridden = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "other",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
             localPath: "/repos/acme/other.git",
             isBare: true,
           })
@@ -321,7 +324,7 @@ describe("DbService", () => {
           const now = Date.now()
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                agent_backend, worktree_path, session_id, failure_code,
                failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'needs_human', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
@@ -329,7 +332,7 @@ describe("DbService", () => {
           )
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                agent_backend, worktree_path, session_id, failure_code,
                failure_message, created_at, updated_at
              ) VALUES (?, ?, 2, 'implement', ?, 'grok', NULL, NULL, NULL, NULL, ?, ?)`,
@@ -378,7 +381,7 @@ describe("DbService", () => {
           // Capture-only: unfinished WI on grok while nothing selects grok.
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                agent_backend, worktree_path, session_id, failure_code,
                failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'implement', ?, 'grok', NULL, NULL, NULL, NULL, ?, ?)`,
@@ -411,7 +414,7 @@ describe("DbService", () => {
           // Unfinished capture keeps opencode selected-or-in-use.
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                agent_backend, worktree_path, session_id, failure_code,
                failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'implement', ?, 'opencode', NULL, NULL, NULL, NULL, ?, ?)`,
@@ -538,8 +541,9 @@ describe("DbService", () => {
           const repo = yield* db.addRepository(sampleInput)
 
           expect(repo.id.startsWith("repo-")).toBe(true)
-          expect(repo.githubOwner).toBe("acme")
-          expect(repo.githubRepo).toBe("widgets")
+          expect(repo.forge).toBe("github")
+          expect(repo.forgeHost).toBe("github.com")
+          expect(repo.projectPath).toBe("acme/widgets")
           expect(repo.localPath).toBe("/repos/acme/widgets.git")
           expect(repo.isBare).toBe(true)
           expect(repo.paused).toBe(true)
@@ -560,14 +564,14 @@ describe("DbService", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const repo = yield* db.addRepository({
-            githubOwner: "  acme  ",
-            githubRepo: "  widgets  ",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "  acme/widgets  ",
             localPath: "  /repos/acme/widgets.git  ",
             isBare: false,
           })
 
-          expect(repo.githubOwner).toBe("acme")
-          expect(repo.githubRepo).toBe("widgets")
+          expect(repo.projectPath).toBe("acme/widgets")
           expect(repo.localPath).toBe("/repos/acme/widgets.git")
           expect(repo.isBare).toBe(false)
           expect(repo.paused).toBe(true)
@@ -581,13 +585,13 @@ describe("DbService", () => {
           const error = yield* Effect.flip(
             db.addRepository({
               ...sampleInput,
-              githubOwner: "   ",
+              projectPath: "   ",
             }),
           )
 
           expect(error).toBeInstanceOf(InvalidRepositoryInputError)
           if (error instanceof InvalidRepositoryInputError) {
-            expect(error.field).toBe("githubOwner")
+            expect(error.field).toBe("projectPath")
           }
         }),
       ))
@@ -601,8 +605,9 @@ describe("DbService", () => {
           const error = yield* Effect.flip(
             db.addRepository({
               ...sampleInput,
-              githubOwner: "Acme",
-              githubRepo: "Widgets",
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "Acme/Widgets",
               localPath: "/other/path",
             }),
           )
@@ -619,8 +624,9 @@ describe("DbService", () => {
 
           const error = yield* Effect.flip(
             db.addRepository({
-              githubOwner: "other",
-              githubRepo: "repo",
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "other/repo",
               localPath: sampleInput.localPath,
               isBare: true,
             }),
@@ -630,19 +636,19 @@ describe("DbService", () => {
         }),
       ))
 
-    it("preserves display casing of owner and repo", () =>
+    it("preserves display casing of Project Path", () =>
       runTest(
         Effect.gen(function* () {
           const db = yield* DbService
           const repo = yield* db.addRepository({
-            githubOwner: "AcmeCorp",
-            githubRepo: "MyWidgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "AcmeCorp/MyWidgets",
             localPath: "/repos/AcmeCorp/MyWidgets",
             isBare: false,
           })
 
-          expect(repo.githubOwner).toBe("AcmeCorp")
-          expect(repo.githubRepo).toBe("MyWidgets")
+          expect(repo.projectPath).toBe("AcmeCorp/MyWidgets")
         }),
       ))
   })
@@ -781,8 +787,9 @@ describe("DbService", () => {
           const sql = yield* SqlClient.SqlClient
           const blocked = yield* db.addRepository(sampleInput)
           const other = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "other",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
             localPath: "/repos/acme/other.git",
             isBare: true,
           })
@@ -790,7 +797,7 @@ describe("DbService", () => {
           // Unfinished only on the target repository (Needs Human counts).
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                paused, waiting_since, worktree_path, session_id, failure_code,
                failure_message, created_at, updated_at
              ) VALUES (?, ?, 1, 'needs_human', ?, 0, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -799,7 +806,7 @@ describe("DbService", () => {
           // Terminal work on the other repository must not affect the gate.
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at,
+               id, repository_id, issue_number, state, state_ready_at,
                worktree_path, session_id, failure_code, failure_message,
                created_at, updated_at
              ) VALUES (?, ?, 2, 'complete', ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -990,8 +997,9 @@ describe("DbService", () => {
           })
           const inheriting = yield* db.addRepository(sampleInput)
           const overridden = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "other",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/other",
             localPath: "/repos/acme/other.git",
             isBare: true,
           })
@@ -1232,15 +1240,17 @@ describe("DbService", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           const zebra = yield* db.addRepository({
-            githubOwner: "zebra",
-            githubRepo: "tools",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "zebra/tools",
             localPath: "/repos/zebra/tools.git",
             isBare: true,
           })
           const acmeWidgets = yield* db.addRepository(sampleInput)
           const acmeApi = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "api",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/api",
             localPath: "/repos/acme/api.git",
             isBare: false,
           })
@@ -1263,15 +1273,15 @@ describe("DbService", () => {
           const repository = yield* db.addRepository(sampleInput)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Remove with repository",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             issueAuthor: null,
             blockedBy: [
               {
-                githubIssueNumber: 7,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/7",
+                issueNumber: 7,
+                issueUrl: "https://github.com/acme/widgets/issues/7",
               },
             ],
           })
@@ -1306,7 +1316,7 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
+               id, repository_id, issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 42, 'create_worktree',
                ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -1345,7 +1355,7 @@ describe("DbService", () => {
 
           yield* sql.unsafe(
             `INSERT INTO work_item (
-               id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
+               id, repository_id, issue_number, state, state_ready_at, worktree_path,
                session_id, failure_code, failure_message, created_at, updated_at
              ) VALUES (?, ?, 42, 'create_worktree',
                ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -1392,7 +1402,7 @@ describe("DbService", () => {
           const githubCreatedAt = new Date("2026-07-01T12:00:00.000Z")
           const issue = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "  Preserve title spacing  ",
             ...sampleIssueFields,
             githubCreatedAt,
@@ -1400,7 +1410,7 @@ describe("DbService", () => {
 
           expect(issue.id.startsWith("issue-")).toBe(true)
           expect(issue.repositoryId).toBe(repository.id)
-          expect(issue.githubIssueNumber).toBe(42)
+          expect(issue.issueNumber).toBe(42)
           expect(issue.title).toBe("  Preserve title spacing  ")
           expect(issue.body).toBe("Issue body")
           expect(issue.url).toBe("https://github.com/acme/widgets/issues/42")
@@ -1418,7 +1428,7 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const withAuthor = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Authored issue",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1429,7 +1439,7 @@ describe("DbService", () => {
 
           const cleared = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Authored issue",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1447,7 +1457,7 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const first = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Original title",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1455,7 +1465,7 @@ describe("DbService", () => {
           })
           const updated = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Updated title",
             ...sampleIssueFields,
             body: "Updated body",
@@ -1482,7 +1492,7 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const baseInput = {
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Blocked issue",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1491,12 +1501,12 @@ describe("DbService", () => {
             ...baseInput,
             blockedBy: [
               {
-                githubIssueNumber: 9,
-                githubIssueUrl: "https://github.com/other/project/issues/9",
+                issueNumber: 9,
+                issueUrl: "https://github.com/other/project/issues/9",
               },
               {
-                githubIssueNumber: 3,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/3",
+                issueNumber: 3,
+                issueUrl: "https://github.com/acme/widgets/issues/3",
               },
             ],
           })
@@ -1505,16 +1515,16 @@ describe("DbService", () => {
             ...baseInput,
             blockedBy: [
               {
-                githubIssueNumber: 5,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/5",
+                issueNumber: 5,
+                issueUrl: "https://github.com/acme/widgets/issues/5",
               },
             ],
           })
 
           expect(stored.blockedBy).toEqual([
             {
-              githubIssueNumber: 5,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/5",
+              issueNumber: 5,
+              issueUrl: "https://github.com/acme/widgets/issues/5",
             },
           ])
           expect((yield* db.listIssues(repository.id))[0]?.blockedBy).toEqual(
@@ -1530,7 +1540,7 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const baseInput = {
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Child issue",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1540,13 +1550,13 @@ describe("DbService", () => {
             ...baseInput,
             parentPosition: 4,
             parent: {
-              githubIssueNumber: 7,
-              githubIssueUrl: "https://github.com/acme/widgets/issues/7",
+              issueNumber: 7,
+              issueUrl: "https://github.com/acme/widgets/issues/7",
             },
           })
           expect(withParent.parent).toEqual({
-            githubIssueNumber: 7,
-            githubIssueUrl: "https://github.com/acme/widgets/issues/7",
+            issueNumber: 7,
+            issueUrl: "https://github.com/acme/widgets/issues/7",
           })
           expect(withParent.parentPosition).toBe(4)
           expect((yield* db.listIssues(repository.id))[0]?.parent).toEqual(
@@ -1573,7 +1583,7 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const baseInput = {
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Parent issue",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1602,21 +1612,21 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const original = yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Original title",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
             issueAuthor: null,
             blockedBy: [
               {
-                githubIssueNumber: 3,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/3",
+                issueNumber: 3,
+                issueUrl: "https://github.com/acme/widgets/issues/3",
               },
             ],
           })
           yield* sql.unsafe(`CREATE TRIGGER fail_dependency_insert
             BEFORE INSERT ON issue_dependency
-            WHEN NEW.blocking_github_issue_number = 5
+            WHEN NEW.blocking_issue_number = 5
             BEGIN
               SELECT RAISE(ABORT, 'forced dependency insert failure');
             END`)
@@ -1624,15 +1634,15 @@ describe("DbService", () => {
           const error = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
-              githubIssueNumber: 42,
+              issueNumber: 42,
               title: "Updated title",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-02T12:00:00.000Z"),
               issueAuthor: null,
               blockedBy: [
                 {
-                  githubIssueNumber: 5,
-                  githubIssueUrl: "https://github.com/acme/widgets/issues/5",
+                  issueNumber: 5,
+                  issueUrl: "https://github.com/acme/widgets/issues/5",
                 },
               ],
             }),
@@ -1650,27 +1660,27 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           const otherRepository = yield* db.addRepository({
             ...sampleInput,
-            githubRepo: "other-widgets",
+            projectPath: "acme/other-widgets",
             localPath: "/repos/acme/other-widgets.git",
           })
           const githubCreatedAt = new Date("2026-07-01T12:00:00.000Z")
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 10,
+            issueNumber: 10,
             title: "Tenth",
             ...sampleIssueFields,
             githubCreatedAt,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 2,
+            issueNumber: 2,
             title: "Second",
             ...sampleIssueFields,
             githubCreatedAt,
           })
           yield* db.storeIssue({
             repositoryId: otherRepository.id,
-            githubIssueNumber: 1,
+            issueNumber: 1,
             title: "Other repository",
             ...sampleIssueFields,
             githubCreatedAt,
@@ -1678,9 +1688,7 @@ describe("DbService", () => {
 
           const issues = yield* db.listIssues(repository.id)
 
-          expect(issues.map((issue) => issue.githubIssueNumber)).toEqual([
-            2, 10,
-          ])
+          expect(issues.map((issue) => issue.issueNumber)).toEqual([2, 10])
         }),
       ))
 
@@ -1692,7 +1700,7 @@ describe("DbService", () => {
           const error = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
-              githubIssueNumber: 0,
+              issueNumber: 0,
               title: "Valid title",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1702,7 +1710,7 @@ describe("DbService", () => {
 
           expect(error).toBeInstanceOf(InvalidIssueInputError)
           if (error instanceof InvalidIssueInputError) {
-            expect(error.field).toBe("githubIssueNumber")
+            expect(error.field).toBe("issueNumber")
           }
         }),
       ))
@@ -1715,7 +1723,7 @@ describe("DbService", () => {
           const titleError = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
-              githubIssueNumber: 1,
+              issueNumber: 1,
               title: "   ",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1725,7 +1733,7 @@ describe("DbService", () => {
           const dateError = yield* Effect.flip(
             db.storeIssue({
               repositoryId: repository.id,
-              githubIssueNumber: 1,
+              issueNumber: 1,
               title: "Valid title",
               ...sampleIssueFields,
               githubCreatedAt: new Date("invalid"),
@@ -1745,7 +1753,7 @@ describe("DbService", () => {
           const error = yield* Effect.flip(
             db.storeIssue({
               repositoryId: "repo-unknown",
-              githubIssueNumber: 1,
+              issueNumber: 1,
               title: "Unknown repository",
               ...sampleIssueFields,
               githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),
@@ -1767,7 +1775,7 @@ describe("DbService", () => {
           const repository = yield* addTestRepository(db)
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 42,
+            issueNumber: 42,
             title: "Delete me",
             ...sampleIssueFields,
             githubCreatedAt: new Date("2026-07-01T12:00:00.000Z"),

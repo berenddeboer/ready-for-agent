@@ -139,14 +139,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 283,
+            issueNumber: 283,
             title: "Assess changes",
             body: "body",
             url: "https://github.com/acme/widgets/issues/283",
@@ -297,14 +298,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 284,
+            issueNumber: 284,
             title: "Commits after start",
             body: "body",
             url: "https://github.com/acme/widgets/issues/284",
@@ -425,14 +427,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 285,
+            issueNumber: 285,
             title: "Assess retry",
             body: "body",
             url: "https://github.com/acme/widgets/issues/285",
@@ -553,7 +556,7 @@ describe("Assess Changes lifecycle routes", () => {
         closeIssue: (context) =>
           Effect.sync(() => {
             githubCalls.push({
-              issueNumber: context.githubIssueNumber,
+              issueNumber: context.issueNumber,
               workItemId: context.workItemId,
               summary: context.completionSummary ?? "",
             })
@@ -590,14 +593,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 290,
+            issueNumber: 290,
             title: "No change outcome",
             body: "body",
             url: "https://github.com/acme/widgets/issues/290",
@@ -633,7 +637,7 @@ describe("Assess Changes lifecycle routes", () => {
           }
           expect(afterAssess.workItem.state).toBe("close_issue")
           expect(afterAssess.workItem.completionSummary).toBe(summary)
-          expect(afterAssess.workItem.githubPullRequestNumber).toBeNull()
+          expect(afterAssess.workItem.pullRequestNumber).toBeNull()
 
           const afterClose = yield* claimAndRun
           expect(afterClose._tag).toBe("processed")
@@ -656,7 +660,7 @@ describe("Assess Changes lifecycle routes", () => {
           }
           expect(afterCleanup.workItem.state).toBe("complete")
           expect(afterCleanup.workItem.completionSummary).toBe(summary)
-          expect(afterCleanup.workItem.githubPullRequestNumber).toBeNull()
+          expect(afterCleanup.workItem.pullRequestNumber).toBeNull()
           expect(preCommitCalls).toBe(0)
           expect(reviewCalls).toBe(0)
           expect(commitCalls).toBe(0)
@@ -759,14 +763,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 291,
+            issueNumber: 291,
             title: "Clean classified as changes",
             body: "body",
             url: "https://github.com/acme/widgets/issues/291",
@@ -893,14 +898,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 292,
+            issueNumber: 292,
             title: "Malformed assess",
             body: "body",
             url: "https://github.com/acme/widgets/issues/292",
@@ -1027,14 +1033,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 293,
+            issueNumber: 293,
             title: "Local no change",
             body: "body",
             url: "https://github.com/acme/widgets/issues/293",
@@ -1207,14 +1214,15 @@ describe("Assess Changes lifecycle routes", () => {
           })
 
           const repository = yield* db.addRepository({
-            githubOwner: "acme",
-            githubRepo: "widgets",
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
             localPath: worktree,
             isBare: false,
           })
           yield* db.storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: 294,
+            issueNumber: 294,
             title: "Close retry",
             body: "body",
             url: "https://github.com/acme/widgets/issues/294",

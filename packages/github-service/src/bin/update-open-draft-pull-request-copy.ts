@@ -3,6 +3,7 @@ import { GitHubService } from "../lib/github-service.js"
 import {
   CliArgumentError,
   decodeArgument,
+  githubRepository,
   runGitHubCli,
   writeStandardOutput,
 } from "./cli.js"
@@ -17,10 +18,11 @@ export const updateOpenDraftPullRequestCopyProgram = (
   args: ReadonlyArray<string>,
 ) =>
   Effect.gen(function* () {
-    const owner = yield* decodeArgument(args[0], "owner")
-    const name = yield* decodeArgument(args[1], "name")
+    const forge = yield* decodeArgument(args[0], "forge")
+    const forgeHost = yield* decodeArgument(args[1], "forge host")
+    const projectPath = yield* decodeArgument(args[2], "project path")
     const payloadJson = yield* decodeArgument(
-      args[2],
+      args[3],
       "update draft copy payload",
     )
     const payload = yield* Schema.decodeUnknownEffect(
@@ -35,7 +37,7 @@ export const updateOpenDraftPullRequestCopyProgram = (
     )
     const github = yield* GitHubService
     const number = yield* github.updateOpenDraftPullRequestCopy(
-      { owner, name },
+      githubRepository(forge, forgeHost, projectPath),
       payload.headRefName,
       {
         title: payload.title,

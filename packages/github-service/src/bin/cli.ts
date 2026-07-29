@@ -23,6 +23,16 @@ export const decodeArgument = (
     ? Effect.fail(new CliArgumentError({ message: `Missing ${name} argument` }))
     : Effect.succeed(Buffer.from(value, "base64url").toString("utf8"))
 
+export const githubRepository = (
+  forge: string,
+  forgeHost: string,
+  projectPath: string,
+) => ({
+  forge,
+  forgeHost,
+  projectPath,
+})
+
 export const writeStandardOutput = (value: string): Effect.Effect<void> =>
   Effect.sync(() => process.stdout.write(value))
 

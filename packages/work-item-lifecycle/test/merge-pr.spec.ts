@@ -19,7 +19,7 @@ const repository = makeRepositoryRecord({ localPath: "/repos/widgets" })
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
   repositoryId: repository.id,
-  githubIssueNumber: 42,
+  issueNumber: 42,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",

@@ -33,7 +33,7 @@ const baseContext = (
 ): LifecycleStepContext => ({
   workItemId: makeWorkItemId(),
   repositoryId: "repo-missing",
-  githubIssueNumber: 80,
+  issueNumber: 80,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",
@@ -112,7 +112,7 @@ const seedWorkItem = (workItemId: string, repositoryId: string) =>
     const now = Date.now()
     yield* sql.unsafe(
       `INSERT INTO work_item (
-         id, repository_id, github_issue_number, state, state_ready_at, worktree_path,
+         id, repository_id, issue_number, state, state_ready_at, worktree_path,
          session_id, failure_code, failure_message, created_at, updated_at
        ) VALUES (?, ?, 80,
          'implement', ?, NULL, NULL, NULL, NULL, ?, ?)`,
@@ -143,8 +143,9 @@ const seedRepository = (localPath: string) =>
   Effect.gen(function* () {
     const db = yield* DbService
     return yield* db.addRepository({
-      githubOwner: "acme",
-      githubRepo: "widgets",
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
       localPath,
       isBare: true,
     })
@@ -176,7 +177,7 @@ describe("implement", () => {
           return yield* implement(
             baseContext(root, {
               repositoryId: repository.id,
-              githubIssueNumber: 0,
+              issueNumber: 0,
             }),
           )
         }).pipe(Effect.flip),
@@ -201,7 +202,7 @@ describe("implement", () => {
           return yield* implement(
             baseContext(root, {
               repositoryId: repository.id,
-              githubIssueNumber: 80,
+              issueNumber: 80,
               issueTitle: null,
               agentBackend: "opencode",
               model: "opencode/implement-model",
@@ -299,7 +300,7 @@ describe("implement", () => {
           return yield* implement(
             baseContext(root, {
               repositoryId: repository.id,
-              githubIssueNumber: 80,
+              issueNumber: 80,
               issueTitle: null,
               agentBackend: "opencode",
               model: "opencode/implement-model",

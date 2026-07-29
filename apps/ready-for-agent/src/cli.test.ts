@@ -44,8 +44,9 @@ describe("operator binary CLI seam", () => {
   const mockLocalGit = Layer.succeed(LocalGit, {
     inspect: (path) =>
       Effect.succeed({
-        githubOwner: "owner",
-        githubRepo: "repo",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "owner/repo",
         localPath: path,
         isBare: false,
         paused: true as const,

@@ -38,8 +38,9 @@ describe("resolveAgentTurnGitHubAuth", () => {
   it("returns keymaxxer auth for a capable backend when the vault is enabled", async () => {
     const auth = await Effect.runPromise(
       resolveAgentTurnGitHubAuth({
-        githubOwner: "acme",
-        githubRepo: "widgets",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
       }).pipe(
         Effect.provide(
           Layer.mergeAll(vaultEnabled, stubActiveAgentBackendLayer()),
@@ -56,8 +57,9 @@ describe("resolveAgentTurnGitHubAuth", () => {
     let findSecretCalled = false
     const auth = await Effect.runPromise(
       resolveAgentTurnGitHubAuth({
-        githubOwner: "acme",
-        githubRepo: "widgets",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -86,8 +88,9 @@ describe("resolveAgentTurnGitHubAuth", () => {
     const error = await Effect.runPromise(
       Effect.flip(
         resolveAgentTurnGitHubAuth({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
         }).pipe(
           Effect.provideService(CurrentCapturedAgentBackendId, "not-a-backend"),
           Effect.provide(
@@ -106,8 +109,9 @@ describe("resolveAgentTurnGitHubAuth", () => {
     const error = await Effect.runPromise(
       Effect.flip(
         resolveAgentTurnGitHubAuth({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
         }).pipe(
           Effect.provideService(CurrentCapturedAgentBackendId, null),
           Effect.provideService(CurrentStepRun, {
@@ -129,8 +133,9 @@ describe("resolveAgentTurnGitHubAuth", () => {
   it("returns ambient auth when Keymaxxer is disabled on a capable backend", async () => {
     const auth = await Effect.runPromise(
       resolveAgentTurnGitHubAuth({
-        githubOwner: "acme",
-        githubRepo: "widgets",
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
       }).pipe(
         Effect.provide(
           Layer.mergeAll(

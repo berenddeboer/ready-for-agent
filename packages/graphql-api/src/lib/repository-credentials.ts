@@ -7,8 +7,9 @@ import { activateRepositoryPolling } from "./issue-polling.js"
 
 export type Repository = {
   id: string
-  githubOwner: string
-  githubRepo: string
+  forge: string
+  forgeHost: string
+  projectPath: string
 }
 
 export class RepositoryCredentialError extends Data.TaggedError(
@@ -16,18 +17,19 @@ export class RepositoryCredentialError extends Data.TaggedError(
 )<{ readonly message: string }> {}
 
 export const githubTokenSecretName = (repository: Repository) =>
-  `GITHUB_TOKEN_${repository.githubOwner}_${repository.githubRepo}`
+  `GITHUB_TOKEN_${repository.projectPath}`
     .replace(/[^A-Za-z0-9_]/g, "_")
     .toUpperCase()
 
 const githubTokenCreationUrl = (repository: Repository) => {
+  const [owner = "", name = ""] = repository.projectPath.split("/")
   const url = new URL("https://github.com/settings/personal-access-tokens/new")
-  url.searchParams.set("name", `${repository.githubRepo} - ready-for-agent`)
+  url.searchParams.set("name", `${name} - ready-for-agent`)
   url.searchParams.set(
     "description",
-    `Ready For Agent token for ${repository.githubOwner}/${repository.githubRepo}`,
+    `Ready For Agent token for ${repository.projectPath}`,
   )
-  url.searchParams.set("target_name", repository.githubOwner)
+  url.searchParams.set("target_name", owner)
   url.searchParams.set("expires_in", "90")
   url.searchParams.set("issues", "write")
   url.searchParams.set("contents", "write")
@@ -91,7 +93,7 @@ export const activatePollingIfCredentialed = Effect.fn(
   }
   const lookup = keymaxxer.findSecret({
     provider: "github",
-    account: `${repository.githubOwner}/${repository.githubRepo}`,
+    account: repository.projectPath,
   })
   const credential =
     options?.metadataTimeout === undefined

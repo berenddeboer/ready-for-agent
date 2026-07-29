@@ -21,7 +21,7 @@ const repository = makeRepositoryRecord({ localPath: "/repos/widgets" })
 
 const openLeaf = {
   repositoryId: repository.id,
-  githubIssueNumber: 42,
+  issueNumber: 42,
   title: "Leaf",
   body: "body",
   url: "https://github.com/acme/widgets/issues/42",
@@ -36,7 +36,7 @@ const openLeaf = {
 const context: LifecycleStepContext = {
   workItemId: makeWorkItemId(),
   repositoryId: repository.id,
-  githubIssueNumber: 42,
+  issueNumber: 42,
   issueTitle: null,
   agentBackend: "opencode",
   model: "opencode/test-model",
@@ -140,8 +140,8 @@ describe("closeIssue", () => {
             ...openLeaf,
             blockedBy: [
               {
-                githubIssueNumber: 1,
-                githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+                issueNumber: 1,
+                issueUrl: "https://github.com/acme/widgets/issues/1",
               },
             ],
           },

@@ -2,8 +2,11 @@ import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
-import { DbService } from "@ready-for-agent/db-service"
-import { GitHubService } from "@ready-for-agent/github-service"
+import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
+import {
+  type GitHubRepository,
+  GitHubService,
+} from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   AgentTurnGitHubCredentialMissingError,
@@ -158,11 +161,11 @@ const runGitInWorktree = (cwd: string, args: ReadonlyArray<string>) =>
  * still assert the pre-#546 Issue-title template shape.
  */
 export const buildDeterministicPullRequestTitle = (input: {
-  readonly githubIssueNumber: number
+  readonly issueNumber: number
   readonly issueTitle: string | null
 }): string => {
   if (input.issueTitle === null || input.issueTitle.trim() === "") {
-    return `Implement #${input.githubIssueNumber}`
+    return `Implement #${input.issueNumber}`
   }
   return input.issueTitle.trim()
 }
@@ -172,12 +175,12 @@ export const buildDeterministicPullRequestTitle = (input: {
  * still assert the pre-#546 generic body shape.
  */
 export const buildDeterministicPullRequestBody = (
-  githubIssueNumber: number,
+  issueNumber: number,
 ): string =>
   [
-    `Automated draft pull request for GitHub issue #${githubIssueNumber}.`,
+    `Automated draft pull request for GitHub issue #${issueNumber}.`,
     "",
-    `Closes #${githubIssueNumber}`,
+    `Closes #${issueNumber}`,
   ].join("\n")
 
 /**
@@ -185,23 +188,19 @@ export const buildDeterministicPullRequestBody = (
  */
 const findExistingOpenPr = (
   context: LifecycleStepContext,
-  githubOwner: string,
-  githubRepo: string,
+  repository: RepositoryRecord,
   branch: string,
 ) =>
   Effect.gen(function* () {
     const github = yield* GitHubService
     return yield* github
-      .findOpenPullRequestNumber(
-        { owner: githubOwner, name: githubRepo },
-        branch,
-      )
+      .findOpenPullRequestNumber(toGitHubRepository(repository), branch)
       .pipe(
         Effect.mapError(
           (cause) =>
             new CreatePrLookupError({
               repositoryId: context.repositoryId,
-              message: `Failed to look up an open pull request for ${githubOwner}/${githubRepo}:${branch}`,
+              message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
               cause,
             }),
         ),
@@ -214,33 +213,28 @@ const findExistingOpenPr = (
  */
 const softFindExistingOpenPr = (
   context: LifecycleStepContext,
-  githubOwner: string,
-  githubRepo: string,
+  repository: RepositoryRecord,
   branch: string,
 ) =>
-  findExistingOpenPr(context, githubOwner, githubRepo, branch).pipe(
+  findExistingOpenPr(context, repository, branch).pipe(
     Effect.orElseSucceed(() => null),
   )
 
 const resolveRequiredOpenPr = (
   context: LifecycleStepContext,
-  githubOwner: string,
-  githubRepo: string,
+  repository: RepositoryRecord,
   branch: string,
 ) =>
   Effect.gen(function* () {
     const github = yield* GitHubService
     return yield* github
-      .getOpenPullRequestNumber(
-        { owner: githubOwner, name: githubRepo },
-        branch,
-      )
+      .getOpenPullRequestNumber(toGitHubRepository(repository), branch)
       .pipe(
         Effect.mapError(
           (cause) =>
             new CreatePrLookupError({
               repositoryId: context.repositoryId,
-              message: `Failed to resolve the open pull request for ${githubOwner}/${githubRepo}:${branch}`,
+              message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
               cause,
             }),
         ),
@@ -253,8 +247,7 @@ const resolveRequiredOpenPr = (
  */
 const resolveNativePushTokenName = (
   repositoryId: string,
-  githubOwner: string,
-  githubRepo: string,
+  projectPath: string,
 ) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
@@ -264,7 +257,7 @@ const resolveNativePushTokenName = (
     return yield* keymaxxer
       .findSecret({
         provider: "github",
-        account: `${githubOwner}/${githubRepo}`,
+        account: projectPath,
       })
       .pipe(
         Effect.mapError(
@@ -363,22 +356,18 @@ const attemptNativePush = (
   })
 
 const attemptNativeCreateDraft = (
-  githubOwner: string,
-  githubRepo: string,
+  repository: RepositoryRecord,
   branch: string,
   copy: PublicationCopy,
 ) =>
   Effect.gen(function* () {
     const github = yield* GitHubService
     return yield* github
-      .createDraftPullRequest(
-        { owner: githubOwner, name: githubRepo },
-        {
-          headRefName: branch,
-          title: copy.title,
-          body: copy.body,
-        },
-      )
+      .createDraftPullRequest(toGitHubRepository(repository), {
+        headRefName: branch,
+        title: copy.title,
+        body: copy.body,
+      })
       .pipe(
         Effect.map((pullRequestNumber) => ({
           ok: true as const,
@@ -431,8 +420,7 @@ const softPersistPublicationCopy = (
   )
 
 const softReconcileDraftCopy = (
-  githubOwner: string,
-  githubRepo: string,
+  repository: RepositoryRecord,
   branch: string,
   copy: PublicationCopy,
   pullRequestNumber: number,
@@ -440,11 +428,10 @@ const softReconcileDraftCopy = (
   Effect.gen(function* () {
     const github = yield* GitHubService
     yield* github
-      .updateOpenDraftPullRequestCopy(
-        { owner: githubOwner, name: githubRepo },
-        branch,
-        { title: copy.title, body: copy.body },
-      )
+      .updateOpenDraftPullRequestCopy(toGitHubRepository(repository), branch, {
+        title: copy.title,
+        body: copy.body,
+      })
       .pipe(
         Effect.catch((cause) =>
           Effect.logWarning(
@@ -458,6 +445,14 @@ const softReconcileDraftCopy = (
       )
   })
 
+const toGitHubRepository = (
+  repository: RepositoryRecord,
+): GitHubRepository => ({
+  forge: repository.forge,
+  forgeHost: repository.forgeHost,
+  projectPath: repository.projectPath,
+})
+
 const resolvePublicationCopyForCreatePr = (
   context: LifecycleStepContext,
   worktreePath: string,
@@ -468,7 +463,7 @@ const resolvePublicationCopyForCreatePr = (
     if (title !== "" && body !== "") {
       const normalized = normalizePublicationCopy(
         { title, body },
-        context.githubIssueNumber,
+        context.issueNumber,
       )
       if (normalized !== null) {
         return normalized
@@ -485,7 +480,7 @@ const resolvePublicationCopyForCreatePr = (
     if (head.exitCode === 0) {
       const seeded = publicationCopyFromCommitMessage(
         head.stdout,
-        context.githubIssueNumber,
+        context.issueNumber,
       )
       if (seeded !== null) {
         yield* softPersistPublicationCopy(context.workItemId, seeded)
@@ -539,9 +534,8 @@ export const createPr = (context: LifecycleStepContext) =>
     const worktreePath = yield* resolveWorktreePath(context)
     const repository = yield* resolveRepositoryRecord(context)
     const branch = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
     const copy = yield* resolvePublicationCopyForCreatePr(context, worktreePath)
@@ -550,51 +544,32 @@ export const createPr = (context: LifecycleStepContext) =>
     // Hard-fail only on lookup: without a reliable answer we must not create a
     // duplicate. Draft title/body reconcile is best-effort and must not fail
     // the step when an open PR already exists.
-    const existing = yield* findExistingOpenPr(
-      context,
-      repository.githubOwner,
-      repository.githubRepo,
-      branch,
-    )
+    const existing = yield* findExistingOpenPr(context, repository, branch)
     if (existing !== null) {
-      yield* softReconcileDraftCopy(
-        repository.githubOwner,
-        repository.githubRepo,
-        branch,
-        copy,
-        existing,
-      )
+      yield* softReconcileDraftCopy(repository, branch, copy, existing)
       return toCreatePrResult(existing, "native", copy)
     }
 
     const pushTokenName = yield* resolveNativePushTokenName(
       context.repositoryId,
-      repository.githubOwner,
-      repository.githubRepo,
+      repository.projectPath,
     )
     const push = yield* attemptNativePush(worktreePath, branch, pushTokenName)
     let nativeDiagnostics: string | null = push.ok ? null : push.diagnostics
 
     if (push.ok) {
-      const created = yield* attemptNativeCreateDraft(
-        repository.githubOwner,
-        repository.githubRepo,
-        branch,
-        copy,
-      )
+      const created = yield* attemptNativeCreateDraft(repository, branch, copy)
       if (created.ok) {
         // Soft-verify only: a successful create already establishes identity.
         // Transient lookup failure must not fail the Step Run or drop the number.
         const verified = yield* softFindExistingOpenPr(
           context,
-          repository.githubOwner,
-          repository.githubRepo,
+          repository,
           branch,
         )
         const pullRequestNumber = verified ?? created.pullRequestNumber
         yield* softReconcileDraftCopy(
-          repository.githubOwner,
-          repository.githubRepo,
+          repository,
           branch,
           copy,
           pullRequestNumber,
@@ -608,24 +583,16 @@ export const createPr = (context: LifecycleStepContext) =>
     // duplicate, and so lookup transport errors still allow one repair turn.
     const afterNative = yield* softFindExistingOpenPr(
       context,
-      repository.githubOwner,
-      repository.githubRepo,
+      repository,
       branch,
     )
     if (afterNative !== null) {
-      yield* softReconcileDraftCopy(
-        repository.githubOwner,
-        repository.githubRepo,
-        branch,
-        copy,
-        afterNative,
-      )
+      yield* softReconcileDraftCopy(repository, branch, copy, afterNative)
       return toCreatePrResult(afterNative, "native", copy)
     }
 
     const auth = yield* resolveAgentTurnGitHubAuth({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
+      projectPath: repository.projectPath,
     }).pipe(
       Effect.mapError((cause) => {
         if (
@@ -657,7 +624,7 @@ export const createPr = (context: LifecycleStepContext) =>
       .continueTurn({
         sessionId,
         prompt: buildCreatePrFallbackPromptWithCopy({
-          githubIssueNumber: context.githubIssueNumber,
+          issueNumber: context.issueNumber,
           branch,
           title: copy.title,
           body: copy.body,
@@ -688,43 +655,25 @@ export const createPr = (context: LifecycleStepContext) =>
     // required lookup still succeeds; then require the open PR identity.
     const afterFallback = yield* softFindExistingOpenPr(
       context,
-      repository.githubOwner,
-      repository.githubRepo,
+      repository,
       branch,
     )
     if (afterFallback !== null) {
-      yield* softReconcileDraftCopy(
-        repository.githubOwner,
-        repository.githubRepo,
-        branch,
-        copy,
-        afterFallback,
-      )
+      yield* softReconcileDraftCopy(repository, branch, copy, afterFallback)
       return toCreatePrResult(afterFallback, "agent_fallback", copy)
     }
 
     const required = yield* Effect.result(
-      resolveRequiredOpenPr(
-        context,
-        repository.githubOwner,
-        repository.githubRepo,
-        branch,
-      ),
+      resolveRequiredOpenPr(context, repository, branch),
     )
     if (required._tag === "Success") {
-      yield* softReconcileDraftCopy(
-        repository.githubOwner,
-        repository.githubRepo,
-        branch,
-        copy,
-        required.success,
-      )
+      yield* softReconcileDraftCopy(repository, branch, copy, required.success)
       return toCreatePrResult(required.success, "agent_fallback", copy)
     }
 
     return yield* new CreatePrPostconditionError({
       repositoryId: context.repositoryId,
-      message: `No open pull request found for ${repository.githubOwner}/${repository.githubRepo}:${branch} after native attempt and agent fallback`,
+      message: `No open pull request found for ${repository.projectPath}:${branch} after native attempt and agent fallback`,
       diagnostics,
     })
   })

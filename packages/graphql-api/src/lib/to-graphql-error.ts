@@ -6,13 +6,14 @@ type TaggedError = {
   readonly field?: string
   readonly repositoryId?: string
   readonly workItemId?: string
-  readonly githubIssueNumber?: number
+  readonly issueNumber?: number
   readonly state?: string
   readonly blockerCount?: number
   readonly reason?: string
   readonly operation?: string
-  readonly githubOwner?: string
-  readonly githubRepo?: string
+  readonly forge?: string
+  readonly forgeHost?: string
+  readonly projectPath?: string
   readonly localPath?: string
   readonly path?: string
   readonly selectedBackendId?: string
@@ -52,49 +53,49 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
   switch (error._tag) {
     case "IssueNotFoundError":
       return gql(
-        `Issue #${error.githubIssueNumber} was not found in repository ${error.repositoryId}`,
+        `Issue #${error.issueNumber} was not found in repository ${error.repositoryId}`,
         "ISSUE_NOT_FOUND",
       )
     case "IssueNotOpenError":
       return gql(
-        `Issue #${error.githubIssueNumber} is ${error.state}, not OPEN`,
+        `Issue #${error.issueNumber} is ${error.state}, not OPEN`,
         "ISSUE_NOT_OPEN",
       )
     case "ParentIssueError":
       return gql(
-        `Issue #${error.githubIssueNumber} has child issues and must target a leaf Issue`,
+        `Issue #${error.issueNumber} has child issues and must target a leaf Issue`,
         "ISSUE_IS_PARENT",
       )
     case "NotAParentIssueError":
       return gql(
-        `Issue #${error.githubIssueNumber} is not a Parent Issue`,
+        `Issue #${error.issueNumber} is not a Parent Issue`,
         "ISSUE_NOT_PARENT",
       )
     case "UnsupportedIssueHierarchyError":
       return gql(
         error.message ??
-          `Issue #${error.githubIssueNumber} is not a Supported Issue Hierarchy`,
+          `Issue #${error.issueNumber} is not a Supported Issue Hierarchy`,
         "UNSUPPORTED_ISSUE_HIERARCHY",
       )
     case "ImplementAllWithAutoMergeNotEligibleError":
       return gql(
         error.reason ??
-          `Parent Issue #${error.githubIssueNumber} is not eligible for Implement all with auto-merge`,
+          `Parent Issue #${error.issueNumber} is not eligible for Implement all with auto-merge`,
         "IMPLEMENT_ALL_WITH_AUTO_MERGE_NOT_ELIGIBLE",
       )
     case "IssueBlockedError":
       return gql(
-        `Issue #${error.githubIssueNumber} is blocked by ${error.blockerCount} issue(s)`,
+        `Issue #${error.issueNumber} is blocked by ${error.blockerCount} issue(s)`,
         "ISSUE_BLOCKED",
       )
     case "IssueNotBlockedError":
       return gql(
-        `Issue #${error.githubIssueNumber} is not blocked and cannot be Queued; use Implement Now instead`,
+        `Issue #${error.issueNumber} is not blocked and cannot be Queued; use Implement Now instead`,
         "ISSUE_NOT_BLOCKED",
       )
     case "UnfinishedWorkItemExistsError":
       return gql(
-        `Issue #${error.githubIssueNumber} already has an unfinished Work Item`,
+        `Issue #${error.issueNumber} already has an unfinished Work Item`,
         "UNFINISHED_WORK_ITEM_EXISTS",
         { workItemId: error.workItemId },
       )
@@ -172,7 +173,7 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       )
     case "RepositoryAlreadyExistsError":
       return gql(
-        `Repository ${error.githubOwner}/${error.githubRepo} already exists`,
+        `Repository ${error.projectPath} already exists on ${error.forgeHost}`,
         "REPOSITORY_ALREADY_EXISTS",
       )
     case "InvalidConfigInputError":

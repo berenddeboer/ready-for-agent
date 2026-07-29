@@ -102,8 +102,9 @@ describe("Agent Backend readiness gates", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets.git",
           isBare: true,
         })
@@ -118,7 +119,7 @@ describe("Agent Backend readiness gates", () => {
         })
         yield* db.storeIssue({
           repositoryId: repo.id,
-          githubIssueNumber: 1,
+          issueNumber: 1,
           title: "Issue",
           body: "body",
           url: "https://github.com/acme/widgets/issues/1",
@@ -194,8 +195,9 @@ describe("Agent Backend readiness gates", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets.git",
           isBare: true,
         })
@@ -210,7 +212,7 @@ describe("Agent Backend readiness gates", () => {
         })
         yield* db.storeIssue({
           repositoryId: repo.id,
-          githubIssueNumber: 1,
+          issueNumber: 1,
           title: "Issue",
           body: "body",
           url: "https://github.com/acme/widgets/issues/1",

@@ -81,7 +81,7 @@ const resolveGithubCredential = (repository: RepositoryRecord) =>
   Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
     if (keymaxxer.enabled === false) return null
-    const account = `${repository.githubOwner}/${repository.githubRepo}`
+    const account = `${repository.projectPath}`
     const tokenName = yield* keymaxxer
       .findSecret({
         provider: "github",
@@ -148,7 +148,7 @@ const closeOpenPullRequests = (input: {
   readonly cwd: string
 }) =>
   Effect.gen(function* () {
-    const repo = `${input.repository.githubOwner}/${input.repository.githubRepo}`
+    const repo = `${input.repository.projectPath}`
     const listed = yield* runRemoteCommand({
       tokenName: input.tokenName,
       cwd: input.cwd,
@@ -205,7 +205,7 @@ const deleteRemoteBranch = (input: {
   readonly cwd: string
 }) =>
   Effect.gen(function* () {
-    const repo = `${input.repository.githubOwner}/${input.repository.githubRepo}`
+    const repo = `${input.repository.projectPath}`
     // Missing remote branch is success (idempotent); other failures fail cleanup.
     const result = yield* runRemoteCommand({
       tokenName: input.tokenName,
@@ -271,18 +271,16 @@ const removeLocalArtifacts = (
     const gitRepository = asGitRepository(repository)
 
     const branchName = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
 
     const plannedPath = workItemWorktreePath({
       localPath: repository.localPath,
       isBare: repository.isBare,
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
       tmpDir: options.tmpDir,
     })

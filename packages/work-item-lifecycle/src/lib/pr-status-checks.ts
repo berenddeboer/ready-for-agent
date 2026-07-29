@@ -144,9 +144,8 @@ const resolveContext = (context: LifecycleStepContext) =>
       })
     }
     const branch = workItemBranchName({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
-      githubIssueNumber: context.githubIssueNumber,
+      projectPath: repository.projectPath,
+      issueNumber: context.issueNumber,
       workItemId: context.workItemId,
     })
     return {
@@ -238,10 +237,7 @@ export const watchPrStatusChecks = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
     const { repository, branch } = yield* resolveContext(context)
     const github = yield* GitHubService
-    const status = yield* github.getPullRequestCheckStatus(
-      { owner: repository.githubOwner, name: repository.githubRepo },
-      branch,
-    )
+    const status = yield* github.getPullRequestCheckStatus(repository, branch)
     const evidence = timingEvidence(status)
     const terminalChecks =
       status._tag === "pending" ||
@@ -619,7 +615,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       const github = yield* GitHubService
       const evidence = yield* github
         .observeAutomatedReviewEvidence(
-          { owner: repository.githubOwner, name: repository.githubRepo },
+          repository,
           branch,
           unhandled.map((check) => ({
             externalId: check.external_id,
@@ -659,8 +655,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       // Positive or ambiguous evidence falls through to the Agent Turn path.
     }
     const auth = yield* resolveAgentTurnGitHubAuth({
-      githubOwner: repository.githubOwner,
-      githubRepo: repository.githubRepo,
+      projectPath: repository.projectPath,
     }).pipe(
       Effect.mapError((cause) => {
         if (
@@ -680,7 +675,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       const logDirectory = `${worktreePath}/.ready-for-agent/status-check-logs`
       diagnostics = yield* github
         .getPrStatusCheckDiagnostics(
-          { owner: repository.githubOwner, name: repository.githubRepo },
+          repository,
           redChecks.map((check) => ({
             externalId: check.external_id,
             name: check.name,
@@ -808,10 +803,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         `workflow run ${investigation.workflowRunId}`
       const github = yield* GitHubService
       const status = yield* github
-        .getPullRequestCheckStatus(
-          { owner: repository.githubOwner, name: repository.githubRepo },
-          branch,
-        )
+        .getPullRequestCheckStatus(repository, branch)
         .pipe(
           Effect.mapError(
             (cause) =>
@@ -846,10 +838,7 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         } satisfies PrStatusCheckInvestigationResult
       }
       const rerunResult = yield* Effect.result(
-        github.rerunWorkflowRun(
-          { owner: repository.githubOwner, name: repository.githubRepo },
-          investigation.workflowRunId,
-        ),
+        github.rerunWorkflowRun(repository, investigation.workflowRunId),
       )
       if (rerunResult._tag === "Failure") {
         // Reservation remains so a crash or indeterminate response cannot

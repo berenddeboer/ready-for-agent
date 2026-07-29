@@ -29,9 +29,7 @@ const addRepositoryWorkflow = Effect.fn("Cli.addRepository")(function* (
   const repository = yield* localGit.inspect(path)
   const added = yield* graphqlApi.addRepository(repository)
 
-  yield* Console.log(
-    `Added repository ${added.githubOwner}/${added.githubRepo}`,
-  )
+  yield* Console.log(`Added repository ${added.projectPath}`)
   yield* Console.log(`  id: ${added.id}`)
   yield* Console.log(`  local path: ${added.localPath}`)
   yield* Console.log(`  bare: ${added.isBare}`)

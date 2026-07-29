@@ -1,7 +1,7 @@
 import { type MouseEvent, type ReactNode, useEffect, useState } from "react"
 
 export type ParentIssueActionsMenuProps = {
-  readonly parentGithubIssueNumber: number
+  readonly parentIssueNumber: number
   readonly menuId: string
   readonly pending: boolean
   readonly errorMessage: string | null
@@ -14,7 +14,7 @@ export type ParentIssueActionsMenuProps = {
  * without the full Issues list.
  */
 export function ParentIssueActionsMenu({
-  parentGithubIssueNumber,
+  parentIssueNumber,
   menuId,
   pending,
   errorMessage,
@@ -46,7 +46,7 @@ export function ParentIssueActionsMenu({
       <button
         type="button"
         className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-        aria-label={`Actions for parent issue #${parentGithubIssueNumber}`}
+        aria-label={`Actions for parent issue #${parentIssueNumber}`}
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         disabled={pending}
@@ -109,7 +109,7 @@ export function ParentIssueActionsMenu({
  */
 export function isParentImplementAllWithAutoMergeEligible(input: {
   readonly openChildren: readonly {
-    readonly githubIssueNumber: number
+    readonly issueNumber: number
     readonly hasChildren: boolean
     readonly blockedBy: readonly unknown[]
   }[]
@@ -121,7 +121,7 @@ export function isParentImplementAllWithAutoMergeEligible(input: {
     readonly hasChildren: boolean
   }[]
   readonly workItems: readonly {
-    readonly githubIssueNumber: number
+    readonly issueNumber: number
     readonly state: string
   }[]
   readonly workItemsLoading: boolean

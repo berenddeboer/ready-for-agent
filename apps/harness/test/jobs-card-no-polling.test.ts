@@ -72,7 +72,7 @@ describe("JobsCard live updates", () => {
   test("shows issue number with title and top-right pause control", () => {
     const { source, jobsCard } = jobsCardSource()
     expect(jobsCard).not.toContain("Issue #")
-    expect(jobsCard).toContain("#{workItem.githubIssueNumber}")
+    expect(jobsCard).toContain("#{workItem.issueNumber}")
     expect(jobsCard).toContain("issueTitle")
     expect(source).toContain("issueTitle: true")
     expect(jobsCard).toContain(
@@ -81,7 +81,7 @@ describe("JobsCard live updates", () => {
     expect(jobsCard).toContain("issuesQuery(repository.id)")
     expect(jobsCard).toContain("title={issueIdentity}")
     expect(jobsCard).toContain("issueTitle === undefined")
-    expect(jobsCard).toContain(`\`#\${workItem.githubIssueNumber}\``)
+    expect(jobsCard).toContain(`\`#\${workItem.issueNumber}\``)
     const pauseIndex = jobsCard.indexOf(
       "<WorkItemPauseButton workItem={workItem} />",
     )
@@ -103,12 +103,12 @@ describe("JobsCard live updates", () => {
 
   test("links status badge and Decide PR merge handoff to Work Item PR", () => {
     const { source, jobsCard } = jobsCardSource()
-    expect(source).toContain("githubPullRequestNumber: true")
+    expect(source).toContain("pullRequestNumber: true")
     expect(source).toContain("workItemPullRequestUrl")
     expect(source).toContain("WorkItemOutcomePresentation")
     expect(source).toContain("completionSummary: true")
     expect(jobsCard).toContain("workItemPullRequestUrl(")
-    expect(jobsCard).toContain("workItem.githubPullRequestNumber")
+    expect(jobsCard).toContain("workItem.pullRequestNumber")
     expect(source).toContain('target="_blank"')
     expect(source).toContain('rel="noopener noreferrer"')
     expect(source).toContain('lifecycleLabel.phase === "DECIDE_PR_MERGE"')

@@ -1,20 +1,26 @@
 import { Effect } from "effect"
 import { GitHubService } from "../lib/github-service.js"
-import { decodeArgument, runGitHubCli, writeStandardOutput } from "./cli.js"
+import {
+  decodeArgument,
+  githubRepository,
+  runGitHubCli,
+  writeStandardOutput,
+} from "./cli.js"
 
 export const ensureIssueCompletedWithSummaryProgram = (
   args: ReadonlyArray<string>,
 ) =>
   Effect.gen(function* () {
-    const owner = yield* decodeArgument(args[0], "owner")
-    const name = yield* decodeArgument(args[1], "name")
-    const issueNumberRaw = yield* decodeArgument(args[2], "issue number")
-    const workItemId = yield* decodeArgument(args[3], "work item id")
-    const summaryMarkdown = yield* decodeArgument(args[4], "summary")
+    const forge = yield* decodeArgument(args[0], "forge")
+    const forgeHost = yield* decodeArgument(args[1], "forge host")
+    const projectPath = yield* decodeArgument(args[2], "project path")
+    const issueNumberRaw = yield* decodeArgument(args[3], "issue number")
+    const workItemId = yield* decodeArgument(args[4], "work item id")
+    const summaryMarkdown = yield* decodeArgument(args[5], "summary")
     const issueNumber = Number(issueNumberRaw)
     const github = yield* GitHubService
     yield* github.ensureIssueCompletedWithSummary(
-      { owner, name },
+      githubRepository(forge, forgeHost, projectPath),
       issueNumber,
       workItemId,
       summaryMarkdown,

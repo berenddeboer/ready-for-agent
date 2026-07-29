@@ -58,7 +58,7 @@ const localIssue = (
   return {
     id: `issue-${number}`,
     repositoryId: repository.id,
-    githubIssueNumber: number,
+    issueNumber: number,
     title: remote.title,
     body: remote.body,
     url: remote.url,
@@ -71,12 +71,12 @@ const localIssue = (
       remote.parent === null
         ? null
         : {
-            githubIssueNumber: remote.parent.number,
-            githubIssueUrl: remote.parent.url,
+            issueNumber: remote.parent.number,
+            issueUrl: remote.parent.url,
           },
     blockedBy: remote.blockedBy.map((dependency) => ({
-      githubIssueNumber: dependency.number,
-      githubIssueUrl: dependency.url,
+      issueNumber: dependency.number,
+      issueUrl: dependency.url,
     })),
     ...overrides,
   }
@@ -105,15 +105,15 @@ const makeDbFixture = (options: DbFixtureOptions) => {
     listWorkItemPullRequests: () =>
       Effect.succeed(options.workItemPullRequests ?? []),
     storeIssue: (input) => {
-      actions.push(`store:${input.githubIssueNumber}`)
-      if (input.githubIssueNumber === options.failStoreNumber) {
+      actions.push(`store:${input.issueNumber}`)
+      if (input.issueNumber === options.failStoreNumber) {
         return Effect.fail(new DatabaseError({ message: "store failed" }))
       }
       const existing = stored.find(
-        (issue) => issue.githubIssueNumber === input.githubIssueNumber,
+        (issue) => issue.issueNumber === input.issueNumber,
       )
       const record: IssueRecord = {
-        id: existing?.id ?? `issue-${input.githubIssueNumber}`,
+        id: existing?.id ?? `issue-${input.issueNumber}`,
         ...input,
       }
       if (existing) {
@@ -123,11 +123,11 @@ const makeDbFixture = (options: DbFixtureOptions) => {
       }
       return Effect.succeed(record)
     },
-    deleteIssue: (_repositoryId, githubIssueNumber) =>
+    deleteIssue: (_repositoryId, issueNumber) =>
       Effect.sync(() => {
-        actions.push(`delete:${githubIssueNumber}`)
+        actions.push(`delete:${issueNumber}`)
         const index = stored.findIndex(
-          (issue) => issue.githubIssueNumber === githubIssueNumber,
+          (issue) => issue.issueNumber === issueNumber,
         )
         if (index >= 0) stored.splice(index, 1)
       }),
@@ -161,8 +161,8 @@ const makeGitHubLayer = (
   } = {},
 ) =>
   Layer.succeed(GitHubService, {
-    getAuthenticatedUserLogin: ({ owner, name }) => {
-      actions.push(`identity:${owner}/${name}`)
+    getAuthenticatedUserLogin: ({ projectPath }) => {
+      actions.push(`identity:${projectPath}`)
       return options.identityError
         ? Effect.fail(options.identityError)
         : Effect.succeed(options.operatorLogin ?? "operator")
@@ -195,8 +195,8 @@ const makeGitHubLayer = (
     mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
     rerunWorkflowRun: () => Effect.void,
     ensureIssueCompletedWithSummary: () => Effect.void,
-    listReadyIssues: ({ owner, name }) => {
-      actions.push(`github:${owner}/${name}`)
+    listReadyIssues: ({ projectPath }) => {
+      actions.push(`github:${projectPath}`)
       return options.error ? Effect.fail(options.error) : Effect.succeed(issues)
     },
   } satisfies GitHubServiceShape)
@@ -270,25 +270,23 @@ describe("IssueReconciler", () => {
         ])
         expect(
           db.stored
-            .sort(
-              (left, right) => left.githubIssueNumber - right.githubIssueNumber,
-            )
-            .map(({ githubIssueNumber, state }) => ({
-              githubIssueNumber,
+            .sort((left, right) => left.issueNumber - right.issueNumber)
+            .map(({ issueNumber, state }) => ({
+              issueNumber,
               state,
             })),
         ).toEqual([
-          { githubIssueNumber: 1, state: "OPEN" },
-          { githubIssueNumber: 2, state: "CLOSED" },
-          { githubIssueNumber: 3, state: "OPEN" },
+          { issueNumber: 1, state: "OPEN" },
+          { issueNumber: 2, state: "CLOSED" },
+          { issueNumber: 3, state: "OPEN" },
         ])
         expect(db.reconciledAt).toBeInstanceOf(Date)
         expect(
-          db.stored.find((issue) => issue.githubIssueNumber === 2)?.blockedBy,
+          db.stored.find((issue) => issue.issueNumber === 2)?.blockedBy,
         ).toEqual([
           {
-            githubIssueNumber: 1,
-            githubIssueUrl: "https://github.com/acme/widgets/issues/1",
+            issueNumber: 1,
+            issueUrl: "https://github.com/acme/widgets/issues/1",
           },
         ])
       }),
@@ -378,8 +376,8 @@ describe("IssueReconciler", () => {
 
         expect(summary.updated).toBe(1)
         expect(db.stored[0]?.parent).toEqual({
-          githubIssueNumber: 9,
-          githubIssueUrl: "https://github.com/acme/widgets/issues/9",
+          issueNumber: 9,
+          issueUrl: "https://github.com/acme/widgets/issues/9",
         })
         expect(db.stored[0]?.parentPosition).toBe(4)
       }),
@@ -448,12 +446,12 @@ describe("IssueReconciler", () => {
         })
         expect(
           db.stored
-            .map((issue) => issue.githubIssueNumber)
+            .map((issue) => issue.issueNumber)
             .sort((left, right) => left - right),
         ).toEqual([1, 2])
-        expect(
-          db.stored.find((issue) => issue.githubIssueNumber === 2)?.state,
-        ).toBe("CLOSED")
+        expect(db.stored.find((issue) => issue.issueNumber === 2)?.state).toBe(
+          "CLOSED",
+        )
       }),
       db.layer,
       github,
@@ -472,8 +470,8 @@ describe("IssueReconciler", () => {
         localIssue(7),
       ],
       workItemPullRequests: [
-        { githubIssueNumber: 2, githubPullRequestNumber: 202 },
-        { githubIssueNumber: 3, githubPullRequestNumber: 303 },
+        { issueNumber: 2, pullRequestNumber: 202 },
+        { issueNumber: 3, pullRequestNumber: 303 },
       ],
     })
     const github = makeGitHubLayer(
@@ -561,7 +559,7 @@ describe("IssueReconciler", () => {
           deleted: 2,
           unchanged: 5,
         })
-        expect(db.stored.map((issue) => issue.githubIssueNumber)).toEqual([
+        expect(db.stored.map((issue) => issue.issueNumber)).toEqual([
           1, 2, 3, 6, 7,
         ])
       }),
@@ -620,7 +618,7 @@ describe("IssueReconciler", () => {
         expect(error).toBeInstanceOf(ReconciliationMutationError)
         if (error instanceof ReconciliationMutationError) {
           expect(error.operation).toBe("insert")
-          expect(error.githubIssueNumber).toBe(3)
+          expect(error.issueNumber).toBe(3)
           expect(error.progress).toEqual({
             fetched: 2,
             inserted: 0,
@@ -635,9 +633,7 @@ describe("IssueReconciler", () => {
           "store:2",
           "store:3",
         ])
-        expect(db.stored.some((issue) => issue.githubIssueNumber === 4)).toBe(
-          true,
-        )
+        expect(db.stored.some((issue) => issue.issueNumber === 4)).toBe(true)
         expect(db.reconciledAt).toBeUndefined()
       }),
       db.layer,
@@ -710,7 +706,7 @@ describe("IssueReconciler", () => {
         })
         expect(
           db.stored.map((issue) => ({
-            number: issue.githubIssueNumber,
+            number: issue.issueNumber,
             author: issue.issueAuthor,
           })),
         ).toEqual([
@@ -769,9 +765,9 @@ describe("IssueReconciler", () => {
           deleted: 0,
           unchanged: 0,
         })
-        expect(
-          db.stored.map((issue) => issue.githubIssueNumber).sort(),
-        ).toEqual([1, 2])
+        expect(db.stored.map((issue) => issue.issueNumber).sort()).toEqual([
+          1, 2,
+        ])
         expect(db.actions).not.toContain("identity:acme/widgets")
       }),
       db.layer,

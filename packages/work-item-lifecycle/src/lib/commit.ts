@@ -286,13 +286,13 @@ const persistPublicationCopy = (
 
 const parseAndNormalize = (
   assistantText: string,
-  githubIssueNumber: number,
+  issueNumber: number,
 ): PublicationCopy | null => {
   const parsed = parsePublicationCopyResult(assistantText)
   if (parsed === null) {
     return null
   }
-  return normalizePublicationCopy(parsed, githubIssueNumber)
+  return normalizePublicationCopy(parsed, issueNumber)
 }
 
 const generatePublicationCopy = (
@@ -309,7 +309,7 @@ const generatePublicationCopy = (
     const first = yield* agentBackend
       .continueTurn({
         sessionId,
-        prompt: buildPublicationCopyPrompt(context.githubIssueNumber),
+        prompt: buildPublicationCopyPrompt(context.issueNumber),
         cwd: worktreePath,
         model: context.model,
         thinkingLevel: context.thinkingLevel,
@@ -327,13 +327,13 @@ const generatePublicationCopy = (
         ),
       )
 
-    let copy = parseAndNormalize(first.assistantText, context.githubIssueNumber)
+    let copy = parseAndNormalize(first.assistantText, context.issueNumber)
     if (copy === null) {
       const correction = yield* agentBackend
         .continueTurn({
           sessionId,
           prompt: buildPublicationCopyFormatCorrectionPrompt(
-            context.githubIssueNumber,
+            context.issueNumber,
           ),
           cwd: worktreePath,
           model: context.model,
@@ -351,10 +351,7 @@ const generatePublicationCopy = (
               }),
           ),
         )
-      copy = parseAndNormalize(
-        correction.assistantText,
-        context.githubIssueNumber,
-      )
+      copy = parseAndNormalize(correction.assistantText, context.issueNumber)
     }
 
     if (copy === null) {
@@ -381,7 +378,7 @@ const resolvePublicationCopy = (
       const message = yield* readHeadCommitMessage(worktreePath)
       const seeded = publicationCopyFromCommitMessage(
         message,
-        context.githubIssueNumber,
+        context.issueNumber,
       )
       if (seeded !== null) {
         const existingTitle = context.publicationTitle?.trim() ?? ""
@@ -399,7 +396,7 @@ const resolvePublicationCopy = (
     if (existingTitle !== "" && existingBody !== "") {
       const normalized = normalizePublicationCopy(
         { title: existingTitle, body: existingBody },
-        context.githubIssueNumber,
+        context.issueNumber,
       )
       // Already-persisted copy is trusted even if slightly over bounds after deploy;
       // re-normalize when possible, otherwise reuse as stored.
@@ -440,7 +437,7 @@ const alignCopyWithHeadCommit = (
     const actualMessage = yield* readHeadCommitMessage(worktreePath)
     const fromCommit = publicationCopyFromCommitMessage(
       actualMessage,
-      context.githubIssueNumber,
+      context.issueNumber,
     )
     if (fromCommit === null) {
       return preferred
@@ -563,7 +560,7 @@ const askAgentToRepairCommit = (
       .continueTurn({
         sessionId,
         prompt: buildCommitFallbackPromptWithCopy({
-          githubIssueNumber: context.githubIssueNumber,
+          issueNumber: context.issueNumber,
           title: copy.title,
           body: copy.body,
           diagnostics,

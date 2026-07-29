@@ -35,7 +35,7 @@ export class ReconciliationMutationError extends Schema.TaggedErrorClass<Reconci
   {
     repositoryId: Schema.String,
     operation: ReconciliationMutation,
-    githubIssueNumber: Schema.optionalKey(
+    issueNumber: Schema.optionalKey(
       Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0))),
     ),
     progress: ReconciliationSummary,
@@ -70,14 +70,14 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
   local.issueAuthor === remote.author &&
   local.hasChildren === remote.hasChildren &&
   local.parentPosition === remote.parentPosition &&
-  local.parent?.githubIssueNumber === remote.parent?.number &&
-  local.parent?.githubIssueUrl === remote.parent?.url &&
+  local.parent?.issueNumber === remote.parent?.number &&
+  local.parent?.issueUrl === remote.parent?.url &&
   local.blockedBy.length === remote.blockedBy.length &&
   local.blockedBy.every((dependency) =>
     remote.blockedBy.some(
       (remoteDependency) =>
-        dependency.githubIssueNumber === remoteDependency.number &&
-        dependency.githubIssueUrl === remoteDependency.url,
+        dependency.issueNumber === remoteDependency.number &&
+        dependency.issueUrl === remoteDependency.url,
     ),
   )
 
@@ -134,6 +134,11 @@ export const IssueReconcilerLive = Layer.effect(
     const reconcile = Effect.fn("IssueReconciler.reconcile")(function* (
       repository: RepositoryRecord,
     ) {
+      const githubRepository = {
+        forge: repository.forge,
+        forgeHost: repository.forgeHost,
+        projectPath: repository.projectPath,
+      }
       const localIssues = yield* db.listIssues(repository.id)
       const workItemPullRequests = yield* db.listWorkItemPullRequests(
         repository.id,
@@ -142,30 +147,23 @@ export const IssueReconcilerLive = Layer.effect(
         ? ({ includeAll: true } as const)
         : ({
             includeAll: false,
-            operatorLogin: yield* github.getAuthenticatedUserLogin({
-              owner: repository.githubOwner,
-              name: repository.githubRepo,
-            }),
+            operatorLogin:
+              yield* github.getAuthenticatedUserLogin(githubRepository),
           } as const)
-      const remoteIssues = yield* github.listReadyIssues({
-        owner: repository.githubOwner,
-        name: repository.githubRepo,
-      })
-      const repositoryName =
-        `${repository.githubOwner}/${repository.githubRepo}`.toLowerCase()
+      const remoteIssues = yield* github.listReadyIssues(githubRepository)
+      const repositoryName = repository.projectPath.toLowerCase()
 
       const localByNumber = new Map(
-        localIssues.map((issue) => [issue.githubIssueNumber, issue]),
+        localIssues.map((issue) => [issue.issueNumber, issue]),
       )
       const workItemPullRequestsByIssue = new Map<number, Set<number>>()
       for (const workItemPullRequest of workItemPullRequests) {
         const numbers =
-          workItemPullRequestsByIssue.get(
-            workItemPullRequest.githubIssueNumber,
-          ) ?? new Set<number>()
-        numbers.add(workItemPullRequest.githubPullRequestNumber)
+          workItemPullRequestsByIssue.get(workItemPullRequest.issueNumber) ??
+          new Set<number>()
+        numbers.add(workItemPullRequest.pullRequestNumber)
         workItemPullRequestsByIssue.set(
-          workItemPullRequest.githubIssueNumber,
+          workItemPullRequest.issueNumber,
           numbers,
         )
       }
@@ -196,8 +194,8 @@ export const IssueReconcilerLive = Layer.effect(
         .filter((entry) => entry !== undefined)
         .sort((left, right) => left.issue.number - right.issue.number)
       const deletions = localIssues
-        .filter((issue) => !remoteByNumber.has(issue.githubIssueNumber))
-        .sort((left, right) => left.githubIssueNumber - right.githubIssueNumber)
+        .filter((issue) => !remoteByNumber.has(issue.issueNumber))
+        .sort((left, right) => left.issueNumber - right.issueNumber)
 
       const progress = {
         fetched: remoteIssues.length,
@@ -210,12 +208,12 @@ export const IssueReconcilerLive = Layer.effect(
       const mutationError = (
         operation: ReconciliationMutation,
         cause: unknown,
-        githubIssueNumber?: number,
+        issueNumber?: number,
       ) =>
         new ReconciliationMutationError({
           repositoryId: repository.id,
           operation,
-          ...(githubIssueNumber === undefined ? {} : { githubIssueNumber }),
+          ...(issueNumber === undefined ? {} : { issueNumber }),
           progress: { ...progress },
           cause,
         })
@@ -224,7 +222,7 @@ export const IssueReconcilerLive = Layer.effect(
         yield* db
           .storeIssue({
             repositoryId: repository.id,
-            githubIssueNumber: issue.number,
+            issueNumber: issue.number,
             title: issue.title,
             body: issue.body,
             url: issue.url,
@@ -237,12 +235,12 @@ export const IssueReconcilerLive = Layer.effect(
               issue.parent === null
                 ? null
                 : {
-                    githubIssueNumber: issue.parent.number,
-                    githubIssueUrl: issue.parent.url,
+                    issueNumber: issue.parent.number,
+                    issueUrl: issue.parent.url,
                   },
             blockedBy: issue.blockedBy.map((dependency) => ({
-              githubIssueNumber: dependency.number,
-              githubIssueUrl: dependency.url,
+              issueNumber: dependency.number,
+              issueUrl: dependency.url,
             })),
           })
           .pipe(
@@ -259,10 +257,10 @@ export const IssueReconcilerLive = Layer.effect(
 
       for (const issue of deletions) {
         yield* db
-          .deleteIssue(repository.id, issue.githubIssueNumber)
+          .deleteIssue(repository.id, issue.issueNumber)
           .pipe(
             Effect.mapError((cause) =>
-              mutationError("delete", cause, issue.githubIssueNumber),
+              mutationError("delete", cause, issue.issueNumber),
             ),
           )
         progress.deleted += 1

@@ -40,6 +40,7 @@ import type {
   GitHubIssueState,
   GitHubPullRequestLifecycleState,
   GitHubPullRequestReference,
+  GitHubRepository,
   MergePullRequestResult,
   PrStatusCheckDiagnostic,
   PrStatusCheckDiagnosticSource,
@@ -52,6 +53,14 @@ import type {
 
 const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 const GITHUB_API_URL = "https://api.github.com"
+
+class GitHubApiRepositoryUnavailableError extends Schema.TaggedErrorClass<GitHubApiRepositoryUnavailableError>()(
+  "GitHubApiRepositoryUnavailableError",
+  {
+    owner: Schema.String,
+    name: Schema.String,
+  },
+) {}
 const READY_FOR_AGENT_LABEL = "ready-for-agent"
 const PAGE_SIZE = 100
 const REQUEST_TIMEOUT = "30 seconds"
@@ -850,7 +859,7 @@ const findOpenPullRequestDetailsImpl = (
   headRefName: string,
 ): Effect.Effect<
   OpenPullRequestDetails | null,
-  GitHubRepositoryUnavailableError | GitHubRequestError
+  GitHubApiRepositoryUnavailableError | GitHubRequestError
 > =>
   Effect.gen(function* () {
     const result = yield* githubQuery(
@@ -880,7 +889,7 @@ const findOpenPullRequestDetailsImpl = (
         ),
     )
     if (result.repository === null) {
-      return yield* new GitHubRepositoryUnavailableError(repository)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
     }
     const node = result.repository.pullRequests.nodes?.[0]
     if (node === null || node === undefined) {
@@ -911,7 +920,7 @@ const findOpenPullRequestNumberImpl = (
   headRefName: string,
 ): Effect.Effect<
   number | null,
-  GitHubRepositoryUnavailableError | GitHubRequestError
+  GitHubApiRepositoryUnavailableError | GitHubRequestError
 > =>
   Effect.gen(function* () {
     // Number-only query: do not require GraphQL id (update paths use details).
@@ -936,7 +945,7 @@ const findOpenPullRequestNumberImpl = (
         ),
     )
     if (result.repository === null) {
-      return yield* new GitHubRepositoryUnavailableError(repository)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
     }
     const number = result.repository.pullRequests.nodes?.[0]?.number
     if (!Number.isSafeInteger(number) || Number(number) <= 0) {
@@ -945,13 +954,37 @@ const findOpenPullRequestNumberImpl = (
     return Number(number)
   })
 
-export const makeGitHubService = (
+type GitHubApiRepository = {
+  readonly owner: string
+  readonly name: string
+}
+
+type GitHubApiServiceShape = {
+  [K in keyof GitHubServiceShape]: GitHubServiceShape[K] extends (
+    repository: GitHubRepository,
+    ...args: infer Args
+  ) => infer Result
+    ? Result extends Effect.Effect<infer A, infer E, infer R>
+      ? (
+          repository: GitHubApiRepository,
+          ...args: Args
+        ) => Effect.Effect<
+          A,
+          | Exclude<E, GitHubRepositoryUnavailableError>
+          | GitHubApiRepositoryUnavailableError,
+          R
+        >
+      : never
+    : never
+}
+
+const makeGitHubApiService = (
   client: GitHubGraphqlClient,
   listTerminalChecksForCommit?: ListTerminalChecksForCommit,
   loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
   rerunWorkflowRunImpl?: RerunWorkflowRun,
   observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
-): GitHubServiceShape => ({
+): GitHubApiServiceShape => ({
   getAuthenticatedUserLogin: Effect.fn(
     "GitHubService.getAuthenticatedUserLogin",
   )(function* (_repository) {
@@ -1020,7 +1053,7 @@ export const makeGitHubService = (
         ),
     )
     if (result.repository === null) {
-      return yield* new GitHubRepositoryUnavailableError(repository)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
     }
     const pullRequest = (result.repository.pullRequests.nodes?.[0] ??
       null) as GitHubApiPullRequest | null
@@ -1143,7 +1176,7 @@ export const makeGitHubService = (
         ),
     )
     if (result.repository === null) {
-      return yield* new GitHubRepositoryUnavailableError(repository)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
     }
     const pullRequest = result.repository.pullRequests.nodes?.[0]
     if (pullRequest === null || pullRequest === undefined) {
@@ -1201,7 +1234,7 @@ export const makeGitHubService = (
           ),
       )
       if (repositoryMeta.repository === null) {
-        return yield* new GitHubRepositoryUnavailableError(repository)
+        return yield* new GitHubApiRepositoryUnavailableError(repository)
       }
       const repositoryId = repositoryMeta.repository.id
       if (typeof repositoryId !== "string" || repositoryId.trim() === "") {
@@ -1342,7 +1375,7 @@ export const makeGitHubService = (
           ),
       )
       if (page.repository === null) {
-        return yield* new GitHubRepositoryUnavailableError(repository)
+        return yield* new GitHubApiRepositoryUnavailableError(repository)
       }
       const nodes = page.repository.pullRequests.nodes ?? []
       for (const node of nodes) {
@@ -1393,7 +1426,7 @@ export const makeGitHubService = (
         ),
     )
     if (result.repository === null) {
-      return yield* new GitHubRepositoryUnavailableError(repository)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
     }
     const pullRequest = result.repository.pullRequests.nodes?.[0]
     if (pullRequest === null || pullRequest === undefined) {
@@ -1498,7 +1531,7 @@ export const makeGitHubService = (
         )
       const result = yield* loadPullRequest()
       if (result.repository === null) {
-        return yield* new GitHubRepositoryUnavailableError(repository)
+        return yield* new GitHubApiRepositoryUnavailableError(repository)
       }
       const pullRequest = result.repository.pullRequests.nodes?.[0]
       if (pullRequest === null || pullRequest === undefined) {
@@ -1623,7 +1656,7 @@ export const makeGitHubService = (
         }
         const refreshed = yield* loadPullRequest()
         if (refreshed.repository === null) {
-          return yield* new GitHubRepositoryUnavailableError(repository)
+          return yield* new GitHubApiRepositoryUnavailableError(repository)
         }
         mergedPullRequest = refreshed.repository.pullRequests.nodes?.[0]
       } else {
@@ -1780,7 +1813,7 @@ export const makeGitHubService = (
         ),
     )
     if (issueResult.repository === null) {
-      return yield* new GitHubRepositoryUnavailableError(repository)
+      return yield* new GitHubApiRepositoryUnavailableError(repository)
     }
     const issue = issueResult.repository.issue
     if (issue === null || issue === undefined) {
@@ -1831,7 +1864,7 @@ export const makeGitHubService = (
           ),
       )
       if (commentsResult.repository === null) {
-        return yield* new GitHubRepositoryUnavailableError(repository)
+        return yield* new GitHubApiRepositoryUnavailableError(repository)
       }
       const commentsIssue = commentsResult.repository.issue
       if (commentsIssue === null || commentsIssue === undefined) {
@@ -2027,7 +2060,7 @@ export const makeGitHubService = (
         )
 
         if (result.repository === null) {
-          return yield* new GitHubRepositoryUnavailableError(repository)
+          return yield* new GitHubApiRepositoryUnavailableError(repository)
         }
 
         const issueNodes = (result.repository.issues.nodes ??
@@ -2098,7 +2131,7 @@ export const makeGitHubService = (
                 ),
             )
             if (dependencyResult.repository === null) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* new GitHubApiRepositoryUnavailableError(repository)
             }
             if (dependencyResult.repository.issue === null) {
               return yield* new GitHubRequestError({
@@ -2158,7 +2191,7 @@ export const makeGitHubService = (
                 ),
             )
             if (pullRequestResult.repository === null) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* new GitHubApiRepositoryUnavailableError(repository)
             }
             if (pullRequestResult.repository.issue === null) {
               return yield* new GitHubRequestError({
@@ -2217,7 +2250,7 @@ export const makeGitHubService = (
                 ),
             )
             if (subIssueResult.repository === null) {
-              return yield* new GitHubRepositoryUnavailableError(repository)
+              return yield* new GitHubApiRepositoryUnavailableError(repository)
             }
             if (subIssueResult.repository.issue === null) {
               hasUnsupportedDescendants = true
@@ -2351,6 +2384,89 @@ export const makeGitHubService = (
     },
   ),
 })
+
+const toGitHubApiRepository = (
+  repository: GitHubRepository,
+): GitHubApiRepository => {
+  const separator = repository.projectPath.indexOf("/")
+  if (separator <= 0 || separator === repository.projectPath.length - 1) {
+    return { owner: repository.projectPath, name: "" }
+  }
+  return {
+    owner: repository.projectPath.slice(0, separator),
+    name: repository.projectPath.slice(separator + 1),
+  }
+}
+
+const adaptRepository =
+  <Args extends readonly unknown[], A, E, R>(
+    method: (
+      repository: GitHubApiRepository,
+      ...args: Args
+    ) => Effect.Effect<A, E | GitHubApiRepositoryUnavailableError, R>,
+  ) =>
+  (
+    repository: GitHubRepository,
+    ...args: Args
+  ): Effect.Effect<A, E | GitHubRepositoryUnavailableError, R> =>
+    method(toGitHubApiRepository(repository), ...args).pipe(
+      Effect.catchTag("GitHubApiRepositoryUnavailableError", () =>
+        Effect.fail(new GitHubRepositoryUnavailableError(repository)),
+      ),
+    )
+
+export const makeGitHubService = (
+  client: GitHubGraphqlClient,
+  listTerminalChecksForCommit?: ListTerminalChecksForCommit,
+  loadPrStatusCheckDiagnostics?: LoadPrStatusCheckDiagnostics,
+  rerunWorkflowRunImpl?: RerunWorkflowRun,
+  observeAutomatedReviewEvidenceImpl?: ObserveAutomatedReviewEvidence,
+): GitHubServiceShape => {
+  const service = makeGitHubApiService(
+    client,
+    listTerminalChecksForCommit,
+    loadPrStatusCheckDiagnostics,
+    rerunWorkflowRunImpl,
+    observeAutomatedReviewEvidenceImpl,
+  )
+  return {
+    getAuthenticatedUserLogin: adaptRepository(
+      service.getAuthenticatedUserLogin,
+    ),
+    listReadyIssues: adaptRepository(service.listReadyIssues),
+    getPullRequestCheckStatus: adaptRepository(
+      service.getPullRequestCheckStatus,
+    ),
+    getPrStatusCheckDiagnostics: adaptRepository(
+      service.getPrStatusCheckDiagnostics,
+    ),
+    observeAutomatedReviewEvidence: adaptRepository(
+      service.observeAutomatedReviewEvidence,
+    ),
+    getPullRequestLifecycleStatus: adaptRepository(
+      service.getPullRequestLifecycleStatus,
+    ),
+    getOpenPullRequestNumber: adaptRepository(service.getOpenPullRequestNumber),
+    findOpenPullRequestNumber: adaptRepository(
+      service.findOpenPullRequestNumber,
+    ),
+    countOpenNonDraftPullRequests: adaptRepository(
+      service.countOpenNonDraftPullRequests,
+    ),
+    createDraftPullRequest: adaptRepository(service.createDraftPullRequest),
+    updateOpenDraftPullRequestCopy: adaptRepository(
+      service.updateOpenDraftPullRequestCopy,
+    ),
+    markPullRequestReadyForReview: adaptRepository(
+      service.markPullRequestReadyForReview,
+    ),
+    mergePullRequest: adaptRepository(service.mergePullRequest),
+    rerunWorkflowRun: adaptRepository(service.rerunWorkflowRun),
+    ensureIssueCompletedWithSummary: adaptRepository(
+      service.ensureIssueCompletedWithSummary,
+    ),
+  }
+}
 
 const githubRestHeaders = (token: string) =>
   ({

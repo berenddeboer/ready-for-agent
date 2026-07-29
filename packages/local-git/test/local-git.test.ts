@@ -54,8 +54,9 @@ describe("LocalGit.inspect", () => {
     ).toBe(0)
 
     const inspected = await runInspect(repoDir)
-    expect(inspected.githubOwner).toBe("acme")
-    expect(inspected.githubRepo).toBe("widgets")
+    expect(inspected.forge).toBe("github")
+    expect(inspected.forgeHost).toBe("github.com")
+    expect(inspected.projectPath).toBe("acme/widgets")
     expect(inspected.isBare).toBe(false)
     expect(inspected.paused).toBe(true)
     expect(inspected.localPath).toContain("repo")

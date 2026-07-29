@@ -80,14 +80,14 @@ const successfulSteps: LifecycleStepsShape = {
 const storeOpenLeafIssue = (
   db: Pick<DbServiceShape, "storeIssue">,
   repositoryId: string,
-  githubIssueNumber: number,
+  issueNumber: number,
 ) =>
   db.storeIssue({
     repositoryId,
-    githubIssueNumber,
-    title: `Issue ${githubIssueNumber}`,
+    issueNumber,
+    title: `Issue ${issueNumber}`,
     body: "body",
-    url: `https://github.com/acme/widgets/issues/${githubIssueNumber}`,
+    url: `https://github.com/acme/widgets/issues/${issueNumber}`,
     state: "OPEN",
     githubCreatedAt: new Date(),
     issueAuthor: null,
@@ -134,8 +134,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets.git",
           isBare: true,
         })
@@ -157,8 +158,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-override.git",
           isBare: true,
         })
@@ -210,8 +212,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-route.git",
           isBare: true,
         })
@@ -279,8 +282,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const sql = yield* SqlClient.SqlClient
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-corrupt-capture.git",
           isBare: true,
         })
@@ -424,8 +428,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
       Effect.gen(function* () {
         const db = yield* DbService
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-models.git",
           isBare: true,
         })
@@ -495,8 +500,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-healthy-override.git",
           isBare: true,
         })
@@ -548,8 +554,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-unavailable.git",
           isBare: true,
         })
@@ -596,8 +603,9 @@ describe("Captured Agent Backend (create + route + models)", () => {
         const db = yield* DbService
         const lifecycle = yield* WorkItemLifecycle
         const repo = yield* db.addRepository({
-          githubOwner: "acme",
-          githubRepo: "widgets",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
           localPath: "/repos/acme/widgets-no-model.git",
           isBare: true,
         })

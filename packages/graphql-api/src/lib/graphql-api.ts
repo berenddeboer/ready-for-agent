@@ -20,7 +20,11 @@ import {
   listBuiltInAgentBackends,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
-import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
+import {
+  DbService,
+  InvalidRepositoryInputError,
+  RepositoryNotFoundError,
+} from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import { typeDefs } from "@ready-for-agent/graphql-schema"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -66,8 +70,9 @@ import {
 
 type AddRepositoryArgs = {
   input: {
-    githubOwner: string
-    githubRepo: string
+    forge: "github" | "gitlab"
+    forgeHost: string
+    projectPath: string
     localPath: string
     isBare: boolean
   }
@@ -125,7 +130,7 @@ type IssuesArgs = {
 }
 
 type WorkItemsArgs = IssuesArgs & {
-  githubIssueNumber?: number
+  issueNumber?: number
   listKind?: "WORKING" | "FAILED" | "COMPLETED"
   limit?: number
 }
@@ -240,7 +245,7 @@ const toWorkItemsListKind = (
 }
 
 type ImplementNowArgs = IssuesArgs & {
-  githubIssueNumber: number
+  issueNumber: number
 }
 
 type WorkItemArgs = {
@@ -369,7 +374,7 @@ export const createGraphqlApi = (
                       keymaxxer.findSecrets(
                         repositories.map((repository) => ({
                           provider: "github",
-                          account: `${repository.githubOwner}/${repository.githubRepo}`,
+                          account: repository.projectPath,
                         })),
                       ),
                       keymaxxerMetadataTimeout,
@@ -486,10 +491,10 @@ export const createGraphqlApi = (
                 const lifecycle = yield* WorkItemLifecycle
                 const listKind = toWorkItemsListKind(args.listKind)
                 const limit = args.limit
-                if (args.githubIssueNumber !== undefined) {
+                if (args.issueNumber !== undefined) {
                   const workItems = yield* lifecycle.listWorkItemsForIssue(
                     args.repositoryId,
-                    args.githubIssueNumber,
+                    args.issueNumber,
                   )
                   return filterWorkItemsByListKind(workItems, listKind, limit)
                 }
@@ -499,13 +504,13 @@ export const createGraphqlApi = (
                   db.listIssues(args.repositoryId),
                 ])
                 const relevantIssueNumbers = new Set(
-                  issues.map((issue) => issue.githubIssueNumber),
+                  issues.map((issue) => issue.issueNumber),
                 )
                 const visible = workItems.filter(
                   (workItem) =>
                     isJobsCompletedWorkItemState(workItem.state) ||
                     isJobsWorkingWorkItem(workItem) ||
-                    relevantIssueNumbers.has(workItem.githubIssueNumber),
+                    relevantIssueNumbers.has(workItem.issueNumber),
                 )
                 return filterWorkItemsByListKind(visible, listKind, limit)
               }).pipe(Effect.withSpan("graphql-api.workItems")),
@@ -593,8 +598,9 @@ export const createGraphqlApi = (
               ),
             ),
           pullRequestCount: async (repository: {
-            githubOwner: string
-            githubRepo: string
+            forge: string
+            forgeHost: string
+            projectPath: string
           }) =>
             runGraphql(
               Effect.gen(function* () {
@@ -604,8 +610,9 @@ export const createGraphqlApi = (
                 // repository list still renders.
                 return yield* github
                   .countOpenNonDraftPullRequests({
-                    owner: repository.githubOwner,
-                    name: repository.githubRepo,
+                    forge: repository.forge,
+                    forgeHost: repository.forgeHost,
+                    projectPath: repository.projectPath,
                   })
                   .pipe(
                     Effect.catchTags({
@@ -642,14 +649,12 @@ export const createGraphqlApi = (
                 const db = yield* DbService
                 const issues = yield* db.listIssues(workItem.repositoryId)
                 const issue = issues.find(
-                  (candidate) =>
-                    candidate.githubIssueNumber === workItem.githubIssueNumber,
+                  (candidate) => candidate.issueNumber === workItem.issueNumber,
                 )
                 return workItemStatusMessage(workItem, {
                   blockerIssueNumbers:
-                    issue?.blockedBy.map(
-                      (blocker) => blocker.githubIssueNumber,
-                    ) ?? [],
+                    issue?.blockedBy.map((blocker) => blocker.issueNumber) ??
+                    [],
                 })
               }).pipe(Effect.withSpan("graphql-api.WorkItem.statusMessage")),
             )
@@ -917,6 +922,12 @@ export const createGraphqlApi = (
           addRepository: async (_parent: unknown, args: AddRepositoryArgs) =>
             runGraphql(
               Effect.gen(function* () {
+                if (args.input.forge !== "github") {
+                  return yield* new InvalidRepositoryInputError({
+                    field: "forge",
+                    message: `Adding ${args.input.forge} repositories is not supported`,
+                  })
+                }
                 const db = yield* DbService
                 const added = yield* db.addRepository(args.input)
                 yield* activatePollingIfCredentialed(added, {
@@ -953,8 +964,9 @@ export const createGraphqlApi = (
                 const db = yield* DbService
                 const inspected = yield* localGit.inspect(path)
                 const added = yield* db.addRepository({
-                  githubOwner: inspected.githubOwner,
-                  githubRepo: inspected.githubRepo,
+                  forge: inspected.forge,
+                  forgeHost: inspected.forgeHost,
+                  projectPath: inspected.projectPath,
                   localPath: inspected.localPath,
                   isBare: inspected.isBare,
                 })
@@ -1001,7 +1013,7 @@ export const createGraphqlApi = (
                     }
 
                     const keymaxxer = yield* KeymaxxerService
-                    const account = `${repository.githubOwner}/${repository.githubRepo}`
+                    const account = repository.projectPath
                     const existingToken = yield* withKeymaxxerMetadataTimeout(
                       keymaxxer.findSecret({
                         provider: "github",
@@ -1138,7 +1150,7 @@ export const createGraphqlApi = (
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementNow(
                   args.repositoryId,
-                  args.githubIssueNumber,
+                  args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementNow")),
             ),
@@ -1148,7 +1160,7 @@ export const createGraphqlApi = (
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementLocally(
                   args.repositoryId,
-                  args.githubIssueNumber,
+                  args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementLocally")),
             ),
@@ -1161,7 +1173,7 @@ export const createGraphqlApi = (
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.implementAllWithAutoMerge(
                   args.repositoryId,
-                  args.githubIssueNumber,
+                  args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.implementAllWithAutoMerge")),
             ),
@@ -1171,7 +1183,7 @@ export const createGraphqlApi = (
                 const lifecycle = yield* WorkItemLifecycle
                 return yield* lifecycle.queue(
                   args.repositoryId,
-                  args.githubIssueNumber,
+                  args.issueNumber,
                 )
               }).pipe(Effect.withSpan("graphql-api.queue")),
             ),

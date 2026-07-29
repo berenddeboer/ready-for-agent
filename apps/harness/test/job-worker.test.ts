@@ -71,8 +71,9 @@ const repository = makeRepositoryRecord({
 
 const otherRepository = makeRepositoryRecord({
   id: "repo-01J00000000000000000000001",
-  githubOwner: "acme",
-  githubRepo: "gadgets",
+  forge: "github",
+  forgeHost: "github.com",
+  projectPath: "acme/gadgets",
   localPath: "/repos/acme/gadgets.git",
   paused: true,
 })
@@ -114,8 +115,8 @@ const dbLayer = (
 
 const keymaxxerLayer = (
   credentialedAccounts: ReadonlySet<string> = new Set([
-    `${repository.githubOwner}/${repository.githubRepo}`,
-    `${otherRepository.githubOwner}/${otherRepository.githubRepo}`,
+    `${repository.projectPath}`,
+    `${otherRepository.projectPath}`,
   ]),
 ) =>
   Layer.succeed(KeymaxxerService, {
@@ -467,8 +468,9 @@ describe("Job worker", () => {
       Effect.gen(function* () {
         const db = yield* DbService
         const added = yield* db.addRepository({
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: true,
         })
@@ -483,9 +485,7 @@ describe("Job worker", () => {
         )
         expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
         const issues = yield* db.listIssues(added.id)
-        expect(
-          issues.map(({ githubIssueNumber }) => githubIssueNumber),
-        ).toEqual([57])
+        expect(issues.map(({ issueNumber }) => issueNumber)).toEqual([57])
       }),
       layer,
     )
@@ -656,8 +656,9 @@ describe("Job worker", () => {
         Effect.gen(function* () {
           const db = yield* DbService
           return yield* db.addRepository({
-            githubOwner: repository.githubOwner,
-            githubRepo: repository.githubRepo,
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
             localPath: repository.localPath,
             isBare: true,
           })
@@ -1488,8 +1489,9 @@ describe("Job worker", () => {
         const db = yield* DbService
         const service = yield* QueueService
         const added = yield* db.addRepository({
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: true,
         })
@@ -1676,8 +1678,9 @@ describe("Job worker", () => {
         const service = yield* QueueService
         // Ensure auto-heal must consult Keymaxxer (and therefore blocks).
         yield* db.addRepository({
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: true,
         })
@@ -1802,14 +1805,16 @@ describe("Job worker", () => {
         const db = yield* DbService
         const service = yield* QueueService
         const credentialed = yield* db.addRepository({
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: true,
         })
         const uncredentialed = yield* db.addRepository({
-          githubOwner: "other",
-          githubRepo: "uncredentialed",
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "other/uncredentialed",
           localPath: "/repos/other/uncredentialed.git",
           isBare: true,
         })
@@ -1850,8 +1855,9 @@ describe("Job worker", () => {
         )
 
         const missing = yield* db.addRepository({
-          githubOwner: otherRepository.githubOwner,
-          githubRepo: otherRepository.githubRepo,
+          forge: otherRepository.forge,
+          forgeHost: otherRepository.forgeHost,
+          projectPath: otherRepository.projectPath,
           localPath: otherRepository.localPath,
           isBare: true,
         })
@@ -1909,8 +1915,8 @@ describe("Job worker", () => {
             reconciler,
             keymaxxerLayer(
               new Set([
-                `${repository.githubOwner}/${repository.githubRepo}`,
-                `${otherRepository.githubOwner}/${otherRepository.githubRepo}`,
+                `${repository.projectPath}`,
+                `${otherRepository.projectPath}`,
               ]),
             ),
             lifecycle,
@@ -1939,7 +1945,7 @@ describe("Job worker", () => {
             )
           }
           return provider === "github" &&
-            account === `${repository.githubOwner}/${repository.githubRepo}`
+            account === `${repository.projectPath}`
             ? `GITHUB_TOKEN`
             : null
         }),
@@ -1994,8 +2000,9 @@ describe("Job worker", () => {
         const db = yield* DbService
         const service = yield* QueueService
         const added = yield* db.addRepository({
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: true,
         })
@@ -2108,8 +2115,9 @@ describe("Job worker", () => {
         const db = yield* DbService
         const service = yield* QueueService
         const added = yield* db.addRepository({
-          githubOwner: repository.githubOwner,
-          githubRepo: repository.githubRepo,
+          forge: repository.forge,
+          forgeHost: repository.forgeHost,
+          projectPath: repository.projectPath,
           localPath: repository.localPath,
           isBare: true,
         })

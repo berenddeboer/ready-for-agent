@@ -25,7 +25,7 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
     let advanced = 0
 
     for (const workItem of workItems) {
-      if (workItem.githubPullRequestNumber === null) {
+      if (workItem.pullRequestNumber === null) {
         continue
       }
       // Already past merge outcome handling.
@@ -46,20 +46,13 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         latest.status === "succeeded"
 
       const headRefName = workItemBranchName({
-        githubOwner: repository.githubOwner,
-        githubRepo: repository.githubRepo,
-        githubIssueNumber: workItem.githubIssueNumber,
+        projectPath: repository.projectPath,
+        issueNumber: workItem.issueNumber,
         workItemId: workItem.id,
       })
 
       const status = yield* github
-        .getPullRequestLifecycleStatus(
-          {
-            owner: repository.githubOwner,
-            name: repository.githubRepo,
-          },
-          headRefName,
-        )
+        .getPullRequestLifecycleStatus(repository, headRefName)
         .pipe(
           Effect.catch((error) =>
             Effect.logWarning(
