@@ -117,7 +117,8 @@ describe("Jobs Reset button wiring", () => {
   test("Jobs Completed tab still renders compact lifecycle status", () => {
     const source = homeSource()
     expect(source).toContain('listKind: "COMPLETED"')
-    expect(source).toContain("JOBS_COMPLETED_LIMIT")
+    expect(source).toContain("JOBS_COMPLETED_WINDOW_HOURS")
+    expect(source).not.toContain("JOBS_COMPLETED_LIMIT")
     const jobsCard = source.slice(
       source.indexOf("function JobsCard("),
       source.indexOf("function WorkItemPauseButton("),

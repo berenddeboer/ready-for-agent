@@ -8,6 +8,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import {
   jobsCardCollapseId,
   repositoryCardCollapseId,
@@ -412,6 +413,7 @@ export type WorkItem = {
   worktreePath: string | null
   completionSummary: string | null
   createdAt: string
+  stateReadyAt: string
   lifecycleLabels: readonly {
     phase: string
     label: string
@@ -441,6 +443,7 @@ const workItemFields = {
   worktreePath: true,
   completionSummary: true,
   createdAt: true,
+  stateReadyAt: true,
   lifecycleLabels: {
     phase: true,
     label: true,
@@ -456,9 +459,12 @@ type WorkItemsQueryOptions = {
   readonly limit?: number
 }
 
-/** Completed history window (successful finished outcomes). */
-export const JOBS_COMPLETED_LIMIT = 15
-/** Failed history window, independent of JOBS_COMPLETED_LIMIT. */
+/**
+ * Rolling window hours for Jobs Completed labels (same source as server filter).
+ * Filtering uses Work Item stateReadyAt within JOBS_COMPLETED_WINDOW_MS on the API.
+ */
+export const JOBS_COMPLETED_WINDOW_HOURS = jobsCompletedWindowHours
+/** Failed history window (fixed item cap; independent of Completed). */
 export const JOBS_FAILED_LIMIT = 15
 
 export const workItemsQuery = (
@@ -502,7 +508,6 @@ export const jobsFailedWorkItemsQuery = (repositoryId: string) =>
 export const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, {
     listKind: "COMPLETED",
-    limit: JOBS_COMPLETED_LIMIT,
   })
 
 const committedPullRequestsCountQuery = (from: string, to: string) => ({
@@ -3174,22 +3179,24 @@ function RepositoryIssueRow({
 
 type JobsTab = "working" | "failed" | "completed"
 
+const JOBS_COMPLETED_TAB_LABEL = `Completed last ${JOBS_COMPLETED_WINDOW_HOURS} h`
+
 const JOBS_TABS = [
   { id: "working", label: "Working" },
   { id: "failed", label: "Failed" },
-  { id: "completed", label: "Completed" },
+  { id: "completed", label: JOBS_COMPLETED_TAB_LABEL },
 ] as const satisfies readonly { id: JobsTab; label: string }[]
 
 const jobsTabEmptyMessage = (tab: JobsTab): string => {
   if (tab === "working") return "No working jobs."
   if (tab === "failed") return "No failed jobs."
-  return "No completed jobs."
+  return `No jobs completed in the last ${JOBS_COMPLETED_WINDOW_HOURS} h.`
 }
 
 const jobsTabListAriaLabel = (tab: JobsTab): string => {
   if (tab === "working") return "Working jobs"
   if (tab === "failed") return "Failed jobs"
-  return "Completed jobs"
+  return JOBS_COMPLETED_TAB_LABEL
 }
 
 export function SessionUsageDialog({
@@ -3476,15 +3483,21 @@ function JobsCard() {
     items
       .slice()
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  const sortCompletedNewestFirst = (items: readonly WorkItem[]) =>
+    items
+      .slice()
+      .sort((left, right) =>
+        right.stateReadyAt.localeCompare(left.stateReadyAt),
+      )
   const workingItems = sortNewestFirst(
     workingQueries.flatMap((query) => query.data ?? []),
   )
   const failedItems = sortNewestFirst(
     failedQueries.flatMap((query) => query.data ?? []),
   ).slice(0, JOBS_FAILED_LIMIT)
-  const completedItems = sortNewestFirst(
+  const completedItems = sortCompletedNewestFirst(
     completedQueries.flatMap((query) => query.data ?? []),
-  ).slice(0, JOBS_COMPLETED_LIMIT)
+  )
   const activeItems =
     selectedTab === "working"
       ? workingItems

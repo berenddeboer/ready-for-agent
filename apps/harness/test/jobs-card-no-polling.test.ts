@@ -33,26 +33,51 @@ describe("JobsCard live updates", () => {
     expect(jobsCard).toContain('role="tabpanel"')
     expect(source).toContain('label: "Working"')
     expect(source).toContain('label: "Failed"')
-    expect(source).toContain('label: "Completed"')
+    expect(source).toContain("JOBS_COMPLETED_TAB_LABEL")
+    expect(source).toContain(
+      "Completed last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h",
+    )
     expect(jobsCard).toContain('useState<JobsTab>("working")')
     expect(jobsCard).toContain("jobsWorkingWorkItemsQuery")
     expect(jobsCard).toContain("jobsFailedWorkItemsQuery")
     expect(jobsCard).toContain("jobsCompletedWorkItemsQuery")
     expect(source).toContain("No working jobs.")
     expect(source).toContain("No failed jobs.")
-    expect(source).toContain("No completed jobs.")
+    expect(source).toContain(
+      "No jobs completed in the last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h.",
+    )
     expect(source).toContain("Working jobs")
     expect(source).toContain("Failed jobs")
-    expect(source).toContain("Completed jobs")
+    expect(source).toContain("JOBS_COMPLETED_TAB_LABEL")
     expect(jobsCard).not.toContain('aria-label="All jobs"')
     expect(source).toContain('listKind: "WORKING"')
     expect(source).toContain('listKind: "FAILED"')
     expect(source).toContain('listKind: "COMPLETED"')
-    expect(source).toContain("JOBS_COMPLETED_LIMIT = 15")
+    expect(source).toContain("JOBS_COMPLETED_WINDOW_HOURS")
+    expect(source).toContain(
+      'from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"',
+    )
+    expect(source).toContain("jobsCompletedWindowHours")
+    // Client must not import the lifecycle barrel (pulls server deps into Vite).
+    expect(source).not.toMatch(
+      /from "@ready-for-agent\/work-item-lifecycle"(?!\/)/,
+    )
+    expect(source).not.toContain("JOBS_COMPLETED_LIMIT")
     expect(source).toContain("JOBS_FAILED_LIMIT = 15")
-    const workingTabIndex = source.indexOf('label: "Working"')
-    const failedTabIndex = source.indexOf('label: "Failed"')
-    const completedTabIndex = source.indexOf('label: "Completed"')
+    expect(source).not.toMatch(
+      /listKind:\s*"COMPLETED"[\s\S]{0,80}limit:\s*JOBS_COMPLETED/,
+    )
+    const jobsTabsBlock = source.slice(
+      source.indexOf("const JOBS_TABS = ["),
+      source.indexOf(
+        "] as const satisfies readonly { id: JobsTab; label: string }[]",
+      ),
+    )
+    const workingTabIndex = jobsTabsBlock.indexOf('label: "Working"')
+    const failedTabIndex = jobsTabsBlock.indexOf('label: "Failed"')
+    const completedTabIndex = jobsTabsBlock.indexOf(
+      "label: JOBS_COMPLETED_TAB_LABEL",
+    )
     expect(workingTabIndex).toBeGreaterThan(-1)
     expect(failedTabIndex).toBeGreaterThan(workingTabIndex)
     expect(completedTabIndex).toBeGreaterThan(failedTabIndex)

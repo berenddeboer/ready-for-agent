@@ -264,6 +264,7 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("bounds.twoWeeksAgoFrom")
     expect(dashboard).toContain("bounds.twoWeeksAgoTo")
     expect(dashboard).not.toContain("workItems")
+    expect(dashboard).not.toContain("JOBS_COMPLETED_WINDOW_HOURS")
     expect(dashboard).not.toContain("JOBS_COMPLETED_LIMIT")
   })
 

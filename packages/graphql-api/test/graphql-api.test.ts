@@ -4107,29 +4107,48 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("filters Completed Work Items newest-first with limit", async () => {
-    const baseTime = Date.parse("2026-01-01T00:00:00.000Z")
-    const completed = Array.from({ length: 18 }, (_, index) => ({
+  test("filters Completed Work Items to rolling last 24 hours without a fixed limit", async () => {
+    const nowMs = Date.now()
+    const hourMs = 60 * 60 * 1000
+    const completedRecent = Array.from({ length: 18 }, (_, index) => {
+      const readyAt = nowMs - index * 10 * 60 * 1000
+      return {
+        ...workItem,
+        id: makeWorkItemId(),
+        state: (index % 2 === 0 ? "complete" : "abandoned") as
+          | "complete"
+          | "abandoned",
+        createdAt: new Date(readyAt - hourMs),
+        updatedAt: new Date(readyAt),
+        stateReadyAt: new Date(readyAt),
+        stepRuns: [],
+      }
+    })
+    const completedTooOld = {
       ...workItem,
       id: makeWorkItemId(),
-      state: (index % 2 === 0 ? "complete" : "abandoned") as
-        | "complete"
-        | "abandoned",
-      createdAt: new Date(baseTime + index * 1000),
+      state: "complete" as const,
+      createdAt: new Date(nowMs - 48 * hourMs),
+      updatedAt: new Date(nowMs - 25 * hourMs),
+      stateReadyAt: new Date(nowMs - 25 * hourMs),
       stepRuns: [],
-    }))
+    }
     const needsHuman = {
       ...workItem,
       id: makeWorkItemId(),
       state: "needs_human" as const,
-      createdAt: new Date(baseTime + 50_000),
+      createdAt: new Date(nowMs - 1000),
+      updatedAt: new Date(nowMs - 1000),
+      stateReadyAt: new Date(nowMs - 1000),
       stepRuns: [],
     }
     const terminalFailed = {
       ...workItem,
       id: makeWorkItemId(),
       state: "failed" as const,
-      createdAt: new Date(baseTime + 40_000),
+      createdAt: new Date(nowMs - 2000),
+      updatedAt: new Date(nowMs - 2000),
+      stateReadyAt: new Date(nowMs - 2000),
       stepRuns: [],
     }
     await runtime.dispose()
@@ -4141,21 +4160,25 @@ describe("GraphQL API", () => {
       {},
       {
         listWorkItemsForRepository: () =>
-          Effect.succeed([...completed, needsHuman, terminalFailed]),
+          Effect.succeed([
+            ...completedRecent,
+            completedTooOld,
+            needsHuman,
+            terminalFailed,
+          ]),
       },
     )
 
     const response = await createGraphqlApi(runtime).fetch(
       graphqlRequest({
-        query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind, $limit: Int) {
-          workItems(repositoryId: $repositoryId, listKind: $listKind, limit: $limit) {
+        query: `query WorkItems($repositoryId: ID!, $listKind: WorkItemsListKind) {
+          workItems(repositoryId: $repositoryId, listKind: $listKind) {
             id state
           }
         }`,
         variables: {
           repositoryId: repository.id,
           listKind: "COMPLETED",
-          limit: 15,
         },
       }),
     )
@@ -4163,19 +4186,22 @@ describe("GraphQL API", () => {
     const body = (await response.json()) as {
       data: { workItems: readonly { id: string; state: string }[] }
     }
-    expect(body.data.workItems).toHaveLength(15)
+    expect(body.data.workItems).toHaveLength(18)
+    expect(body.data.workItems.map((item) => item.id)).not.toContain(
+      completedTooOld.id,
+    )
     expect(
       body.data.workItems.every(
         (item) => item.state !== "NEEDS_HUMAN" && item.state !== "FAILED",
       ),
     ).toBe(true)
     expect(body.data.workItems.map((item) => item.id)).toEqual(
-      completed
+      completedRecent
         .slice()
         .sort(
-          (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
+          (left, right) =>
+            right.stateReadyAt.getTime() - left.stateReadyAt.getTime(),
         )
-        .slice(0, 15)
         .map((item) => item.id),
     )
   })
@@ -4394,13 +4420,16 @@ describe("GraphQL API", () => {
   })
 
   test("keeps complete and abandoned Work Items in COMPLETED when Issue is absent", async () => {
+    const nowMs = Date.now()
     const completeOrphan = {
       ...workItem,
       id: makeWorkItemId(),
       issueNumber: 201,
       issueTitle: "Completed issue title",
       state: "complete" as const,
-      createdAt: new Date("2026-03-01T00:00:00.000Z"),
+      createdAt: new Date(nowMs - 3_600_000),
+      updatedAt: new Date(nowMs - 2_000_000),
+      stateReadyAt: new Date(nowMs - 2_000_000),
       stepRuns: [],
     }
     const abandonedOrphan = {
@@ -4409,7 +4438,9 @@ describe("GraphQL API", () => {
       issueNumber: 202,
       issueTitle: null,
       state: "abandoned" as const,
-      createdAt: new Date("2026-03-02T00:00:00.000Z"),
+      createdAt: new Date(nowMs - 1_800_000),
+      updatedAt: new Date(nowMs - 1_000_000),
+      stateReadyAt: new Date(nowMs - 1_000_000),
       stepRuns: [],
     }
     const failedOrphan = {
@@ -4417,7 +4448,9 @@ describe("GraphQL API", () => {
       id: makeWorkItemId(),
       issueNumber: 203,
       state: "failed" as const,
-      createdAt: new Date("2026-03-03T00:00:00.000Z"),
+      createdAt: new Date(nowMs - 500_000),
+      updatedAt: new Date(nowMs - 500_000),
+      stateReadyAt: new Date(nowMs - 500_000),
       stepRuns: [],
     }
     await runtime.dispose()

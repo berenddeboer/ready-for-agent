@@ -67,7 +67,8 @@ The Jobs area has four tabs:
 1. Pipeline is the default and renders the six lanes.
 2. Working retains the existing active-work list.
 3. Failed retains the existing failed-work list.
-4. Completed retains the existing completed-work list.
+4. Completed last 24 h shows every work item completed in the rolling previous
+   24 hours (no fixed item limit).
 
 The existing arrow-key tab behavior, selected-tab ARIA semantics, Jobs collapse
 control, retry/reset/start/pause actions, Session usage dialog, issue links,
