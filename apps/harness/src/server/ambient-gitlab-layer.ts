@@ -230,6 +230,70 @@ export const ambientGitLabLayer = (options: {
               ),
             ),
         ),
+        getOpenPullRequestNumber: Effect.fn(
+          "AmbientGitLab.getOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.getOpenPullRequestNumber(repository, headRefName),
+          ),
+        ),
+        findOpenPullRequestNumber: Effect.fn(
+          "AmbientGitLab.findOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.findOpenPullRequestNumber(repository, headRefName),
+          ),
+        ),
+        createDraftPullRequest: Effect.fn(
+          "AmbientGitLab.createDraftPullRequest",
+        )((repository, input) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.createDraftPullRequest(repository, input),
+          ),
+        ),
+        updateOpenDraftPullRequestCopy: Effect.fn(
+          "AmbientGitLab.updateOpenDraftPullRequestCopy",
+        )((repository, headRefName, input) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.updateOpenDraftPullRequestCopy(
+              repository,
+              headRefName,
+              input,
+            ),
+          ),
+        ),
+        countOpenNonDraftPullRequests: Effect.fn(
+          "AmbientGitLab.countOpenNonDraftPullRequests",
+        )((repository) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.countOpenNonDraftPullRequests(repository),
+          ),
+        ),
+        ensureIssueCompletedWithSummary: Effect.fn(
+          "AmbientGitLab.ensureIssueCompletedWithSummary",
+        )((repository, issueNumber, workItemId, summaryMarkdown) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.ensureIssueCompletedWithSummary(
+              repository,
+              issueNumber,
+              workItemId,
+              summaryMarkdown,
+            ),
+          ),
+        ),
+        closeOpenPullRequestsForBranch: Effect.fn(
+          "AmbientGitLab.closeOpenPullRequestsForBranch",
+        )((repository, headRefName) =>
+          authenticated(repository.forgeHost, (service) =>
+            service.closeOpenPullRequestsForBranch(repository, headRefName),
+          ),
+        ),
+        deleteBranch: Effect.fn("AmbientGitLab.deleteBranch")(
+          (repository, branchName) =>
+            authenticated(repository.forgeHost, (service) =>
+              service.deleteBranch(repository, branchName),
+            ),
+        ),
       }
     }),
   )

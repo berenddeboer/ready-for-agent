@@ -155,6 +155,14 @@ const defaultGitlabLayer = Layer.succeed(GitLabService, {
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
   hasAmbientCredentials: () => Effect.succeed(true),
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
 } satisfies GitLabServiceShape)
 
 const defaultGithubLayer = Layer.merge(

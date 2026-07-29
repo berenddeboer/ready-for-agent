@@ -3110,12 +3110,14 @@ function RepositoryIssueRow({
             issue.url !== ""
               ? issue.url
               : workItemIssueUrl(
+                  repository.forge,
                   repository.forgeHost,
                   repository.projectPath,
                   latestWorkItem.issueNumber,
                 )
           }
           pullRequestUrl={workItemPullRequestUrl(
+            repository.forge,
             repository.forgeHost,
             repository.projectPath,
             latestWorkItem.pullRequestNumber,
@@ -3580,6 +3582,7 @@ function JobsCard() {
                   : repository === undefined
                     ? null
                     : workItemIssueUrl(
+                        repository.forge,
                         repository.forgeHost,
                         repository.projectPath,
                         workItem.issueNumber,
@@ -3690,6 +3693,7 @@ function JobsCard() {
                       repository === undefined
                         ? null
                         : workItemPullRequestUrl(
+                            repository.forge,
                             repository.forgeHost,
                             repository.projectPath,
                             workItem.pullRequestNumber,

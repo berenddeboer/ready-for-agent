@@ -243,6 +243,7 @@ export const keymaxxerGitLabLayer = (options: {
         operation: GitLabHelperOperation,
         decode: (stdout: string) => Effect.Effect<A, GitLabServiceError>,
         operationLabel: string,
+        extraArgs: readonly string[] = [],
       ): Effect.Effect<A, GitLabServiceError> =>
         Effect.gen(function* () {
           const [forge, forgeHost, projectPath] =
@@ -251,6 +252,7 @@ export const keymaxxerGitLabLayer = (options: {
             forge,
             forgeHost,
             projectPath,
+            ...extraArgs,
           ])
           if (result.exitCode === 2) {
             return yield* repositoryUnavailable(repository)
@@ -371,6 +373,244 @@ export const keymaxxerGitLabLayer = (options: {
         hasAmbientCredentials: Effect.fn(
           "KeymaxxerGitLab.hasAmbientCredentials",
         )((repository) => ambient.hasAmbientCredentials(repository)),
+        getOpenPullRequestNumber: Effect.fn(
+          "KeymaxxerGitLab.getOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "get-open-pull-request-number",
+                (stdout) => {
+                  const number = Number(stdout.trim())
+                  if (!Number.isSafeInteger(number) || number <= 0) {
+                    return Effect.fail(
+                      requestError(
+                        repository,
+                        "decode open pull request number",
+                        stdout,
+                      ),
+                    )
+                  }
+                  return Effect.succeed(number)
+                },
+                "get open pull request number",
+                [encodeArgument(headRefName)],
+              ),
+            (ambientService) =>
+              ambientService.getOpenPullRequestNumber(repository, headRefName),
+          ),
+        ),
+        findOpenPullRequestNumber: Effect.fn(
+          "KeymaxxerGitLab.findOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "find-open-pull-request-number",
+                (stdout) => {
+                  const trimmed = stdout.trim()
+                  if (trimmed === "") return Effect.succeed(null)
+                  const number = Number(trimmed)
+                  if (!Number.isSafeInteger(number) || number <= 0) {
+                    return Effect.fail(
+                      requestError(
+                        repository,
+                        "decode open pull request number",
+                        stdout,
+                      ),
+                    )
+                  }
+                  return Effect.succeed(number)
+                },
+                "find open pull request number",
+                [encodeArgument(headRefName)],
+              ),
+            (ambientService) =>
+              ambientService.findOpenPullRequestNumber(repository, headRefName),
+          ),
+        ),
+        createDraftPullRequest: Effect.fn(
+          "KeymaxxerGitLab.createDraftPullRequest",
+        )((repository, input) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "create-draft-pull-request",
+                (stdout) => {
+                  const number = Number(stdout.trim())
+                  if (!Number.isSafeInteger(number) || number <= 0) {
+                    return Effect.fail(
+                      requestError(
+                        repository,
+                        "decode created draft pull request number",
+                        stdout,
+                      ),
+                    )
+                  }
+                  return Effect.succeed(number)
+                },
+                "create draft pull request",
+                [
+                  encodeArgument(
+                    JSON.stringify({
+                      headRefName: input.headRefName,
+                      title: input.title,
+                      body: input.body,
+                      ...(input.baseRefName === undefined
+                        ? {}
+                        : { baseRefName: input.baseRefName }),
+                    }),
+                  ),
+                ],
+              ),
+            (ambientService) =>
+              ambientService.createDraftPullRequest(repository, input),
+          ),
+        ),
+        updateOpenDraftPullRequestCopy: Effect.fn(
+          "KeymaxxerGitLab.updateOpenDraftPullRequestCopy",
+        )((repository, headRefName, input) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "update-open-draft-pull-request-copy",
+                (stdout) => {
+                  const trimmed = stdout.trim()
+                  if (trimmed === "") return Effect.succeed(null)
+                  const number = Number(trimmed)
+                  if (!Number.isSafeInteger(number) || number <= 0) {
+                    return Effect.fail(
+                      requestError(
+                        repository,
+                        "decode updated draft pull request number",
+                        stdout,
+                      ),
+                    )
+                  }
+                  return Effect.succeed(number)
+                },
+                "update open draft pull request copy",
+                [
+                  encodeArgument(headRefName),
+                  encodeArgument(
+                    JSON.stringify({ title: input.title, body: input.body }),
+                  ),
+                ],
+              ),
+            (ambientService) =>
+              ambientService.updateOpenDraftPullRequestCopy(
+                repository,
+                headRefName,
+                input,
+              ),
+          ),
+        ),
+        countOpenNonDraftPullRequests: Effect.fn(
+          "KeymaxxerGitLab.countOpenNonDraftPullRequests",
+        )((repository) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "count-open-non-draft-pull-requests",
+                (stdout) => {
+                  const count = Number(stdout.trim())
+                  if (!Number.isSafeInteger(count) || count < 0) {
+                    return Effect.fail(
+                      requestError(
+                        repository,
+                        "decode open non-draft pull request count",
+                        stdout,
+                      ),
+                    )
+                  }
+                  return Effect.succeed(count)
+                },
+                "count open non-draft pull requests",
+              ),
+            (ambientService) =>
+              ambientService.countOpenNonDraftPullRequests(repository),
+          ),
+        ),
+        ensureIssueCompletedWithSummary: Effect.fn(
+          "KeymaxxerGitLab.ensureIssueCompletedWithSummary",
+        )((repository, issueNumber, workItemId, summaryMarkdown) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "ensure-issue-completed-with-summary",
+                () => Effect.void,
+                "ensure issue completed with summary",
+                [
+                  encodeArgument(String(issueNumber)),
+                  encodeArgument(workItemId),
+                  encodeArgument(summaryMarkdown),
+                ],
+              ),
+            (ambientService) =>
+              ambientService.ensureIssueCompletedWithSummary(
+                repository,
+                issueNumber,
+                workItemId,
+                summaryMarkdown,
+              ),
+          ),
+        ),
+        closeOpenPullRequestsForBranch: Effect.fn(
+          "KeymaxxerGitLab.closeOpenPullRequestsForBranch",
+        )((repository, headRefName) =>
+          withVaultOrAmbient(
+            repository,
+            (tokenName) =>
+              runVaultHelper(
+                repository,
+                tokenName,
+                "close-open-pull-requests-for-branch",
+                () => Effect.void,
+                "close open pull requests for branch",
+                [encodeArgument(headRefName)],
+              ),
+            (ambientService) =>
+              ambientService.closeOpenPullRequestsForBranch(
+                repository,
+                headRefName,
+              ),
+          ),
+        ),
+        deleteBranch: Effect.fn("KeymaxxerGitLab.deleteBranch")(
+          (repository, branchName) =>
+            withVaultOrAmbient(
+              repository,
+              (tokenName) =>
+                runVaultHelper(
+                  repository,
+                  tokenName,
+                  "delete-branch",
+                  () => Effect.void,
+                  "delete branch",
+                  [encodeArgument(branchName)],
+                ),
+              (ambientService) =>
+                ambientService.deleteBranch(repository, branchName),
+            ),
+        ),
       }
       return service
     }),

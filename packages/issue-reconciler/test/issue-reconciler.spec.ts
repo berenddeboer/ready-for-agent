@@ -205,13 +205,23 @@ const makeGitHubLayer = (
     },
   } satisfies GitHubServiceShape)
 
-const defaultGitLabLayer = Layer.succeed(GitLabService, {
+const defaultGitLabShape = {
   verifyProject: () => Effect.void,
   getAuthenticatedUserLogin: () => Effect.succeed("operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
   hasAmbientCredentials: () => Effect.succeed(true),
-} satisfies GitLabServiceShape)
+  getOpenPullRequestNumber: () => Effect.succeed(1),
+  findOpenPullRequestNumber: () => Effect.succeed(null),
+  createDraftPullRequest: () => Effect.succeed(1),
+  updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+  countOpenNonDraftPullRequests: () => Effect.succeed(0),
+  ensureIssueCompletedWithSummary: () => Effect.void,
+  closeOpenPullRequestsForBranch: () => Effect.void,
+  deleteBranch: () => Effect.void,
+} satisfies GitLabServiceShape
+
+const defaultGitLabLayer = Layer.succeed(GitLabService, defaultGitLabShape)
 
 const runReconciliation = <A, E>(
   effect: Effect.Effect<A, E, IssueReconciler>,
@@ -298,15 +308,12 @@ describe("IssueReconciler", () => {
       }),
     ]
     const gitlab = Layer.succeed(GitLabService, {
-      verifyProject: () => Effect.void,
-      getAuthenticatedUserLogin: () => Effect.succeed("operator"),
+      ...defaultGitLabShape,
       listReadyIssues: ({ projectPath }) =>
         Effect.sync(() => {
           db.actions.push(`gitlab:${projectPath}`)
           return issues
         }),
-      hasCredentials: () => Effect.succeed(true),
-      hasAmbientCredentials: () => Effect.succeed(true),
     } satisfies GitLabServiceShape)
     const github = makeGitHubLayer([], db.actions)
 

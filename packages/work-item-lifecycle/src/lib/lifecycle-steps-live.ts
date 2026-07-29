@@ -9,6 +9,7 @@ import {
 } from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   CurrentCapturedAgentBackendId,
@@ -44,14 +45,15 @@ type StepServices =
   | AgentBackend
   | ActiveAgentBackend
   | GitHubService
+  | GitLabService
   | SqlClient.SqlClient
 
 /**
  * Production LifecycleSteps: Create Worktree through local cleanup, including
  * Assess Changes (git then optional OpenCode confirm) and Close Issue for
- * No-Change Outcomes. Captures platform, database, Keymaxxer, GitHub, Active
- * Agent Backend, and Agent Backend services so handlers remain `Effect<A, E>`
- * with no requirements.
+ * No-Change Outcomes. Captures platform, database, Keymaxxer, GitHub, GitLab,
+ * Active Agent Backend, and Agent Backend services so handlers remain
+ * `Effect<A, E>` with no requirements.
  */
 export const LifecycleStepsLive = Layer.effect(
   LifecycleSteps,
@@ -64,6 +66,7 @@ export const LifecycleStepsLive = Layer.effect(
     const fallbackAgentBackend = yield* AgentBackend
     const activeAgentBackend = yield* ActiveAgentBackend
     const github = yield* GitHubService
+    const gitlab = yield* GitLabService
     const sql = yield* SqlClient.SqlClient
     // Dispatch Agent Turns by the Work Item's captured backend (ambient) so
     // concurrent dual-backend fleets never share the process-wide proxy.
@@ -125,6 +128,7 @@ export const LifecycleStepsLive = Layer.effect(
       Layer.succeed(AgentBackend, agentBackend),
       Layer.succeed(ActiveAgentBackend, activeAgentBackend),
       Layer.succeed(GitHubService, github),
+      Layer.succeed(GitLabService, gitlab),
       Layer.succeed(SqlClient.SqlClient, sql),
     )
 

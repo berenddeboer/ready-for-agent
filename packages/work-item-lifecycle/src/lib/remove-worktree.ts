@@ -1,5 +1,6 @@
 import { Duration, Effect, FileSystem, Path } from "effect"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
+import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   CreateWorktreeRepositoryNotFoundError,
@@ -240,11 +241,49 @@ const deleteRemoteBranch = (input: {
     })
   })
 
+const removeGitLabRemoteArtifacts = (input: {
+  readonly repository: RepositoryRecord
+  readonly branchName: string
+}) =>
+  Effect.gen(function* () {
+    const gitlab = yield* GitLabService
+    const forgeRepository = {
+      forge: input.repository.forge,
+      forgeHost: input.repository.forgeHost,
+      projectPath: input.repository.projectPath,
+    }
+    yield* gitlab
+      .closeOpenPullRequestsForBranch(forgeRepository, input.branchName)
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new RemoveWorktreeRemoteError({
+              message: "Failed to close open GitLab merge requests for cleanup",
+              branchName: input.branchName,
+              cause,
+            }),
+        ),
+      )
+    yield* gitlab.deleteBranch(forgeRepository, input.branchName).pipe(
+      Effect.mapError(
+        (cause) =>
+          new RemoveWorktreeRemoteError({
+            message: "Failed to delete remote GitLab Work Item branch",
+            branchName: input.branchName,
+            cause,
+          }),
+      ),
+    )
+  })
+
 const removeRemoteArtifacts = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
 }) =>
   Effect.gen(function* () {
+    if (input.repository.forge === "gitlab") {
+      return yield* removeGitLabRemoteArtifacts(input)
+    }
     const tokenName = yield* resolveGithubCredential(input.repository)
     const cwd = input.repository.localPath
     yield* closeOpenPullRequests({
@@ -349,9 +388,10 @@ export const localCleanup = (
   })
 
 /**
- * Inverse of createWorktree: remove local artifacts, close any open remote PR,
- * and drop the remote branch when present. Missing artifacts are success
- * (idempotent). Missing GitHub credential fails.
+ * Inverse of createWorktree: remove local artifacts, close any open remote
+ * PR/MR, and drop the remote branch when present. Missing artifacts are
+ * success (idempotent). Missing Forge credential fails for GitHub Keymaxxer
+ * paths; GitLab cleanup uses the ambient GitLab service.
  */
 export const removeWorktree = (
   context: LifecycleStepContext,
@@ -359,17 +399,6 @@ export const removeWorktree = (
 ) =>
   Effect.gen(function* () {
     const repository = yield* resolveRepository(context.repositoryId)
-    if (repository.forge === "gitlab") {
-      return yield* new RemoveWorktreeRemoteError({
-        message:
-          "GitLab Remove Worktree requires GitLab PR lifecycle support; refusing to invoke GitHub cleanup for a GitLab Repository",
-        branchName: workItemBranchName({
-          projectPath: repository.projectPath,
-          issueNumber: context.issueNumber,
-          workItemId: context.workItemId,
-        }),
-      })
-    }
     const branchName = yield* removeLocalArtifacts(repository, context, options)
 
     yield* removeRemoteArtifacts({ repository, branchName })

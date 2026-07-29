@@ -1,7 +1,15 @@
 import type { Effect } from "effect"
 import { runGitLabCli } from "../bin/cli.js"
+import { closeOpenPullRequestsForBranchProgram } from "../bin/close-open-pull-requests-for-branch.js"
+import { countOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
+import { createDraftPullRequestProgram } from "../bin/create-draft-pull-request.js"
+import { deleteBranchProgram } from "../bin/delete-branch.js"
+import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
+import { findOpenPullRequestNumberProgram } from "../bin/find-open-pull-request-number.js"
 import { getAuthenticatedUserLoginProgram } from "../bin/get-authenticated-user-login.js"
+import { getOpenPullRequestNumberProgram } from "../bin/get-open-pull-request-number.js"
 import { listReadyIssuesProgram } from "../bin/list-ready-issues.js"
+import { updateOpenDraftPullRequestCopyProgram } from "../bin/update-open-draft-pull-request-copy.js"
 import { verifyProjectProgram } from "../bin/verify-project.js"
 import { gitlabServiceBinScriptPath } from "../bin-script-path.js"
 import type { GitLabService } from "./gitlab-service.js"
@@ -14,6 +22,14 @@ export const GITLAB_HELPER_OPERATIONS = [
   "list-ready-issues",
   "get-authenticated-user-login",
   "verify-project",
+  "get-open-pull-request-number",
+  "find-open-pull-request-number",
+  "create-draft-pull-request",
+  "update-open-draft-pull-request-copy",
+  "count-open-non-draft-pull-requests",
+  "ensure-issue-completed-with-summary",
+  "close-open-pull-requests-for-branch",
+  "delete-branch",
 ] as const
 
 export type GitLabHelperOperation = (typeof GITLAB_HELPER_OPERATIONS)[number]
@@ -109,6 +125,14 @@ const programs: Record<
   "list-ready-issues": listReadyIssuesProgram,
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "verify-project": verifyProjectProgram,
+  "get-open-pull-request-number": getOpenPullRequestNumberProgram,
+  "find-open-pull-request-number": findOpenPullRequestNumberProgram,
+  "create-draft-pull-request": createDraftPullRequestProgram,
+  "update-open-draft-pull-request-copy": updateOpenDraftPullRequestCopyProgram,
+  "count-open-non-draft-pull-requests": countOpenNonDraftPullRequestsProgram,
+  "ensure-issue-completed-with-summary": ensureIssueCompletedWithSummaryProgram,
+  "close-open-pull-requests-for-branch": closeOpenPullRequestsForBranchProgram,
+  "delete-branch": deleteBranchProgram,
 }
 
 /**
