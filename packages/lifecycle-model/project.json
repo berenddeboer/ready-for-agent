@@ -12,7 +12,10 @@
         "command": "bun scripts/generate-lifecycle-state.ts"
       },
       "inputs": ["default", "{workspaceRoot}/ontology/rfa.ttl"],
-      "outputs": ["{projectRoot}/src/generated/work-item-state.ts"],
+      "outputs": [
+        "{projectRoot}/src/generated/work-item-state.ts",
+        "{projectRoot}/src/generated/predicate-expressions.ts"
+      ],
       "cache": false
     },
     "check-generated": {

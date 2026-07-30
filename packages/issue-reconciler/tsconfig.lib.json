@@ -11,10 +11,13 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../github-service/tsconfig.lib.json"
+      "path": "../lifecycle-model/tsconfig.lib.json"
     },
     {
       "path": "../gitlab-service/tsconfig.lib.json"
+    },
+    {
+      "path": "../github-service/tsconfig.lib.json"
     },
     {
       "path": "../db-service/tsconfig.lib.json"

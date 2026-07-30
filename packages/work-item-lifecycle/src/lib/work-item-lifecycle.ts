@@ -32,7 +32,12 @@ import {
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
-import { isAgentDependentLifecycleStep } from "@ready-for-agent/lifecycle-model"
+import {
+  evaluateActionableIssue,
+  evaluateImplementableIssue,
+  evaluateUnfinishedWorkItem,
+  isAgentDependentLifecycleStep,
+} from "@ready-for-agent/lifecycle-model"
 import {
   type AcknowledgeError,
   EnqueueError,
@@ -113,6 +118,11 @@ import {
 import { workItemBranchName } from "./worktree-names.js"
 
 export { WAITING_FOR_WORKER_SLOT_MESSAGE } from "./types.js"
+
+const currentIssuePredicateInput = <Issue extends object>(
+  issue: Issue | undefined,
+): (Issue & { readonly isCurrentIssue: true }) | undefined =>
+  issue === undefined ? undefined : { ...issue, isCurrentIssue: true }
 
 const formatSqlError = (error: SqlError): string => {
   const parts: string[] = [error.message]
@@ -1396,36 +1406,33 @@ export const makeWorkItemLifecycleLive = (
         const issue = issues.find(
           (candidate) => candidate.issueNumber === issueNumber,
         )
-
-        if (!issue) {
-          return {
-            _tag: "invalid",
-            failureCode: "issue_not_found",
-            failureMessage: `Issue #${issueNumber} is no longer present in the Issue store`,
-          }
+        const verdict = evaluateImplementableIssue(
+          currentIssuePredicateInput(issue),
+        )
+        switch (verdict._tag) {
+          case "match":
+            return { _tag: "implementable" }
+          case "issue_blocked":
+            return { _tag: "still_blocked" }
+          case "issue_missing":
+            return {
+              _tag: "invalid",
+              failureCode: "issue_not_found",
+              failureMessage: `Issue #${issueNumber} is no longer present in the Issue store`,
+            }
+          case "issue_not_open":
+            return {
+              _tag: "invalid",
+              failureCode: "issue_not_open",
+              failureMessage: `Issue #${issueNumber} is ${verdict.state}, not OPEN`,
+            }
+          case "issue_not_leaf":
+            return {
+              _tag: "invalid",
+              failureCode: "issue_is_parent",
+              failureMessage: `Issue #${issueNumber} has children and is no longer a Leaf Issue`,
+            }
         }
-
-        if (issue.state !== "OPEN") {
-          return {
-            _tag: "invalid",
-            failureCode: "issue_not_open",
-            failureMessage: `Issue #${issueNumber} is ${issue.state}, not OPEN`,
-          }
-        }
-
-        if (issue.hasChildren) {
-          return {
-            _tag: "invalid",
-            failureCode: "issue_is_parent",
-            failureMessage: `Issue #${issueNumber} has children and is no longer a Leaf Issue`,
-          }
-        }
-
-        if (issue.blockedBy.length > 0) {
-          return { _tag: "still_blocked" }
-        }
-
-        return { _tag: "implementable" }
       }
 
       const releaseWaitingForBlockers = Effect.fn(
@@ -1660,40 +1667,37 @@ export const makeWorkItemLifecycleLive = (
           const issue = issues.find(
             (candidate) => candidate.issueNumber === issueNumber,
           )
-
-          if (!issue) {
-            return {
-              ok: false as const,
-              failureCode: "issue_not_found",
-              failureMessage: `Issue #${issueNumber} is no longer present in the Issue store`,
-            }
+          const verdict = evaluateImplementableIssue(
+            currentIssuePredicateInput(issue),
+          )
+          switch (verdict._tag) {
+            case "match":
+              return { ok: true as const }
+            case "issue_missing":
+              return {
+                ok: false as const,
+                failureCode: "issue_not_found",
+                failureMessage: `Issue #${issueNumber} is no longer present in the Issue store`,
+              }
+            case "issue_not_open":
+              return {
+                ok: false as const,
+                failureCode: "issue_not_open",
+                failureMessage: `Issue #${issueNumber} is ${verdict.state}, not OPEN`,
+              }
+            case "issue_not_leaf":
+              return {
+                ok: false as const,
+                failureCode: "issue_is_parent",
+                failureMessage: `Issue #${issueNumber} has children and is no longer a Leaf Issue`,
+              }
+            case "issue_blocked":
+              return {
+                ok: false as const,
+                failureCode: "issue_blocked",
+                failureMessage: `Issue #${issueNumber} is blocked by ${verdict.blockerCount} Issue(s)`,
+              }
           }
-
-          if (issue.state !== "OPEN") {
-            return {
-              ok: false as const,
-              failureCode: "issue_not_open",
-              failureMessage: `Issue #${issueNumber} is ${issue.state}, not OPEN`,
-            }
-          }
-
-          if (issue.hasChildren) {
-            return {
-              ok: false as const,
-              failureCode: "issue_is_parent",
-              failureMessage: `Issue #${issueNumber} has children and is no longer a Leaf Issue`,
-            }
-          }
-
-          if (issue.blockedBy.length > 0) {
-            return {
-              ok: false as const,
-              failureCode: "issue_blocked",
-              failureMessage: `Issue #${issueNumber} is blocked by ${issue.blockedBy.length} Issue(s)`,
-            }
-          }
-
-          return { ok: true as const }
         })
 
       const mergeRevalidationCount = (
@@ -5063,52 +5067,44 @@ export const makeWorkItemLifecycleLive = (
           const issue = issues.find(
             (candidate) => candidate.issueNumber === issueNumber,
           )
-
-          if (!issue) {
-            return yield* new IssueNotFoundError({
-              repositoryId,
-              issueNumber,
-            })
+          const currentIssue = currentIssuePredicateInput(issue)
+          const implementable = evaluateImplementableIssue(currentIssue)
+          switch (implementable._tag) {
+            case "issue_missing":
+              return yield* new IssueNotFoundError({
+                repositoryId,
+                issueNumber,
+              })
+            case "issue_not_open":
+              return yield* new IssueNotOpenError({
+                repositoryId,
+                issueNumber,
+                state: implementable.state,
+              })
+            case "issue_not_leaf":
+              return yield* new ParentIssueError({
+                repositoryId,
+                issueNumber,
+              })
+            case "issue_blocked":
+              return yield* new IssueBlockedError({
+                repositoryId,
+                issueNumber,
+                blockerCount: implementable.blockerCount,
+              })
           }
-
-          if (issue.state !== "OPEN") {
-            return yield* new IssueNotOpenError({
-              repositoryId,
-              issueNumber,
-              state: issue.state,
-            })
-          }
-
-          if (issue.hasChildren) {
-            return yield* new ParentIssueError({
-              repositoryId,
-              issueNumber,
-            })
-          }
-
-          if (issue.blockedBy.length > 0) {
-            return yield* new IssueBlockedError({
-              repositoryId,
-              issueNumber,
-              blockerCount: issue.blockedBy.length,
-            })
-          }
+          const matchedIssue = Option.getOrThrow(Option.fromNullishOr(issue))
 
           const existing = yield* listWorkItemsForIssue(
             repositoryId,
             issueNumber,
           )
-          const unfinished = existing.find(
-            (item) =>
-              item.state !== "complete" &&
-              item.state !== "failed" &&
-              item.state !== "abandoned",
-          )
-          if (unfinished) {
+          const actionable = evaluateActionableIssue(currentIssue, existing)
+          if (actionable._tag === "unfinished_work_item_exists") {
             return yield* unfinishedWorkItemExistsError(
               repositoryId,
               issueNumber,
-              unfinished.id,
+              actionable.workItemId ?? undefined,
             )
           }
 
@@ -5177,7 +5173,7 @@ export const makeWorkItemLifecycleLive = (
                         repositoryId,
                         issueNumber,
                         agentBackendId,
-                        issue.title,
+                        matchedIssue.title,
                         step,
                         now,
                         admit ? null : now,
@@ -5335,11 +5331,7 @@ export const makeWorkItemLifecycleLive = (
           yield* listWorkItemsForRepository(repositoryId)
         const unfinishedByIssue = new Map<number, WorkItemId>()
         for (const item of repositoryWorkItems) {
-          if (
-            item.state !== "complete" &&
-            item.state !== "failed" &&
-            item.state !== "abandoned"
-          ) {
+          if (evaluateUnfinishedWorkItem(item)._tag === "match") {
             unfinishedByIssue.set(item.issueNumber, item.id)
           }
         }
@@ -5599,42 +5591,39 @@ export const makeWorkItemLifecycleLive = (
         const issue = issues.find(
           (candidate) => candidate.issueNumber === issueNumber,
         )
-
-        if (!issue) {
-          return yield* new IssueNotFoundError({
-            repositoryId,
-            issueNumber,
-          })
+        const implementable = evaluateImplementableIssue(
+          currentIssuePredicateInput(issue),
+        )
+        switch (implementable._tag) {
+          case "issue_missing":
+            return yield* new IssueNotFoundError({
+              repositoryId,
+              issueNumber,
+            })
+          case "issue_not_open":
+            return yield* new IssueNotOpenError({
+              repositoryId,
+              issueNumber,
+              state: implementable.state,
+            })
+          case "issue_not_leaf":
+            return yield* new ParentIssueError({
+              repositoryId,
+              issueNumber,
+            })
+          case "match":
+            return yield* new IssueNotBlockedError({
+              repositoryId,
+              issueNumber,
+            })
+          case "issue_blocked":
+            break
         }
-
-        if (issue.state !== "OPEN") {
-          return yield* new IssueNotOpenError({
-            repositoryId,
-            issueNumber,
-            state: issue.state,
-          })
-        }
-
-        if (issue.hasChildren) {
-          return yield* new ParentIssueError({
-            repositoryId,
-            issueNumber,
-          })
-        }
-
-        if (issue.blockedBy.length === 0) {
-          return yield* new IssueNotBlockedError({
-            repositoryId,
-            issueNumber,
-          })
-        }
+        const matchedIssue = Option.getOrThrow(Option.fromNullishOr(issue))
 
         const existing = yield* listWorkItemsForIssue(repositoryId, issueNumber)
         const unfinished = existing.find(
-          (item) =>
-            item.state !== "complete" &&
-            item.state !== "failed" &&
-            item.state !== "abandoned",
+          (item) => evaluateUnfinishedWorkItem(item)._tag === "match",
         )
         if (unfinished) {
           return yield* unfinishedWorkItemExistsError(
@@ -5696,7 +5685,7 @@ export const makeWorkItemLifecycleLive = (
                       repositoryId,
                       issueNumber,
                       agentBackendId,
-                      issue.title,
+                      matchedIssue.title,
                       step,
                       now,
                       now,

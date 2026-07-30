@@ -17,6 +17,7 @@ import {
   type GitLabRequestError,
   GitLabService,
 } from "@ready-for-agent/gitlab-service"
+import { evaluateRelevantIssue } from "@ready-for-agent/lifecycle-model"
 
 export const ReconciliationSummary = Schema.Struct({
   fetched: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -88,57 +89,6 @@ const matches = (local: IssueRecord, remote: ReadyLabeledIssue): boolean =>
     ),
   )
 
-const isActiveClosingPullRequest = (
-  pullRequest: ReadyLabeledIssue["closingPullRequests"][number],
-  forge: RepositoryRecord["forge"],
-): boolean =>
-  pullRequest.state === "MERGED" ||
-  (pullRequest.state === "OPEN" && (forge === "gitlab" || !pullRequest.isDraft))
-
-const matchesOperatorAuthor = (
-  issueAuthor: string | null,
-  operatorLogin: string,
-): boolean =>
-  issueAuthor !== null &&
-  issueAuthor.toLowerCase() === operatorLogin.toLowerCase()
-
-const isRelevant = (
-  issue: ReadyLabeledIssue,
-  forge: RepositoryRecord["forge"],
-  repositoryName: string,
-  workItemPullRequestNumbers: ReadonlySet<number>,
-  authorScope:
-    | { readonly includeAll: true }
-    | { readonly includeAll: false; readonly operatorLogin: string },
-): boolean => {
-  const activeClosingPullRequests = issue.closingPullRequests.filter(
-    (pullRequest) => isActiveClosingPullRequest(pullRequest, forge),
-  )
-  const supportedStructure = issue.hierarchySupported
-    ? issue.parent === null
-      ? issue.state === "OPEN"
-      : issue.parent.state === "OPEN" && issue.parent.isReadyLabeled
-    : forge === "gitlab" &&
-      issue.state === "OPEN" &&
-      issue.parent === null &&
-      !issue.hasChildren
-  const structureAndClosingPrs =
-    supportedStructure &&
-    (activeClosingPullRequests.length === 0 ||
-      activeClosingPullRequests.some(
-        (pullRequest) =>
-          pullRequest.repository.toLowerCase() === repositoryName &&
-          workItemPullRequestNumbers.has(pullRequest.number),
-      ))
-  if (!structureAndClosingPrs) {
-    return false
-  }
-  if (authorScope.includeAll) {
-    return true
-  }
-  return matchesOperatorAuthor(issue.author, authorScope.operatorLogin)
-}
-
 export const IssueReconcilerLive = Layer.effect(
   IssueReconciler,
   Effect.gen(function* () {
@@ -185,14 +135,15 @@ export const IssueReconcilerLive = Layer.effect(
       }
       const remoteByNumber = new Map(
         remoteIssues
-          .filter((issue) =>
-            isRelevant(
-              issue,
-              repository.forge,
-              repositoryName,
-              workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
-              authorScope,
-            ),
+          .filter(
+            (issue) =>
+              evaluateRelevantIssue(issue, {
+                forge: repository.forge,
+                repositoryName,
+                workItemPullRequestNumbers:
+                  workItemPullRequestsByIssue.get(issue.number) ?? new Set(),
+                authorScope,
+              })._tag === "match",
           )
           .map((issue) => [issue.number, issue]),
       )

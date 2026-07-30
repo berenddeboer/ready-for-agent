@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path"
 import { DataFactory, Parser, Store, type Term } from "n3"
 
 const namespace = {
+  owl: "http://www.w3.org/2002/07/owl#",
   rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
   rfa: "https://ready-for-agent.dev/ontology/rfa#",
   skos: "http://www.w3.org/2004/02/skos/core#",
@@ -13,6 +14,16 @@ const iri = (value: string) => DataFactory.namedNode(value)
 const term = (localName: string) => iri(`${namespace.rfa}${localName}`)
 
 const rdfType = iri(`${namespace.rdf}type`)
+const rdfFirst = iri(`${namespace.rdf}first`)
+const rdfRest = iri(`${namespace.rdf}rest`)
+const rdfNil = iri(`${namespace.rdf}nil`)
+const owlComplementOf = iri(`${namespace.owl}complementOf`)
+const owlEquivalentClass = iri(`${namespace.owl}equivalentClass`)
+const owlHasValue = iri(`${namespace.owl}hasValue`)
+const owlIntersectionOf = iri(`${namespace.owl}intersectionOf`)
+const owlOnProperty = iri(`${namespace.owl}onProperty`)
+const owlSomeValuesFrom = iri(`${namespace.owl}someValuesFrom`)
+const owlUnionOf = iri(`${namespace.owl}unionOf`)
 const skosNotation = iri(`${namespace.skos}notation`)
 const operationalLifecycleStep = term("OperationalLifecycleStep")
 const terminalWorkItemState = term("TerminalWorkItemState")
@@ -30,6 +41,223 @@ const xsdDayTimeDuration = iri(`${namespace.xsd}dayTimeDuration`)
 const packageRoot = resolve(import.meta.dir, "..")
 const ontologyPath = resolve(packageRoot, "../../ontology/rfa.ttl")
 const generatedPath = resolve(packageRoot, "src/generated/work-item-state.ts")
+const generatedPredicatePath = resolve(
+  packageRoot,
+  "src/generated/predicate-expressions.ts",
+)
+
+const predicateClassNames = [
+  "LeafIssue",
+  "ImplementableIssue",
+  "ActionableIssue",
+  "RelevantIssue",
+  "UnfinishedWorkItem",
+] as const
+
+type PredicateClassName = (typeof predicateClassNames)[number]
+
+type PredicateExpression =
+  | { readonly kind: "class"; readonly name: string }
+  | {
+      readonly kind: "intersection"
+      readonly expressions: readonly PredicateExpression[]
+    }
+  | {
+      readonly kind: "hasValue"
+      readonly property: string
+      readonly value: string | number | boolean
+    }
+  | {
+      readonly kind: "someValueOutside"
+      readonly property: string
+      readonly excludedValues: readonly string[]
+    }
+
+const localName = (value: string): string => {
+  if (!value.startsWith(namespace.rfa)) {
+    throw new Error(`Expected an rfa: term, received ${value}`)
+  }
+  return value.slice(namespace.rfa.length)
+}
+
+const rdfList = (store: Store, head: Term): readonly Term[] => {
+  const values: Term[] = []
+  const visited = new Set<string>()
+  let cursor = head
+
+  while (!cursor.equals(rdfNil)) {
+    if (visited.has(cursor.id)) {
+      throw new Error(`Cyclic RDF list at ${cursor.value}`)
+    }
+    visited.add(cursor.id)
+    values.push(onlyObject(store, cursor, rdfFirst))
+    cursor = onlyObject(store, cursor, rdfRest)
+  }
+
+  return values
+}
+
+const literalValue = (subject: Term, value: Term) => {
+  if (value.termType !== "Literal") {
+    throw new Error(`${subject.value} owl:hasValue must be a literal`)
+  }
+  if (value.datatype.equals(xsdBoolean)) {
+    if (value.value === "true" || value.value === "1") return true
+    if (value.value === "false" || value.value === "0") return false
+    throw new Error(`${subject.value} has an invalid boolean value`)
+  }
+  if (value.datatype.value.startsWith(`${namespace.xsd}`)) {
+    const number = Number(value.value)
+    if (Number.isFinite(number)) return number
+  }
+  return value.value
+}
+
+const parsePredicateExpression = (
+  store: Store,
+  expression: Term,
+): PredicateExpression => {
+  if (expression.termType === "NamedNode") {
+    return { kind: "class", name: localName(expression.value) }
+  }
+
+  const intersection = store.getObjects(expression, owlIntersectionOf, null)
+  if (intersection.length === 1 && intersection[0] !== undefined) {
+    return {
+      kind: "intersection",
+      expressions: rdfList(store, intersection[0]).map((entry) =>
+        parsePredicateExpression(store, entry),
+      ),
+    }
+  }
+
+  const property = onlyObject(store, expression, owlOnProperty)
+  if (property.termType !== "NamedNode") {
+    throw new Error(`${expression.value} owl:onProperty must be an IRI`)
+  }
+
+  const hasValues = store.getObjects(expression, owlHasValue, null)
+  if (hasValues.length === 1 && hasValues[0] !== undefined) {
+    return {
+      kind: "hasValue",
+      property: localName(property.value),
+      value: literalValue(expression, hasValues[0]),
+    }
+  }
+
+  const someValues = store.getObjects(expression, owlSomeValuesFrom, null)
+  if (someValues.length === 1 && someValues[0] !== undefined) {
+    const complement = onlyObject(store, someValues[0], owlComplementOf)
+    const union = onlyObject(store, complement, owlUnionOf)
+    return {
+      kind: "someValueOutside",
+      property: localName(property.value),
+      excludedValues: rdfList(store, union).map((entry) => {
+        if (entry.termType !== "NamedNode") {
+          throw new Error(`${entry.value} must be a named lifecycle state`)
+        }
+        return onlyNotation(store, entry)
+      }),
+    }
+  }
+
+  throw new Error(`Unsupported predicate expression at ${expression.value}`)
+}
+
+const predicateExpressions = (
+  store: Store,
+): Readonly<Record<PredicateClassName, PredicateExpression>> =>
+  Object.fromEntries(
+    predicateClassNames.map((name) => [
+      name,
+      parsePredicateExpression(
+        store,
+        onlyObject(store, term(name), owlEquivalentClass),
+      ),
+    ]),
+  ) as Readonly<Record<PredicateClassName, PredicateExpression>>
+
+const renderPredicateExpressions = (
+  expressions: Readonly<Record<PredicateClassName, PredicateExpression>>,
+) => `\
+// This file is generated from the predicate class expressions in ontology/rfa.ttl.
+// Run \`bunx nx run lifecycle-model:generate\` to update it.
+
+export type LifecyclePredicateName =
+${predicateClassNames.map((name) => `  | ${JSON.stringify(name)}`).join("\n")}
+
+type LifecyclePredicateExpression =
+  | { readonly kind: "class"; readonly name: string }
+  | {
+      readonly kind: "intersection"
+      readonly expressions: readonly LifecyclePredicateExpression[]
+    }
+  | {
+      readonly kind: "hasValue"
+      readonly property: string
+      readonly value: string | number | boolean
+    }
+  | {
+      readonly kind: "someValueOutside"
+      readonly property: string
+      readonly excludedValues: readonly string[]
+    }
+
+export interface LifecyclePredicateFacts {
+  readonly classes: ReadonlySet<string>
+  readonly properties: Readonly<Record<string, string | number | boolean>>
+}
+
+const LIFECYCLE_PREDICATE_EXPRESSIONS: Readonly<
+  Record<LifecyclePredicateName, LifecyclePredicateExpression>
+> = ${JSON.stringify(expressions, null, 2)}
+
+const matchesExpression = (
+  expression: LifecyclePredicateExpression,
+  facts: LifecyclePredicateFacts,
+  evaluating: ReadonlySet<string>,
+): boolean => {
+  switch (expression.kind) {
+    case "class": {
+      if (facts.classes.has(expression.name)) return true
+      if (!(expression.name in LIFECYCLE_PREDICATE_EXPRESSIONS)) return false
+      if (evaluating.has(expression.name)) {
+        throw new Error(\`Cyclic lifecycle predicate: \${expression.name}\`)
+      }
+      return matchesExpression(
+        LIFECYCLE_PREDICATE_EXPRESSIONS[
+          expression.name as LifecyclePredicateName
+        ],
+        facts,
+        new Set([...evaluating, expression.name]),
+      )
+    }
+    case "intersection":
+      return expression.expressions.every((entry) =>
+        matchesExpression(entry, facts, evaluating),
+      )
+    case "hasValue":
+      return facts.properties[expression.property] === expression.value
+    case "someValueOutside": {
+      const value = facts.properties[expression.property]
+      return (
+        typeof value === "string" &&
+        !expression.excludedValues.includes(value)
+      )
+    }
+  }
+}
+
+export const matchesLifecyclePredicateExpression = (
+  name: LifecyclePredicateName,
+  facts: LifecyclePredicateFacts,
+): boolean =>
+  matchesExpression(
+    LIFECYCLE_PREDICATE_EXPRESSIONS[name],
+    facts,
+    new Set([name]),
+  )
+`
 
 const onlyNotation = (store: Store, subject: Term): string => {
   const notations = store.getObjects(subject, skosNotation, null)
@@ -373,12 +601,15 @@ const generate = async () => {
     )
   }
 
-  return renderGeneratedSource(
-    operationalSteps,
-    terminalStates,
-    transitions(ontology, operationalSteps, terminalStates),
-    lifecycleStepProperties,
-  )
+  return {
+    stateSource: renderGeneratedSource(
+      operationalSteps,
+      terminalStates,
+      transitions(ontology, operationalSteps, terminalStates),
+      lifecycleStepProperties,
+    ),
+    predicateSource: renderPredicateExpressions(predicateExpressions(ontology)),
+  }
 }
 
 const check = process.argv.slice(2).includes("--check")
@@ -390,17 +621,29 @@ if (unknownArguments.length > 0) {
   throw new Error(`Unknown arguments: ${unknownArguments.join(", ")}`)
 }
 
-const generatedSource = await generate()
+const generated = await generate()
 
 if (check) {
-  const checkedInSource = await readFile(generatedPath, "utf8").catch(() => "")
-  if (checkedInSource !== generatedSource) {
+  const [checkedInStateSource, checkedInPredicateSource] = await Promise.all([
+    readFile(generatedPath, "utf8").catch(() => ""),
+    readFile(generatedPredicatePath, "utf8").catch(() => ""),
+  ])
+  if (
+    checkedInStateSource !== generated.stateSource ||
+    checkedInPredicateSource !== generated.predicateSource
+  ) {
     console.error(
-      "Generated lifecycle state is stale. Run `bunx nx run lifecycle-model:generate`.",
+      "Generated lifecycle model is stale. Run `bunx nx run lifecycle-model:generate`.",
     )
     process.exitCode = 1
   }
 } else {
-  await mkdir(dirname(generatedPath), { recursive: true })
-  await writeFile(generatedPath, generatedSource)
+  await Promise.all([
+    mkdir(dirname(generatedPath), { recursive: true }),
+    mkdir(dirname(generatedPredicatePath), { recursive: true }),
+  ])
+  await Promise.all([
+    writeFile(generatedPath, generated.stateSource),
+    writeFile(generatedPredicatePath, generated.predicateSource),
+  ])
 }
