@@ -17,6 +17,7 @@ const namespace = {
   rfa: "https://ready-for-agent.dev/ontology/rfa#",
   sh: "http://www.w3.org/ns/shacl#",
   skos: "http://www.w3.org/2004/02/skos/core#",
+  xsd: "http://www.w3.org/2001/XMLSchema#",
 } as const
 
 const iri = (value: string) => DataFactory.namedNode(value)
@@ -53,6 +54,9 @@ const operationalClass = term("OperationalLifecycleStep")
 const terminalClass = term("TerminalWorkItemState")
 const contextTermClass = term("ContextTerm")
 const avoidanceRationale = term("avoidanceRationale")
+const maximumDuration = term("maximumDuration")
+const xsdDayTimeDuration = iri(`${namespace.xsd}dayTimeDuration`)
+const xsdDuration = iri(`${namespace.xsd}duration`)
 
 interface AvoidedLabel {
   readonly label: string
@@ -747,6 +751,32 @@ describe("rfa lifecycle ontology", () => {
     const report = await new SHACLValidator(shapes).validate(ontology)
     expect(report.conforms).toBe(true)
     expect(report.results).toHaveLength(0)
+  })
+
+  it.each([
+    ["year-month duration", "P1M", xsdDuration],
+    ["zero duration", "PT0S", xsdDayTimeDuration],
+    ["sub-millisecond duration", "PT0.0001S", xsdDayTimeDuration],
+  ])("rejects an unsupported %s", async (_, value, datatype) => {
+    const unsupportedOntology = new Store(
+      ontology.getQuads(null, null, null, null),
+    )
+    unsupportedOntology.removeMatches(
+      term("Implement"),
+      maximumDuration,
+      null,
+      null,
+    )
+    unsupportedOntology.addQuad(
+      term("Implement"),
+      maximumDuration,
+      DataFactory.literal(value, datatype),
+    )
+
+    const report = await new SHACLValidator(shapes).validate(
+      unsupportedOntology,
+    )
+    expect(report.conforms).toBe(false)
   })
 })
 

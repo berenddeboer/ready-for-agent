@@ -18,7 +18,6 @@ import {
   ActiveAgentBackend,
   type AgentBackendId,
   agentBackendLabel,
-  isAgentDependentLifecycleStep,
   isSelectableAgentBackendId,
 } from "@ready-for-agent/agent-backend"
 import {
@@ -33,6 +32,7 @@ import {
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
+import { isAgentDependentLifecycleStep } from "@ready-for-agent/lifecycle-model"
 import {
   type AcknowledgeError,
   EnqueueError,

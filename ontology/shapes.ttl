@@ -5,6 +5,7 @@
 @prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 rfa:ContextTermShape
   a sh:NodeShape ;
@@ -130,6 +131,36 @@ rfa:OperationalLifecycleStepShape
     sh:hasValue rfa:OperationalLifecycleStep ;
     sh:message
       "Every operational term must specialize Operational Lifecycle Step."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:agentFree ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:boolean ;
+    sh:message
+      "Every operational Lifecycle Step must declare whether it is agent-free."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:maximumDuration ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:dayTimeDuration ;
+    sh:pattern
+      "^P(?:[0-9]{1,3}D)?(?:T(?:[0-9]{1,3}H)?(?:[0-9]{1,3}M)?(?:[0-9]{1,3}(?:[.][0-9]{1,3})?S)?)?$" ;
+    sh:not [
+      sh:pattern
+        "^P(?:0{1,3}D)?(?:T(?:0{1,3}H)?(?:0{1,3}M)?(?:0{1,3}(?:[.]0{1,3})?S)?)?$" ;
+    ] ;
+    sh:message
+      "Every operational Lifecycle Step must declare one positive fixed maximum duration with millisecond precision."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:retryable ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype xsd:boolean ;
+    sh:message
+      "Every operational Lifecycle Step must declare whether it is retryable."@en ;
   ] .
 
 rfa:TerminalWorkItemStateShape

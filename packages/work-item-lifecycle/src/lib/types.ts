@@ -1,6 +1,8 @@
-import { Duration, Schema } from "effect"
+import { Schema } from "effect"
 import { ulid } from "ulidx"
 import {
+  DEFAULT_LIFECYCLE_MAX_DURATIONS,
+  type LifecycleMaxDurations,
   OperationalLifecycleStep,
   TERMINAL_WORK_ITEM_STATES,
   TerminalWorkItemState,
@@ -12,8 +14,10 @@ import {
 } from "./jobs-completed-window.js"
 
 export {
+  DEFAULT_LIFECYCLE_MAX_DURATIONS,
   JOBS_COMPLETED_WINDOW_HOURS,
   JOBS_COMPLETED_WINDOW_MS,
+  type LifecycleMaxDurations,
   OperationalLifecycleStep,
   TERMINAL_WORK_ITEM_STATES,
   TerminalWorkItemState,
@@ -380,30 +384,6 @@ export const STEP_RUN_REASON = {
 
 export type StepRunReasonCode =
   (typeof STEP_RUN_REASON)[keyof typeof STEP_RUN_REASON]
-
-export type LifecycleMaxDurations = {
-  readonly [Step in OperationalLifecycleStep]: Duration.Duration
-}
-
-/** Default maximum Effect durations per Lifecycle Step (also used as visibility leases). */
-export const DEFAULT_LIFECYCLE_MAX_DURATIONS: LifecycleMaxDurations = {
-  create_worktree: Duration.minutes(5),
-  install_dependencies: Duration.minutes(15),
-  implement: Duration.hours(2),
-  assess_changes: Duration.hours(1),
-  pre_commit: Duration.hours(2),
-  review: Duration.hours(1),
-  commit: Duration.minutes(30),
-  create_pr: Duration.minutes(10),
-  watch_pr_status_checks: Duration.minutes(5),
-  resolve_pr_merge_conflict: Duration.hours(2),
-  investigate_pr_status_checks: Duration.hours(2),
-  mark_pr_ready_for_review: Duration.minutes(5),
-  decide_pr_merge: Duration.minutes(15),
-  merge_pr: Duration.minutes(5),
-  close_issue: Duration.minutes(5),
-  local_cleanup: Duration.minutes(5),
-}
 
 export type WorkItemLifecycleConfig = {
   readonly maxDurations?: LifecycleMaxDurations

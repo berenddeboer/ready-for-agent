@@ -6,6 +6,7 @@ const namespace = {
   rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
   rfa: "https://ready-for-agent.dev/ontology/rfa#",
   skos: "http://www.w3.org/2004/02/skos/core#",
+  xsd: "http://www.w3.org/2001/XMLSchema#",
 } as const
 
 const iri = (value: string) => DataFactory.namedNode(value)
@@ -20,6 +21,11 @@ const fromStep = term("fromStep")
 const toStep = term("toStep")
 const guard = term("guard")
 const reasonCode = term("reasonCode")
+const agentFree = term("agentFree")
+const maximumDuration = term("maximumDuration")
+const retryable = term("retryable")
+const xsdBoolean = iri(`${namespace.xsd}boolean`)
+const xsdDayTimeDuration = iri(`${namespace.xsd}dayTimeDuration`)
 
 const packageRoot = resolve(import.meta.dir, "..")
 const ontologyPath = resolve(packageRoot, "../../ontology/rfa.ttl")
@@ -66,6 +72,91 @@ const onlyLiteral = (store: Store, subject: Term, predicate: Term): string => {
   }
   return object.value
 }
+
+const onlyTypedLiteral = (
+  store: Store,
+  subject: Term,
+  predicate: Term,
+  datatype: Term,
+) => {
+  const object = onlyObject(store, subject, predicate)
+  if (
+    object.termType !== "Literal" ||
+    object.datatype.value !== datatype.value
+  ) {
+    throw new Error(
+      `${subject.value} must have a ${datatype.value} literal ${predicate.value}`,
+    )
+  }
+  return object.value
+}
+
+const onlyBoolean = (store: Store, subject: Term, predicate: Term): boolean => {
+  const value = onlyTypedLiteral(
+    store,
+    subject,
+    predicate,
+    xsdBoolean,
+  ).toLowerCase()
+  if (value !== "true" && value !== "false" && value !== "1" && value !== "0") {
+    throw new Error(
+      `${subject.value} has invalid boolean ${predicate.value}: ${value}`,
+    )
+  }
+  return value === "true" || value === "1"
+}
+
+const durationToMilliseconds = (subject: Term, value: string): number => {
+  const match = value.match(
+    /^P(?=.*[1-9])(?:([0-9]{1,3})D)?(?:T(?:([0-9]{1,3})H)?(?:([0-9]{1,3})M)?(?:([0-9]{1,3}(?:[.][0-9]{1,3})?)S)?)?$/,
+  )
+  if (
+    match === null ||
+    value.endsWith("T") ||
+    match.slice(1).every((part) => part === undefined)
+  ) {
+    throw new Error(
+      `${subject.value} has unsupported maximum duration: ${value}`,
+    )
+  }
+
+  const [, days = "0", hours = "0", minutes = "0", seconds = "0"] = match
+  const milliseconds =
+    Number(days) * 86_400_000 +
+    Number(hours) * 3_600_000 +
+    Number(minutes) * 60_000 +
+    Number(seconds) * 1_000
+
+  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
+    throw new Error(
+      `${subject.value} maximum duration must be a positive whole number of milliseconds: ${value}`,
+    )
+  }
+  return milliseconds
+}
+
+interface GeneratedStepProperties {
+  readonly step: string
+  readonly agentFree: boolean
+  readonly maximumDurationMs: number
+  readonly retryable: boolean
+}
+
+const stepProperties = (store: Store): readonly GeneratedStepProperties[] =>
+  store
+    .getSubjects(rdfType, operationalLifecycleStep, null)
+    .map(
+      (subject): GeneratedStepProperties => ({
+        step: onlyNotation(store, subject),
+        agentFree: onlyBoolean(store, subject, agentFree),
+        maximumDurationMs: durationToMilliseconds(
+          subject,
+          onlyTypedLiteral(store, subject, maximumDuration, xsdDayTimeDuration),
+        ),
+        retryable: onlyBoolean(store, subject, retryable),
+      }),
+    )
+    .sort((left, right) => left.step.localeCompare(right.step))
 
 const notationsForClass = (
   store: Store,
@@ -190,15 +281,50 @@ export const isDeclaredLifecycleTransition = (
   )
 `
 
+const renderStepPropertyMaps = (
+  values: readonly GeneratedStepProperties[],
+) => `\
+export type LifecycleStepPropertyMap<Value> = {
+  readonly [Step in OperationalLifecycleStep]: Value
+}
+
+export const LIFECYCLE_STEP_AGENT_FREE = {
+${values.map((value) => `  ${value.step}: ${value.agentFree},`).join("\n")}
+} as const satisfies LifecycleStepPropertyMap<boolean>
+
+export type LifecycleMaxDurations =
+  LifecycleStepPropertyMap<Duration.Duration>
+
+export const DEFAULT_LIFECYCLE_MAX_DURATIONS = {
+${values
+  .map(
+    (value) => `  ${value.step}: Duration.millis(${value.maximumDurationMs}),`,
+  )
+  .join("\n")}
+} satisfies LifecycleMaxDurations
+
+export const LIFECYCLE_STEP_RETRYABLE = {
+${values.map((value) => `  ${value.step}: ${value.retryable},`).join("\n")}
+} as const satisfies LifecycleStepPropertyMap<boolean>
+
+export const isAgentFreeLifecycleStep = (step: string): boolean =>
+  Object.hasOwn(LIFECYCLE_STEP_AGENT_FREE, step) &&
+  LIFECYCLE_STEP_AGENT_FREE[step as OperationalLifecycleStep]
+
+export const isAgentDependentLifecycleStep = (step: string): boolean =>
+  !isAgentFreeLifecycleStep(step)
+`
+
 const renderGeneratedSource = (
   operationalSteps: readonly string[],
   terminalStates: readonly string[],
   lifecycleTransitions: readonly GeneratedTransition[],
+  lifecycleStepProperties: readonly GeneratedStepProperties[],
 ) => `\
 // This file is generated from ontology/rfa.ttl.
 // Run \`bunx nx run lifecycle-model:generate\` to update it.
 
-import { Schema } from "effect"
+import { Duration, Schema } from "effect"
 
 ${renderTuple("OPERATIONAL_LIFECYCLE_STEPS", operationalSteps)}
 export const OperationalLifecycleStep = Schema.Literals(
@@ -221,6 +347,7 @@ export const WORK_ITEM_STATES = [
 export const WorkItemState = Schema.Literals(WORK_ITEM_STATES)
 export type WorkItemState = typeof WorkItemState.Type
 
+${renderStepPropertyMaps(lifecycleStepProperties)}
 ${renderTransitions(lifecycleTransitions)}
 `
 
@@ -233,11 +360,24 @@ const generate = async () => {
   const ontology = new Store(quads)
   const operationalSteps = notationsForClass(ontology, operationalLifecycleStep)
   const terminalStates = notationsForClass(ontology, terminalWorkItemState)
+  const lifecycleStepProperties = stepProperties(ontology)
+
+  if (
+    lifecycleStepProperties.length !== operationalSteps.length ||
+    lifecycleStepProperties.some(
+      (properties, index) => properties.step !== operationalSteps[index],
+    )
+  ) {
+    throw new Error(
+      "Lifecycle Step properties do not exactly cover the operational state space",
+    )
+  }
 
   return renderGeneratedSource(
     operationalSteps,
     terminalStates,
     transitions(ontology, operationalSteps, terminalStates),
+    lifecycleStepProperties,
   )
 }
 

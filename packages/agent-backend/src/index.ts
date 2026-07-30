@@ -1,6 +1,9 @@
+export {
+  isAgentDependentLifecycleStep,
+  isAgentFreeLifecycleStep,
+} from "@ready-for-agent/lifecycle-model"
 export * from "./lib/active-agent-backend.js"
 export * from "./lib/agent-backend.js"
-export * from "./lib/agent-free-steps.js"
 export * from "./lib/cli-runner.js"
 export * from "./lib/collect-child-stdout.js"
 export * from "./lib/environment.js"
