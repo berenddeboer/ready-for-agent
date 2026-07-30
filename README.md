@@ -1,14 +1,15 @@
 # Ready for Agent: Clanker Harness for 150+ PRs a week
 
-This harness is designed for people who create issues in GitHub, and
-then use this tool to start working working on them, reviewing them,
-and merging them (if auto-merge is enabled). It's a different way of
-working: you talk to your agent to create GitHub issues, and this
-harness implements them.
+Create issues in GitHub and use this harness to implement them, review
+the code, create a PR, and merge the PR if status checks succeed (if
+auto-merge is enabled). It's a different way of working: you talk to
+your agent to create GitHub issues, and this harness implements them.
 
-Label your issues with `ready-for-agent`, then select an issue in the
-UI to start working on it, or select a parent to implement all child
-issues.
+It's a loop based around issues labelled with `ready-for-agent`. The
+harness will only show these, you select the ones you want to work on,
+and it autonomously completes the task using your preferred coding
+agent. You can even select a parent issue, and ready-for-agent will
+implement all child issues.
 
 <img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
 
@@ -17,28 +18,31 @@ you architect, you verify where needed.
 
 It works very well if you follow [the Matt Pocock
 workflow](https://www.youtube.com/watch?v=M6mYodf0dJM): start a
-grilling session, then create a specification (`/to-spec`), then
-create tickets (`/to-tickets1`). These tickets will be labled with
-ready-for-agent, and show up immediately. Install his [Skills for Real Engineers](https://github.com/mattpocock/skills) to get started with this
-workflow.
+grilling session, create a specification (`/to-spec`), then create
+tickets (`/to-tickets`). These tickets will be labeled with
+ready-for-agent, and show up immediately in the harness. Install his
+[Skills for Real Engineers](https://github.com/mattpocock/skills) to
+get started with this kind of workflow.
 
-Step 1 to 3 is you. Step 4 and 5 is the harness.
+Steps 1 to 3 are you. Steps 4 and 5 are the harness.
 
 <img src="docs/way-of-working.png" alt="Way of Working" width="40%" />
 
+But as long as an issue has the `ready-for-agent` label, this tool can
+work on it.
 
 ## How it works
 
-The harness creates a new worktree, installs packages, and asking a
+The harness creates a new worktree, installs packages, and asks a
 selectable headless Agent Backend ([OpenCode](https://opencode.ai/),
 [Codex](https://github.com/openai/codex), or [Grok
 Build](https://docs.x.ai/)) to implement the issue, review the issue,
 create a PR, and merge if allowed.
 
 The goal of this clanker harness is to get you to that 25+ PRs merged
-a day nirvana. It does that by removing the time spend babysitting an
-agent sand guiding it through a implement, review, commit, and watch
-PR stages.
+a day nirvana. It does that by removing the time spent babysitting an
+agent and guiding it through the implementation, review, commit, and PR
+status-check stages.
 
 See [the introduction
 video](https://www.youtube.com/watch?v=dnYWUenIo7Y) to see the tool in
@@ -111,7 +115,7 @@ will ask the AI about the risk of auto-merge. Only low risk PRs are
 auto-merged, higher risk still require human review.
 
 Pick the "Implement locally" option to implement the issue in the new
-worktree, but withoutr creating a PR yet. This allows you to test and verify.
+worktree, but without creating a PR yet. This allows you to test and verify.
 
 ## Assumptions
 
@@ -123,9 +127,9 @@ worktree, but withoutr creating a PR yet. This allows you to test and verify.
   berenddeboer/git-bare-worktree --global`
 - The harness is designed to run on your local laptop. This avoids
   cloud costs, and you already paid for an extensive
-  machine. Secondly, your machine will be setup for your repo, so we
+  machine. Secondly, your machine will be set up for your repo, so we
   avoid the setup issues you get with running compute in the cloud.
-- Ideally you have setup a CI pipeline with automated build/test and an AI code review.
+- Ideally, you have set up a CI pipeline with automated build/test and an AI code review.
 
 # Requirements
 
@@ -212,9 +216,9 @@ source of truth; the local database is book-keeping. Style and
 guidelines come from the target repository—this harness steers an
 agent swarm on `ready-for-agent` labeled work.
 
-## Graphql API
+## GraphQL API
 
-The backend is served as graphql api: `http://127.0.0.1:6056/graphql`
+The backend serves a GraphQL API at `http://127.0.0.1:6056/graphql`.
 
 ## Application data
 

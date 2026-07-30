@@ -2,6 +2,16 @@
   "name": "@ready-for-agent/source",
   "version": "0.0.0",
   "license": "MIT",
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "developer-tools",
+    "github",
+    "gitlab",
+    "issue-tracker",
+    "pull-request",
+    "worktree"
+  ],
   "scripts": {
     "commitlint": "commitlint",
     "ready-for-agent": "bun nx run ready-for-agent:run --",
