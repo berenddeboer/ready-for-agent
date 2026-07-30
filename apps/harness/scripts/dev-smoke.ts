@@ -18,6 +18,11 @@ const sidecarWrapper = resolve(
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** Overall wait for cold CI Vite first boot (empty dep graph, no Nx cache). */
+const GRAPHQL_HEALTH_TIMEOUT_MS = 360_000
+/** Cap each poll so a hung TCP/fetch cannot outrun the overall deadline. */
+const GRAPHQL_HEALTH_POLL_MS = 5_000
+
 const waitForGraphqlHealth = async (
   baseUrl: string,
   timeoutMs: number,
@@ -33,11 +38,15 @@ const waitForGraphqlHealth = async (
         }`,
       )
     }
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) break
+    const pollMs = Math.min(GRAPHQL_HEALTH_POLL_MS, remainingMs)
     try {
       const response = await fetch(`${baseUrl}/graphql`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ query: "{ health }" }),
+        signal: AbortSignal.timeout(pollMs),
       })
       if (response.status === 200) {
         const payload = (await response.json()) as {
@@ -158,7 +167,11 @@ const cleanup = async () => {
 }
 
 try {
-  await waitForGraphqlHealth(baseUrl, 120_000, () => !childExited)
+  await waitForGraphqlHealth(
+    baseUrl,
+    GRAPHQL_HEALTH_TIMEOUT_MS,
+    () => !childExited,
+  )
 
   const root = await fetch(`${baseUrl}/`, { redirect: "manual" })
   if (root.status <= 0) {

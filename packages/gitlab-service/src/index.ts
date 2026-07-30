@@ -9,4 +9,5 @@ export {
   normalizeGitLabForgeHost,
 } from "./lib/gitlab-service-live.js"
 export * from "./lib/gitlab-service-test.js"
+export * from "./lib/glab-host-token.js"
 export * from "./lib/types.js"

@@ -1,4 +1,4 @@
-import { Duration, Effect, FileSystem, Stream } from "effect"
+import { Effect, FileSystem, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { SqlClient } from "effect/unstable/sql"
 import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
@@ -10,6 +10,7 @@ import {
 import {
   type GitLabRepository,
   GitLabService,
+  resolveGlabHostToken,
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
@@ -311,10 +312,8 @@ const gitlabHttpsRemoteUrl = (repository: RepositoryRecord): string =>
 
 /**
  * Resolve ambient GitLab token for HTTPS push (Keymaxxer path unavailable).
- * Prefers GITLAB_TOKEN, then glab host-scoped config.
+ * Prefers GITLAB_TOKEN, then host-authenticated glab via shared helper.
  */
-const GLAB_TOKEN_TIMEOUT = Duration.seconds(60)
-
 const resolveAmbientGitLabToken = (forgeHost: string) =>
   Effect.gen(function* () {
     const fromEnv = process.env.GITLAB_TOKEN?.trim()
@@ -322,42 +321,7 @@ const resolveAmbientGitLabToken = (forgeHost: string) =>
       return fromEnv
     }
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    const command = ChildProcess.make(
-      "glab",
-      ["config", "get", "token", "--host", forgeHost],
-      { stdin: "ignore" },
-    )
-    const output = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const handle = yield* spawner.spawn(command)
-        const [exitCode, stdout, stderr] = yield* Effect.all(
-          [
-            handle.exitCode,
-            Stream.decodeText(handle.stdout).pipe(Stream.mkString),
-            Stream.decodeText(handle.stderr).pipe(Stream.mkString),
-          ],
-          { concurrency: 3 },
-        )
-        return {
-          exitCode: Number(exitCode),
-          stdout: stdout.trim(),
-          stderr: stderr.trim(),
-        }
-      }),
-    ).pipe(
-      Effect.timeout(GLAB_TOKEN_TIMEOUT),
-      Effect.catch((cause) =>
-        Effect.succeed({
-          exitCode: 1,
-          stdout: "",
-          stderr: errorMessage(cause),
-        }),
-      ),
-    )
-    if (output.exitCode !== 0 || output.stdout === "") {
-      return null
-    }
-    return output.stdout
+    return yield* resolveGlabHostToken({ forgeHost, spawner })
   })
 
 /**
