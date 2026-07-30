@@ -42,14 +42,56 @@ describe("/kanban route", () => {
     expect(source).toMatch(/industrial-shell pt-6 sm:pt-8/)
   })
 
-  test("drops obsolete masthead styles while keeping industrial pipeline chrome", () => {
+  test("does not render the Jobs section header band (eyebrow, title, LIVE, collapse)", () => {
+    // Issue #681: header band is gone; board mounts unconditionally. Tab/source
+    // filter chrome stays inside KanbanJobsBoard (see tabs/filtering test).
+    const source = kanbanSource()
+    expect(source).not.toContain("section-rail")
+    expect(source).not.toContain("section-index")
+    expect(source).not.toContain("section-title")
+    expect(source).not.toContain("live-marker")
+    expect(source).not.toContain("01 / Live floor")
+    expect(source).not.toContain("Live floor")
+    expect(source).not.toContain("<CardCollapseToggle")
+    expect(source).not.toContain("jobsCardCollapseId")
+    expect(source).not.toContain("useCardCollapsed")
+    expect(source).not.toContain("jobsCollapsed")
+    expect(source).not.toContain("kanban-jobs-card-body")
+    expect(source).toContain("<KanbanJobsBoard />")
+    expect(source).not.toContain("!jobsCollapsed &&")
+
+    // KanbanPage itself has no title/eyebrow chrome above the board.
+    const page = source.slice(
+      source.indexOf("function KanbanPage("),
+      source.indexOf("function PipelineCompleteSummary"),
+    )
+    expect(page).not.toContain("section-rail")
+    expect(page).not.toContain("Pipeline</h2>")
+    expect(page).toContain("<KanbanJobsBoard />")
+
+    // Filter controls remain the board's leading chrome (before the lane grid).
+    const board = source.slice(source.indexOf("function KanbanJobsBoard("))
+    const controlsIndex = board.indexOf("pipeline-controls")
+    const pipelineBoardIndex = board.indexOf("pipeline-board")
+    expect(controlsIndex).toBeGreaterThan(-1)
+    expect(pipelineBoardIndex).toBeGreaterThan(controlsIndex)
+  })
+
+  test("drops obsolete masthead and section-header styles while keeping industrial pipeline chrome", () => {
     const styles = stylesSource()
     expect(styles).not.toContain(".board-masthead")
     expect(styles).not.toContain(".board-kicker")
     expect(styles).not.toContain(".board-title")
     expect(styles).not.toContain(".board-deck")
+    // Issue #681: section-rail header band styles are gone.
+    expect(styles).not.toContain(".section-rail")
+    expect(styles).not.toContain(".section-index")
+    expect(styles).not.toContain(".section-title")
+    expect(styles).not.toContain(".live-marker")
+    expect(styles).not.toContain("industrial-pulse")
     // Pipeline board language remains.
     expect(styles).toContain(".pipeline-board")
+    expect(styles).toContain(".pipeline-controls")
     expect(styles).toContain(".industrial-shell")
   })
 
@@ -122,7 +164,7 @@ describe("/kanban route", () => {
 
   test("retains board controls and excludes repository management", () => {
     const source = kanbanSource()
-    expect(source).toContain("<CardCollapseToggle")
+    // Section collapse absence is covered by the #681 header-band test above.
     expect(source).toContain("<SessionUsageDialog")
     expect(source).toContain("<WorkItemPauseButton")
     expect(source).toContain("<WorkItemLifecycleStatus")

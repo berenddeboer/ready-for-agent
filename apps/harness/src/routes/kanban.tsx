@@ -1,8 +1,6 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useState } from "react"
-import { jobsCardCollapseId, useCardCollapsed } from "../card-collapse.js"
-import { CardCollapseToggle } from "../card-collapse-toggle.js"
 import { Copy } from "../copy.js"
 import { KanbanLiveUpdates } from "../kanban-live.js"
 import {
@@ -70,41 +68,15 @@ export const Route = createFileRoute("/kanban")({
 })
 
 function KanbanPage() {
-  const { collapsed: jobsCollapsed, toggleCollapsed: toggleJobsCollapsed } =
-    useCardCollapsed(jobsCardCollapseId())
-  const jobsBodyId = "kanban-jobs-card-body"
-
   return (
     <main className="industrial-shell pt-6 sm:pt-8">
       <section aria-label="Committed pull requests" className="mb-5">
         <CommittedPullRequestsDashboard />
       </section>
       <section aria-label="Jobs" className="pipeline-section">
-        <div className="section-rail">
-          <div>
-            <p className="section-index">01 / Live floor</p>
-            <h2 className="section-title">Pipeline</h2>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="live-marker">
-              <span aria-hidden="true" />
-              Live
-            </span>
-            <CardCollapseToggle
-              collapsed={jobsCollapsed}
-              onToggle={toggleJobsCollapsed}
-              controlsId={jobsBodyId}
-              label="Jobs"
-            />
-          </div>
-        </div>
-        {!jobsCollapsed && (
-          <div id={jobsBodyId}>
-            <Suspense fallback={<JobsCardSkeleton />}>
-              <KanbanJobsBoard />
-            </Suspense>
-          </div>
-        )}
+        <Suspense fallback={<JobsCardSkeleton />}>
+          <KanbanJobsBoard />
+        </Suspense>
       </section>
     </main>
   )
