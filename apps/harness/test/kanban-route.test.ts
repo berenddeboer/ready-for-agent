@@ -20,6 +20,39 @@ describe("/kanban route", () => {
     expect(source).toContain("<KanbanJobsBoard />")
   })
 
+  test("does not render the former board masthead (title, deck, or separator)", () => {
+    // Issue #670: decorative masthead is removed; content starts under primary nav.
+    const source = kanbanSource()
+    expect(source).not.toContain("board-masthead")
+    expect(source).not.toContain("board-kicker")
+    expect(source).not.toContain("board-title")
+    expect(source).not.toContain("board-deck")
+    expect(source).not.toContain("Autonomous delivery control")
+    expect(source).not.toContain("Work pipeline")
+    expect(source).not.toContain("Live production flow from intake to merge.")
+
+    // Committed PR dashboard is the first content landmark under main.
+    const main = source.slice(source.indexOf("<main"))
+    const firstSection = main.indexOf("<section")
+    expect(firstSection).toBeGreaterThan(-1)
+    expect(main.slice(firstSection, firstSection + 80)).toContain(
+      'aria-label="Committed pull requests"',
+    )
+    // Intentional top spacing only — no masthead-sized clamp padding.
+    expect(source).toMatch(/industrial-shell pt-6 sm:pt-8/)
+  })
+
+  test("drops obsolete masthead styles while keeping industrial pipeline chrome", () => {
+    const styles = stylesSource()
+    expect(styles).not.toContain(".board-masthead")
+    expect(styles).not.toContain(".board-kicker")
+    expect(styles).not.toContain(".board-title")
+    expect(styles).not.toContain(".board-deck")
+    // Pipeline board language remains.
+    expect(styles).toContain(".pipeline-board")
+    expect(styles).toContain(".industrial-shell")
+  })
+
   test("renders all six lifecycle lanes as an accessible pipeline", () => {
     const source = kanbanSource()
     expect(source).toContain('aria-label="Lifecycle pipeline"')
