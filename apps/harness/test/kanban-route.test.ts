@@ -76,7 +76,62 @@ describe("/kanban route", () => {
     )
     expect(ticket).toContain("onOpenSession(workItem.id, sessionId)")
     expect(ticket).toContain("showValue={false}")
-    expect(ticket).not.toContain('laneId === "complete"')
+    // Complete lane only swaps lifecycle chrome; session/copy remain shared
+    // above that branch for every ticket.
+    expect(ticket).toContain('laneId === "complete"')
+    const sessionIndex = ticket.indexOf("onOpenSession(workItem.id, sessionId)")
+    const completeSummaryIndex = ticket.indexOf("<PipelineCompleteSummary")
+    expect(sessionIndex).toBeGreaterThan(-1)
+    expect(completeSummaryIndex).toBeGreaterThan(sessionIndex)
+  })
+
+  test("Complete-lane tickets show start time and total duration without lifecycle steps", () => {
+    const source = kanbanSource()
+    expect(source).toContain("function PipelineCompleteSummary(")
+    const summary = source.slice(
+      source.indexOf("function PipelineCompleteSummary("),
+      source.indexOf("function PipelineTicket("),
+    )
+    expect(summary).toContain("formatStartedAgo(workItem.createdAt, nowMs)")
+    expect(summary).toContain(
+      "totalElapsedMs(workItem.createdAt, workItem.stateReadyAt)",
+    )
+    expect(summary).toContain("Elapsed ${")
+    expect(summary).toContain("formatDuration(elapsedMs)")
+    expect(summary).not.toContain("lifecycleLabels")
+    expect(summary).not.toContain("WorkItemLifecycleStatus")
+    expect(summary).not.toContain("Lifecycle steps")
+    // Intentional: no-change completionSummary chrome is out of Complete-lane scope.
+    expect(summary).not.toContain("completionSummary")
+    expect(summary).not.toContain("WorkItemOutcomePresentation")
+
+    const ticket = source.slice(
+      source.indexOf("function PipelineTicket("),
+      source.indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain('laneId === "complete"')
+    expect(ticket).toContain("<PipelineCompleteSummary")
+    // Non-complete lanes keep the full compact lifecycle status.
+    expect(ticket).toContain("<WorkItemLifecycleStatus")
+    const completeBranch = ticket.slice(ticket.indexOf("isCompleteLane ? ("))
+    expect(completeBranch).toContain("<PipelineCompleteSummary")
+    expect(completeBranch).toContain("<WorkItemLifecycleStatus")
+  })
+
+  test("Kanban list tabs share Complete-lane compact summary via pipelineLaneFor", () => {
+    // Gate is lane identity, not Pipeline vs Completed tab. Completed-tab rows
+    // that classify as complete intentionally reuse PipelineCompleteSummary;
+    // homepage Jobs Completed isolation is separate (index.tsx JobsCard).
+    const source = kanbanSource()
+    const board = source.slice(source.indexOf("function KanbanJobsBoard("))
+    expect(board).toContain("laneId={pipelineLaneFor(workItem)}")
+    expect(board).toContain("<PipelineTicket")
+    const ticket = source.slice(
+      source.indexOf("function PipelineTicket("),
+      source.indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain('const isCompleteLane = laneId === "complete"')
+    expect(ticket).toContain("<PipelineCompleteSummary")
   })
 
   test("shows agent backend label inline before session id on pipeline tickets", () => {

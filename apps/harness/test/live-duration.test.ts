@@ -3,6 +3,7 @@ import {
   formatStartedAgo,
   isLiveDurationStatus,
   liveDurationMs,
+  totalElapsedMs,
 } from "../src/live-duration.js"
 import { describe, expect, test } from "bun:test"
 
@@ -113,5 +114,22 @@ describe("formatDuration", () => {
     expect(formatDuration(3_000)).toBe("3s")
     expect(formatDuration(78_000)).toBe("1m 18s")
     expect(formatDuration(120_000)).toBe("2m")
+  })
+})
+
+describe("totalElapsedMs", () => {
+  test("computes wall-clock elapsed from createdAt to stateReadyAt", () => {
+    const createdAt = new Date(1_000_000).toISOString()
+    const stateReadyAt = new Date(1_000_000 + 78_000).toISOString()
+    expect(totalElapsedMs(createdAt, stateReadyAt)).toBe(78_000)
+    expect(formatDuration(totalElapsedMs(createdAt, stateReadyAt))).toBe(
+      "1m 18s",
+    )
+  })
+
+  test("clamps inverted timestamps to zero", () => {
+    const createdAt = new Date(2_000_000).toISOString()
+    const stateReadyAt = new Date(1_000_000).toISOString()
+    expect(totalElapsedMs(createdAt, stateReadyAt)).toBe(0)
   })
 })
