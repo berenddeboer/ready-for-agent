@@ -7,6 +7,10 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core"
 import { ulid } from "ulidx"
+import {
+  OPERATIONAL_LIFECYCLE_STEPS,
+  WORK_ITEM_STATES,
+} from "@ready-for-agent/lifecycle-model"
 
 export const repository = snakeCase.table(
   "repository",
@@ -231,30 +235,7 @@ export const workItem = snakeCase.table(
     pullRequestNumber: integer(),
     /** Active Agent Backend captured at Work Item creation (provenance). */
     agentBackend: text().notNull().default("opencode"),
-    state: text({
-      enum: [
-        "create_worktree",
-        "install_dependencies",
-        "implement",
-        "assess_changes",
-        "pre_commit",
-        "review",
-        "commit",
-        "create_pr",
-        "watch_pr_status_checks",
-        "resolve_pr_merge_conflict",
-        "investigate_pr_status_checks",
-        "mark_pr_ready_for_review",
-        "decide_pr_merge",
-        "merge_pr",
-        "close_issue",
-        "local_cleanup",
-        "complete",
-        "failed",
-        "abandoned",
-        "needs_human",
-      ],
-    }).notNull(),
+    state: text({ enum: WORK_ITEM_STATES }).notNull(),
     stateReadyAt: integer({ mode: "number" }).notNull(),
     paused: integer({ mode: "boolean" }).notNull().default(false),
     /**
@@ -283,26 +264,7 @@ export const workItem = snakeCase.table(
      * When set, successful advancement into this Lifecycle Step pauses the Work
      * Item (no Step Run enqueued) so the operator can inspect local work.
      */
-    pauseBeforeStep: text({
-      enum: [
-        "create_worktree",
-        "install_dependencies",
-        "implement",
-        "assess_changes",
-        "pre_commit",
-        "review",
-        "commit",
-        "create_pr",
-        "watch_pr_status_checks",
-        "resolve_pr_merge_conflict",
-        "investigate_pr_status_checks",
-        "mark_pr_ready_for_review",
-        "decide_pr_merge",
-        "merge_pr",
-        "close_issue",
-        "local_cleanup",
-      ],
-    }),
+    pauseBeforeStep: text({ enum: OPERATIONAL_LIFECYCLE_STEPS }),
     worktreePath: text(),
     /**
      * Exact commit OID at Create Worktree success; Assess Changes baseline.
@@ -381,26 +343,7 @@ export const stepRun = snakeCase.table(
     workItemId: text()
       .notNull()
       .references(() => workItem.id, { onDelete: "cascade" }),
-    step: text({
-      enum: [
-        "create_worktree",
-        "install_dependencies",
-        "implement",
-        "assess_changes",
-        "pre_commit",
-        "review",
-        "commit",
-        "create_pr",
-        "watch_pr_status_checks",
-        "resolve_pr_merge_conflict",
-        "investigate_pr_status_checks",
-        "mark_pr_ready_for_review",
-        "decide_pr_merge",
-        "merge_pr",
-        "close_issue",
-        "local_cleanup",
-      ],
-    }).notNull(),
+    step: text({ enum: OPERATIONAL_LIFECYCLE_STEPS }).notNull(),
     status: text({
       enum: [
         "queued",

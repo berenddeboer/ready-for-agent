@@ -18,5 +18,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.lib.json"
+  },
+  "devDependencies": {
+    "@ready-for-agent/lifecycle-model": "workspace:*"
   }
 }

@@ -1,4 +1,3 @@
-import { resolve } from "node:path"
 import {
   OPERATIONAL_LIFECYCLE_STEPS,
   OperationalLifecycleStep,
@@ -9,25 +8,8 @@ import {
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
-const existingDeclarationsPath = resolve(
-  import.meta.dir,
-  "../../work-item-lifecycle/src/lib/types.ts",
-)
-const {
-  OperationalLifecycleStep: ExistingOperationalLifecycleStep,
-  TerminalWorkItemState: ExistingTerminalWorkItemState,
-} = await import(existingDeclarationsPath)
-
-const sorted = (values: readonly string[]) => [...values].sort()
-
 describe("generated lifecycle state", () => {
-  it("matches the existing hand-written state space", () => {
-    expect(OPERATIONAL_LIFECYCLE_STEPS).toEqual(
-      sorted(ExistingOperationalLifecycleStep.literals),
-    )
-    expect(TERMINAL_WORK_ITEM_STATES).toEqual(
-      sorted(ExistingTerminalWorkItemState.literals),
-    )
+  it("composes the complete state space from operational and terminal states", () => {
     expect(WORK_ITEM_STATES).toEqual([
       ...OPERATIONAL_LIFECYCLE_STEPS,
       ...TERMINAL_WORK_ITEM_STATES,

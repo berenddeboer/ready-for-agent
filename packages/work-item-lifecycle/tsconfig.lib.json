@@ -33,6 +33,9 @@
     },
     {
       "path": "../db/tsconfig.lib.json"
+    },
+    {
+      "path": "../lifecycle-model/tsconfig.lib.json"
     }
   ]
 }
