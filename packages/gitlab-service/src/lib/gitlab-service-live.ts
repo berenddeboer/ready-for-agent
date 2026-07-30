@@ -53,6 +53,59 @@ const RequiredString = Schema.String.pipe(
 const ProjectSchema = Schema.Struct({
   path_with_namespace: RequiredString,
   default_branch: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Canonical web/API host lives here; SSH remotes may use a different host. */
+  web_url: Schema.optional(Schema.NullOr(Schema.String)),
+})
+
+/**
+ * Normalize a Forge Host string (hostname or hostname:port).
+ * Keeps non-default ports so self-hosted instances on :8443 stay reachable.
+ */
+export const normalizeGitLabForgeHost = (value: string): string => {
+  const trimmed = value.trim()
+  if (trimmed === "") return trimmed
+  const withPort = /^(.+):(\d+)$/.exec(trimmed)
+  if (withPort?.[1] !== undefined && withPort[2] !== undefined) {
+    const hostname = withPort[1].toLowerCase().replace(/^www\./, "")
+    return hostname.length > 0 ? `${hostname}:${withPort[2]}` : trimmed
+  }
+  return trimmed.toLowerCase().replace(/^www\./, "")
+}
+
+/**
+ * Prefer the host from project web_url over the clone/SSH remote host.
+ * Drupal's GitLab serves SSH as git.drupal.org and HTTPS/API as git.drupalcode.org.
+ * Uses hostname + non-default port (URL.host semantics) so custom-port instances
+ * are not rewritten to portless hosts.
+ */
+const forgeHostFromProjectWebUrl = (
+  webUrl: string | null | undefined,
+  fallbackHost: string,
+): string => {
+  if (webUrl === null || webUrl === undefined || webUrl.trim() === "") {
+    return normalizeGitLabForgeHost(fallbackHost)
+  }
+  try {
+    const url = new URL(webUrl)
+    const hostname = url.hostname.toLowerCase().replace(/^www\./, "")
+    if (hostname.length === 0) return normalizeGitLabForgeHost(fallbackHost)
+    // url.port is empty for default scheme ports; keep only explicit ports.
+    return url.port === "" ? hostname : `${hostname}:${url.port}`
+  } catch {
+    return normalizeGitLabForgeHost(fallbackHost)
+  }
+}
+
+const resolvedRepositoryIdentity = (
+  repository: GitLabRepository,
+  project: {
+    readonly path_with_namespace: string
+    readonly web_url?: string | null
+  },
+): GitLabRepository => ({
+  forge: repository.forge,
+  forgeHost: forgeHostFromProjectWebUrl(project.web_url, repository.forgeHost),
+  projectPath: project.path_with_namespace,
 })
 const UserSchema = Schema.Struct({
   username: RequiredString,
@@ -727,8 +780,10 @@ export const makeGitLabService = (options: {
           projectApiPath(repository),
           `Failed to verify GitLab project ${repository.projectPath} on ${repository.forgeHost}`,
         ).pipe(
-          Effect.map((value) => decode(ProjectSchema, value)),
-          Effect.asVoid,
+          Effect.map((value) => {
+            const project = decode(ProjectSchema, value)
+            return resolvedRepositoryIdentity(repository, project)
+          }),
           Effect.mapError((error) =>
             error instanceof GitLabRequestError
               ? error

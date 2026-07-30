@@ -12,6 +12,7 @@ import {
   type GitLabServiceShape,
   formatGitLabHelperShellCommand,
   gitlabVaultAccount,
+  normalizeGitLabForgeHost,
   resolveGitLabHelperChildSpawn,
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -396,16 +397,51 @@ export const keymaxxerGitLabLayer = (options: {
                   repository,
                   tokenName,
                   "verify-project",
-                  (stdout) =>
-                    stdout.trim() === "" || stdout.trim() === "ok"
-                      ? Effect.void
-                      : Effect.fail(
+                  (stdout) => {
+                    const trimmed = stdout.trim()
+                    // Legacy helpers printed "ok"; treat that as "no host change".
+                    if (trimmed === "" || trimmed === "ok") {
+                      return Effect.succeed(repository)
+                    }
+                    try {
+                      const parsed = JSON.parse(trimmed) as {
+                        readonly forge?: string
+                        readonly forgeHost?: string
+                        readonly projectPath?: string
+                      }
+                      if (
+                        typeof parsed.forgeHost !== "string" ||
+                        parsed.forgeHost.trim() === "" ||
+                        typeof parsed.projectPath !== "string" ||
+                        parsed.projectPath.trim() === ""
+                      ) {
+                        return Effect.fail(
                           requestError(
                             repository,
                             "verify GitLab project",
                             stdout,
                           ),
+                        )
+                      }
+                      return Effect.succeed({
+                        forge:
+                          typeof parsed.forge === "string" &&
+                          parsed.forge.trim() !== ""
+                            ? parsed.forge
+                            : repository.forge,
+                        forgeHost: normalizeGitLabForgeHost(parsed.forgeHost),
+                        projectPath: parsed.projectPath.trim(),
+                      })
+                    } catch {
+                      return Effect.fail(
+                        requestError(
+                          repository,
+                          "verify GitLab project",
+                          stdout,
                         ),
+                      )
+                    }
+                  },
                   "verify GitLab project",
                 ),
               (ambientService) => ambientService.verifyProject(repository),

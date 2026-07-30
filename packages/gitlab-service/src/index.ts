@@ -6,6 +6,7 @@ export {
   GitLabServiceLive,
   makeGitLabService,
   makeGitLabServiceFromToken,
+  normalizeGitLabForgeHost,
 } from "./lib/gitlab-service-live.js"
 export * from "./lib/gitlab-service-test.js"
 export * from "./lib/types.js"

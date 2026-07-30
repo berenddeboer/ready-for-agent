@@ -18,10 +18,14 @@ export type GitLabServiceError =
   | GitLabRequestError
 
 export interface GitLabServiceShape {
-  /** Verify Forge Host + Project Path against GitLab before persistence. */
+  /**
+   * Verify Forge Host + Project Path against GitLab before persistence.
+   * Returns the repository identity with the instance's canonical API/web host
+   * (from project `web_url`) when it differs from the SSH/remote guess.
+   */
   readonly verifyProject: (
     repository: GitLabRepository,
-  ) => Effect.Effect<void, GitLabServiceError>
+  ) => Effect.Effect<GitLabRepository, GitLabServiceError>
   /** Operator Forge User for the active ambient credential. */
   readonly getAuthenticatedUserLogin: (
     repository: GitLabRepository,

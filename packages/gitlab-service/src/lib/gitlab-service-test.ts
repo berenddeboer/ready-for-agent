@@ -45,7 +45,8 @@ export const makeGitLabServiceTest = (
   }
 
   return Layer.succeed(GitLabService, {
-    verifyProject: (repository) => failOr(repository, () => Effect.void),
+    verifyProject: (repository) =>
+      failOr(repository, (fixture) => Effect.succeed(fixture.repository)),
     getAuthenticatedUserLogin: (repository) =>
       failOr(repository, (fixture) =>
         Effect.succeed(fixture.operatorLogin ?? "operator"),

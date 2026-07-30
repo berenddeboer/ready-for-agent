@@ -134,7 +134,7 @@ const stubGitLab = (
   overrides: Partial<GitLabServiceShape> = {},
 ): Layer.Layer<GitLabService> =>
   Layer.succeed(GitLabService, {
-    verifyProject: () => Effect.void,
+    verifyProject: (repository) => Effect.succeed(repository),
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     listReadyIssues: () => Effect.succeed([]),
     hasCredentials: () => Effect.succeed(true),
