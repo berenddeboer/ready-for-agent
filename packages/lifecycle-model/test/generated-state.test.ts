@@ -1,4 +1,8 @@
+import { Duration } from "effect"
 import {
+  DEFAULT_LIFECYCLE_MAX_DURATIONS,
+  LIFECYCLE_STEP_AGENT_FREE,
+  LIFECYCLE_STEP_RETRYABLE,
   LIFECYCLE_TRANSITIONS,
   OPERATIONAL_LIFECYCLE_STEPS,
   OperationalLifecycleStep,
@@ -24,6 +28,62 @@ describe("generated lifecycle state", () => {
     )
     expect(TerminalWorkItemState.literals).toEqual(TERMINAL_WORK_ITEM_STATES)
     expect(WorkItemState.literals).toEqual(WORK_ITEM_STATES)
+  })
+
+  it("preserves the previous agent-free Lifecycle Step classification", () => {
+    expect(LIFECYCLE_STEP_AGENT_FREE).toEqual({
+      assess_changes: false,
+      close_issue: true,
+      commit: false,
+      create_pr: false,
+      create_worktree: true,
+      decide_pr_merge: false,
+      implement: false,
+      install_dependencies: false,
+      investigate_pr_status_checks: false,
+      local_cleanup: true,
+      mark_pr_ready_for_review: true,
+      merge_pr: true,
+      pre_commit: false,
+      resolve_pr_merge_conflict: false,
+      review: false,
+      watch_pr_status_checks: true,
+    })
+  })
+
+  it("preserves the previous default maximum durations", () => {
+    expect(
+      Object.fromEntries(
+        Object.entries(DEFAULT_LIFECYCLE_MAX_DURATIONS).map(
+          ([step, duration]) => [step, Duration.toMillis(duration)],
+        ),
+      ),
+    ).toEqual({
+      assess_changes: 3_600_000,
+      close_issue: 300_000,
+      commit: 1_800_000,
+      create_pr: 600_000,
+      create_worktree: 300_000,
+      decide_pr_merge: 900_000,
+      implement: 7_200_000,
+      install_dependencies: 900_000,
+      investigate_pr_status_checks: 7_200_000,
+      local_cleanup: 300_000,
+      mark_pr_ready_for_review: 300_000,
+      merge_pr: 300_000,
+      pre_commit: 7_200_000,
+      resolve_pr_merge_conflict: 7_200_000,
+      review: 3_600_000,
+      watch_pr_status_checks: 300_000,
+    })
+  })
+
+  it("emits retryability for every operational Lifecycle Step", () => {
+    expect(LIFECYCLE_STEP_RETRYABLE).toEqual(
+      Object.fromEntries(
+        OPERATIONAL_LIFECYCLE_STEPS.map((step) => [step, true]),
+      ),
+    )
   })
 
   it("exports the ontology transition relation as queryable data", () => {

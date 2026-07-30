@@ -1,7 +1,7 @@
 // This file is generated from ontology/rfa.ttl.
 // Run `bunx nx run lifecycle-model:generate` to update it.
 
-import { Schema } from "effect"
+import { Duration, Schema } from "effect"
 
 export const OPERATIONAL_LIFECYCLE_STEPS = [
   "assess_changes",
@@ -47,6 +47,77 @@ export const WORK_ITEM_STATES = [
 
 export const WorkItemState = Schema.Literals(WORK_ITEM_STATES)
 export type WorkItemState = typeof WorkItemState.Type
+
+export type LifecycleStepPropertyMap<Value> = {
+  readonly [Step in OperationalLifecycleStep]: Value
+}
+
+export const LIFECYCLE_STEP_AGENT_FREE = {
+  assess_changes: false,
+  close_issue: true,
+  commit: false,
+  create_pr: false,
+  create_worktree: true,
+  decide_pr_merge: false,
+  implement: false,
+  install_dependencies: false,
+  investigate_pr_status_checks: false,
+  local_cleanup: true,
+  mark_pr_ready_for_review: true,
+  merge_pr: true,
+  pre_commit: false,
+  resolve_pr_merge_conflict: false,
+  review: false,
+  watch_pr_status_checks: true,
+} as const satisfies LifecycleStepPropertyMap<boolean>
+
+export type LifecycleMaxDurations =
+  LifecycleStepPropertyMap<Duration.Duration>
+
+export const DEFAULT_LIFECYCLE_MAX_DURATIONS = {
+  assess_changes: Duration.millis(3600000),
+  close_issue: Duration.millis(300000),
+  commit: Duration.millis(1800000),
+  create_pr: Duration.millis(600000),
+  create_worktree: Duration.millis(300000),
+  decide_pr_merge: Duration.millis(900000),
+  implement: Duration.millis(7200000),
+  install_dependencies: Duration.millis(900000),
+  investigate_pr_status_checks: Duration.millis(7200000),
+  local_cleanup: Duration.millis(300000),
+  mark_pr_ready_for_review: Duration.millis(300000),
+  merge_pr: Duration.millis(300000),
+  pre_commit: Duration.millis(7200000),
+  resolve_pr_merge_conflict: Duration.millis(7200000),
+  review: Duration.millis(3600000),
+  watch_pr_status_checks: Duration.millis(300000),
+} satisfies LifecycleMaxDurations
+
+export const LIFECYCLE_STEP_RETRYABLE = {
+  assess_changes: true,
+  close_issue: true,
+  commit: true,
+  create_pr: true,
+  create_worktree: true,
+  decide_pr_merge: true,
+  implement: true,
+  install_dependencies: true,
+  investigate_pr_status_checks: true,
+  local_cleanup: true,
+  mark_pr_ready_for_review: true,
+  merge_pr: true,
+  pre_commit: true,
+  resolve_pr_merge_conflict: true,
+  review: true,
+  watch_pr_status_checks: true,
+} as const satisfies LifecycleStepPropertyMap<boolean>
+
+export const isAgentFreeLifecycleStep = (step: string): boolean =>
+  Object.hasOwn(LIFECYCLE_STEP_AGENT_FREE, step) &&
+  LIFECYCLE_STEP_AGENT_FREE[step as OperationalLifecycleStep]
+
+export const isAgentDependentLifecycleStep = (step: string): boolean =>
+  !isAgentFreeLifecycleStep(step)
 
 export interface LifecycleTransition {
   readonly from: WorkItemState

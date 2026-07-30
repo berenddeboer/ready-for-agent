@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.2.0" .
+  owl:versionInfo "0.3.0" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -88,6 +88,30 @@ rfa:reasonCode
   rdfs:domain rfa:Transition ;
   rdfs:range rfa:StepRunReason .
 
+rfa:agentFree
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:OperationalLifecycleStep ;
+  rdfs:range xsd:boolean ;
+  rdfs:label "agent-free"@en ;
+  skos:definition
+    "Whether the Lifecycle Step is guaranteed not to invoke an Agent Turn."@en .
+
+rfa:maximumDuration
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:OperationalLifecycleStep ;
+  rdfs:range xsd:dayTimeDuration ;
+  rdfs:label "maximum duration"@en ;
+  skos:definition
+    "The positive fixed default maximum productive execution time for the Lifecycle Step, expressed to millisecond precision."@en .
+
+rfa:retryable
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:OperationalLifecycleStep ;
+  rdfs:range xsd:boolean ;
+  rdfs:label "retryable"@en ;
+  skos:definition
+    "Whether a failed or interrupted run of the Lifecycle Step may be retried."@en .
+
 rfa:NativeReason a rfa:StepRunReason ; skos:notation "native" .
 rfa:AgentFallbackReason a rfa:StepRunReason ; skos:notation "agent_fallback" .
 rfa:ReviewDeferredReason a rfa:StepRunReason ; skos:notation "review_deferred" .
@@ -105,6 +129,9 @@ rfa:CreateWorktree
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "create_worktree" ;
+  rfa:agentFree true ;
+  rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Create Worktree"@en ;
   skos:definition
     "The Lifecycle Step that creates the Work Item's isolated Git worktree and records its starting commit."@en .
@@ -114,6 +141,9 @@ rfa:InstallDependencies
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "install_dependencies" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT15M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Install Dependencies"@en ;
   skos:definition
     "The Lifecycle Step that installs the Repository dependencies required to work on the Work Item."@en .
@@ -122,37 +152,55 @@ rfa:Implement
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "implement" .
+  skos:notation "implement" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT2H"^^xsd:dayTimeDuration ;
+  rfa:retryable true .
 
 rfa:AssessChanges
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "assess_changes" .
+  skos:notation "assess_changes" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT1H"^^xsd:dayTimeDuration ;
+  rfa:retryable true .
 
 rfa:PreCommit
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "pre_commit" .
+  skos:notation "pre_commit" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT2H"^^xsd:dayTimeDuration ;
+  rfa:retryable true .
 
 rfa:Review
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "review" .
+  skos:notation "review" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT1H"^^xsd:dayTimeDuration ;
+  rfa:retryable true .
 
 rfa:Commit
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "commit" .
+  skos:notation "commit" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT30M"^^xsd:dayTimeDuration ;
+  rfa:retryable true .
 
 rfa:CreatePr
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "create_pr" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT10M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Create PR"@en ;
   skos:definition
     "The Lifecycle Step that pushes committed Work Item changes and creates their draft pull request."@en .
@@ -162,6 +210,9 @@ rfa:WatchPrStatusChecks
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "watch_pr_status_checks" ;
+  rfa:agentFree true ;
+  rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Watch PR Status Checks"@en ;
   skos:definition
     "The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions."@en .
@@ -171,6 +222,9 @@ rfa:ResolvePrMergeConflict
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "resolve_pr_merge_conflict" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT2H"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Resolve PR Merge Conflict"@en ;
   skos:definition
     "The Lifecycle Step that asks the Work Item's Implement Session to rebase a conflicting pull-request branch."@en .
@@ -180,6 +234,9 @@ rfa:InvestigatePrStatusChecks
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "investigate_pr_status_checks" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT2H"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Investigate PR Status Checks"@en ;
   skos:definition
     "The Lifecycle Step that processes a durable Status Check Handoff in the Work Item's Implement Session."@en .
@@ -189,6 +246,9 @@ rfa:MarkPrReadyForReview
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "mark_pr_ready_for_review" ;
+  rfa:agentFree true ;
+  rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Mark PR Ready for Review"@en ;
   skos:definition
     "The Lifecycle Step that changes a settled draft Work Item PR to ready for review."@en .
@@ -198,6 +258,9 @@ rfa:DecidePrMerge
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "decide_pr_merge" ;
+  rfa:agentFree false ;
+  rfa:maximumDuration "PT15M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Decide PR Merge"@en ;
   skos:definition
     "The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human."@en .
@@ -207,6 +270,9 @@ rfa:MergePr
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "merge_pr" ;
+  rfa:agentFree true ;
+  rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "Merge PR"@en ;
   skos:definition
     "The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge."@en .
@@ -215,13 +281,19 @@ rfa:CloseIssue
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "close_issue" .
+  skos:notation "close_issue" ;
+  rfa:agentFree true ;
+  rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
+  rfa:retryable true .
 
 rfa:LocalCleanup
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
   skos:notation "local_cleanup" ;
+  rfa:agentFree true ;
+  rfa:maximumDuration "PT5M"^^xsd:dayTimeDuration ;
+  rfa:retryable true ;
   skos:prefLabel "local cleanup"@en ;
   skos:definition
     "The Lifecycle Step that removes the Work Item's local worktree and branch after its remote outcome is finished."@en .
