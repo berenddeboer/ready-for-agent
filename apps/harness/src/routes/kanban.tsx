@@ -6,12 +6,19 @@ import { CardCollapseToggle } from "../card-collapse-toggle.js"
 import { Copy } from "../copy.js"
 import { KanbanLiveUpdates } from "../kanban-live.js"
 import {
+  formatDuration,
+  formatStartedAgo,
+  totalElapsedMs,
+  useNowMs,
+} from "../live-duration.js"
+import {
   PIPELINE_LANES,
   type PipelineLaneId,
   pipelineLaneFor,
 } from "../pipeline-lanes.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
+import { prBadgeClassName } from "../work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
 import {
   CommittedPullRequestsDashboard,
@@ -129,6 +136,59 @@ function KanbanPage() {
   )
 }
 
+/**
+ * Complete-lane tickets omit per-step lifecycle chrome. Show only start time
+ * and total elapsed duration, plus a PR link when one exists.
+ *
+ * Gated by assigned lane (`laneId === "complete"`), not by which Jobs tab
+ * hosts the ticket — so Pipeline Complete-lane cards and Kanban Completed-tab
+ * rows that classify as complete share this compact view. Homepage Jobs
+ * Completed is unaffected (it never uses PipelineTicket).
+ *
+ * No-change completion-summary chrome is intentionally omitted: issue #630
+ * limits Complete-lane status to start + total duration (and PR identity).
+ */
+function PipelineCompleteSummary({
+  workItem,
+  pullRequestUrl,
+}: {
+  readonly workItem: WorkItem
+  readonly pullRequestUrl: string | null
+}) {
+  const nowMs = useNowMs(true)
+  const elapsedMs = totalElapsedMs(workItem.createdAt, workItem.stateReadyAt)
+  const elapsedLabel = `Elapsed ${formatDuration(elapsedMs)}`
+  const prNumber = workItem.pullRequestNumber
+  const openPullRequestLabel =
+    prNumber === null ? null : `Open pull request #${prNumber}`
+
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="font-mono text-xs tracking-[0.1em] text-ink-faint uppercase">
+          {formatStartedAgo(workItem.createdAt, nowMs)}
+        </span>
+        <span className="font-mono text-xs text-ink-faint">{elapsedLabel}</span>
+      </div>
+      {pullRequestUrl !== null &&
+        prNumber !== null &&
+        openPullRequestLabel !== null && (
+          <div className="mt-1.5">
+            <a
+              className={prBadgeClassName}
+              href={pullRequestUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={openPullRequestLabel}
+            >
+              PR #{prNumber}
+            </a>
+          </div>
+        )}
+    </div>
+  )
+}
+
 function PipelineTicket({
   workItem,
   repository,
@@ -169,6 +229,7 @@ function PipelineTicket({
     workItem.worktreePath,
   )
   const lane = PIPELINE_LANES.find((candidate) => candidate.id === laneId)
+  const isCompleteLane = laneId === "complete"
 
   return (
     <li
@@ -223,12 +284,19 @@ function PipelineTicket({
           />
         )}
       </div>
-      <WorkItemLifecycleStatus
-        workItem={workItem}
-        compact
-        issueUrl={issueUrl}
-        pullRequestUrl={pullRequestUrl}
-      />
+      {isCompleteLane ? (
+        <PipelineCompleteSummary
+          workItem={workItem}
+          pullRequestUrl={pullRequestUrl}
+        />
+      ) : (
+        <WorkItemLifecycleStatus
+          workItem={workItem}
+          compact
+          issueUrl={issueUrl}
+          pullRequestUrl={pullRequestUrl}
+        />
+      )}
     </li>
   )
 }

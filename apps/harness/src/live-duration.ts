@@ -34,6 +34,20 @@ export function formatDuration(ms: number): string {
   return remainingMinutes === 0 ? `${hours}h` : `${hours}h ${remainingMinutes}m`
 }
 
+/**
+ * Total wall-clock elapsed time for a Work Item from creation to last state
+ * transition (for terminal items: end of the run).
+ */
+export function totalElapsedMs(
+  createdAt: string,
+  stateReadyAt: string,
+): number {
+  return Math.max(
+    0,
+    new Date(stateReadyAt).getTime() - new Date(createdAt).getTime(),
+  )
+}
+
 /** Formats job start time as a relative phrase, e.g. "Started 15 min ago". */
 export function formatStartedAgo(iso: string, nowMs = Date.now()): string {
   const elapsedMs = Math.max(0, nowMs - new Date(iso).getTime())

@@ -125,5 +125,8 @@ describe("Jobs Reset button wiring", () => {
     )
     expect(jobsCard).toContain("<WorkItemLifecycleStatus")
     expect(jobsCard).toContain("compact")
+    // Homepage isolation: Kanban Complete-lane summary must not leak here.
+    expect(jobsCard).not.toContain("PipelineCompleteSummary")
+    expect(jobsCard).not.toContain("totalElapsedMs")
   })
 })
