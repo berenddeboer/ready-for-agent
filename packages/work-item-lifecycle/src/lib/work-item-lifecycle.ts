@@ -143,6 +143,7 @@ const isUnfinishedWorkItemUniqueViolation = (error: SqlError): boolean => {
     (message.includes("work_item_one_unfinished_uidx") ||
       message.includes("work_item_one_unfinished_v2_uidx") ||
       message.includes("work_item_one_unfinished_v3_uidx") ||
+      message.includes("work_item_one_unfinished_v4_uidx") ||
       (message.includes("work_item.repository_id") &&
         message.includes("work_item.issue_number")))
   )
