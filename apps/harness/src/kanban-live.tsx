@@ -1,12 +1,12 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 import { followRepositoryIssuesLive } from "./refresh-issues-live.js"
-import { followRepositoryWorkItemsLive } from "./refresh-work-items-live.js"
 import {
   issuesQuery,
   repositoriesQuery,
   workItemsQuery,
 } from "./routes/index.js"
+import { WorkItemsLiveUpdates } from "./work-items-live-updates.js"
 
 /**
  * Mounts the Harness's existing live invalidation subscriptions for the
@@ -38,18 +38,5 @@ export function KanbanLiveUpdates({
     return () => controller.abort()
   }, [queryClient])
 
-  useEffect(() => {
-    const controller = new AbortController()
-    void followRepositoryWorkItemsLive({
-      getRepositoryIds: () => repositoryIdsRef.current,
-      queryClient,
-      queries: {
-        workItems: workItemsQuery,
-      },
-      signal: controller.signal,
-    })
-    return () => controller.abort()
-  }, [queryClient])
-
-  return null
+  return <WorkItemsLiveUpdates repositoryIds={repositoryIds} />
 }

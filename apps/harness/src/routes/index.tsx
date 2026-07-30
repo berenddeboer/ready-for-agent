@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useMutation,
   useQueries,
   useQuery,
@@ -8,13 +9,17 @@ import {
 import { Link, createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
-import { JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
+import {
+  COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
+  JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
+} from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import {
   jobsCardCollapseId,
   repositoryCardCollapseId,
   useCardCollapsed,
 } from "../card-collapse.js"
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
+import { CompletedWorkItemRow } from "../completed-work-item-row.js"
 import { Copy } from "../copy.js"
 import {
   type GraphqlWorkItemState,
@@ -47,6 +52,7 @@ import {
 } from "../refresh-repositories-live.js"
 import {
   committedPullRequestsCountQueryKeyPrefix,
+  completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
@@ -450,6 +456,8 @@ type WorkItemsQueryOptions = {
 export const JOBS_COMPLETED_WINDOW_HOURS = jobsCompletedWindowHours
 /** Failed history window (fixed item cap; independent of Completed). */
 export const JOBS_FAILED_LIMIT = 15
+/** Historical Completed page size (server-paginated; not the Jobs 24 h tab). */
+export const COMPLETED_WORK_ITEMS_PAGE_SIZE = completedWorkItemsDefaultPageSize
 
 export const workItemsQuery = (
   repositoryId: string,
@@ -493,6 +501,47 @@ export const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
   workItemsQuery(repositoryId, {
     listKind: "COMPLETED",
   })
+
+export type CompletedWorkItemsPage = {
+  readonly items: readonly WorkItem[]
+  readonly page: number
+  readonly pageSize: number
+  readonly totalCount: number
+  readonly hasNextPage: boolean
+  readonly hasPreviousPage: boolean
+}
+
+/**
+ * Historical Completed Work Items across all repositories (server-paginated).
+ * Distinct from jobsCompletedWorkItemsQuery (per-repo, 24 h window).
+ */
+export const completedWorkItemsHistoryQuery = (page: number) => ({
+  queryKey: [
+    ...completedWorkItemsHistoryQueryKeyPrefix,
+    page,
+    COMPLETED_WORK_ITEMS_PAGE_SIZE,
+  ] as const,
+  // Keep the prior page visible while the next page loads so pagination does
+  // not flash a full-board skeleton (and so live updates stay mounted).
+  placeholderData: keepPreviousData,
+  queryFn: async (): Promise<CompletedWorkItemsPage> => {
+    const result = await graphql.query({
+      completedWorkItems: {
+        __args: {
+          page,
+          pageSize: COMPLETED_WORK_ITEMS_PAGE_SIZE,
+        },
+        items: workItemFields,
+        page: true,
+        pageSize: true,
+        totalCount: true,
+        hasNextPage: true,
+        hasPreviousPage: true,
+      },
+    })
+    return result.completedWorkItems
+  },
+})
 
 const committedPullRequestsCountQuery = (from: string, to: string) => ({
   queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to] as const,
@@ -3665,13 +3714,26 @@ function JobsCard() {
           >
             {activeItems.map((workItem) => {
               const repository = repositoryById.get(workItem.repositoryId)
+              const issue = issueByRepoAndNumber.get(
+                `${workItem.repositoryId}:${workItem.issueNumber}`,
+              )
+              if (selectedTab === "completed") {
+                return (
+                  <CompletedWorkItemRow
+                    key={workItem.id}
+                    workItem={workItem}
+                    repository={repository}
+                    issue={issue}
+                    onOpenSession={(workItemId, sessionId) => {
+                      setSessionDialog({ workItemId, sessionId })
+                    }}
+                  />
+                )
+              }
               const repositoryLabel =
                 repository === undefined
                   ? workItem.repositoryId
                   : `${repository.projectPath}`
-              const issue = issueByRepoAndNumber.get(
-                `${workItem.repositoryId}:${workItem.issueNumber}`,
-              )
               const issueTitle =
                 issue?.title ?? workItem.issueTitle ?? undefined
               const issueUrl =
@@ -3741,35 +3803,13 @@ function JobsCard() {
                         -
                       </span>
                     )}
-                    {sessionId !== null &&
-                      (selectedTab === "completed" ? (
-                        <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-                          <button
-                            type="button"
-                            className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-                            title={sessionId}
-                            onClick={() => {
-                              setSessionDialog({
-                                workItemId: workItem.id,
-                                sessionId,
-                              })
-                            }}
-                          >
-                            {sessionId}
-                          </button>
-                          <Copy
-                            value={sessionId}
-                            className="shrink-0"
-                            showValue={false}
-                          />
-                        </span>
-                      ) : (
-                        <Copy
-                          value={sessionId}
-                          className="min-w-0 max-w-full"
-                          textClassName="font-mono text-xs text-ink-faint"
-                        />
-                      ))}
+                    {sessionId !== null && (
+                      <Copy
+                        value={sessionId}
+                        className="min-w-0 max-w-full"
+                        textClassName="font-mono text-xs text-ink-faint"
+                      />
+                    )}
                     {sessionId !== null && worktreePath !== null && (
                       <span className="shrink-0 font-mono text-xs text-ink-faint">
                         -

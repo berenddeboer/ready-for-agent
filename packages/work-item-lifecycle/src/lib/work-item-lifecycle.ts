@@ -97,6 +97,8 @@ import {
 import { computeProductiveElapsedMs } from "./step-run-productive-time.js"
 import { applyCheckedLifecycleTransition } from "./transition-relation-check.js"
 import {
+  COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
+  COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
   type MergeMode,
@@ -645,6 +647,16 @@ export type RunStepResult =
       readonly _tag: "noop"
     }
 
+/**
+ * One page of historical Completed Work Items (Complete / Abandoned, all repos).
+ */
+export type CompletedWorkItemsPage = {
+  readonly items: readonly WorkItemRecord[]
+  readonly page: number
+  readonly pageSize: number
+  readonly totalCount: number
+}
+
 export interface WorkItemLifecycleShape {
   readonly maxDurations: LifecycleMaxDurations
   readonly recoverOrphanedStepRuns: Effect.Effect<
@@ -715,6 +727,15 @@ export interface WorkItemLifecycleShape {
   readonly listWorkItemsForRepository: (
     repositoryId: string,
   ) => Effect.Effect<readonly WorkItemRecord[], ListWorkItemsError>
+  /**
+   * Historical Completed Work Items across all repositories (Complete and
+   * Abandoned only). No rolling 24-hour window. Ordered by stateReadyAt
+   * newest-first with a stable rowid tie-break. Page is 1-based.
+   */
+  readonly listCompletedWorkItems: (options: {
+    readonly page: number
+    readonly pageSize: number
+  }) => Effect.Effect<CompletedWorkItemsPage, ListWorkItemsError>
   /**
    * True when any Work Item (any state) has this OpenCode Session id.
    * Used to gate GraphQL session usage reads to harness-owned Sessions.
@@ -1041,6 +1062,67 @@ export const makeWorkItemLifecycleLive = (
         return rows.map((row) =>
           toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
         )
+      })
+
+      /**
+       * Server-side pagination for historical Completed (no 24 h window).
+       * Clamps page/pageSize the same way as GraphQL so direct callers cannot
+       * request an unbounded LIMIT.
+       */
+      const listCompletedWorkItems = Effect.fn(
+        "WorkItemLifecycle.listCompletedWorkItems",
+      )(function* (options: {
+        readonly page: number
+        readonly pageSize: number
+      }) {
+        const page =
+          !Number.isFinite(options.page) || options.page < 1
+            ? 1
+            : Math.max(1, Math.trunc(options.page))
+        const pageSize =
+          !Number.isFinite(options.pageSize) || options.pageSize < 1
+            ? COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE
+            : Math.min(
+                COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
+                Math.trunc(options.pageSize),
+              )
+        const offset = (page - 1) * pageSize
+        const nowMs = yield* Clock.currentTimeMillis
+
+        const countRows = (yield* sql
+          .unsafe(
+            `SELECT COUNT(*) AS count
+             FROM work_item
+             WHERE state IN ('complete', 'abandoned')`,
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly {
+          readonly count: number
+        }[]
+        const totalCount = Number(countRows[0]?.count ?? 0)
+
+        const rows = (yield* sql
+          .unsafe(
+            `SELECT ${WORK_ITEM_SELECT_COLUMNS}
+             FROM work_item
+             WHERE state IN ('complete', 'abandoned')
+             ORDER BY state_ready_at DESC, rowid DESC
+             LIMIT ? OFFSET ?`,
+            [pageSize, offset],
+          )
+          .pipe(Effect.mapError(toDatabaseError))) as readonly WorkItemRow[]
+
+        const stepRunsByWorkItem = yield* loadStepRuns(
+          rows.map((row) => row.id),
+          nowMs,
+        )
+        return {
+          items: rows.map((row) =>
+            toWorkItemRecord(row, stepRunsByWorkItem.get(row.id) ?? [], nowMs),
+          ),
+          page,
+          pageSize,
+          totalCount,
+        } satisfies CompletedWorkItemsPage
       })
 
       const ownsSessionId = Effect.fn("WorkItemLifecycle.ownsSessionId")(
@@ -5776,6 +5858,7 @@ export const makeWorkItemLifecycleLive = (
         getWorkItem,
         listWorkItemsForIssue,
         listWorkItemsForRepository,
+        listCompletedWorkItems,
         ownsSessionId,
         countCommittedPullRequests,
         continueAfterHumanPrOutcome,
