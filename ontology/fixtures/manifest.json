@@ -7,6 +7,12 @@
       "consistent": true
     },
     {
+      "file": "valid-execution.ttl",
+      "category": "valid",
+      "conforms": true,
+      "consistent": true
+    },
+    {
       "file": "invalid.ttl",
       "category": "invalid",
       "conforms": false,

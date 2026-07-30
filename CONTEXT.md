@@ -311,6 +311,48 @@ _Avoid_: Not Implemented Issue, Ready-labeled Issue
 The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. In the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs, defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles; it sends a settled draft through Mark PR Ready for Review, and sends a settled ready PR past its Check-Start Deadline to Decide PR Merge.
 _Avoid_: Last completed step, phase
 
+**Create Worktree**:
+The Lifecycle Step that creates the Work Item's isolated Git worktree and records its starting commit.
+
+**Install Dependencies**:
+The Lifecycle Step that installs the Repository dependencies required to work on the Work Item.
+
+**Create PR**:
+The Lifecycle Step that pushes committed Work Item changes and creates their draft pull request.
+
+**Watch PR Status Checks**:
+The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions.
+
+**Resolve PR Merge Conflict**:
+The Lifecycle Step that asks the Work Item's Implement Session to rebase a conflicting pull-request branch.
+
+**Investigate PR Status Checks**:
+The Lifecycle Step that processes a durable Status Check Handoff in the Work Item's Implement Session.
+
+**Mark PR Ready for Review**:
+The Lifecycle Step that changes a settled draft Work Item PR to ready for review.
+
+**Decide PR Merge**:
+The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human.
+
+**Merge PR**:
+The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge.
+
+**local cleanup**:
+The Lifecycle Step that removes the Work Item's local worktree and branch after its remote outcome is finished.
+
+**Complete**:
+A terminal Work Item state whose remote outcome and local cleanup have both finished.
+
+**Failed**:
+A terminal Work Item state that cannot advance because a lifecycle precondition was not met.
+
+**Needs Human**:
+A Work Item state that cannot continue autonomously and records the intervention required from a human.
+
+**Abandoned**:
+A terminal Work Item state that preserves history after the attempt is stopped without completion.
+
 **Merge Revalidation Outcome**:
 A handled Merge PR attempt in which the Forge does not merge because the pull request or its base changed after approval. The first three outcomes return the Work Item to Watch PR Status Checks; a fourth requires a human, while operational or API failures remain failed Merge PR Step Runs eligible for Retry.
 _Avoid_: Merge failure, automatic Retry

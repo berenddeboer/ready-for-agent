@@ -3,20 +3,29 @@
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
 
 <https://ready-for-agent.dev/ontology/rfa>
   a owl:Ontology ;
   dcterms:title "Ready for Agent Work Item lifecycle ontology"@en ;
   dcterms:description
-    "The operational Lifecycle Steps and terminal Work Item states."@en ;
+    "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.1.0" .
+  owl:versionInfo "0.2.0" .
+
+rfa:ContextTerm
+  a owl:Class ;
+  rdfs:subClassOf skos:Concept .
+
+rfa:avoidanceRationale
+  a owl:AnnotationProperty .
 
 rfa:LifecycleState
   a owl:Class ;
-  skos:prefLabel "Lifecycle state"@en ;
+  rdfs:subClassOf rfa:LifecycleStep ;
+  rdfs:label "Lifecycle state"@en ;
   skos:definition
     "The next action required for a Work Item, or a terminal Work Item state."@en .
 
@@ -24,28 +33,25 @@ rfa:OperationalLifecycleStep
   a owl:Class ;
   rdfs:subClassOf rfa:LifecycleState ;
   owl:disjointWith rfa:TerminalWorkItemState ;
-  skos:prefLabel "Operational Lifecycle Step"@en ;
+  rdfs:label "Operational Lifecycle Step"@en ;
   skos:definition
     "A non-terminal Lifecycle Step that the harness can run for a Work Item."@en .
 
 rfa:TerminalWorkItemState
   a owl:Class ;
   rdfs:subClassOf rfa:LifecycleState ;
-  skos:prefLabel "terminal Work Item state"@en ;
+  rdfs:label "terminal Work Item state"@en ;
   skos:definition
     "A Lifecycle state in which ordinary Work Item advancement has stopped."@en .
 
 rfa:WorkItem
-  a owl:Class ;
-  skos:prefLabel "Work Item"@en ;
-  skos:definition
-    "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle."@en .
+  a owl:Class .
 
 rfa:currentState
   a owl:ObjectProperty ;
   rdfs:domain rfa:WorkItem ;
   rdfs:range rfa:LifecycleState ;
-  skos:prefLabel "current state"@en ;
+  rdfs:label "current state"@en ;
   skos:definition
     "The single operational Lifecycle Step or terminal state currently held by a Work Item."@en .
 
@@ -71,46 +77,31 @@ rfa:Implement
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "implement" ;
-  skos:prefLabel "Implement"@en ;
-  skos:definition
-    "The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective."@en .
+  skos:notation "implement" .
 
 rfa:AssessChanges
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "assess_changes" ;
-  skos:prefLabel "Assess Changes"@en ;
-  skos:definition
-    "The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run."@en .
+  skos:notation "assess_changes" .
 
 rfa:PreCommit
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "pre_commit" ;
-  skos:prefLabel "Pre-Commit"@en ;
-  skos:definition
-    "The Lifecycle Step that runs the Repository's git pre-commit hook on staged Work Item changes before Review."@en .
+  skos:notation "pre_commit" .
 
 rfa:Review
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "review" ;
-  skos:prefLabel "Review"@en ;
-  skos:definition
-    "The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes and may apply accepted Review Findings before Commit."@en .
+  skos:notation "review" .
 
 rfa:Commit
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "commit" ;
-  skos:prefLabel "Commit"@en ;
-  skos:definition
-    "The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes."@en .
+  skos:notation "commit" .
 
 rfa:CreatePr
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -179,10 +170,7 @@ rfa:CloseIssue
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:OperationalLifecycleStep ;
   rdfs:subClassOf rfa:OperationalLifecycleStep ;
-  skos:notation "close_issue" ;
-  skos:prefLabel "Close Issue"@en ;
-  skos:definition
-    "The Lifecycle Step that publishes a No-Change Outcome's completion summary and closes the Work Item's Issue."@en .
+  skos:notation "close_issue" .
 
 rfa:LocalCleanup
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -196,7 +184,7 @@ rfa:LocalCleanup
 rfa:Complete
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:TerminalWorkItemState ;
-  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState, rfa:CompleteWorkItem ;
   skos:notation "complete" ;
   skos:prefLabel "Complete"@en ;
   skos:definition
@@ -205,7 +193,7 @@ rfa:Complete
 rfa:Failed
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:TerminalWorkItemState ;
-  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState, rfa:FailedWorkItem ;
   skos:notation "failed" ;
   skos:prefLabel "Failed"@en ;
   skos:definition
@@ -214,7 +202,7 @@ rfa:Failed
 rfa:NeedsHuman
   a owl:Class, owl:NamedIndividual, skos:Concept,
     rfa:TerminalWorkItemState ;
-  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState, rfa:NeedsHumanWorkItem ;
   skos:notation "needs_human" ;
   skos:prefLabel "Needs Human"@en ;
   skos:definition
@@ -228,6 +216,110 @@ rfa:Abandoned
   skos:prefLabel "Abandoned"@en ;
   skos:definition
     "A terminal Work Item state that preserves history after the attempt is stopped without completion."@en .
+
+rfa:Paused
+  owl:disjointWith rfa:PauseWorkItem .
+
+rfa:WaitingForBlockers
+  owl:disjointWith rfa:AdmittedWorkItem .
+
+rfa:MergeModeAlways
+  a owl:Class ;
+  rdfs:subClassOf rfa:MergeMode ;
+  owl:disjointWith rfa:AutoMerge .
+
+rfa:AutoMerge
+  owl:disjointWith rfa:MergeMode .
+
+rfa:StepRun
+  rdfs:subClassOf
+    prov:Activity,
+    [
+      a owl:Restriction ;
+      owl:onProperty prov:wasAssociatedWith ;
+      owl:someValuesFrom rfa:Harness ;
+    ] .
+
+rfa:AgentTurn
+  rdfs:subClassOf
+    prov:Activity,
+    [
+      a owl:Restriction ;
+      owl:onProperty prov:wasAssociatedWith ;
+      owl:someValuesFrom rfa:AgentBackend ;
+    ] .
+
+rfa:AgentBackend
+  rdfs:subClassOf prov:SoftwareAgent .
+
+rfa:Operator
+  a owl:Class ;
+  rdfs:subClassOf prov:Person .
+
+rfa:Harness
+  a owl:Class ;
+  rdfs:subClassOf prov:SoftwareAgent .
+
+rfa:Outcome
+  a owl:Class ;
+  rdfs:subClassOf prov:Entity .
+
+rfa:AgentAttributedOutcome
+  a owl:Class ;
+  rdfs:subClassOf
+    rfa:Outcome,
+    [
+      a owl:Restriction ;
+      owl:onProperty prov:wasAttributedTo ;
+      owl:someValuesFrom rfa:AgentBackend ;
+    ] .
+
+rfa:HarnessAttributedOutcome
+  a owl:Class ;
+  rdfs:subClassOf
+    rfa:Outcome,
+    [
+      a owl:Restriction ;
+      owl:onProperty prov:wasAttributedTo ;
+      owl:someValuesFrom rfa:Harness ;
+    ] .
+
+rfa:AgentReportedOutcome
+  rdfs:subClassOf rfa:AgentAttributedOutcome .
+
+rfa:NoChangeOutcome
+  rdfs:subClassOf rfa:AgentReportedOutcome .
+
+rfa:AcceptedReviewOutcome
+  rdfs:subClassOf rfa:AgentReportedOutcome .
+
+rfa:ClearedReviewOutcome
+  rdfs:subClassOf rfa:AgentReportedOutcome .
+
+rfa:ChecksTriggeredOutcome
+  rdfs:subClassOf rfa:AgentReportedOutcome .
+
+rfa:MergeRevalidationOutcome
+  rdfs:subClassOf rfa:HarnessAttributedOutcome .
+
+rfa:AgentTurnResult
+  rdfs:subClassOf
+    prov:Entity,
+    [
+      a owl:Restriction ;
+      owl:onProperty prov:wasGeneratedBy ;
+      owl:someValuesFrom rfa:AgentTurn ;
+    ] .
+
+[
+  a owl:AllDisjointClasses ;
+  owl:members (
+    rfa:Complete
+    rfa:Failed
+    rfa:NeedsHuman
+    rfa:Abandoned
+  )
+] .
 
 [
   a owl:AllDisjointClasses ;

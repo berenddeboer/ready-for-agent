@@ -1,6 +1,16 @@
 @prefix example: <https://ready-for-agent.dev/ontology/examples#> .
 @prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
 
-example:contradictory-work-item
-  a rfa:WorkItem, rfa:Implement, rfa:Complete ;
+example:waiting-and-admitted
+  a rfa:WorkItem, rfa:WaitingForBlockers, rfa:AdmittedWorkItem ;
   rfa:currentState rfa:Implement, rfa:Complete .
+
+example:paused-repository-action
+  a rfa:Paused, rfa:PauseWorkItem .
+
+example:auto-merge-mode-always
+  a rfa:AutoMerge, rfa:MergeModeAlways .
+
+example:two-terminal-states
+  a rfa:WorkItem, rfa:Complete, rfa:Failed ;
+  rfa:currentState rfa:Complete, rfa:Failed .
