@@ -8187,6 +8187,11 @@ describe("WorkItemLifecycle", () => {
             [now, created.id],
           )
 
+          const duplicate = yield* Effect.flip(
+            lifecycle.implementNow(repository.id, issue.issueNumber),
+          )
+          expect(duplicate).toBeInstanceOf(UnfinishedWorkItemExistsError)
+
           const retried = yield* lifecycle.retry(created.id)
           expect(retried.state).toBe("watch_pr_status_checks")
           expect(retried.failureCode).toBeNull()

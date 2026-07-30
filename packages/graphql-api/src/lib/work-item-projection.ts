@@ -1,6 +1,11 @@
 import type { IssueRecord } from "@ready-for-agent/db-service"
 import {
+  LIFECYCLE_STEP_RETRYABLE,
   type OperationalLifecycleStep,
+  type TerminalWorkItemState,
+  isTerminalWorkItemState,
+} from "@ready-for-agent/lifecycle-model"
+import {
   REVIEW_APPLYING_FINDINGS_MESSAGE,
   REVIEW_ASSESSING_RERUN_MESSAGE,
   REVIEW_PRE_COMMIT_MESSAGE,
@@ -10,7 +15,8 @@ import {
   WAITING_FOR_WORKER_SLOT_MESSAGE,
   type WorkItemRecord,
   formatWaitingForBlockersMessage,
-  isTerminalWorkItemState,
+  isRetryableFailedWorkItem,
+  isRetryableNeedsHumanWorkItem,
 } from "@ready-for-agent/work-item-lifecycle"
 
 const childIssueCategory = (issue: IssueRecord): number => {
@@ -105,9 +111,8 @@ const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
 export const statusLabel = (status: WorkItemStatus): string =>
   status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
 
-export const latestStepRun = (
-  workItem: WorkItemRecord,
-): StepRunRecord | undefined => workItem.stepRuns.at(-1)
+const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
+  workItem.stepRuns.at(-1)
 
 /** Running Step Run blocked on maxConcurrentAgentTurns → operator Queued. */
 const isWaitingForAgentTurn = (stepRun: StepRunRecord): boolean =>
@@ -118,8 +123,41 @@ const isWaitingForAgentTurn = (stepRun: StepRunRecord): boolean =>
 const stepRunDisplayStatus = (stepRun: StepRunRecord): WorkItemStatus =>
   isWaitingForAgentTurn(stepRun) ? "queued" : stepRun.status
 
+export const workItemIsTerminal = (
+  workItem: WorkItemRecord,
+): workItem is WorkItemRecord & { readonly state: TerminalWorkItemState } =>
+  isTerminalWorkItemState(workItem.state)
+
+export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
+  if (
+    workItem.waitingSince != null ||
+    workItem.waitingForBlockers ||
+    workItem.paused
+  ) {
+    return false
+  }
+
+  if (
+    isRetryableFailedWorkItem(workItem) ||
+    isRetryableNeedsHumanWorkItem(workItem)
+  ) {
+    return true
+  }
+
+  if (
+    isTerminalWorkItemState(workItem.state) ||
+    !Object.hasOwn(LIFECYCLE_STEP_RETRYABLE, workItem.state) ||
+    !LIFECYCLE_STEP_RETRYABLE[workItem.state as OperationalLifecycleStep]
+  ) {
+    return false
+  }
+
+  const latestStatus = latestStepRun(workItem)?.status
+  return latestStatus === "failed" || latestStatus === "interrupted"
+}
+
 export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
-  // Terminal state always wins over hold/slot flags (flags may lag a terminal UPDATE).
+  // Terminal states always win over flags, which may lag UPDATE.
   if (isTerminalWorkItemState(workItem.state)) return workItem.state
   if (workItem.waitingForBlockers) return "waiting_for_blockers"
   if (workItem.waitingSince != null) return "waiting_for_worker_slot"
@@ -148,7 +186,7 @@ export const workItemStatusMessage = (
     readonly blockerIssueNumbers?: readonly number[]
   },
 ): string | null => {
-  if (isTerminalWorkItemState(workItem.state)) {
+  if (workItemIsTerminal(workItem)) {
     return workItem.failureMessage
   }
   if (workItem.waitingForBlockers) {
@@ -251,8 +289,10 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
 }
 
 export const workItemStateLabel = (workItem: WorkItemRecord): string => {
-  if (isTerminalWorkItemState(workItem.state)) {
+  if (workItemIsTerminal(workItem)) {
     return statusLabel(workItem.state)
   }
-  return lifecyclePhaseLabel(lifecyclePhase(workItem.state))
+  return lifecyclePhaseLabel(
+    lifecyclePhase(workItem.state as OperationalLifecycleStep),
+  )
 }

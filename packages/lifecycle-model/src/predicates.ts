@@ -2,7 +2,11 @@ import {
   type LifecyclePredicateName,
   matchesLifecyclePredicateExpression,
 } from "./generated/predicate-expressions.js"
-import type { WorkItemState } from "./generated/work-item-state.js"
+import {
+  TERMINAL_WORK_ITEM_STATES,
+  type TerminalWorkItemState,
+  type WorkItemState,
+} from "./generated/work-item-state.js"
 
 export interface IssuePredicateShape {
   readonly isCurrentIssue: boolean
@@ -14,6 +18,7 @@ export interface IssuePredicateShape {
 export interface WorkItemPredicateShape {
   readonly id?: string
   readonly state: WorkItemState
+  readonly canRetry: boolean
 }
 
 export interface RelevantIssuePredicateShape {
@@ -178,6 +183,7 @@ export const evaluateUnfinishedWorkItem = (
   if (
     matchesExpression("UnfinishedWorkItem", ["WorkItem"], {
       currentState: workItem.state,
+      canRetry: workItem.canRetry,
     })
   ) {
     return MATCH
@@ -191,6 +197,11 @@ export const evaluateUnfinishedWorkItem = (
       return MATCH
   }
 }
+
+export const isTerminalWorkItemState = (
+  state: WorkItemState,
+): state is TerminalWorkItemState =>
+  (TERMINAL_WORK_ITEM_STATES as readonly WorkItemState[]).includes(state)
 
 export const evaluateActionableIssue = (
   issue: IssuePredicateShape | null | undefined,

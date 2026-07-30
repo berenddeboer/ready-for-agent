@@ -63,6 +63,10 @@ type PredicateExpression =
       readonly expressions: readonly PredicateExpression[]
     }
   | {
+      readonly kind: "union"
+      readonly expressions: readonly PredicateExpression[]
+    }
+  | {
       readonly kind: "hasValue"
       readonly property: string
       readonly value: string | number | boolean
@@ -131,6 +135,16 @@ const parsePredicateExpression = (
     }
   }
 
+  const union = store.getObjects(expression, owlUnionOf, null)
+  if (union.length === 1 && union[0] !== undefined) {
+    return {
+      kind: "union",
+      expressions: rdfList(store, union[0]).map((entry) =>
+        parsePredicateExpression(store, entry),
+      ),
+    }
+  }
+
   const property = onlyObject(store, expression, owlOnProperty)
   if (property.termType !== "NamedNode") {
     throw new Error(`${expression.value} owl:onProperty must be an IRI`)
@@ -193,6 +207,10 @@ type LifecyclePredicateExpression =
       readonly expressions: readonly LifecyclePredicateExpression[]
     }
   | {
+      readonly kind: "union"
+      readonly expressions: readonly LifecyclePredicateExpression[]
+    }
+  | {
       readonly kind: "hasValue"
       readonly property: string
       readonly value: string | number | boolean
@@ -234,6 +252,10 @@ const matchesExpression = (
     }
     case "intersection":
       return expression.expressions.every((entry) =>
+        matchesExpression(entry, facts, evaluating),
+      )
+    case "union":
+      return expression.expressions.some((entry) =>
         matchesExpression(entry, facts, evaluating),
       )
     case "hasValue":

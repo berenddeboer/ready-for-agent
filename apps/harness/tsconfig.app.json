@@ -26,6 +26,9 @@
   ],
   "references": [
     {
+      "path": "../../packages/lifecycle-model/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/work-item-lifecycle/tsconfig.lib.json"
     },
     {

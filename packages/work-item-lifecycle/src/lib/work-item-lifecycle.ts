@@ -33,6 +33,7 @@ import {
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
+  type WorkItemPredicateShape,
   evaluateActionableIssue,
   evaluateImplementableIssue,
   evaluateUnfinishedWorkItem,
@@ -111,6 +112,7 @@ import {
   type WorkItemRecord,
   type WorkItemState,
   WorkItemStepJob,
+  isRetryableFailedWorkItem,
   isTerminalWorkItemState,
   makeStepRunId,
   makeWorkItemId,
@@ -123,6 +125,14 @@ const currentIssuePredicateInput = <Issue extends object>(
   issue: Issue | undefined,
 ): (Issue & { readonly isCurrentIssue: true }) | undefined =>
   issue === undefined ? undefined : { ...issue, isCurrentIssue: true }
+
+const workItemPredicateInput = (
+  workItem: WorkItemRecord,
+): WorkItemPredicateShape => ({
+  id: workItem.id,
+  state: workItem.state,
+  canRetry: isRetryableFailedWorkItem(workItem),
+})
 
 const formatSqlError = (error: SqlError): string => {
   const parts: string[] = [error.message]
@@ -5099,7 +5109,10 @@ export const makeWorkItemLifecycleLive = (
             repositoryId,
             issueNumber,
           )
-          const actionable = evaluateActionableIssue(currentIssue, existing)
+          const actionable = evaluateActionableIssue(
+            currentIssue,
+            existing.map(workItemPredicateInput),
+          )
           if (actionable._tag === "unfinished_work_item_exists") {
             return yield* unfinishedWorkItemExistsError(
               repositoryId,
@@ -5331,7 +5344,10 @@ export const makeWorkItemLifecycleLive = (
           yield* listWorkItemsForRepository(repositoryId)
         const unfinishedByIssue = new Map<number, WorkItemId>()
         for (const item of repositoryWorkItems) {
-          if (evaluateUnfinishedWorkItem(item)._tag === "match") {
+          if (
+            evaluateUnfinishedWorkItem(workItemPredicateInput(item))._tag ===
+            "match"
+          ) {
             unfinishedByIssue.set(item.issueNumber, item.id)
           }
         }
@@ -5623,7 +5639,9 @@ export const makeWorkItemLifecycleLive = (
 
         const existing = yield* listWorkItemsForIssue(repositoryId, issueNumber)
         const unfinished = existing.find(
-          (item) => evaluateUnfinishedWorkItem(item)._tag === "match",
+          (item) =>
+            evaluateUnfinishedWorkItem(workItemPredicateInput(item))._tag ===
+            "match",
         )
         if (unfinished) {
           return yield* unfinishedWorkItemExistsError(

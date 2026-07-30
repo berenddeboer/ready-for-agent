@@ -1,4 +1,5 @@
 import { type MouseEvent, type ReactNode, useEffect, useState } from "react"
+import { evaluateLeafIssue } from "@ready-for-agent/lifecycle-model"
 
 export type ParentIssueActionsMenuProps = {
   readonly parentIssueNumber: number
@@ -108,11 +109,7 @@ export function ParentIssueActionsMenu({
  * required for eligibility once loading finishes — repeated invocation is safe.
  */
 export function isParentImplementAllWithAutoMergeEligible(input: {
-  readonly openChildren: readonly {
-    readonly issueNumber: number
-    readonly hasChildren: boolean
-    readonly blockedBy: readonly unknown[]
-  }[]
+  readonly openChildren: readonly unknown[]
   /**
    * All direct children of the Parent (open and closed). Hierarchy rejection
    * uses this full set so a closed intermediate child still hides the action.
@@ -120,15 +117,16 @@ export function isParentImplementAllWithAutoMergeEligible(input: {
   readonly directChildren: readonly {
     readonly hasChildren: boolean
   }[]
-  readonly workItems: readonly {
-    readonly issueNumber: number
-    readonly state: string
-  }[]
   readonly workItemsLoading: boolean
 }): boolean {
   if (input.workItemsLoading) return false
   if (input.openChildren.length === 0) return false
-  // Match server: any direct child with children is unsupported hierarchy.
-  if (input.directChildren.some((child) => child.hasChildren)) return false
+  if (
+    input.directChildren.some(
+      (child) => evaluateLeafIssue(child)._tag !== "match",
+    )
+  ) {
+    return false
+  }
   return true
 }

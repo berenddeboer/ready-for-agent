@@ -28,6 +28,7 @@ import {
   KeymaxxerService,
   type KeymaxxerServiceShape,
 } from "@ready-for-agent/keymaxxer-service"
+import { evaluateUnfinishedWorkItem } from "@ready-for-agent/lifecycle-model"
 import {
   DirectoryPicker,
   LocalGit,
@@ -51,6 +52,7 @@ import {
   makeWorkItemId,
 } from "@ready-for-agent/work-item-lifecycle"
 import { createGraphqlApi } from "../src/index.js"
+import { workItemCanRetry } from "../src/lib/work-item-projection.js"
 import { afterEach, describe, expect, test } from "bun:test"
 
 const unused = () => Effect.die("not used")
@@ -5057,6 +5059,156 @@ describe("GraphQL API", () => {
             isTerminal: false,
             paused: false,
             lifecycleLabels: [],
+          },
+        ],
+      },
+    })
+  })
+
+  test("keeps status and eligibility fields in parity with shared Work Item predicates", async () => {
+    const needsHuman = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "needs_human",
+      paused: true,
+      waitingSince: new Date("2026-07-14T08:05:00.000Z"),
+      waitingForBlockers: true,
+      stepRuns: [],
+    } as WorkItemRecord
+    const paused = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "implement",
+      paused: true,
+      stepRuns: [],
+    } as WorkItemRecord
+    const waitingForBlockers = {
+      ...workItem,
+      id: makeWorkItemId(),
+      waitingForBlockers: true,
+      waitingSince: new Date("2026-07-14T08:05:00.000Z"),
+      paused: true,
+      stepRuns: [],
+    } as WorkItemRecord
+    const waitingForWorkerSlot = {
+      ...workItem,
+      id: makeWorkItemId(),
+      waitingSince: new Date("2026-07-14T08:05:00.000Z"),
+      paused: true,
+      stepRuns: [],
+    } as WorkItemRecord
+    const retryable = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "implement",
+      stepRuns: [
+        {
+          ...workItem.stepRuns[0]!,
+          id: "srun-retryable-parity",
+          workItemId: "wi-retryable-parity",
+          step: "implement",
+          status: "failed",
+          finishedAt: new Date("2026-07-14T08:05:00.000Z"),
+        },
+      ],
+    } as WorkItemRecord
+    const complete = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "complete",
+      paused: true,
+      waitingSince: new Date("2026-07-14T08:05:00.000Z"),
+      waitingForBlockers: true,
+      stepRuns: [],
+    } as WorkItemRecord
+    const projected = [
+      needsHuman,
+      paused,
+      waitingForBlockers,
+      waitingForWorkerSlot,
+      retryable,
+      complete,
+    ]
+
+    expect(
+      projected.map(
+        (candidate) =>
+          evaluateUnfinishedWorkItem({
+            ...candidate,
+            canRetry: workItemCanRetry(candidate),
+          })._tag,
+      ),
+    ).toEqual([
+      "match",
+      "match",
+      "match",
+      "match",
+      "match",
+      "work_item_finished",
+    ])
+
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listWorkItemsForIssue: () => Effect.succeed(projected),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query WorkItems($repositoryId: ID!, $issueNumber: Int!) {
+          workItems(repositoryId: $repositoryId, issueNumber: $issueNumber) {
+            id status canRetry isTerminal
+          }
+        }`,
+        variables: {
+          repositoryId: repository.id,
+          issueNumber: issue.issueNumber,
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        workItems: [
+          {
+            id: needsHuman.id,
+            status: "NEEDS_HUMAN",
+            canRetry: false,
+            isTerminal: true,
+          },
+          {
+            id: paused.id,
+            status: "NEEDS_HUMAN_REVIEW",
+            canRetry: false,
+            isTerminal: false,
+          },
+          {
+            id: waitingForBlockers.id,
+            status: "WAITING_FOR_BLOCKERS",
+            canRetry: false,
+            isTerminal: false,
+          },
+          {
+            id: waitingForWorkerSlot.id,
+            status: "WAITING_FOR_WORKER_SLOT",
+            canRetry: false,
+            isTerminal: false,
+          },
+          {
+            id: retryable.id,
+            status: "FAILED",
+            canRetry: true,
+            isTerminal: false,
+          },
+          {
+            id: complete.id,
+            status: "COMPLETE",
+            canRetry: false,
+            isTerminal: true,
           },
         ],
       },
