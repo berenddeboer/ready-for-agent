@@ -267,6 +267,7 @@ function PipelineTicket({
         <WorkItemLifecycleStatus
           workItem={workItem}
           compact
+          collapseEarlierLanes
           issueUrl={issueUrl}
           pullRequestUrl={pullRequestUrl}
         />

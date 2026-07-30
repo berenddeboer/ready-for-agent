@@ -174,11 +174,54 @@ describe("/kanban route", () => {
     )
     expect(ticket).toContain('laneId === "complete"')
     expect(ticket).toContain("<PipelineCompleteSummary")
-    // Non-Merged lanes keep the full compact lifecycle status.
+    // Non-Merged lanes keep compact lifecycle status with earlier-lane collapse.
     expect(ticket).toContain("<WorkItemLifecycleStatus")
+    expect(ticket).toContain("collapseEarlierLanes")
     const completeBranch = ticket.slice(ticket.indexOf("isCompleteLane ? ("))
     expect(completeBranch).toContain("<PipelineCompleteSummary")
     expect(completeBranch).toContain("<WorkItemLifecycleStatus")
+  })
+
+  test("Kanban tickets opt into earlier-lane lifecycle chip collapse", () => {
+    // Issue #679: Kanban-only presentation; Home Jobs leaves collapseEarlierLanes off.
+    const source = kanbanSource()
+    const ticket = source.slice(
+      source.indexOf("function PipelineTicket("),
+      source.indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain("collapseEarlierLanes")
+    // Prop is only on the non-Merged WorkItemLifecycleStatus branch.
+    const lifecycleCall = ticket.slice(
+      ticket.indexOf("<WorkItemLifecycleStatus"),
+      ticket.indexOf("/>", ticket.indexOf("<WorkItemLifecycleStatus")) + 2,
+    )
+    expect(lifecycleCall).toContain("collapseEarlierLanes")
+    expect(lifecycleCall).toContain("compact")
+
+    const home = readFileSync(
+      join(import.meta.dir, "../src/routes/index.tsx"),
+      "utf8",
+    )
+    const completedRow = readFileSync(
+      join(import.meta.dir, "../src/completed-work-item-row.tsx"),
+      "utf8",
+    )
+    // Non-Kanban call sites must not opt into collapse (default remains false).
+    const nonKanbanSources = [home, completedRow]
+    let nonKanbanCallCount = 0
+    for (const nonKanbanSource of nonKanbanSources) {
+      const calls = [
+        ...nonKanbanSource.matchAll(/<WorkItemLifecycleStatus[\s\S]*?\/>/g),
+      ].map((match) => match[0])
+      nonKanbanCallCount += calls.length
+      for (const call of calls) {
+        expect(call).not.toContain("collapseEarlierLanes")
+      }
+    }
+    expect(nonKanbanCallCount).toBeGreaterThan(0)
+    // Only the Kanban ticket path opts in; the prop defaults off elsewhere.
+    expect(home).toContain("collapseEarlierLanes = false")
+    expect(source.match(/collapseEarlierLanes/g)).toHaveLength(1)
   })
 
   test("Kanban list tabs share Merged-lane compact summary via pipelineLaneFor", () => {
