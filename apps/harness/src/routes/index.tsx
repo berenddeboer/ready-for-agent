@@ -40,6 +40,12 @@ import {
   ParentIssueActionsMenu,
   isParentImplementAllWithAutoMergeEligible,
 } from "../parent-issue-actions-menu.js"
+import {
+  type LifecycleLabelChip,
+  type LifecyclePipelineLaneId,
+  lifecycleFocusLaneFor,
+  planLifecycleChipPresentation,
+} from "../pipeline-lanes.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
 import {
   followOpenPullRequestCountLive,
@@ -3976,11 +3982,17 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
 export function WorkItemLifecycleStatus({
   workItem,
   compact = false,
+  /**
+   * Kanban-only: collapse earlier Build/Review/PR lane chips into summary
+   * rows. Home Jobs and other surfaces leave this off for the full list.
+   */
+  collapseEarlierLanes = false,
   pullRequestUrl = null,
   issueUrl = null,
 }: {
   workItem: WorkItem
   compact?: boolean
+  collapseEarlierLanes?: boolean
   pullRequestUrl?: string | null
   issueUrl?: string | null
 }) {
@@ -4014,6 +4026,9 @@ export function WorkItemLifecycleStatus({
       0,
     )
   const nowMs = useNowMs(true)
+  const [expandedEarlierLanes, setExpandedEarlierLanes] = useState(
+    () => new Set<LifecyclePipelineLaneId>(),
+  )
   const patchWorkItem = (updated: WorkItem) => {
     patchWorkItemsCaches(queryClient, workItem.repositoryId, (current) =>
       current?.map((candidate) =>
@@ -4059,6 +4074,84 @@ export function WorkItemLifecycleStatus({
     prNumber === null &&
     workItem.completionSummary !== null &&
     workItem.completionSummary.trim() !== ""
+  const focusLane = collapseEarlierLanes
+    ? lifecycleFocusLaneFor(workItem)
+    : null
+  const chipBlocks = planLifecycleChipPresentation(workItem.lifecycleLabels, {
+    collapseEarlierLanes,
+    focusLane,
+    expandedEarlierLanes,
+  })
+  const toggleEarlierLane = (lane: LifecyclePipelineLaneId) => {
+    setExpandedEarlierLanes((current) => {
+      const next = new Set(current)
+      if (next.has(lane)) {
+        next.delete(lane)
+      } else {
+        next.add(lane)
+      }
+      return next
+    })
+  }
+  const renderLifecycleChip = (lifecycleLabel: LifecycleLabelChip) => {
+    const displayDurationMs = liveDurationMs(
+      lifecycleLabel.durationMs,
+      isLiveDurationStatus(lifecycleLabel.status),
+      dataUpdatedAt,
+      nowMs,
+    )
+    const linkToPullRequest =
+      !isNoChangeComplete &&
+      pullRequestUrl !== null &&
+      openPullRequestLabel !== null &&
+      lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
+      lifecycleLabel.status === "NEEDS_HUMAN"
+    const chipClassName = lifecycleStepChipClassName
+    const duration = displayDurationMs !== null && (
+      <span className="ml-1 font-mono text-ink-faint">
+        {formatDuration(displayDurationMs)}
+      </span>
+    )
+    return (
+      <li key={lifecycleLabel.phase}>
+        {linkToPullRequest ? (
+          <a
+            className={`${chipClassName} hover:underline`}
+            href={pullRequestUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`${openPullRequestLabel}: ${lifecycleLabel.label}`}
+          >
+            {lifecycleLabel.label}
+            {duration}
+          </a>
+        ) : (
+          <span className={chipClassName}>
+            {lifecycleLabel.label}
+            {duration}
+          </span>
+        )}
+      </li>
+    )
+  }
+  const renderChipList = (
+    chips: readonly LifecycleLabelChip[],
+    options?: {
+      readonly id?: string
+      readonly className?: string
+      readonly ariaLabel?: string
+    },
+  ) => (
+    <ol
+      id={options?.id}
+      className={
+        options?.className ?? "mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
+      }
+      aria-label={options?.ariaLabel ?? "Lifecycle steps"}
+    >
+      {chips.map(renderLifecycleChip)}
+    </ol>
+  )
 
   return (
     <div className={compact ? "mt-2" : "field-rule mt-2 ml-11 px-3 py-2"}>
@@ -4076,54 +4169,62 @@ export function WorkItemLifecycleStatus({
           issueUrl={issueUrl}
         />
       </div>
-      {workItem.lifecycleLabels.length > 0 && (
-        <ol
-          className="mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
-          aria-label="Lifecycle steps"
-        >
-          {workItem.lifecycleLabels.map((lifecycleLabel) => {
-            const displayDurationMs = liveDurationMs(
-              lifecycleLabel.durationMs,
-              isLiveDurationStatus(lifecycleLabel.status),
-              dataUpdatedAt,
-              nowMs,
-            )
-            const linkToPullRequest =
-              !isNoChangeComplete &&
-              pullRequestUrl !== null &&
-              openPullRequestLabel !== null &&
-              lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
-              lifecycleLabel.status === "NEEDS_HUMAN"
-            const chipClassName = lifecycleStepChipClassName
-            const duration = displayDurationMs !== null && (
-              <span className="ml-1 font-mono text-ink-faint">
-                {formatDuration(displayDurationMs)}
-              </span>
-            )
-            return (
-              <li key={lifecycleLabel.phase}>
-                {linkToPullRequest ? (
-                  <a
-                    className={`${chipClassName} hover:underline`}
-                    href={pullRequestUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={`${openPullRequestLabel}: ${lifecycleLabel.label}`}
-                  >
-                    {lifecycleLabel.label}
-                    {duration}
-                  </a>
-                ) : (
-                  <span className={chipClassName}>
-                    {lifecycleLabel.label}
-                    {duration}
-                  </span>
-                )}
-              </li>
-            )
-          })}
-        </ol>
-      )}
+      {workItem.lifecycleLabels.length > 0 &&
+        (chipBlocks.length === 1 && chipBlocks[0]?.kind === "full-list" ? (
+          renderChipList(chipBlocks[0].chips)
+        ) : (
+          <div className="mt-2 flex flex-col gap-1">
+            {chipBlocks.map((block) => {
+              if (block.kind === "earlier-lane") {
+                const chipsId = `lifecycle-lane-${workItem.id}-${block.lane}`
+                const durationLabel =
+                  block.durationMs === null
+                    ? null
+                    : formatDuration(block.durationMs)
+                return (
+                  <div key={block.lane} className="min-w-0">
+                    <button
+                      type="button"
+                      className="inline-flex max-w-full items-center gap-2 border border-rule-2 bg-paper px-1.5 py-1 text-xs text-ink-2 transition hover:border-oxblood hover:text-oxblood focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+                      aria-expanded={block.expanded}
+                      aria-controls={block.expanded ? chipsId : undefined}
+                      onClick={() => toggleEarlierLane(block.lane)}
+                    >
+                      <span aria-hidden="true">
+                        {block.expanded ? "▾" : "▸"}
+                      </span>
+                      <span>{block.laneLabel}</span>
+                      {durationLabel !== null && (
+                        <span className="font-mono text-ink-faint">
+                          {durationLabel}
+                        </span>
+                      )}
+                    </button>
+                    {block.expanded &&
+                      renderChipList(block.chips, {
+                        id: chipsId,
+                        className:
+                          "mt-1 mb-0 flex list-none flex-wrap gap-1 p-0",
+                        ariaLabel: `${block.laneLabel} lifecycle steps`,
+                      })}
+                  </div>
+                )
+              }
+              if (block.kind === "focus-lane") {
+                if (block.chips.length === 0) return null
+                return (
+                  <div key="focus-lane">
+                    {renderChipList(block.chips, {
+                      className: "m-0 flex list-none flex-wrap gap-1 p-0",
+                      ariaLabel: "Current lifecycle steps",
+                    })}
+                  </div>
+                )
+              }
+              return <div key="full-list">{renderChipList(block.chips)}</div>
+            })}
+          </div>
+        ))}
       {workItem.statusMessage !== null && (
         <p className={`mt-1.5 mb-0 text-xs ${statusMessageClassName}`}>
           {workItem.statusMessage}

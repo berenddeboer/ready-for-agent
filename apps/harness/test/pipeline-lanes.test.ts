@@ -1,7 +1,15 @@
 import {
+  type LifecycleLabelChip,
+  type LifecyclePipelineLaneId,
   PIPELINE_LANES,
   type PipelineLaneId,
+  earlierLifecycleLanes,
+  lifecycleFocusLaneFor,
+  lifecycleLaneForPhase,
+  lifecycleLaneForState,
   pipelineLaneFor,
+  planLifecycleChipPresentation,
+  sumLaneDurationMs,
 } from "../src/pipeline-lanes.js"
 import { describe, expect, test } from "bun:test"
 
@@ -188,5 +196,320 @@ describe("pipelineLaneFor", () => {
         status: "QUEUED",
       }),
     ).toBe("pr")
+  })
+})
+
+describe("lifecycleLaneForPhase", () => {
+  test.each([
+    ["CREATE_WORKTREE", "build"],
+    ["INSTALL_DEPENDENCIES", "build"],
+    ["IMPLEMENT", "build"],
+    ["ASSESS_CHANGES", "build"],
+    ["PRE_COMMIT", "build"],
+    ["REVIEW", "review"],
+    ["COMMIT", "pr"],
+    ["CREATE_PR", "pr"],
+    ["WATCH_PR_STATUS_CHECKS", "pr"],
+    ["INVESTIGATE_PR_STATUS_CHECKS", "pr"],
+    ["GITHUB_STATUS_CHECKS", "pr"],
+    ["RESOLVE_PR_MERGE_CONFLICT", "pr"],
+    ["MARK_PR_READY_FOR_REVIEW", "pr"],
+    ["DECIDE_PR_MERGE", "pr"],
+    ["MERGE_PR", "pr"],
+    ["CLOSE_ISSUE", "pr"],
+    ["LOCAL_CLEANUP", "pr"],
+  ] as const)("maps phase %s to %s", (phase, lane) => {
+    expect(lifecycleLaneForPhase(phase)).toBe(lane)
+  })
+
+  test("returns null for unknown phases", () => {
+    expect(lifecycleLaneForPhase("UNKNOWN_PHASE")).toBeNull()
+  })
+})
+
+describe("lifecycleLaneForState", () => {
+  test("mirrors Build / Review / PR placement sets without status overrides", () => {
+    expect(lifecycleLaneForState("IMPLEMENT")).toBe("build")
+    expect(lifecycleLaneForState("REVIEW")).toBe("review")
+    expect(lifecycleLaneForState("CREATE_PR")).toBe("pr")
+    expect(lifecycleLaneForState("FAILED")).toBeNull()
+    expect(lifecycleLaneForState("NEEDS_HUMAN")).toBeNull()
+  })
+})
+
+describe("lifecycleFocusLaneFor", () => {
+  test("uses lifecycle state for Build / Review / PR tickets", () => {
+    expect(
+      lifecycleFocusLaneFor({ state: "IMPLEMENT", status: "RUNNING" }),
+    ).toBe("build")
+    expect(lifecycleFocusLaneFor({ state: "REVIEW", status: "QUEUED" })).toBe(
+      "review",
+    )
+    expect(
+      lifecycleFocusLaneFor({
+        state: "WATCH_PR_STATUS_CHECKS",
+        status: "RUNNING",
+      }),
+    ).toBe("pr")
+  })
+
+  test("Attention tickets still focus the lifecycle lane from state", () => {
+    expect(lifecycleFocusLaneFor({ state: "REVIEW", status: "FAILED" })).toBe(
+      "review",
+    )
+    expect(
+      lifecycleFocusLaneFor({
+        state: "MERGE_PR",
+        status: "NEEDS_HUMAN",
+      }),
+    ).toBe("pr")
+    expect(
+      lifecycleFocusLaneFor({
+        state: "IMPLEMENT",
+        status: "INTERRUPTED",
+      }),
+    ).toBe("build")
+  })
+
+  test("Queue hold statuses disable chip-collapse focus", () => {
+    expect(
+      lifecycleFocusLaneFor({
+        state: "CREATE_WORKTREE",
+        status: "WAITING_FOR_BLOCKERS",
+      }),
+    ).toBeNull()
+    expect(
+      lifecycleFocusLaneFor({
+        state: "IMPLEMENT",
+        status: "WAITING_FOR_WORKER_SLOT",
+      }),
+    ).toBeNull()
+  })
+
+  test("falls back to the latest chip phase when state is non-operational", () => {
+    expect(
+      lifecycleFocusLaneFor({
+        state: "FAILED",
+        status: "FAILED",
+        lifecycleLabels: [{ phase: "IMPLEMENT" }, { phase: "REVIEW" }],
+      }),
+    ).toBe("review")
+  })
+})
+
+describe("earlierLifecycleLanes", () => {
+  test("returns earlier lanes in Build → Review → PR order", () => {
+    expect(earlierLifecycleLanes("build")).toEqual([])
+    expect(earlierLifecycleLanes("review")).toEqual(["build"])
+    expect(earlierLifecycleLanes("pr")).toEqual(["build", "review"])
+  })
+})
+
+describe("sumLaneDurationMs", () => {
+  test("sums non-null chip durations and skips nulls", () => {
+    expect(
+      sumLaneDurationMs([
+        { durationMs: 1_000 },
+        { durationMs: null },
+        { durationMs: 2_500 },
+      ]),
+    ).toBe(3_500)
+  })
+
+  test("returns null when every duration is null", () => {
+    expect(
+      sumLaneDurationMs([{ durationMs: null }, { durationMs: null }]),
+    ).toBeNull()
+  })
+})
+
+function chip(
+  phase: string,
+  durationMs: number | null = 1_000,
+): LifecycleLabelChip {
+  return {
+    phase,
+    label: `${phase}: Succeeded`,
+    status: "SUCCEEDED",
+    durationMs,
+  }
+}
+
+describe("planLifecycleChipPresentation", () => {
+  const buildReviewPr: readonly LifecycleLabelChip[] = [
+    chip("CREATE_WORKTREE", 10_000),
+    chip("IMPLEMENT", 30_000),
+    chip("REVIEW", 20_000),
+    chip("COMMIT", 5_000),
+    chip("CREATE_PR", 8_000),
+  ]
+
+  test("PR focus collapses Build and Review as earlier-lane summaries", () => {
+    const blocks = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: "pr",
+      expandedEarlierLanes: new Set(),
+    })
+    expect(blocks).toEqual([
+      {
+        kind: "earlier-lane",
+        lane: "build",
+        laneLabel: "Build",
+        durationMs: 40_000,
+        expanded: false,
+        chips: [chip("CREATE_WORKTREE", 10_000), chip("IMPLEMENT", 30_000)],
+      },
+      {
+        kind: "earlier-lane",
+        lane: "review",
+        laneLabel: "Review",
+        durationMs: 20_000,
+        expanded: false,
+        chips: [chip("REVIEW", 20_000)],
+      },
+      {
+        kind: "focus-lane",
+        lane: "pr",
+        chips: [chip("COMMIT", 5_000), chip("CREATE_PR", 8_000)],
+      },
+    ])
+  })
+
+  test("Review focus collapses Build only; Review chips stay expanded", () => {
+    const labels = [chip("IMPLEMENT", 12_000), chip("REVIEW", 9_000)] as const
+    const blocks = planLifecycleChipPresentation(labels, {
+      collapseEarlierLanes: true,
+      focusLane: "review",
+      expandedEarlierLanes: new Set(),
+    })
+    expect(blocks).toEqual([
+      {
+        kind: "earlier-lane",
+        lane: "build",
+        laneLabel: "Build",
+        durationMs: 12_000,
+        expanded: false,
+        chips: [chip("IMPLEMENT", 12_000)],
+      },
+      {
+        kind: "focus-lane",
+        lane: "review",
+        chips: [chip("REVIEW", 9_000)],
+      },
+    ])
+  })
+
+  test("Build focus shows no earlier-lane summaries", () => {
+    const labels = [chip("CREATE_WORKTREE"), chip("IMPLEMENT")] as const
+    const blocks = planLifecycleChipPresentation(labels, {
+      collapseEarlierLanes: true,
+      focusLane: "build",
+      expandedEarlierLanes: new Set(),
+    })
+    expect(blocks).toEqual([
+      {
+        kind: "focus-lane",
+        lane: "build",
+        chips: [chip("CREATE_WORKTREE"), chip("IMPLEMENT")],
+      },
+    ])
+  })
+
+  test("expanding one earlier lane is independent of the others", () => {
+    const collapsed = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: "pr",
+      expandedEarlierLanes: new Set(),
+    })
+    const expandedBuild = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: "pr",
+      expandedEarlierLanes: new Set<LifecyclePipelineLaneId>(["build"]),
+    })
+    expect(
+      collapsed
+        .filter((block) => block.kind === "earlier-lane")
+        .map((block) => [block.lane, block.expanded]),
+    ).toEqual([
+      ["build", false],
+      ["review", false],
+    ])
+    expect(
+      expandedBuild
+        .filter((block) => block.kind === "earlier-lane")
+        .map((block) => [block.lane, block.expanded]),
+    ).toEqual([
+      ["build", true],
+      ["review", false],
+    ])
+  })
+
+  test("non-Kanban path keeps the full chip list (no lane summaries)", () => {
+    const blocks = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: false,
+      focusLane: "pr",
+      expandedEarlierLanes: new Set(),
+    })
+    expect(blocks).toEqual([{ kind: "full-list", chips: buildReviewPr }])
+  })
+
+  test("Queue / missing focus keeps the full chip list", () => {
+    const blocks = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: null,
+      expandedEarlierLanes: new Set(),
+    })
+    expect(blocks).toEqual([{ kind: "full-list", chips: buildReviewPr }])
+  })
+
+  test("summary duration equals the sum of that lane’s chip durations", () => {
+    const blocks = planLifecycleChipPresentation(
+      [
+        chip("CREATE_WORKTREE", 1_000),
+        chip("IMPLEMENT", null),
+        chip("PRE_COMMIT", 4_000),
+        chip("REVIEW", 2_000),
+      ],
+      {
+        collapseEarlierLanes: true,
+        focusLane: "review",
+        expandedEarlierLanes: new Set(),
+      },
+    )
+    const build = blocks.find(
+      (block) => block.kind === "earlier-lane" && block.lane === "build",
+    )
+    expect(build).toMatchObject({
+      kind: "earlier-lane",
+      durationMs: 5_000,
+    })
+    if (build?.kind === "earlier-lane") {
+      expect(sumLaneDurationMs(build.chips)).toBe(build.durationMs)
+    }
+  })
+
+  test("later-than-focus chips stay expanded after focus-lane chips", () => {
+    // Defensive: if focus lags retained history, do not drop later steps.
+    const labels = [
+      chip("IMPLEMENT", 10_000),
+      chip("REVIEW", 20_000),
+      chip("CREATE_PR", 5_000),
+    ] as const
+    const blocks = planLifecycleChipPresentation(labels, {
+      collapseEarlierLanes: true,
+      focusLane: "build",
+      expandedEarlierLanes: new Set(),
+    })
+    expect(blocks).toEqual([
+      {
+        kind: "focus-lane",
+        lane: "build",
+        chips: [
+          chip("IMPLEMENT", 10_000),
+          chip("REVIEW", 20_000),
+          chip("CREATE_PR", 5_000),
+        ],
+      },
+    ])
   })
 })
