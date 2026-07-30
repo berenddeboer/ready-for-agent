@@ -19,11 +19,10 @@ export const GITHUB_SENTINEL_ISSUE_TITLE =
 // support local bootstrap before constants are locked.
 export const FIXTURE_GITLAB_FORGE_HOST =
   process.env.E2E_GITLAB_FORGE_HOST?.trim() || "git.drupalcode.org"
+/** Project Path and UI display identity for the GitLab fixture Repository. */
 export const FIXTURE_GITLAB_PROJECT_PATH =
   process.env.E2E_GITLAB_PROJECT_PATH?.trim() ||
   "sandbox/berend-test-ready-for-agent"
-/** Display identity shown in the Harness UI (Project Path). */
-export const FIXTURE_GITLAB_REPOSITORY = FIXTURE_GITLAB_PROJECT_PATH
 /**
  * Keymaxxer account is `<forge-host>/<project-path>` with provider=gitlab.
  * Canonical secret name follows the GitHub fixture naming convention.

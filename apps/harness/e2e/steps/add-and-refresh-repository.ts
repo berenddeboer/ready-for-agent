@@ -11,7 +11,7 @@ import {
 import {
   E2E_GRAPHQL_URL,
   FIXTURE_GITHUB_REPOSITORY,
-  FIXTURE_GITLAB_REPOSITORY,
+  FIXTURE_GITLAB_PROJECT_PATH,
   GITHUB_SENTINEL_ISSUE_NUMBER,
   GITHUB_SENTINEL_ISSUE_TITLE,
   GITLAB_SENTINEL_ISSUE_TITLE,
@@ -27,7 +27,7 @@ const workspaceRoot = resolve(
 )
 
 const displayRepositoryFor = (forge: FixtureForge): string =>
-  forge === "gitlab" ? FIXTURE_GITLAB_REPOSITORY : FIXTURE_GITHUB_REPOSITORY
+  forge === "gitlab" ? FIXTURE_GITLAB_PROJECT_PATH : FIXTURE_GITHUB_REPOSITORY
 
 const sentinelFor = (forge: FixtureForge) =>
   forge === "gitlab"
