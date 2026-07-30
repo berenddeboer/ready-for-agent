@@ -4,7 +4,7 @@
 
 The Kanban Pipeline is an alternate Harness work view for an operator who
 needs to understand flow at a glance: what is waiting, being built, under
-review, in the PR path, blocked, or complete.
+review, in the PR path, blocked, or merged.
 
 It was prototyped in the `redesign/kanban-pipeline` branch. The prototype
 demonstrates the interaction model and visual direction; it is not currently
@@ -34,12 +34,12 @@ The board has six ordered lanes:
 | Review | Local review is in progress (including a queued Review step). | `REVIEW` |
 | PR | Commit through cleanup on the pull-request path (including queued Watch and later PR steps). | `COMMIT`, `CREATE_PR`, `WATCH_PR_STATUS_CHECKS`, `RESOLVE_PR_MERGE_CONFLICT`, `INVESTIGATE_PR_STATUS_CHECKS`, `MARK_PR_READY_FOR_REVIEW`, `DECIDE_PR_MERGE`, `MERGE_PR`, `CLOSE_ISSUE`, `LOCAL_CLEANUP` |
 | Attention | An operator or remediation decision is needed. | Failed, interrupted, needs-human statuses or states |
-| Complete | The Work Item has reached a terminal successful or abandoned state. | Complete, succeeded, or abandoned statuses or states |
+| Merged | The Work Item has reached a terminal successful or abandoned state. | Complete, succeeded, or abandoned statuses or states |
 
 Lane assignment is a pure function of the current Work Item state and status.
 Placement is driven by **lifecycle progress**, not scheduler status:
 
-- Attention and Complete take precedence over every lifecycle lane.
+- Attention and Merged take precedence over every lifecycle lane.
 - Queue is only for genuine blocked or not-admitted work. A `QUEUED` step run
   (status-check poll, agent turn, or later lifecycle step) stays in Build,
   Review, or PR according to its state.
@@ -56,7 +56,7 @@ The prototype uses an industrial control-board language:
 
 - Dense, six-column board with high-contrast lane headers.
 - Fixed lane colors make the flow memorable: Queue yellow, Build blue, Review
-  violet, PR green, Attention orange, and Complete black.
+  violet, PR green, Attention orange, and Merged black.
 - Tickets use a narrow colored edge to retain their lane association while
   keeping title, repository, status, controls, session, and worktree visible.
 - Empty lanes explicitly say `Lane clear`; an empty lane is operational

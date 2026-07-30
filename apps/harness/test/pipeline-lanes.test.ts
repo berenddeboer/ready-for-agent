@@ -21,7 +21,7 @@ describe("PIPELINE_LANES", () => {
       { id: "review", label: "Review", color: "#7654b5" },
       { id: "pr", label: "PR", color: "#168b62" },
       { id: "attention", label: "Attention", color: "#ff4d1c" },
-      { id: "complete", label: "Complete", color: "#151515" },
+      { id: "complete", label: "Merged", color: "#151515" },
     ])
   })
 })
@@ -52,7 +52,7 @@ describe("pipelineLaneFor", () => {
     { state: "COMPLETE", status: "RUNNING", lane: "complete" },
     { state: "ABANDONED", status: "RUNNING", lane: "complete" },
   ] satisfies readonly LaneCase[])(
-    "places $state with $status in Complete",
+    "places $state with $status in Merged",
     ({ state, status, lane }) => {
       expect(pipelineLaneFor({ state, status })).toBe(lane)
     },

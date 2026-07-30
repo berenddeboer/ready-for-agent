@@ -12,7 +12,7 @@ export const PIPELINE_LANES = [
   { id: "review", label: "Review", color: "#7654b5", text: "#ffffff" },
   { id: "pr", label: "PR", color: "#168b62", text: "#ffffff" },
   { id: "attention", label: "Attention", color: "#ff4d1c", text: "#151515" },
-  { id: "complete", label: "Complete", color: "#151515", text: "#ffffff" },
+  { id: "complete", label: "Merged", color: "#151515", text: "#ffffff" },
 ] as const satisfies readonly {
   id: PipelineLaneId
   label: string
@@ -27,7 +27,7 @@ type PipelineWorkItem = {
 
 /**
  * Kanban placement is driven by lifecycle progress, not scheduler status.
- * Attention and Complete override every lane. Queue is only for work that
+ * Attention and Merged override every lane. Queue is only for work that
  * cannot begin yet (blockers or worker slot). Queued step execution stays in
  * its lifecycle lane (Build / Review / PR).
  */

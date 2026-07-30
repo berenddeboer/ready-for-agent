@@ -7,7 +7,7 @@ const PIPELINE_LANE_HEADERS = [
   "Review",
   "PR",
   "Attention",
-  "Complete",
+  "Merged",
 ] as const
 
 const COMMITTED_PULL_REQUEST_PERIODS = [

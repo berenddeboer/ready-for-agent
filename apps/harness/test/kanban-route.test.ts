@@ -19,19 +19,10 @@ describe("/kanban route", () => {
 
   test("renders all six lifecycle lanes as an accessible pipeline", () => {
     const source = kanbanSource()
-    for (const label of [
-      "Queue",
-      "Build",
-      "Review",
-      "PR",
-      "Attention",
-      "Complete",
-    ]) {
-      expect(source).toContain(`"${label}"`)
-    }
     expect(source).toContain('aria-label="Lifecycle pipeline"')
     expect(source).toContain("pipelineLaneFor(workItem)")
     expect(source).toContain("Lane clear")
+    expect(source.match(/\{lane\.label\}/g)).toHaveLength(2)
   })
 
   test("retains accessible tabs, keyboard navigation, and repository filtering", () => {
@@ -76,7 +67,7 @@ describe("/kanban route", () => {
     )
     expect(ticket).toContain("onOpenSession(workItem.id, sessionId)")
     expect(ticket).toContain("showValue={false}")
-    // Complete lane only swaps lifecycle chrome; session/copy remain shared
+    // Merged lane only swaps lifecycle chrome; session/copy remain shared
     // above that branch for every ticket.
     expect(ticket).toContain('laneId === "complete"')
     const sessionIndex = ticket.indexOf("onOpenSession(workItem.id, sessionId)")
@@ -85,7 +76,7 @@ describe("/kanban route", () => {
     expect(completeSummaryIndex).toBeGreaterThan(sessionIndex)
   })
 
-  test("Complete-lane tickets show start time and total duration without lifecycle steps", () => {
+  test("Merged-lane tickets show start time and total duration without lifecycle steps", () => {
     const source = kanbanSource()
     expect(source).toContain("function PipelineCompleteSummary(")
     const summary = source.slice(
@@ -101,7 +92,7 @@ describe("/kanban route", () => {
     expect(summary).not.toContain("lifecycleLabels")
     expect(summary).not.toContain("WorkItemLifecycleStatus")
     expect(summary).not.toContain("Lifecycle steps")
-    // Intentional: no-change completionSummary chrome is out of Complete-lane scope.
+    // Intentional: no-change completionSummary chrome is out of Merged-lane scope.
     expect(summary).not.toContain("completionSummary")
     expect(summary).not.toContain("WorkItemOutcomePresentation")
 
@@ -111,14 +102,14 @@ describe("/kanban route", () => {
     )
     expect(ticket).toContain('laneId === "complete"')
     expect(ticket).toContain("<PipelineCompleteSummary")
-    // Non-complete lanes keep the full compact lifecycle status.
+    // Non-Merged lanes keep the full compact lifecycle status.
     expect(ticket).toContain("<WorkItemLifecycleStatus")
     const completeBranch = ticket.slice(ticket.indexOf("isCompleteLane ? ("))
     expect(completeBranch).toContain("<PipelineCompleteSummary")
     expect(completeBranch).toContain("<WorkItemLifecycleStatus")
   })
 
-  test("Kanban list tabs share Complete-lane compact summary via pipelineLaneFor", () => {
+  test("Kanban list tabs share Merged-lane compact summary via pipelineLaneFor", () => {
     // Gate is lane identity, not Pipeline vs Completed tab. Completed-tab rows
     // that classify as complete intentionally reuse PipelineCompleteSummary;
     // homepage Jobs Completed isolation is separate (index.tsx JobsCard).

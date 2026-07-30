@@ -48,15 +48,6 @@ const JOBS_TABS = [
   { id: "completed", label: JOBS_COMPLETED_TAB_LABEL },
 ] as const satisfies readonly { id: JobsTab; label: string }[]
 
-const PIPELINE_LANE_LABELS = {
-  queue: "Queue",
-  build: "Build",
-  review: "Review",
-  pr: "PR",
-  attention: "Attention",
-  complete: "Complete",
-} as const satisfies Record<PipelineLaneId, string>
-
 const jobsTabEmptyMessage = (tab: Exclude<JobsTab, "pipeline">): string => {
   if (tab === "working") return "No working jobs."
   if (tab === "failed") return "No failed jobs."
@@ -137,16 +128,16 @@ function KanbanPage() {
 }
 
 /**
- * Complete-lane tickets omit per-step lifecycle chrome. Show only start time
+ * Merged-lane tickets omit per-step lifecycle chrome. Show only start time
  * and total elapsed duration, plus a PR link when one exists.
  *
  * Gated by assigned lane (`laneId === "complete"`), not by which Jobs tab
- * hosts the ticket — so Pipeline Complete-lane cards and Kanban Completed-tab
+ * hosts the ticket — so Pipeline Merged-lane cards and Kanban Completed-tab
  * rows that classify as complete share this compact view. Homepage Jobs
  * Completed is unaffected (it never uses PipelineTicket).
  *
  * No-change completion-summary chrome is intentionally omitted: issue #630
- * limits Complete-lane status to start + total duration (and PR identity).
+ * limits Merged-lane status to start + total duration (and PR identity).
  */
 function PipelineCompleteSummary({
   workItem,
@@ -358,7 +349,7 @@ function KanbanJobsBoard() {
     completedQueries.flatMap((query) => query.data ?? []),
   )
   // Preserve per-list recency: Working/Failed by createdAt, Completed by
-  // stateReadyAt. Do not re-sort the merge by createdAt or Complete-lane order
+  // stateReadyAt. Do not re-sort the merge by createdAt or Merged-lane order
   // drifts from the Completed tab.
   const pipelineItems = Array.from(
     new Map(
@@ -499,8 +490,7 @@ function KanbanJobsBoard() {
                   key={lane.id}
                   onClick={() => setMobileLane(lane.id)}
                 >
-                  {PIPELINE_LANE_LABELS[lane.id]}{" "}
-                  {laneItems.get(lane.id)?.length ?? 0}
+                  {lane.label} {laneItems.get(lane.id)?.length ?? 0}
                 </button>
               ))}
             </fieldset>
@@ -529,7 +519,7 @@ function KanbanJobsBoard() {
                           0{laneIndex + 1} / 06
                         </span>
                         <h3 className="lane-title" id={`lane-${lane.id}`}>
-                          {PIPELINE_LANE_LABELS[lane.id]}
+                          {lane.label}
                         </h3>
                       </div>
                       <span className="lane-count">
