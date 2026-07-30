@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test"
+        "command": "NODE_ENV=test bun test"
       },
       "inputs": ["default", "^production"],
       "cache": true,

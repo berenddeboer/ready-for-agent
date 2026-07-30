@@ -89,6 +89,7 @@ import {
   formatDeferredReviewSummary,
 } from "./review.js"
 import { computeProductiveElapsedMs } from "./step-run-productive-time.js"
+import { applyCheckedLifecycleTransition } from "./transition-relation-check.js"
 import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   type LifecycleMaxDurations,
@@ -1093,6 +1094,32 @@ export const makeWorkItemLifecycleLive = (
           return rows[0] ?? null
         })
 
+      /**
+       * The single seam for applying a Work Item state transition.
+       *
+       * Callers run this inside the transaction containing `mutation`. The
+       * relation is checked only after the persisted state reaches `to`, so a
+       * rejected or no-op mutation is not reported as an applied transition.
+       */
+      const applyLifecycleTransition = <A, E, R>(
+        workItemId: string,
+        to: WorkItemState,
+        mutation: Effect.Effect<A, E, R>,
+        didApply: (result: A) => boolean,
+      ): Effect.Effect<A, E | SqlError, R> =>
+        applyCheckedLifecycleTransition(
+          Effect.gen(function* () {
+            const rows = (yield* sql.unsafe(
+              `SELECT state FROM work_item WHERE id = ? LIMIT 1`,
+              [workItemId],
+            )) as readonly { readonly state: WorkItemState }[]
+            return rows[0]?.state
+          }),
+          to,
+          mutation,
+          didApply,
+        )
+
       const countOccupiedWorkerSlots = (): Effect.Effect<
         number,
         WorkItemLifecycleDatabaseError
@@ -1441,8 +1468,13 @@ export const makeWorkItemLifecycleLive = (
 
             if (classification._tag === "invalid") {
               const failedRows = (yield* sql
-                .unsafe(
-                  `UPDATE work_item
+                .withTransaction(
+                  applyLifecycleTransition(
+                    held.id,
+                    "failed",
+                    sql
+                      .unsafe(
+                        `UPDATE work_item
                    SET state = 'failed',
                        state_ready_at = ?,
                        failure_code = ?,
@@ -1455,13 +1487,21 @@ export const makeWorkItemLifecycleLive = (
                      AND waiting_for_blockers = 1
                      AND state NOT IN ('complete', 'failed', 'abandoned')
                    RETURNING id`,
-                  [
-                    now,
-                    classification.failureCode,
-                    classification.failureMessage,
-                    now,
-                    held.id,
-                  ],
+                        [
+                          now,
+                          classification.failureCode,
+                          classification.failureMessage,
+                          now,
+                          held.id,
+                        ],
+                      )
+                      .pipe(
+                        Effect.map(
+                          (rows) => rows as readonly { readonly id: string }[],
+                        ),
+                      ),
+                    (rows) => rows.length > 0,
+                  ),
                 )
                 .pipe(Effect.mapError(toDatabaseError))) as readonly {
                 readonly id: string
@@ -2495,6 +2535,14 @@ export const makeWorkItemLifecycleLive = (
             ownedPrIssueStop?.reasonCode ?? output.stepRunReasonCode ?? null
           const stepRunReasonMessage =
             ownedPrIssueStop?.reasonMessage ?? output.stepRunNote ?? null
+          const appliedNextState =
+            ownedPrIssueStop?._tag === "merged"
+              ? ("local_cleanup" as const)
+              : ownedPrIssueStop?._tag === "pause"
+                ? null
+                : !revalidation.ok
+                  ? ("failed" as const)
+                  : nextStep
 
           yield* sql
             .withTransaction(
@@ -2872,7 +2920,16 @@ export const makeWorkItemLifecycleLive = (
                 if (stepRun.queue_job_id !== null) {
                   yield* queue.acknowledge(stepRun.queue_job_id)
                 }
-              }),
+              }).pipe((mutation) =>
+                appliedNextState === null
+                  ? mutation
+                  : applyLifecycleTransition(
+                      workItem.id,
+                      appliedNextState,
+                      mutation,
+                      () => true,
+                    ),
+              ),
             )
             .pipe(Effect.catch(catchTransactionError))
 
@@ -2982,7 +3039,16 @@ export const makeWorkItemLifecycleLive = (
                     retryable: false,
                   })
                 }
-              }),
+              }).pipe((mutation) =>
+                terminalFailure === undefined
+                  ? mutation
+                  : applyLifecycleTransition(
+                      workItem.id,
+                      "failed",
+                      mutation,
+                      () => true,
+                    ),
+              ),
             )
             .pipe(Effect.catch(catchTransactionError))
 
@@ -4175,7 +4241,14 @@ export const makeWorkItemLifecycleLive = (
                     )
                 }
               }
-            }),
+            }).pipe((mutation) =>
+              applyLifecycleTransition(
+                workItemId,
+                "abandoned",
+                mutation,
+                () => true,
+              ),
+            ),
           )
           .pipe(
             Effect.catch((error): Effect.Effect<never, AbandonError> => {
@@ -4395,12 +4468,13 @@ export const makeWorkItemLifecycleLive = (
                   return
                 }
 
-                for (const active of supersedingStepRuns) {
-                  // Label by id from the pre-interrupt snapshot. A snapshotted
-                  // queued row may become interrupted if it started before
-                  // cancel landed; never overwrite a terminal Effect outcome.
-                  yield* sql.unsafe(
-                    `UPDATE step_run
+                yield* Effect.gen(function* () {
+                  for (const active of supersedingStepRuns) {
+                    // Label by id from the pre-interrupt snapshot. A snapshotted
+                    // queued row may become interrupted if it started before
+                    // cancel landed; never overwrite a terminal Effect outcome.
+                    yield* sql.unsafe(
+                      `UPDATE step_run
                      SET status = CASE
                            WHEN status IN ('queued', 'cancelled') THEN 'cancelled'
                            ELSE 'interrupted'
@@ -4420,44 +4494,46 @@ export const makeWorkItemLifecycleLive = (
                          'interrupted',
                          'cancelled'
                        )`,
-                    [
-                      now,
-                      STEP_RUN_REASON.prMerged,
-                      "Work Item PR was merged before the Step Run started",
-                      "Work Item PR was merged; Step Run superseded",
-                      now,
-                      active.id,
-                    ],
-                  )
-
-                  if (active.queue_job_id !== null) {
-                    yield* queue
-                      .acknowledge(active.queue_job_id)
-                      .pipe(
-                        Effect.catchTag("JobNotFoundError", () => Effect.void),
-                      )
+                      [
+                        now,
+                        STEP_RUN_REASON.prMerged,
+                        "Work Item PR was merged before the Step Run started",
+                        "Work Item PR was merged; Step Run superseded",
+                        now,
+                        active.id,
+                      ],
+                    )
+                    if (active.queue_job_id !== null) {
+                      yield* queue
+                        .acknowledge(active.queue_job_id)
+                        .pipe(
+                          Effect.catchTag(
+                            "JobNotFoundError",
+                            () => Effect.void,
+                          ),
+                        )
+                    }
                   }
-                }
 
-                // Catch any Step Run that became active after the snapshot.
-                yield* sql.unsafe(
-                  `UPDATE step_run
+                  // Catch any Step Run that became active after the snapshot.
+                  yield* sql.unsafe(
+                    `UPDATE step_run
                    SET status = 'interrupted',
                        finished_at = COALESCE(finished_at, ?),
                        reason_code = ?,
                        reason_message = ?,
                        updated_at = ?
                    WHERE work_item_id = ? AND status = 'running'`,
-                  [
-                    now,
-                    STEP_RUN_REASON.prMerged,
-                    "Work Item PR was merged; Step Run superseded",
-                    now,
-                    workItemId,
-                  ],
-                )
-                const lateQueued = (yield* sql.unsafe(
-                  `UPDATE step_run
+                    [
+                      now,
+                      STEP_RUN_REASON.prMerged,
+                      "Work Item PR was merged; Step Run superseded",
+                      now,
+                      workItemId,
+                    ],
+                  )
+                  const lateQueued = (yield* sql.unsafe(
+                    `UPDATE step_run
                    SET status = 'cancelled',
                        finished_at = ?,
                        reason_code = ?,
@@ -4465,26 +4541,29 @@ export const makeWorkItemLifecycleLive = (
                        updated_at = ?
                    WHERE work_item_id = ? AND status = 'queued'
                    RETURNING queue_job_id`,
-                  [
-                    now,
-                    STEP_RUN_REASON.prMerged,
-                    "Work Item PR was merged before the Step Run started",
-                    now,
-                    workItemId,
-                  ],
-                )) as readonly { readonly queue_job_id: string | null }[]
-                for (const cancelled of lateQueued) {
-                  if (cancelled.queue_job_id !== null) {
-                    yield* queue
-                      .acknowledge(cancelled.queue_job_id)
-                      .pipe(
-                        Effect.catchTag("JobNotFoundError", () => Effect.void),
-                      )
+                    [
+                      now,
+                      STEP_RUN_REASON.prMerged,
+                      "Work Item PR was merged before the Step Run started",
+                      now,
+                      workItemId,
+                    ],
+                  )) as readonly { readonly queue_job_id: string | null }[]
+                  for (const cancelled of lateQueued) {
+                    if (cancelled.queue_job_id !== null) {
+                      yield* queue
+                        .acknowledge(cancelled.queue_job_id)
+                        .pipe(
+                          Effect.catchTag(
+                            "JobNotFoundError",
+                            () => Effect.void,
+                          ),
+                        )
+                    }
                   }
-                }
 
-                const updated = (yield* sql.unsafe(
-                  `UPDATE work_item
+                  const updated = (yield* sql.unsafe(
+                    `UPDATE work_item
                    SET state = 'local_cleanup',
                        state_ready_at = ?,
                        paused = 0,
@@ -4494,37 +4573,45 @@ export const makeWorkItemLifecycleLive = (
                    WHERE id = ?
                      AND state NOT IN ('complete', 'failed', 'abandoned', 'local_cleanup')
                    RETURNING id`,
-                  [now, now, workItemId],
-                )) as readonly { readonly id: string }[]
+                    [now, now, workItemId],
+                  )) as readonly { readonly id: string }[]
 
-                if (!updated[0]) {
-                  return yield* new NeedsHumanHandoffNotEligibleError({
-                    workItemId,
-                    reason:
-                      "Work Item is no longer eligible for merge cleanup advance",
-                  })
-                }
+                  if (!updated[0]) {
+                    return yield* new NeedsHumanHandoffNotEligibleError({
+                      workItemId,
+                      reason:
+                        "Work Item is no longer eligible for merge cleanup advance",
+                    })
+                  }
 
-                const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
-                if (!acquired) {
-                  return
-                }
+                  const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+                  if (!acquired) {
+                    return
+                  }
 
-                const stillActive = (yield* sql.unsafe(
-                  `SELECT id FROM step_run
+                  const stillActive = (yield* sql.unsafe(
+                    `SELECT id FROM step_run
                    WHERE work_item_id = ?
                      AND status IN ('queued', 'running')
                    LIMIT 1`,
-                  [workItemId],
-                )) as readonly { readonly id: string }[]
-                if (stillActive[0]) {
-                  return
-                }
+                    [workItemId],
+                  )) as readonly { readonly id: string }[]
+                  if (stillActive[0]) {
+                    return
+                  }
 
-                yield* enqueueStepRunForWorkItem(
-                  workItemId,
-                  "local_cleanup",
-                  now,
+                  yield* enqueueStepRunForWorkItem(
+                    workItemId,
+                    "local_cleanup",
+                    now,
+                  )
+                }).pipe((mutation) =>
+                  applyLifecycleTransition(
+                    workItemId,
+                    "local_cleanup",
+                    mutation,
+                    () => true,
+                  ),
                 )
               }),
             )
@@ -4839,16 +4926,16 @@ export const makeWorkItemLifecycleLive = (
                 // Anchor columns; give them a conservative anchor before Watch.
                 yield* sql.unsafe(
                   `UPDATE work_item
-                   SET state = ?,
-                       state_ready_at = ?,
-                       failure_code = NULL,
-                       failure_message = NULL,
-                       check_start_anchor_at = CASE
-                         WHEN ? = 1 AND check_start_anchor_at IS NULL THEN ?
-                         ELSE check_start_anchor_at
-                       END,
-                       updated_at = ?
-                   WHERE id = ?`,
+               SET state = ?,
+                   state_ready_at = ?,
+                   failure_code = NULL,
+                   failure_message = NULL,
+                   check_start_anchor_at = CASE
+                     WHEN ? = 1 AND check_start_anchor_at IS NULL THEN ?
+                     ELSE check_start_anchor_at
+                   END,
+                   updated_at = ?
+               WHERE id = ?`,
                   [
                     pendingStep,
                     now,
@@ -4867,8 +4954,8 @@ export const makeWorkItemLifecycleLive = (
               ) {
                 yield* sql.unsafe(
                   `UPDATE pr_status_check
-                   SET handled_at = NULL, handled_by_step_run_id = NULL, updated_at = ?
-                   WHERE work_item_id = ? AND handled_by_step_run_id = ?`,
+               SET handled_at = NULL, handled_by_step_run_id = NULL, updated_at = ?
+               WHERE work_item_id = ? AND handled_by_step_run_id = ?`,
                   [now, workItemId, latest.id],
                 )
               }
@@ -4886,7 +4973,16 @@ export const makeWorkItemLifecycleLive = (
                WHERE id = ?`,
                 [now, workItemId],
               )
-            }),
+            }).pipe((mutation) =>
+              recoverableStatusCheckFailure || retryableNeedsHumanHandoff
+                ? applyLifecycleTransition(
+                    workItemId,
+                    pendingStep,
+                    mutation,
+                    () => true,
+                  )
+                : mutation,
+            ),
           )
           .pipe(
             Effect.catch((error): Effect.Effect<never, RetryError> => {

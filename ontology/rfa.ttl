@@ -5,6 +5,7 @@
 @prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
 @prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <https://ready-for-agent.dev/ontology/rfa>
   a owl:Ontology ;
@@ -54,6 +55,50 @@ rfa:currentState
   rdfs:label "current state"@en ;
   skos:definition
     "The single operational Lifecycle Step or terminal state currently held by a Work Item."@en .
+
+rfa:Transition
+  a owl:Class ;
+  rdfs:label "Lifecycle transition"@en ;
+  skos:definition
+    "A declared Work Item state change selected by a named lifecycle guard."@en .
+
+rfa:StepRunReason
+  a owl:Class ;
+  rdfs:label "Step Run reason"@en ;
+  skos:definition
+    "A reason code from the harness Step Run reason vocabulary."@en .
+
+rfa:fromStep
+  a owl:ObjectProperty ;
+  rdfs:domain rfa:Transition ;
+  rdfs:range rfa:LifecycleState .
+
+rfa:toStep
+  a owl:ObjectProperty ;
+  rdfs:domain rfa:Transition ;
+  rdfs:range rfa:LifecycleState .
+
+rfa:guard
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Transition ;
+  rdfs:range xsd:string .
+
+rfa:reasonCode
+  a owl:ObjectProperty ;
+  rdfs:domain rfa:Transition ;
+  rdfs:range rfa:StepRunReason .
+
+rfa:NativeReason a rfa:StepRunReason ; skos:notation "native" .
+rfa:AgentFallbackReason a rfa:StepRunReason ; skos:notation "agent_fallback" .
+rfa:ReviewDeferredReason a rfa:StepRunReason ; skos:notation "review_deferred" .
+rfa:ReviewClearedReason a rfa:StepRunReason ; skos:notation "review_cleared" .
+rfa:ReviewAcceptedReason a rfa:StepRunReason ; skos:notation "review_accepted" .
+rfa:HandlerFailedReason a rfa:StepRunReason ; skos:notation "handler_failed" .
+rfa:MergeRevalidationReason a rfa:StepRunReason ; skos:notation "merge_revalidation" .
+rfa:GreenNoReviewEvidenceReason a rfa:StepRunReason ; skos:notation "green-no-review-evidence" .
+rfa:PrMergedReason a rfa:StepRunReason ; skos:notation "pr_merged" .
+rfa:AbandonedReason a rfa:StepRunReason ; skos:notation "abandoned" .
+rfa:PrStatusChecksUnresolvedReason a rfa:StepRunReason ; skos:notation "pr_status_checks_unresolved" .
 
 rfa:CreateWorktree
   a owl:Class, owl:NamedIndividual, skos:Concept,
@@ -180,6 +225,130 @@ rfa:LocalCleanup
   skos:prefLabel "local cleanup"@en ;
   skos:definition
     "The Lifecycle Step that removes the Work Item's local worktree and branch after its remote outcome is finished."@en .
+
+# Handler-selected and happy-path transitions.
+rfa:CreateWorktreeSucceededTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:InstallDependencies ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
+rfa:InstallDependenciesSucceededTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:Implement ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
+rfa:ImplementSucceededTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:AssessChanges ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
+rfa:AssessChangesDetectedTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:PreCommit ; rfa:guard "changes_detected" ; rfa:reasonCode rfa:NativeReason .
+rfa:AssessChangesNoChangeTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:CloseIssue ; rfa:guard "no_change_outcome" ; rfa:reasonCode rfa:NativeReason .
+rfa:PreCommitSucceededTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:Review ; rfa:guard "step_succeeded" ; rfa:reasonCode rfa:NativeReason .
+rfa:ReviewSucceededTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Commit ; rfa:guard "review_completed" ; rfa:reasonCode rfa:NativeReason .
+rfa:ReviewDeferredTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Commit ; rfa:guard "review_deferred" ; rfa:reasonCode rfa:ReviewDeferredReason .
+rfa:ReviewClearedTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Commit ; rfa:guard "review_cleared" ; rfa:reasonCode rfa:ReviewClearedReason .
+rfa:ReviewAcceptedTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Commit ; rfa:guard "review_accepted" ; rfa:reasonCode rfa:ReviewAcceptedReason .
+rfa:ReviewNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:NeedsHuman ; rfa:guard "review_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:CommitNativeTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CreatePr ; rfa:guard "native_completion" ; rfa:reasonCode rfa:NativeReason .
+rfa:CommitAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:CreatePr ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
+rfa:CreatePrNativeTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "native_completion" ; rfa:reasonCode rfa:NativeReason .
+rfa:CreatePrAgentFallbackTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "agent_fallback_completion" ; rfa:reasonCode rfa:AgentFallbackReason .
+
+rfa:WatchConflictTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:ResolvePrMergeConflict ; rfa:guard "merge_conflict_observed" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchHandoffTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "status_check_handoff_needed" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchClosedTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:NeedsHuman ; rfa:guard "pull_request_closed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:WatchPendingTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "checks_pending" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchFailedDraftTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:MarkPrReadyForReview ; rfa:guard "failed_checks_on_draft" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchFailedWaitingTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "failed_checks_before_deadline_or_unknown_draft_state" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchSettledDraftTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:MarkPrReadyForReview ; rfa:guard "settled_draft" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchSettledUnknownTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "settled_with_unknown_draft_state" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchSettledOrdinaryTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:DecidePrMerge ; rfa:guard "settled_ready_ordinary_merge_mode" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchSettledAlwaysTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:MergePr ; rfa:guard "settled_ready_always_merge_mode" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchFallbackDraftTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:MarkPrReadyForReview ; rfa:guard "fallback_draft_observation" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchFallbackUnknownTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "fallback_unknown_draft_state" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchFallbackOrdinaryTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:DecidePrMerge ; rfa:guard "fallback_ready_ordinary_merge_mode" ; rfa:reasonCode rfa:NativeReason .
+rfa:WatchFallbackAlwaysTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:MergePr ; rfa:guard "fallback_ready_always_merge_mode" ; rfa:reasonCode rfa:NativeReason .
+
+rfa:ResolveProcessedTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "conflict_processed" ; rfa:reasonCode rfa:NativeReason .
+rfa:ResolveNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:NeedsHuman ; rfa:guard "conflict_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:InvestigateChecksTriggeredTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "replacement_checks_triggered" ; rfa:reasonCode rfa:NativeReason .
+rfa:InvestigateProcessedTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "handoff_processed" ; rfa:reasonCode rfa:NativeReason .
+rfa:InvestigateGreenOnlyTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "green_without_review_evidence" ; rfa:reasonCode rfa:GreenNoReviewEvidenceReason .
+rfa:InvestigateNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:NeedsHuman ; rfa:guard "handoff_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
+
+rfa:MarkReadyWaitTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "ready_phase_wait_enabled" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyConflictTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:ResolvePrMergeConflict ; rfa:guard "reobserved_merge_conflict" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyHandoffTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "reobserved_status_check_handoff" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyClosedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:NeedsHuman ; rfa:guard "reobserved_closed_pull_request" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:MarkReadySettledOrdinaryTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:DecidePrMerge ; rfa:guard "settled_non_failing_ordinary_merge_mode" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadySettledAlwaysTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:MergePr ; rfa:guard "settled_non_failing_always_merge_mode" ; rfa:reasonCode rfa:NativeReason .
+rfa:MarkReadyContinueWatchingTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "failed_or_pending_ready_phase_checks" ; rfa:reasonCode rfa:NativeReason .
+
+rfa:DecideAlwaysTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:MergePr ; rfa:guard "always_merge_mode_defensive_route" ; rfa:reasonCode rfa:NativeReason .
+rfa:DecideClankerMergeTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:MergePr ; rfa:guard "clanker_merge_decision" ; rfa:reasonCode rfa:NativeReason .
+rfa:DecideNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:NeedsHuman ; rfa:guard "human_merge_decision" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:MergeSucceededTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "pull_request_merged" ; rfa:reasonCode rfa:NativeReason .
+rfa:MergeNeedsHumanTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:NeedsHuman ; rfa:guard "merge_needs_human" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:MergeRevalidateTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "merge_revalidation_within_limit" ; rfa:reasonCode rfa:MergeRevalidationReason .
+rfa:MergeRevalidationExhaustedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:NeedsHuman ; rfa:guard "merge_revalidation_limit_exhausted" ; rfa:reasonCode rfa:MergeRevalidationReason .
+rfa:CloseIssueSucceededTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:LocalCleanup ; rfa:guard "issue_closed" ; rfa:reasonCode rfa:NativeReason .
+rfa:LocalCleanupSucceededTransition a rfa:Transition ; rfa:fromStep rfa:LocalCleanup ; rfa:toStep rfa:Complete ; rfa:guard "local_cleanup_succeeded" ; rfa:reasonCode rfa:NativeReason .
+
+# Issue revalidation and terminal-failure transitions.
+rfa:CreateWorktreeRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:InstallDependenciesRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:ImplementRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:AssessChangesRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:PreCommitRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:ReviewRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:CommitRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:CreatePrRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:WatchRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:ResolveRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:InvestigateRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:MarkReadyRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:DecideRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:MergeRevalidationFailedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:Failed ; rfa:guard "issue_revalidation_failed_without_owned_pr_stop" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:CloseIssueEligibilityFailedTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:Failed ; rfa:guard "close_issue_eligibility_failed" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:HeldIssueInvalidTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:Failed ; rfa:guard "blocked_issue_became_invalid" ; rfa:reasonCode rfa:HandlerFailedReason .
+
+# A merged Work Item PR supersedes the current non-terminal state.
+rfa:CreatePrMergedTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:WatchMergedTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ResolveMergedTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:InvestigateMergedTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MarkReadyMergedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:DecideMergedTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merged" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MergeObservedMergedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "owned_pull_request_merge_observed_at_revalidation" ; rfa:reasonCode rfa:PrMergedReason .
+
+# Explicit operator and refresh transitions.
+rfa:CreateWorktreeAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:InstallDependenciesAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:ImplementAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:AssessChangesAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:PreCommitAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:ReviewAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:CommitAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:CreatePrAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:WatchAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:ResolveAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:InvestigateAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:MarkReadyAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:DecideAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:MergeAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:CloseIssueAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:LocalCleanupAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:LocalCleanup ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:NeedsHumanAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Abandoned ; rfa:guard "operator_abandon" ; rfa:reasonCode rfa:AbandonedReason .
+rfa:FailedRetryChecksTransition a rfa:Transition ; rfa:fromStep rfa:Failed ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "retry_unresolved_status_checks" ; rfa:reasonCode rfa:PrStatusChecksUnresolvedReason .
+rfa:NeedsHumanRetryInvestigationTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "retry_status_check_handoff" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:NeedsHumanRetryReviewTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Review ; rfa:guard "retry_review_fix_limit" ; rfa:reasonCode rfa:HandlerFailedReason .
+
+# Refresh may observe a merge while any PR-owning unfinished state is current.
+rfa:CreateWorktreeRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:InstallDependenciesRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:InstallDependencies ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ImplementRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:Implement ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:AssessChangesRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:AssessChanges ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:PreCommitRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:PreCommit ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ReviewRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:Review ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CommitRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:Commit ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CreatePrRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CreatePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:WatchRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:WatchPrStatusChecks ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:ResolveRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:ResolvePrMergeConflict ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:InvestigateRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:InvestigatePrStatusChecks ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MarkReadyRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:MarkPrReadyForReview ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:DecideRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:DecidePrMerge ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:MergeRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:MergePr ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:CloseIssueRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CloseIssue ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
+rfa:NeedsHumanRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
 
 rfa:Complete
   a owl:Class, owl:NamedIndividual, skos:Concept,
