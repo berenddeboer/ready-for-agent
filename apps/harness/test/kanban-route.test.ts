@@ -61,22 +61,58 @@ describe("/kanban route", () => {
     expect(source.match(/\{lane\.label\}/g)).toHaveLength(2)
   })
 
-  test("retains accessible tabs, keyboard navigation, and repository filtering", () => {
+  test("retains accessible two-tab control, keyboard navigation, and repository filtering", () => {
+    // Issue #675: Working and Failed tabs are Home-only; Kanban keeps Pipeline
+    // (default) and Completed last 24 h.
     const source = kanbanSource()
+    expect(source).toContain('type JobsTab = "pipeline" | "completed"')
     expect(source).toContain('{ id: "pipeline", label: "Pipeline" }')
-    expect(source).toContain('{ id: "working", label: "Working" }')
-    expect(source).toContain('{ id: "failed", label: "Failed" }')
     expect(source).toContain(
       '{ id: "completed", label: JOBS_COMPLETED_TAB_LABEL }',
     )
     expect(source).toContain(
       "Completed last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h",
     )
+    expect(source).not.toContain('{ id: "working", label: "Working" }')
+    expect(source).not.toContain('{ id: "failed", label: "Failed" }')
+    expect(source).not.toContain('label: "Working"')
+    expect(source).not.toContain('label: "Failed"')
+    expect(source).not.toContain("No working jobs.")
+    expect(source).not.toContain("No failed jobs.")
+    expect(source).not.toContain("Working jobs")
+    expect(source).not.toContain("Failed jobs")
+    expect(source).not.toContain('tab.id === "working"')
+    expect(source).not.toContain('tab.id === "failed"')
+    expect(source).not.toContain('selectedListTab === "working"')
+    expect(source).not.toContain('selectedListTab === "failed"')
+    expect(source).toContain("JOBS_COMPLETED_EMPTY_MESSAGE")
+    expect(source).toContain(
+      "No jobs completed in the last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h.",
+    )
+    // Tab strip order: Pipeline then Completed only.
+    const jobsTabsBlock = source.slice(
+      source.indexOf("const JOBS_TABS = ["),
+      source.indexOf(
+        "] as const satisfies readonly { id: JobsTab; label: string }[]",
+      ),
+    )
+    const pipelineTabIndex = jobsTabsBlock.indexOf('label: "Pipeline"')
+    const completedTabIndex = jobsTabsBlock.indexOf(
+      "label: JOBS_COMPLETED_TAB_LABEL",
+    )
+    expect(pipelineTabIndex).toBeGreaterThan(-1)
+    expect(completedTabIndex).toBeGreaterThan(pipelineTabIndex)
+    expect(jobsTabsBlock).not.toContain("Working")
+    expect(jobsTabsBlock).not.toContain("Failed")
+    // Keyboard cycles only between the two remaining tabs.
     expect(source).toContain('role="tablist"')
     expect(source).toContain('role="tab"')
     expect(source).toContain("aria-selected={selected}")
     expect(source).toContain('event.key === "ArrowRight"')
     expect(source).toContain('event.key === "ArrowLeft"')
+    expect(source).toContain(
+      "(tabIndex + delta + JOBS_TABS.length) % JOBS_TABS.length",
+    )
     expect(source).toContain("All sources")
     expect(source).toContain("aria-pressed={selectedRepositoryId === null}")
     expect(source).toContain(
@@ -182,6 +218,8 @@ describe("/kanban route", () => {
   })
 
   test("reuses existing queries and live invalidation without polling", () => {
+    // Working/Failed list queries still feed the Pipeline board merge; they are
+    // not tab panels. Completed tab still uses jobsCompletedWorkItemsQuery.
     const source = kanbanSource()
     expect(source).toContain("jobsWorkingWorkItemsQuery")
     expect(source).toContain("jobsFailedWorkItemsQuery")
@@ -189,6 +227,11 @@ describe("/kanban route", () => {
     expect(source).toContain("issuesQuery")
     expect(source).toContain("repositoriesQuery")
     expect(source).toContain("<KanbanLiveUpdates")
+    // No Working/Failed tab selection that isolates those query sets for a list.
+    expect(source).not.toContain("selectedListTab")
+    expect(source).not.toMatch(
+      /selectedTab === "working"|selectedTab === "failed"/,
+    )
     expect(source).not.toContain("queryFn:")
     expect(source).not.toContain("createClient(")
     expect(source).not.toContain("setInterval")

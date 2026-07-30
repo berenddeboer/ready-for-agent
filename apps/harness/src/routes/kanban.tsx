@@ -37,28 +37,16 @@ import {
   repositoriesQuery,
 } from "./index.js"
 
-type JobsTab = "pipeline" | "working" | "failed" | "completed"
+type JobsTab = "pipeline" | "completed"
 
 const JOBS_COMPLETED_TAB_LABEL = `Completed last ${JOBS_COMPLETED_WINDOW_HOURS} h`
 
 const JOBS_TABS = [
   { id: "pipeline", label: "Pipeline" },
-  { id: "working", label: "Working" },
-  { id: "failed", label: "Failed" },
   { id: "completed", label: JOBS_COMPLETED_TAB_LABEL },
 ] as const satisfies readonly { id: JobsTab; label: string }[]
 
-const jobsTabEmptyMessage = (tab: Exclude<JobsTab, "pipeline">): string => {
-  if (tab === "working") return "No working jobs."
-  if (tab === "failed") return "No failed jobs."
-  return `No jobs completed in the last ${JOBS_COMPLETED_WINDOW_HOURS} h.`
-}
-
-const jobsTabListAriaLabel = (tab: Exclude<JobsTab, "pipeline">): string => {
-  if (tab === "working") return "Working jobs"
-  if (tab === "failed") return "Failed jobs"
-  return JOBS_COMPLETED_TAB_LABEL
-}
+const JOBS_COMPLETED_EMPTY_MESSAGE = `No jobs completed in the last ${JOBS_COMPLETED_WINDOW_HOURS} h.`
 
 const sortNewestFirst = (items: readonly WorkItem[]): readonly WorkItem[] =>
   items
@@ -358,23 +346,14 @@ function KanbanJobsBoard() {
     selectedRepositoryId === null
       ? items
       : items.filter((item) => item.repositoryId === selectedRepositoryId)
-  const selectedListTab = selectedTab === "pipeline" ? null : selectedTab
   const activeItems =
-    selectedListTab === null
-      ? pipelineItems
-      : selectedListTab === "working"
-        ? workingItems
-        : selectedListTab === "failed"
-          ? failedItems
-          : completedItems
+    selectedTab === "pipeline" ? pipelineItems : completedItems
+  // Working/Failed list queries still feed the Pipeline board merge; Completed
+  // tab uses completed queries only. There are no Working/Failed tabs on Kanban.
   const activeQueries =
-    selectedListTab === null
+    selectedTab === "pipeline"
       ? [...workingQueries, ...failedQueries, ...completedQueries]
-      : selectedListTab === "working"
-        ? workingQueries
-        : selectedListTab === "failed"
-          ? failedQueries
-          : completedQueries
+      : completedQueries
   const loading = activeQueries.some((query) => query.isLoading)
   const failed = activeQueries.some((query) => query.isError)
   const visibleItems = repositoryFilteredItems(activeItems)
@@ -437,8 +416,6 @@ function KanbanJobsBoard() {
                 }}
               >
                 {tab.label}
-                {tab.id === "working" && ` (${workingItems.length})`}
-                {tab.id === "failed" && ` (${failedItems.length})`}
                 {tab.id === "completed" && ` (${completedItems.length})`}
               </button>
             )
@@ -472,7 +449,7 @@ function KanbanJobsBoard() {
         id={`jobs-panel-${selectedTab}`}
         aria-labelledby={`jobs-tab-${selectedTab}`}
       >
-        {selectedListTab === null ? (
+        {selectedTab === "pipeline" ? (
           <>
             <fieldset className="lane-switcher">
               <legend className="sr-only">Pipeline lane</legend>
@@ -553,13 +530,11 @@ function KanbanJobsBoard() {
             </section>
           </>
         ) : visibleItems.length === 0 ? (
-          <p className="pipeline-list-empty">
-            {jobsTabEmptyMessage(selectedListTab)}
-          </p>
+          <p className="pipeline-list-empty">{JOBS_COMPLETED_EMPTY_MESSAGE}</p>
         ) : (
           <ul
             className="pipeline-list m-0 grid list-none gap-2"
-            aria-label={jobsTabListAriaLabel(selectedListTab)}
+            aria-label={JOBS_COMPLETED_TAB_LABEL}
           >
             {visibleItems.map((workItem) => {
               const repository = repositoryById.get(workItem.repositoryId)

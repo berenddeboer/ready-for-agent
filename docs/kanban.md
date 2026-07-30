@@ -71,13 +71,15 @@ operator-facing ticket, rather than the prototype's exact palette or fonts.
 
 ## Interaction Model
 
-The Jobs area has four tabs:
+The Jobs area has two tabs:
 
 1. Pipeline is the default and renders the six lanes.
-2. Working retains the existing active-work list.
-3. Failed retains the existing failed-work list.
-4. Completed last 24 h shows every work item completed in the rolling previous
+2. Completed last 24 h shows every work item completed in the rolling previous
    24 hours (no fixed item limit).
+
+Working and Failed list tabs remain on the Home Jobs card only; Kanban does not
+duplicate those lists. Pipeline still assembles tickets from the existing
+working, failed, and completed Work Item queries.
 
 The existing arrow-key tab behavior, selected-tab ARIA semantics, Jobs collapse
 control, retry/reset/start/pause actions, Session usage dialog, issue links,
@@ -87,7 +89,7 @@ presentation, not a reduced-action overview.
 Repository filters sit above the board:
 
 - `All sources` shows every repository.
-- A repository filter limits every lane and every non-Pipeline tab to that
+- A repository filter limits every lane and the Completed tab to that
   repository.
 - Filter selection is local UI state and does not alter repository settings or
   the underlying queries.
@@ -161,9 +163,9 @@ systems.
 - Queued status-check polls and other queued later steps stay in their
   lifecycle lane; only blockers / worker-slot holds appear in Queue.
 - Every ticket preserves access to its existing operational actions.
-- Existing Working, Failed, and Completed views remain available and keyboard
-  accessible.
-- Repository filtering applies consistently to both board and list views.
+- Pipeline and Completed remain available and keyboard accessible; Working and
+  Failed lists stay on Home only.
+- Repository filtering applies consistently to both board and Completed list.
 - Desktop shows all six lanes; mobile shows a selected lane without horizontal
   page overflow.
 - No new polling or GraphQL contract is introduced.
