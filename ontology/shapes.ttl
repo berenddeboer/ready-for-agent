@@ -1,9 +1,40 @@
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
 @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+rfa:ContextTermShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:ContextTerm ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue owl:Class ;
+    sh:message "Every CONTEXT.md term must be declared as an OWL class."@en ;
+  ] ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue skos:Concept ;
+    sh:message "Every CONTEXT.md term must be declared as a SKOS concept."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:prefLabel ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "Every CONTEXT.md term must have one English preferred label."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:definition ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "Every CONTEXT.md term must have one English definition."@en ;
+  ] .
 
 rfa:LifecycleVocabularyShape
   a sh:NodeShape ;
@@ -95,4 +126,48 @@ rfa:WorkItemShape
     ) ;
     sh:message
       "A Work Item must have exactly one declared lifecycle state."@en ;
+  ] .
+
+rfa:StepRunShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:StepRun ;
+  sh:property [
+    sh:path prov:wasAssociatedWith ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:class rfa:Harness ;
+    sh:message "A Step Run must be associated with the Harness."@en ;
+  ] .
+
+rfa:AgentTurnShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:AgentTurn ;
+  sh:property [
+    sh:path prov:wasAssociatedWith ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:class rfa:AgentBackend ;
+    sh:message "An Agent Turn must be associated with its Agent Backend."@en ;
+  ] .
+
+rfa:AgentAttributedOutcomeShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:AgentAttributedOutcome ;
+  sh:property [
+    sh:path prov:wasAttributedTo ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:class rfa:AgentBackend ;
+    sh:message "An agent-attributed outcome must name its Agent Backend."@en ;
+  ] .
+
+rfa:HarnessAttributedOutcomeShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:HarnessAttributedOutcome ;
+  sh:property [
+    sh:path prov:wasAttributedTo ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:class rfa:Harness ;
+    sh:message "A harness-attributed outcome must name the Harness."@en ;
   ] .

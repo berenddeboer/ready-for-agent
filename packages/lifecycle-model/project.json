@@ -13,6 +13,7 @@
       },
       "inputs": [
         "default",
+        "{workspaceRoot}/CONTEXT.md",
         "{workspaceRoot}/ontology/**/*.ttl",
         "{workspaceRoot}/ontology/fixtures/manifest.json"
       ],

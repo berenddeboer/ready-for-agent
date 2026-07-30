@@ -1,0 +1,2588 @@
+# CONTEXT.md glossary terms, definitions, and avoided-language annotations.
+# The lifecycle-model parity test keeps this graph synchronized with the glossary.
+
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+# Lifecycle values retain their SKOS labels and definitions in rfa.ttl.
+# Declaring them here records that they are also CONTEXT.md glossary terms.
+rfa:CreateWorktree a rfa:ContextTerm .
+rfa:InstallDependencies a rfa:ContextTerm .
+rfa:CreatePr a rfa:ContextTerm .
+rfa:WatchPrStatusChecks a rfa:ContextTerm .
+rfa:ResolvePrMergeConflict a rfa:ContextTerm .
+rfa:InvestigatePrStatusChecks a rfa:ContextTerm .
+rfa:MarkPrReadyForReview a rfa:ContextTerm .
+rfa:DecidePrMerge a rfa:ContextTerm .
+rfa:MergePr a rfa:ContextTerm .
+rfa:LocalCleanup a rfa:ContextTerm .
+rfa:Complete a rfa:ContextTerm .
+rfa:Failed a rfa:ContextTerm .
+rfa:NeedsHuman a rfa:ContextTerm .
+rfa:Abandoned a rfa:ContextTerm .
+
+rfa:Forge
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Forge"@en ;
+  skos:definition "A code-hosting platform kind the harness supports as a Repository's source of git hosting, Issues, and Pull Requests: GitHub or GitLab. A Repository belongs to exactly one Forge, chosen when the Repository is added."@en ;
+  skos:hiddenLabel "Provider"@en, "issue source"@en, "platform"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Forge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Provider"@en ;
+  rfa:avoidanceRationale "overloaded with model provider and credential metadata"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Forge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "issue source"@en ;
+  rfa:avoidanceRationale "too narrow — the Forge also hosts Pull Requests and checks"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Forge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "platform"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Forge for this concept."@en ;
+] .
+
+rfa:ForgeHost
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Forge Host"@en ;
+  skos:definition "The hostname of the Forge instance serving a Repository — `github.com` for GitHub, or a self-managed GitLab instance such as `git.drupalcode.org`. It is part of Repository identity: the same Project Path on two different Forge Hosts denotes two different Repositories. The git remote's hostname is not authoritative for the Forge Host — an instance may serve SSH on a different hostname (git.drupal.org vs git.drupalcode.org)."@en ;
+  skos:hiddenLabel "Instance URL"@en, "server"@en, "domain"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ForgeHost ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Instance URL"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Forge Host for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ForgeHost ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "server"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Forge Host for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ForgeHost ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "domain"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Forge Host for this concept."@en ;
+] .
+
+rfa:ProjectPath
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Project Path"@en ;
+  skos:definition "The Forge's own slash-separated path addressing the project within its Forge Host — `owner/name` for GitHub, a group or nested subgroup path for GitLab (e.g., `project/oauth_client`). Case-insensitive identity; display casing preserved."@en ;
+  skos:hiddenLabel "Owner/repo pair"@en, "clone URL"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProjectPath ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Owner/repo pair"@en ;
+  rfa:avoidanceRationale "cannot express nested GitLab paths"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ProjectPath ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "clone URL"@en ;
+  rfa:avoidanceRationale "too many spellings for one project"@en ;
+] .
+
+rfa:Repository
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Repository"@en ;
+  skos:definition "A project on a Forge the harness is configured to work on, identified by Forge, Forge Host, and Project Path (case-insensitive identity; display casing preserved). One row per project; the harness keeps a single local clone of it (bare or working). Displayed as its Project Path — no separate display label. Forge, Forge Host, and Project Path are guessed from the local clone's remote when the Repository is added, verified against the Forge API, and may be corrected in Repository settings; changing them is rejected while any Work Item exists for the Repository."@en ;
+  skos:hiddenLabel "Repo"@en, "target"@en, "project"@en, "checkout"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Repository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Repo"@en ;
+  rfa:avoidanceRationale "in formal docs"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Repository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "target"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repository for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Repository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "project"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repository for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Repository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "checkout"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repository for this concept."@en ;
+] .
+
+rfa:EndToEndFixtureRepository
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "End-to-End Fixture Repository"@en ;
+  skos:definition "A dedicated Repository whose stable Forge state is controlled as a fixture for end-to-end validation. It contains a permanent open, Ready-labeled sentinel Issue with fixed identity and content, no hierarchy or blockers, and no Issue-closing PR; scenarios need not reject unrelated Issues."@en ;
+  skos:hiddenLabel "Test repo"@en, "sandbox Repository"@en, "mutable fixture"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:EndToEndFixtureRepository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Test repo"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers End-to-End Fixture Repository for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:EndToEndFixtureRepository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "sandbox Repository"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers End-to-End Fixture Repository for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:EndToEndFixtureRepository ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "mutable fixture"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers End-to-End Fixture Repository for this concept."@en ;
+] .
+
+rfa:Paused
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Paused"@en ;
+  skos:definition "A Repository state in which the harness does not autonomously select work for the Repository while keeping its configuration. Keeping the Issue store current through scheduled polling continues while Paused. Explicit operator requests, including a manual Refresh Job or Implement Now and its resulting lifecycle, remain allowed; new Repositories start paused until deliberately unpaused. Not the same as a paused Work Item (see Pause Work Item)."@en ;
+  skos:hiddenLabel "Disabled"@en, "inactive"@en, "enabled=false"@en, "Pause Work Item"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Paused ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Disabled"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Paused ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "inactive"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Paused ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "enabled=false"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Paused ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pause Work Item"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Paused for this concept."@en ;
+] .
+
+rfa:RepositorySettings
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Repository settings"@en ;
+  skos:definition "Per-Repository operator preferences: Paused, optional Agent Backend override, optional build Agent Model selection, optional review Agent Model selection, Auto-merge, Include all Issue Authors, and Wait for checks to start after ready for review (`waitForReadyForReviewChecks`, default true). Forge identity (Forge, Forge Host, and Project Path) is also corrected through Repository settings, subject to the Work Item gate described under Repository. An absent Agent Backend override inherits the Harness Config default Agent Backend. Build and review model selections are backend-scoped: each Agent Backend has its own optional overrides. An absent build model inherits the whole Harness build selection for the Repository's effective Agent Backend; an absent review model inherits the Harness review selection for that backend and then the resolved build selection; an explicit model with no Thinking Level uses that model's backend default. For a Work Item, build and review selections are resolved at each Agent Turn from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend, so a model settings change affects the next turn without rewriting the Work Item. Changing the Agent Backend override is rejected while any Work Item for that Repository is unfinished."@en ;
+  skos:hiddenLabel "Project config"@en, "repo config file"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositorySettings ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Project config"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repository settings for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RepositorySettings ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "repo config file"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Repository settings for this concept."@en ;
+] .
+
+rfa:HarnessConfig
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Harness Config"@en ;
+  skos:definition "Harness-wide operator preferences stored as a single config row: the default Agent Backend (OpenCode by default), backend-scoped optional default build Agent Model and Thinking Level, backend-scoped optional review Agent Model and Thinking Level (no review model means the build selection), and concurrency limits (default two concurrent Agent Turns and five concurrent Work Items). The default Agent Backend applies to Repositories without an override. Changing the default is rejected while any unfinished Work Item exists on a Repository that inherits the default; when allowed it hot-activates on Save (no Harness restart), remembers each backend's model selections separately, and may leave that backend's build model null (unconfigured) like first-run. On a fresh empty database the build model starts null; there is no product-seeded free model. First-run UI opens Settings and shows a banner until the default backend has a build model; Repositories with a fully configured override are not blocked by an unconfigured default. Creating a Work Item fails with a structured error when the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`)."@en ;
+  skos:hiddenLabel "Default model seed"@en, "product default model"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessConfig ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Default model seed"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Harness Config for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessConfig ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "product default model"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Harness Config for this concept."@en ;
+] .
+
+rfa:AutoMerge
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Auto-merge"@en ;
+  skos:definition "A Repository setting that, when enabled, lets Decide PR Merge ask whether a clanker may merge a low-risk PR; when disabled, Decide PR Merge always requires a human. Enabling Auto-merge does not itself merge pull requests; only a subsequent Merge PR step merges when Decide PR Merge chooses clanker merge. It applies only when a Work Item has a pull request and does not gate Close Issue for a No-Change Outcome. Distinct from Merge Mode Always on a Work Item."@en ;
+  skos:hiddenLabel "Automerge"@en, "auto-approve"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutoMerge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Automerge"@en ;
+  rfa:avoidanceRationale "GitHub product"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutoMerge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "auto-approve"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Auto-merge for this concept."@en ;
+] .
+
+rfa:MergeMode
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Merge Mode"@en ;
+  skos:definition "Durable Work Item policy for post-check merge routing. `ordinary` follows Repository Auto-merge and Decide PR Merge. `always` skips Decide PR Merge (no agent risk decision) and advances to Merge PR after the normal pre-merge lifecycle settles, without bypassing status checks, automated-review handling, conflict resolution, merge revalidation, Forge requirements, or technical Needs Human outcomes. No-Change Outcomes still close the Issue without merge-related steps. Stored on the Work Item and survives restarts. A merge-related Needs Human handoff reached before the mode became `always` is not revoked."@en ;
+  skos:hiddenLabel "Auto-merge"@en, "force merge"@en, "skip checks"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeMode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Auto-merge"@en ;
+  rfa:avoidanceRationale "Repository setting"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeMode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "force merge"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Mode for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeMode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "skip checks"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Mode for this concept."@en ;
+] .
+
+rfa:IncludeAllIssueAuthors
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Include all Issue Authors"@en ;
+  skos:definition "A boolean Repository setting (default false for new and existing Repositories) that opts into treating Ready-labeled Issues from every author as candidates for relevance. When false, the Issue Reconciler keeps only Issues whose Issue Author matches the Operator Forge User (case-insensitive); missing or ghost authors never match. When true, author does not filter relevance."@en ;
+  skos:hiddenLabel "Show all authors"@en, "mine only toggle"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IncludeAllIssueAuthors ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Show all authors"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Include all Issue Authors for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IncludeAllIssueAuthors ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "mine only toggle"@en ;
+  rfa:avoidanceRationale "as a separate UI control"@en ;
+] .
+
+rfa:IssueAuthor
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Issue Author"@en ;
+  skos:definition "The Forge username of the user who opened an Issue, when the Forge provides one (the GitHub login or GitLab username); otherwise null. Fetched with Ready-labeled Issues, stored on the local Issue record, and used for author-scoped relevance when Include all Issue Authors is off."@en ;
+  skos:hiddenLabel "Assignee"@en, "reporter"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssueAuthor ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Assignee"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Issue Author for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssueAuthor ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "reporter"@en ;
+  rfa:avoidanceRationale "unless matching the Forge’s author field"@en ;
+] .
+
+rfa:OperatorForgeUser
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Operator Forge User"@en ;
+  skos:definition "The Forge username of the authenticated principal for a Repository’s Forge credential path (Keymaxxer-injected token or ambient Forge CLI auth). Resolved via the Forge API viewer endpoint for that token during reconciliation when Include all Issue Authors is off; not a separate harness user account."@en ;
+  skos:hiddenLabel "Harness user"@en, "local operator account"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:OperatorForgeUser ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Harness user"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Operator Forge User for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:OperatorForgeUser ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "local operator account"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Operator Forge User for this concept."@en ;
+] .
+
+rfa:Issue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Issue"@en ;
+  skos:definition "An issue on the Repository's Forge, identified within that Repository by a positive integer issue number (the iid in GitLab) and represented locally with its title, body, web URL, creation time, Forge state, and optional Issue Author. The harness may retain a local representation for later use, but the Forge remains authoritative. GitLab issues and merge requests come from separate per-project number sequences, so a bare GitLab number is ambiguous across the two kinds — unlike GitHub's single shared sequence."@en ;
+  skos:hiddenLabel "Ticket"@en, "task"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Issue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Ticket"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Issue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "task"@en ;
+  rfa:avoidanceRationale "unless referring to a broader concept"@en ;
+] .
+
+rfa:IssueStore
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Issue store"@en ;
+  skos:definition "The harness capability that retains the Repository's current working set of Relevant Issue representations locally. It does not fetch, refresh, or establish the authoritative state of Issues."@en .
+
+rfa:IssueReconciler
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Issue Reconciler"@en ;
+  skos:definition "The sole harness capability that changes the Issue store, deriving one Repository's Relevant Issues from the Forge's authoritative set of Ready-labeled Issues. Issues that are not Relevant, including Issues whose ready label was removed, are absent from the Issue store after reconciliation."@en ;
+  skos:hiddenLabel "GitHub Reconciler"@en, "Issue Synchronizer"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssueReconciler ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "GitHub Reconciler"@en ;
+  rfa:avoidanceRationale "too broad"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssueReconciler ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Issue Synchronizer"@en ;
+  rfa:avoidanceRationale "suggests bidirectional updates"@en ;
+] .
+
+rfa:RefreshJob
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Refresh Job"@en ;
+  skos:definition "A durable request for the Issue Reconciler to reconcile one Repository. Acceptance of a Refresh Job does not mean reconciliation has completed. After reconciliation succeeds, unfinished Work Items that own a Work Item PR are inspected for merge outcomes: a merged PR advances local cleanup toward Complete (including Work Items paused because the Issue closed while the PR was open); closed-unmerged Abandon remains limited to merge-related Needs Human. Refresh does not auto-Start a Work Item paused for a closed Issue with an open PR."@en ;
+  skos:hiddenLabel "Refresh"@en, "sync job"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RefreshJob ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Refresh"@en ;
+  rfa:avoidanceRationale "ambiguous between the request and its execution"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RefreshJob ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "sync job"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Refresh Job for this concept."@en ;
+] .
+
+rfa:IssuePolling
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Issue Polling"@en ;
+  skos:definition "The autonomous recurring initiation of Issue reconciliation for every credentialed Repository, including Paused Repositories. Adding a Repository's matching Forge credential through the Harness activates polling; removing it suspends polling. Polling is serial: only one scheduled or manual Refresh Job executes at a time. A Repository's next scheduled attempt becomes eligible 120 to 150 seconds after its previous scheduled attempt finishes, whether that attempt succeeded or failed. Manual Refresh Jobs take precedence over scheduled attempts but neither interrupt a running attempt nor alter the Repository's polling cadence."@en ;
+  skos:hiddenLabel "Issue synchronization"@en, "refresh interval"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssuePolling ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Issue synchronization"@en ;
+  rfa:avoidanceRationale "suggests bidirectional updates"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssuePolling ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "refresh interval"@en ;
+  rfa:avoidanceRationale "ambiguous about eligibility and execution"@en ;
+] .
+
+rfa:PollingAutoHealJob
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Polling Auto-heal Job"@en ;
+  skos:definition "A durable high-priority startup request that makes the active Issue Polling set exactly match the Harness's credentialed Repositories, adding missing polling schedules and removing schedules for deleted or uncredentialed Repositories. Startup resets all exhausted polling-lane jobs before accepting new claims. The Auto-heal Job retries with backoff until reconciliation succeeds without delaying Harness startup."@en ;
+  skos:hiddenLabel "Issue reconciliation"@en, "startup migration"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PollingAutoHealJob ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Issue reconciliation"@en ;
+  rfa:avoidanceRationale "changes the Issue store"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PollingAutoHealJob ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "startup migration"@en ;
+  rfa:avoidanceRationale "runs on every startup and may depend on external credentials"@en ;
+] .
+
+rfa:KeymaxxerService
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Keymaxxer Service"@en ;
+  skos:definition "The backend boundary for vault operations. It can determine whether a named secret exists, request that a secret be added, and run a command with named secrets injected without exposing raw secret values to the Harness."@en ;
+  skos:hiddenLabel "Secret store"@en, "credential cache"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:KeymaxxerService ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Secret store"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Service for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:KeymaxxerService ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "credential cache"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Service for this concept."@en ;
+] .
+
+rfa:KeymaxxerSidecar
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Keymaxxer Sidecar"@en ;
+  skos:definition "The long-lived loopback companion process that owns one Keymaxxer stdio keyholder and exposes the Keymaxxer MCP tools over Streamable HTTP so the Harness and Keymaxxer-capable Agent Backends can share one vault session and Allow-session set without ambient secret values."@en ;
+  skos:hiddenLabel "Credential daemon"@en, "token cache"@en, "development-only sidecar"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:KeymaxxerSidecar ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Credential daemon"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:KeymaxxerSidecar ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "token cache"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:KeymaxxerSidecar ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "development-only sidecar"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Keymaxxer Sidecar for this concept."@en ;
+] .
+
+rfa:AgentBackend
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Backend"@en ;
+  skos:definition "A supported headless coding-agent CLI integration shipped with Ready for Agent that can execute Agent Turns for the Harness. The harness default and optional per-Repository overrides select among built-in backends; arbitrary external backend plugins are not part of this boundary. Work Items do not independently choose a backend: they capture the Repository's effective selection at creation."@en ;
+  skos:hiddenLabel "Agent"@en, "model"@en, "provider"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent"@en ;
+  rfa:avoidanceRationale "ambiguous"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "model"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "provider"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend for this concept."@en ;
+] .
+
+rfa:EffectiveAgentBackend
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Effective Agent Backend"@en ;
+  skos:definition "The Agent Backend a Repository uses for new Work Items: the Repository override when set, otherwise the Harness Config default. At Work Item creation the effective selection is captured and becomes that Work Item's routing and provenance backend for its lifetime."@en ;
+  skos:hiddenLabel "Active Agent Backend"@en, "preferred backend without capture"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:EffectiveAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Active Agent Backend"@en ;
+  rfa:avoidanceRationale "the runtime set"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:EffectiveAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "preferred backend without capture"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Effective Agent Backend for this concept."@en ;
+] .
+
+rfa:ActiveAgentBackend
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Active Agent Backend"@en ;
+  skos:definition "An Agent Backend the running Harness has hot-activated and may use for Agent Turns and model catalogs. Zero or more backends may be Active concurrently. A backend is kept Active while it is selected-or-in-use: the harness default, any Repository override, or the captured backend of any unfinished Work Item. Leaving that set drops it from Active. Each Work Item routes Agent Turns to its captured backend, which must be Active and not Unavailable for those turns."@en ;
+  skos:hiddenLabel "Single instance-wide backend only"@en, "Selected vs Active limbo"@en, "dual backends on one Work Item mid-ship"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ActiveAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Single instance-wide backend only"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Active Agent Backend for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ActiveAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Selected vs Active limbo"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Active Agent Backend for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ActiveAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "dual backends on one Work Item mid-ship"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Active Agent Backend for this concept."@en ;
+] .
+
+rfa:GrokBuild
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Grok Build"@en ;
+  skos:definition "The supported xAI coding Agent Backend with the stable ID `grok`. Distinct from a Grok Agent Model."@en ;
+  skos:hiddenLabel "Grok"@en, "grok-build"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:GrokBuild ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Grok"@en ;
+  rfa:avoidanceRationale "when referring to the backend"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:GrokBuild ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "grok-build"@en ;
+  rfa:avoidanceRationale "as the config ID"@en ;
+] .
+
+rfa:CodexBuild
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Codex Build"@en ;
+  skos:definition "The supported OpenAI coding Agent Backend with the stable ID `codex`. Distinct from a Codex Agent Model."@en ;
+  skos:hiddenLabel "Codex"@en, "codex-build"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CodexBuild ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Codex"@en ;
+  rfa:avoidanceRationale "when referring to the backend"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CodexBuild ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "codex-build"@en ;
+  rfa:avoidanceRationale "as the config ID"@en ;
+] .
+
+rfa:AgentBackendUnavailable
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Backend Unavailable"@en ;
+  skos:definition "A per-backend degraded state established by failed startup inspection, failed hot-activation on Save, or Recheck Agent Backend when that Agent Backend cannot execute Agent Turns or report its Agent Models. The UI, non-agent maintenance, and Agent-free Lifecycle Steps remain available. New Agent Turns and Work Item creation that need the Unavailable backend are blocked until a Recheck (or successful re-activation) for that backend succeeds; other backends are unaffected. Runtime Agent Turn failures fail only their Step Run, and the Harness never silently falls back to another backend. Unavailable does not block changing selections while the applicable idle gate allows."@en ;
+  skos:hiddenLabel "Startup failure"@en, "automatic fallback"@en, "harness-wide block when another backend is healthy"@en, "Paused Repository"@en, "restart required"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendUnavailable ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Startup failure"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendUnavailable ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "automatic fallback"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendUnavailable ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "harness-wide block when another backend is healthy"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendUnavailable ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Paused Repository"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendUnavailable ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "restart required"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Unavailable for this concept."@en ;
+] .
+
+rfa:AgentBackendPreview
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Backend Preview"@en ;
+  skos:definition "A Settings-only inspection of a not-yet-saved Agent Backend that loads that backend's Agent Model catalog so the operator can pick backend-scoped model selections before Save. It does not add or change an Active Agent Backend or allow Agent Turns on the previewed backend."@en ;
+  skos:hiddenLabel "Hot activate"@en, "Recheck Agent Backend"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendPreview ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Hot activate"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentBackendPreview ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Recheck Agent Backend"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Backend Preview for this concept."@en ;
+] .
+
+rfa:RecheckAgentBackend
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Recheck Agent Backend"@en ;
+  skos:definition "An explicit operator request that revalidates one Agent Backend by id and refreshes its Agent Model catalog. Success clears that backend's Agent Backend Unavailable and permits Agent Turns on it to resume; failure leaves that backend degraded with an actionable reason. Optional UI may recheck every selected-or-in-use backend."@en ;
+  skos:hiddenLabel "Automatic health poll"@en, "model-cache refresh only"@en, "Harness restart"@en, "Agent Backend Preview"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RecheckAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Automatic health poll"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RecheckAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "model-cache refresh only"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RecheckAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Harness restart"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RecheckAgentBackend ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent Backend Preview"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Recheck Agent Backend for this concept."@en ;
+] .
+
+rfa:AgentModel
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Model"@en ;
+  skos:definition "A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Each Agent Turn resolves build and review Agent Models from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend rather than from Work Item-stored model fields."@en ;
+  skos:hiddenLabel "Provider"@en, "Agent Backend"@en, "model profile"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentModel ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Provider"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Model for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentModel ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent Backend"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Model for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentModel ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "model profile"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Model for this concept."@en ;
+] .
+
+rfa:ThinkingLevel
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Thinking Level"@en ;
+  skos:definition "An optional, backend-defined effort setting for an Agent Model. An Agent Model may offer no Thinking Levels; `variant` is OpenCode's representation rather than the Harness term."@en ;
+  skos:hiddenLabel "Variant"@en, "required reasoning effort"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ThinkingLevel ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Variant"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Thinking Level for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ThinkingLevel ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "required reasoning effort"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Thinking Level for this concept."@en ;
+] .
+
+rfa:Session
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Session"@en ;
+  skos:definition "An Agent Backend-owned conversation identified to the Harness by its backend provenance and an opaque backend-local Session ID, scoped to a working directory, and continued across one or more Agent Turns and Harness restarts. Its identity is made durable while the first turn is still running; the Harness does not persist or reconstruct conversation history, and each turn may select a different Agent Model and Thinking Level without starting a new Session."@en ;
+  skos:hiddenLabel "chat"@en, "thread"@en, "conversation"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Session ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "chat"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Session for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Session ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "thread"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Session for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Session ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "conversation"@en ;
+  rfa:avoidanceRationale "in formal docs"@en ;
+] .
+
+rfa:SessionTelemetry
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Session Telemetry"@en ;
+  skos:definition "Optional Agent Backend-provided details about a Session, such as models, token totals, cost, and timestamps. An Agent Backend may support Agent Turns without exposing Session Telemetry; unsupported telemetry is distinct from a missing Session."@en ;
+  skos:hiddenLabel "Agent Turn Result"@en, "required backend capability"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:SessionTelemetry ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent Turn Result"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Session Telemetry for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:SessionTelemetry ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "required backend capability"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Session Telemetry for this concept."@en ;
+] .
+
+rfa:AgentTurn
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Turn"@en ;
+  skos:definition "One fully unattended headless Agent Backend CLI invocation within a Session using an explicit Agent Model and optional Thinking Level. An Agent Backend must support both the first turn and later turns that continue the same Session; file, shell, and tool permissions cannot wait for operator approval during the turn."@en ;
+  skos:hiddenLabel "Agent run"@en, "prompt run"@en, "OpenCode process"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurn ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurn ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "prompt run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurn ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "OpenCode process"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn for this concept."@en ;
+] .
+
+rfa:AgentTurnResult
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Turn Result"@en ;
+  skos:definition "The normalized successful output of an Agent Turn: its Session ID and ordered final assistant text, recovered from the Agent Backend's machine-readable output. Backend-specific events and terminal presentation are not part of the result."@en ;
+  skos:hiddenLabel "CLI stdout"@en, "transcript"@en, "tool-event stream"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnResult ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "CLI stdout"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Result for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnResult ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "transcript"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Result for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentTurnResult ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "tool-event stream"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Turn Result for this concept."@en ;
+] .
+
+rfa:AgentReportedOutcome
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent-reported Outcome"@en ;
+  skos:definition "A lifecycle-specific, machine-readable conclusion included in an Agent Turn's final assistant text so the Harness can choose the next lifecycle transition. It is semantic lifecycle data carried inside, but distinct from, the transport-level Agent Turn Result."@en ;
+  skos:hiddenLabel "Ruling"@en, "verdict"@en, "Agent Turn Result"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentReportedOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Ruling"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent-reported Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentReportedOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "verdict"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent-reported Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentReportedOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Agent Turn Result"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent-reported Outcome for this concept."@en ;
+] .
+
+rfa:AgentFreeLifecycleStep
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent-free Lifecycle Step"@en ;
+  skos:definition "A Lifecycle Step guaranteed not to invoke an Agent Turn. A step that may need an Agent Turn conditionally is not Agent-free and does not start while the Work Item's captured Agent Backend is Unavailable."@en ;
+  skos:hiddenLabel "Step that usually avoids the agent"@en, "non-OpenCode step"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentFreeLifecycleStep ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Step that usually avoids the agent"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent-free Lifecycle Step for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentFreeLifecycleStep ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "non-OpenCode step"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent-free Lifecycle Step for this concept."@en ;
+] .
+
+rfa:AgentCommand
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Command"@en ;
+  skos:definition "A slash command invoked verbatim by a Lifecycle Step and expected to have common semantics across Agent Backends. `/review` is the only required Agent Command; its availability is not checked by Recheck Agent Backend, so a missing command fails the Review Step Run when invoked."@en ;
+  skos:hiddenLabel "Backend-specific prompt template"@en, "readiness capability"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentCommand ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Backend-specific prompt template"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Command for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentCommand ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "readiness capability"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Command for this concept."@en ;
+] .
+
+rfa:AgentForgeAccess
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Agent Forge Access"@en ;
+  skos:definition "Authentication available to Forge commands invoked during Agent Turns. A backend may integrate the Keymaxxer named-secret tools, but need not; otherwise it uses authenticated ambient Forge access (the `gh` CLI on GitHub; a `GITLAB_TOKEN` environment variable or `glab` CLI on GitLab), and the Harness never copies raw Forge tokens into the Agent Turn environment. On GitLab, a per-Repository vault secret (`provider: gitlab`, `account: <forge-host>/<project-path>`) is strictly more specific than ambient sources when Keymaxxer is enabled; Agent Turns prefer `keymaxxer_run` with that secret and fall back to ambient guidance when none exists."@en ;
+  skos:hiddenLabel "Required Keymaxxer support"@en, "injected Forge token"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentForgeAccess ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Required Keymaxxer support"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Forge Access for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AgentForgeAccess ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "injected Forge token"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Agent Forge Access for this concept."@en ;
+] .
+
+rfa:ReadyLabeledIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Ready-labeled Issue"@en ;
+  skos:definition "An Issue carrying the `ready-for-agent` Forge label, regardless of whether the Issue is open or closed. A fetched Ready-labeled Issue includes its number, title, body, web URL, creation time, Forge state, and Issue Author (username when the Forge provides one) so consumers can decide whether it is actionable."@en ;
+  skos:hiddenLabel "Ready Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReadyLabeledIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Ready Issue"@en ;
+  rfa:avoidanceRationale "can imply that the Issue is open and actionable"@en ;
+] .
+
+rfa:PullRequest
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Pull Request"@en ;
+  skos:definition "A proposal to merge one branch into another on a Forge, reviewed and merged through the Forge: a GitHub pull request or a GitLab merge request."@en ;
+  skos:hiddenLabel "Merge request"@en, "MR"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PullRequest ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Merge request"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pull Request for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PullRequest ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "MR"@en ;
+  rfa:avoidanceRationale "GitLab's name for the same concept"@en ;
+] .
+
+rfa:IssueClosingPr
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Issue-closing PR"@en ;
+  skos:definition "A Pull Request that the Forge associates with an Issue through closing semantics, such as a supported closing keyword. A mere mention or other cross-reference does not make one an Issue-closing PR."@en ;
+  skos:hiddenLabel "Related PR"@en, "linked PR"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssueClosingPr ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Related PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Issue-closing PR for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:IssueClosingPr ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "linked PR"@en ;
+  rfa:avoidanceRationale "both can include incidental references"@en ;
+] .
+
+rfa:WorkItemPr
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Work Item PR"@en ;
+  skos:definition "A Pull Request whose exact identity is recorded by a Work Item. A matching Issue number or Git branch alone does not establish that the PR belongs to the Work Item. The PR need not use Issue-closing semantics. Complete, Failed, Needs Human, and Abandoned Work Items retain their Work Item PR; Reset relinquishes ownership by deleting the Work Item. When an Issue has multiple Issue-closing PRs, one matching Work Item PR is sufficient to establish that the harness is managing the Issue."@en ;
+  skos:hiddenLabel "Our PR"@en, "harness PR"@en, "associated PR"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItemPr ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Our PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item PR for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItemPr ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "harness PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item PR for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItemPr ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "associated PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item PR for this concept."@en ;
+] .
+
+rfa:LastPrChange
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Last PR Change"@en ;
+  skos:definition "The later of a Work Item PR's creation and the push of its current head commit, both of which are Check-Start Anchors. When the Forge omits the current head's push time, the time that head is first observed is the conservative substitute."@en ;
+  skos:hiddenLabel "Last commit time"@en, "Watch start time"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:LastPrChange ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Last commit time"@en ;
+  rfa:avoidanceRationale "ambiguous with author or commit timestamps"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:LastPrChange ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Watch start time"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Last PR Change for this concept."@en ;
+] .
+
+rfa:SupportedIssueHierarchy
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Supported Issue Hierarchy"@en ;
+  skos:definition "A GitHub issue hierarchy wholly contained within one Repository and limited to a root Issue with optional direct children. A hierarchy containing a cross-Repository relationship or a grandchild is unsupported in its entirety. GitLab Issues do not participate in a hierarchy: every GitLab Issue is a root with no children and is therefore structurally a Standalone Issue."@en ;
+  skos:hiddenLabel "Issue tree"@en, "nested Issues"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:SupportedIssueHierarchy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Issue tree"@en ;
+  rfa:avoidanceRationale "implies arbitrary depth"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:SupportedIssueHierarchy ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "nested Issues"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Supported Issue Hierarchy for this concept."@en ;
+] .
+
+rfa:ListedBlockers
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Listed Blockers"@en ;
+  skos:definition "The other Issues recorded as blocking an Issue. On GitHub they are the Issue's native blocked-by issue dependencies. On GitLab they are parsed from a `Blocked by: #n` line in the Issue body, since a GitLab instance cannot be assumed to offer native blocking links. An Issue with no Listed Blockers is unblocked."@en ;
+  skos:hiddenLabel "Dependencies"@en, "linked issues"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ListedBlockers ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Dependencies"@en ;
+  rfa:avoidanceRationale "overloaded"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ListedBlockers ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "linked issues"@en ;
+  rfa:avoidanceRationale "GitLab relates-to links are informational and do not block"@en ;
+] .
+
+rfa:ParentIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Parent Issue"@en ;
+  skos:definition "A root Issue with one or more direct children. It organizes related work and may receive Implement All with Auto-merge, but is not itself a unit the harness works directly."@en ;
+  skos:hiddenLabel "PRD"@en, "epic"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ParentIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "PRD"@en ;
+  rfa:avoidanceRationale "the relationship does not establish document type"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ParentIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "epic"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Parent Issue for this concept."@en ;
+] .
+
+rfa:ImplementAllWithAutoMerge
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Implement All with Auto-merge"@en ;
+  skos:definition "An atomic explicit operator request on a Parent Issue covering the open Child Issues present when the request is accepted. Children added later are not part of that request. It creates a separate Work Item for each covered child without unfinished work and sets every covered unfinished Work Item's Merge Mode to `Always`; if any child cannot be enrolled, none are created or changed. An unblocked child starts through the ordinary remote implementation and Worker Slot admission path, while a blocked child waits for its blockers through Queue. Siblings may run concurrently; hierarchy and child order add no dependency, and one child's later failure or Needs Human outcome does not stop its siblings. The Parent Issue itself does not become a Work Item, and the request never closes or updates it. The request does not overturn a Work Item already stopped at a merge-related Needs Human handoff."@en ;
+  skos:hiddenLabel "Queue Parent Issue"@en, "Parent Work Item"@en, "Implement Now with Auto-merge"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementAllWithAutoMerge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queue Parent Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement All with Auto-merge for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementAllWithAutoMerge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Parent Work Item"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement All with Auto-merge for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementAllWithAutoMerge ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Implement Now with Auto-merge"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement All with Auto-merge for this concept."@en ;
+] .
+
+rfa:ChildIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Child Issue"@en ;
+  skos:definition "A direct child of a Parent Issue. In a Supported Issue Hierarchy, a Child Issue has no children of its own."@en ;
+  skos:hiddenLabel "Subtask"@en, "nested Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ChildIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Subtask"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Child Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ChildIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "nested Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Child Issue for this concept."@en ;
+] .
+
+rfa:StandaloneIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Standalone Issue"@en ;
+  skos:definition "A root Issue with no children. It is structurally eligible to be worked directly."@en ;
+  skos:hiddenLabel "Unparented Issue"@en, "top-level Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StandaloneIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Unparented Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Standalone Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StandaloneIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "top-level Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Standalone Issue for this concept."@en ;
+] .
+
+rfa:LeafIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Leaf Issue"@en ;
+  skos:definition "An Issue with no children: either a Standalone Issue or a Child Issue. Only Leaf Issues are structurally eligible to be worked directly, subject to other workflow constraints."@en ;
+  skos:hiddenLabel "Actionable Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:LeafIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Actionable Issue"@en ;
+  rfa:avoidanceRationale "actionability also depends on workflow constraints"@en ;
+] .
+
+rfa:WorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Work Item"@en ;
+  skos:definition "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle, capturing the Repository's effective Agent Backend at creation as both provenance and routing authority for Agent Turns, and a durable Merge Mode (ordinary by default). Build and review Agent Model selections are not stored on the Work Item; each Agent Turn resolves them from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the captured Agent Backend. The resolved build selection is used for Implement, Review Fix Rounds, Commit, and related steps; the resolved review selection is used only for reviewing passes inside Review. It references the current Issue by Repository and issue number, captures the Issue title for identification after the Issue leaves the Issue store, records canonical agent-authored publication title and body after Commit generates them (shared by git commit and draft PR), records the exact identity of its pull request when one is created, and records the completion summary for a No-Change Outcome. Other Issue contents remain live rather than snapshotted. A Leaf Issue may produce multiple Work Items over time, but at most one may be unfinished at a time."@en ;
+  skos:hiddenLabel "Issue lifecycle"@en, "implementation job"@en, "attempt"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Issue lifecycle"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "implementation job"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "attempt"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Work Item for this concept."@en ;
+] .
+
+rfa:Implement
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Implement"@en ;
+  skos:definition "The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective. Completion may change repository files, produce findings, create or update Forge artifacts, or perform other work required by the Issue; repository changes are not required."@en ;
+  skos:hiddenLabel "Edit code"@en, "generate code"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Implement ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Edit code"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Implement ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "generate code"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement for this concept."@en ;
+] .
+
+rfa:NoChangeOutcome
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "No-Change Outcome"@en ;
+  skos:definition "A successful Work Item outcome that leaves no repository changes to commit because the Issue's objective was completed without changing repository files, such as by reporting findings or creating other Issues. Documentation, configuration, and other non-code repository changes are not a No-Change Outcome and follow the normal changed-work lifecycle."@en ;
+  skos:hiddenLabel "No-code outcome"@en, "empty change"@en, "no-op"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NoChangeOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "No-code outcome"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers No-Change Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NoChangeOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "empty change"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers No-Change Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NoChangeOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "no-op"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers No-Change Outcome for this concept."@en ;
+] .
+
+rfa:AssessChanges
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Assess Changes"@en ;
+  skos:definition "The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run. Observable repository changes advance directly to Pre-Commit without an Agent Turn. When the worktree appears unchanged, Assess Changes asks the Work Item's Session to confirm that the absence of changes is intentional and provide a concise completion summary. A confirmed No-Change Outcome skips Pre-Commit and Review and follows the lifecycle's no-change branch. Assess Changes does not review the work."@en ;
+  skos:hiddenLabel "Review changes"@en, "empty-commit check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AssessChanges ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Review changes"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Assess Changes for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AssessChanges ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "empty-commit check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Assess Changes for this concept."@en ;
+] .
+
+rfa:PreCommit
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Pre-Commit"@en ;
+  skos:definition "The Lifecycle Step that runs the repository's git pre-commit hook on staged Work Item changes before Review, with an Agent Turn fix loop on hook failure. It may also run again inside Review after a Review Fix Round changes the worktree."@en ;
+  skos:hiddenLabel "Pre-push"@en, "CI gate"@en, "local lint only"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PreCommit ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pre-push"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pre-Commit for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PreCommit ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "CI gate"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pre-Commit for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PreCommit ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "local lint only"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pre-Commit for this concept."@en ;
+] .
+
+rfa:Review
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Review"@en ;
+  skos:definition "The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes with the review model, then may apply accepted Review Findings with the build model in bounded Review Fix Rounds before Commit. Operator-visible phases stay under this one step: reviewing, applying findings, pre-commit, and assessing rerun inside the loop."@en ;
+  skos:hiddenLabel "Code review PR check"@en, "Mark PR Ready for Review"@en, "advisory-only review"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Review ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Code review PR check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Review ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Mark PR Ready for Review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Review ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "advisory-only review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review for this concept."@en ;
+] .
+
+rfa:ReviewFinding
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Review Finding"@en ;
+  skos:definition "A standards or specification issue reported by Review against the Work Item's changes. A build-model Agent Turn may fix or clear low- or medium-severity findings and may defer them; a high-severity finding must be fixed and re-reviewed or handed to a human."@en ;
+  skos:hiddenLabel "Lint error"@en, "CI failure"@en, "comment thread"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewFinding ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Lint error"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Finding for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewFinding ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "CI failure"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Finding for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewFinding ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "comment thread"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Finding for this concept."@en ;
+] .
+
+rfa:ReviewSeverity
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Review Severity"@en ;
+  skos:definition "The highest impact assigned to any Review Finding in one reviewing pass: low has no plausible runtime or contract impact, medium has bounded behavior or correctness impact, and high has security, data-loss, major-contract, or broad/systemic impact. A clean reviewing pass has no Review Severity; medium and high require another reviewing pass after fixes, while low is eligible for a Review Rerun Assessment."@en ;
+  skos:hiddenLabel "Finding list"@en, "risk score"@en, "priority"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewSeverity ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Finding list"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Severity for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewSeverity ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "risk score"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Severity for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewSeverity ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "priority"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Severity for this concept."@en ;
+] .
+
+rfa:UnresolvedReviewSeverity
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Unresolved Review Severity"@en ;
+  skos:definition "The highest Review Severity still unresolved after a build-model pass interprets the findings. A deferred result records this aggregate as low or medium; an unresolved high-severity finding requires human attention."@en ;
+  skos:hiddenLabel "Original severity"@en, "finding count"@en, "per-finding status"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:UnresolvedReviewSeverity ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Original severity"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Unresolved Review Severity for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:UnresolvedReviewSeverity ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "finding count"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Unresolved Review Severity for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:UnresolvedReviewSeverity ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "per-finding status"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Unresolved Review Severity for this concept."@en ;
+] .
+
+rfa:ReviewRerunAssessment
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Review Rerun Assessment"@en ;
+  skos:definition "A narrow build-model Agent Turn after applied low-severity Review Findings and nested Pre-Commit that uses the shared Session's account of those changes to decide, with a short rationale, whether they require another reviewing pass. It may skip only direct, localized, semantics-preserving remediation; expanded scope, higher-risk change categories, or uncertainty require a rerun."@en ;
+  skos:hiddenLabel "Re-review"@en, "self-review"@en, "diff check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewRerunAssessment ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Re-review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Rerun Assessment for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewRerunAssessment ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "self-review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Rerun Assessment for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewRerunAssessment ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "diff check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Rerun Assessment for this concept."@en ;
+] .
+
+rfa:AcceptedReviewOutcome
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Accepted Review Outcome"@en ;
+  skos:definition "A successful Review outcome in which a Review Rerun Assessment determines, with a recorded rationale, that applied findings do not require another reviewing pass. It advances to Commit without claiming that the changed remediation was reviewed clean and preserves any lower-severity findings deferred during the same remediation."@en ;
+  skos:hiddenLabel "Clean review"@en, "skipped review"@en, "deferred finding"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AcceptedReviewOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Clean review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Accepted Review Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AcceptedReviewOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "skipped review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Accepted Review Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AcceptedReviewOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "deferred finding"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Accepted Review Outcome for this concept."@en ;
+] .
+
+rfa:ClearedReviewOutcome
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Cleared Review Outcome"@en ;
+  skos:definition "A successful Review outcome in which the build model rejects all low- or medium-severity Review Findings as invalid without changing the worktree. It advances to Commit with a recorded rationale; high-severity findings cannot be cleared this way."@en ;
+  skos:hiddenLabel "Clean review"@en, "deferred finding"@en, "fixed finding"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ClearedReviewOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Clean review"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Cleared Review Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ClearedReviewOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "deferred finding"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Cleared Review Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ClearedReviewOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "fixed finding"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Cleared Review Outcome for this concept."@en ;
+] .
+
+rfa:ReviewFixRound
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Review Fix Round"@en ;
+  skos:definition "One build-model pass that interprets Review Findings and changes the worktree, possibly while deferring other findings, followed by Pre-Commit and either a Review Rerun Assessment or a mandatory reviewing pass. A Review Step Run allows at most five rounds; exhausting the limit without a clean, deferred, or Accepted Review Outcome is Needs Human."@en ;
+  skos:hiddenLabel "Implement redo"@en, "unbounded fix loop"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewFixRound ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Implement redo"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Fix Round for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReviewFixRound ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "unbounded fix loop"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Review Fix Round for this concept."@en ;
+] .
+
+rfa:Commit
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Commit"@en ;
+  skos:definition "The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes. Before the first native mutation it continues the Work Item Session for one publication-copy Agent Turn (unless canonical copy is already persisted or can be seeded from an existing commit), persists that title and body on the Work Item, then stages and commits with that copy; it does not implement Review Findings or other rework. The harness attempts a native git commit with the persisted copy and continues the Session only as a repair fallback when the native path does not establish the postcondition; repair may re-seed copy from the actual final commit message."@en ;
+  skos:hiddenLabel "Create PR"@en, "git commit hook"@en, "Pre-Commit"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Commit ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Create PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Commit for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Commit ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "git commit hook"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Commit for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Commit ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pre-Commit"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Commit for this concept."@en ;
+] .
+
+rfa:CloseIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Close Issue"@en ;
+  skos:definition "The Lifecycle Step that publishes the No-Change Outcome's completion summary on the Work Item's Issue and closes that Issue after Assess Changes. It precedes local cleanup so the remote completion outcome is preserved even when cleanup must be retried."@en ;
+  skos:hiddenLabel "Complete Work Item"@en, "local cleanup"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CloseIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Complete Work Item"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Close Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CloseIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "local cleanup"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Close Issue for this concept."@en ;
+] .
+
+rfa:WorkerSlot
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Worker Slot"@en ;
+  skos:definition "One unit of harness capacity reserved by an Admitted Work Item. Only Admitted Work Items occupy a Worker Slot; Work Items waiting for a Worker Slot do not. The number of occupied Worker Slots is bounded by a harness-wide maximum concurrent Work Items Config setting (default five, positive integer), re-read on each admission decision. Raising the bound admits waiters immediately up to the new limit; lowering it does not demote already-Admitted Work Items, but blocks new admissions until occupancy is at or below the new bound. Distinct from the concurrent Agent Turn limit and from job-worker fiber budget."@en ;
+  skos:hiddenLabel "OpenCode session limit"@en, "fiber budget"@en, "queue concurrency"@en, "concurrent Step Runs"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "OpenCode session limit"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "fiber budget"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "queue concurrency"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "concurrent Step Runs"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Worker Slot for this concept."@en ;
+] .
+
+rfa:AdmittedWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Admitted Work Item"@en ;
+  skos:definition "An unfinished Work Item that has been granted a Worker Slot and may run Lifecycle Steps. A Work Item becomes Admitted when created while a Worker Slot is free and it is not Waiting for blockers, or when it leaves Waiting for blockers or is the next waiter and a slot frees, or when Retry or Start successfully re-acquires a free slot. A Worker Slot is released when the Work Item becomes terminal (Complete, Failed, Abandoned), Needs Human, paused (after any running Step Run finishes), or when a Step Run fails non-terminally (operator may Retry). A failed non-terminal Work Item does not auto-enter the wait queue; only Retry (or Start after Pause) attempts re-admission. Start or Retry when no slot is free leaves the Work Item Waiting for Worker Slot until re-admitted FIFO."@en ;
+  skos:hiddenLabel "Running Work Item"@en, "active Work Item"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AdmittedWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Running Work Item"@en ;
+  rfa:avoidanceRationale "admission is not the same as a running Step Run"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AdmittedWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "active Work Item"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Admitted Work Item for this concept."@en ;
+] .
+
+rfa:WaitingForBlockers
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Waiting for blockers"@en ;
+  skos:definition "The state of an unfinished Work Item created by Queue while its Issue still has listed blockers. It does not occupy a Worker Slot, has no Step Run and no lifecycle job, and cannot be force-started past blockers. When Issue reconciliation finds the Issue Implementable, the Work Item leaves this state and follows normal Worker Slot admission (FIFO with other waiters by time entered the admission wait; creation time if never admitted). If reconciliation finds the Issue no longer a valid open leaf candidate (closed, not Relevant, not a leaf, and so on), the Work Item fails terminally with that reason; remaining blocked while still a valid open leaf is not a failure. Operator-facing copy may read as queued waiting for the blocking Issues; the status is not the Step Run or Agent Turn **Queued** stamp."@en ;
+  skos:hiddenLabel "Queued"@en, "Waiting for Worker Slot"@en, "blocked Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForBlockers ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queued"@en ;
+  rfa:avoidanceRationale "alone"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForBlockers ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting for Worker Slot"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for blockers for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForBlockers ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "blocked Issue"@en ;
+  rfa:avoidanceRationale "the Issue is blocked; this is the Work Item hold"@en ;
+] .
+
+rfa:WaitingForWorkerSlot
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Waiting for Worker Slot"@en ;
+  skos:definition "The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission."@en ;
+  skos:hiddenLabel "Queued Step Run"@en, "paused"@en, "Not Implemented"@en, "Waiting for blockers"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForWorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queued Step Run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForWorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "paused"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForWorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Not Implemented"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:WaitingForWorkerSlot ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting for blockers"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Waiting for Worker Slot for this concept."@en ;
+] .
+
+rfa:ImplementNow
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Implement Now"@en ;
+  skos:definition "An explicit operator request that creates a Work Item for an Actionable Issue and seeks Worker Slot admission immediately. Work Items are not created automatically by Issue reconciliation or eligibility discovery. Creation is allowed when all Worker Slots are occupied; the new Work Item is then Waiting for Worker Slot rather than rejected. Creation is hard-blocked while the Repository's effective Agent Backend is Unavailable or no build Agent Model can be resolved for that backend from Repository settings or Harness Config (`Select a default build model first`). Distinct from Queue, which creates a Work Item only for a blocked open leaf and holds it until Implementable."@en ;
+  skos:hiddenLabel "Auto-implement"@en, "enqueue Issue"@en, "Queue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementNow ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Auto-implement"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementNow ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "enqueue Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementNow ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Now for this concept."@en ;
+] .
+
+rfa:Queue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Queue"@en ;
+  skos:definition "An explicit operator request that creates a Work Item for a Relevant, open Leaf Issue that has listed blockers and no unfinished Work Item — the Issue would be Actionable except for blockers. The new Work Item is Waiting for blockers rather than Admitted. When the hold lifts, lifecycle and admission behave as if the operator had chosen Implement Now at that moment (full remote path, not Implement Locally), including when the Repository is Paused; backend or model problems after the hold lifts are handled like a post-create Implement Now failure, not by staying Waiting for blockers. Same hard blocks as Implement Now for the Repository's effective Agent Backend Unavailable and unresolved build Agent Model at request time. Not offered on Actionable Issues or outside the Issue store."@en ;
+  skos:hiddenLabel "Implement Now"@en, "enqueue Issue"@en, "schedule"@en, "defer"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Queue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Implement Now"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Queue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "enqueue Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Queue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "schedule"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Queue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "defer"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Queue for this concept."@en ;
+] .
+
+rfa:ImplementLocally
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Implement Locally"@en ;
+  skos:definition "An explicit operator request that creates a Work Item for an Actionable Issue like Implement Now, but records that the Work Item should pause before remote completion. Subject to the same Worker Slot admission rules as Implement Now. Local steps run only after admission; changed work continues from Assess Changes through Pre-Commit and Review before pausing at Commit, while a No-Change Outcome pauses at Close Issue immediately after Assess Changes. No Step Run is enqueued for the paused step, so the operator can inspect the worktree. Start resumes the selected branch and continues the lifecycle. Queue has no Locally variant."@en ;
+  skos:hiddenLabel "Local-only mode"@en, "dry run"@en, "Implement Now without PR"@en, "Queue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementLocally ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Local-only mode"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementLocally ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "dry run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementLocally ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Implement Now without PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementLocally ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implement Locally for this concept."@en ;
+] .
+
+rfa:NotImplemented
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Not Implemented"@en ;
+  skos:definition "The derived status of an Issue for which no Work Item has ever been created. It is not a persisted Work Item lifecycle state."@en ;
+  skos:hiddenLabel "Pending"@en, "queued"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NotImplemented ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pending"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Not Implemented for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NotImplemented ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "queued"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Not Implemented for this concept."@en ;
+] .
+
+rfa:ImplementableIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Implementable Issue"@en ;
+  skos:definition "A current, open Leaf Issue with no listed blockers. A Work Item that is not Waiting for blockers revalidates this predicate before every lifecycle advancement. When the predicate no longer holds and no Work Item PR is owned, the Work Item fails terminally. When a Work Item PR is already recorded and the only revalidation failure is that the Issue is closed or missing, the Work Item does not fail: it branches on that PR's lifecycle (Pause with reason for open, closed-unmerged, or indeterminate; local cleanup toward Complete for merged). A Work Item Waiting for blockers instead remains held while blockers persist and only seeks admission once the predicate holds."@en ;
+  skos:hiddenLabel "Ready-labeled Issue"@en, "Relevant Issue"@en, "Leaf Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementableIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Ready-labeled Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implementable Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementableIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Relevant Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implementable Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ImplementableIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Leaf Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Implementable Issue for this concept."@en ;
+] .
+
+rfa:ActionableIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Actionable Issue"@en ;
+  skos:definition "An Implementable Issue with no unfinished Work Item, including no Needs Human Work Item or retryable persisted status-check failure for that Issue. Only an Actionable Issue may receive Implement Now or Implement Locally; Repository pause does not affect actionability. An open Leaf Issue that fails only the blockers part of Implementable may receive Queue when it has no unfinished Work Item."@en ;
+  skos:hiddenLabel "Not Implemented Issue"@en, "Ready-labeled Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ActionableIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Not Implemented Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Actionable Issue for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ActionableIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Ready-labeled Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Actionable Issue for this concept."@en ;
+] .
+
+rfa:LifecycleStep
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Lifecycle Step"@en ;
+  skos:definition "The next action required for a Work Item: Create Worktree, Install Dependencies, Implement, Assess Changes, Pre-Commit, Review, Commit, Create PR, Watch PR Status Checks, Resolve PR Merge Conflict, Investigate PR Status Checks, Mark PR Ready for Review, Decide PR Merge, Merge PR, Close Issue, local cleanup, or a terminal Complete, Failed, Needs Human, or Abandoned state. In the PR completion loop, Watch prioritizes merge conflicts and red Status Check Handoffs, defers green-only Status Check Handoffs while any execution is still pending, then hands the accumulated unhandled batch once the aggregate settles; it sends a settled draft through Mark PR Ready for Review, and sends a settled ready PR past its Check-Start Deadline to Decide PR Merge."@en ;
+  skos:hiddenLabel "Last completed step"@en, "phase"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:LifecycleStep ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Last completed step"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Lifecycle Step for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:LifecycleStep ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "phase"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Lifecycle Step for this concept."@en ;
+] .
+
+rfa:MergeRevalidationOutcome
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Merge Revalidation Outcome"@en ;
+  skos:definition "A handled Merge PR attempt in which the Forge does not merge because the pull request or its base changed after approval. The first three outcomes return the Work Item to Watch PR Status Checks; a fourth requires a human, while operational or API failures remain failed Merge PR Step Runs eligible for Retry."@en ;
+  skos:hiddenLabel "Merge failure"@en, "automatic Retry"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeRevalidationOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Merge failure"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Revalidation Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeRevalidationOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "automatic Retry"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Revalidation Outcome for this concept."@en ;
+] .
+
+rfa:PrStatusCheck
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "PR Status Check"@en ;
+  skos:definition "An individual GitHub check run or commit status context associated with a pull request; on GitLab, one job of the pull request's head pipeline. An execution is green on explicit success and red on explicit failure, error, timeout, action-required, or startup-failure; on GitLab a failed job that allows failure is not red. Neutral, skipped, cancelled, stale, and pending results do not trigger a handoff; nor do GitLab manual or canceled jobs."@en ;
+  skos:hiddenLabel "Aggregate status-check rollup"@en, "workflow run"@en, "pipeline"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PrStatusCheck ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Aggregate status-check rollup"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers PR Status Check for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PrStatusCheck ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "workflow run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers PR Status Check for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PrStatusCheck ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "pipeline"@en ;
+  rfa:avoidanceRationale "the container of jobs, not a check"@en ;
+] .
+
+rfa:ExpectedPrStatusCheck
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Expected PR Status Check"@en ;
+  skos:definition "A required status context for which GitHub has not reported an execution. It may block final advancement before the Check-Start Deadline, but it is not a started check and no longer blocks at or after the deadline. GitLab has no required status contexts, so a GitLab pull request never has Expected PR Status Checks."@en ;
+  skos:hiddenLabel "Pending PR Status Check"@en, "queued check"@en, "running check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ExpectedPrStatusCheck ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pending PR Status Check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Expected PR Status Check for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ExpectedPrStatusCheck ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "queued check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Expected PR Status Check for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ExpectedPrStatusCheck ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "running check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Expected PR Status Check for this concept."@en ;
+] .
+
+rfa:CheckStartAnchor
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Check-Start Anchor"@en ;
+  skos:definition "The latest known event expected to start PR Status Checks: the Last PR Change, marking the Work Item PR ready for review, or a successful request to rerun or restart checks. Each new anchor gives the Forge another catch-up window in which replacement checks may appear."@en ;
+  skos:hiddenLabel "Last PR Change"@en, "Watch start time"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CheckStartAnchor ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Last PR Change"@en ;
+  rfa:avoidanceRationale "when a ready transition, rerun, or restart is newer"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CheckStartAnchor ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Watch start time"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Anchor for this concept."@en ;
+] .
+
+rfa:CheckStartDeadline
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Check-Start Deadline"@en ;
+  skos:definition "The instant 90 seconds after the latest Check-Start Anchor, before which neither an absence of checks nor an all-terminal observed set proves startup is complete. At or after the deadline, the harness assumes every check has started, while checks already pending are still watched until they finish."@en ;
+  skos:hiddenLabel "No-check grace"@en, "Watch residence time"@en, "check completion timeout"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CheckStartDeadline ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "No-check grace"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Deadline for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CheckStartDeadline ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Watch residence time"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Deadline for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CheckStartDeadline ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "check completion timeout"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Check-Start Deadline for this concept."@en ;
+] .
+
+rfa:ReadyPhaseStatusCheckRound
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Ready-Phase Status Check Round"@en ;
+  skos:definition "The fresh PR Status Check observation period after a pull request known to the harness as draft becomes ready for review. It protects repositories whose ready-for-review transition can start additional checks. A Repository may omit this round when its settled, non-failing draft-phase checks are sufficient evidence, allowing Mark PR Ready for Review to advance directly to Decide PR Merge. This omission does not shorten startup deadlines after PR creation, a head push, a check restart, or an automated-review rerun, and it never ignores an observed pending check or bypasses a known aggregate failure."@en ;
+  skos:hiddenLabel "Second CI run"@en, "duplicate checks"@en, "post-draft delay"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReadyPhaseStatusCheckRound ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Second CI run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Ready-Phase Status Check Round for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReadyPhaseStatusCheckRound ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "duplicate checks"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Ready-Phase Status Check Round for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ReadyPhaseStatusCheckRound ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "post-draft delay"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Ready-Phase Status Check Round for this concept."@en ;
+] .
+
+rfa:AutomatedReviewOutput
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Automated Review Output"@en ;
+  skos:definition "Feedback published by a recognized automated reviewer for a PR Status Check, treated as fully published once that check is terminal. No comment means no feedback, while present but visibly incomplete output indicates a failed review eligible for bounded whole-review reruns."@en ;
+  skos:hiddenLabel "Eventually consistent review comment"@en, "pending comment"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutomatedReviewOutput ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Eventually consistent review comment"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Automated Review Output for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:AutomatedReviewOutput ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "pending comment"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Automated Review Output for this concept."@en ;
+] .
+
+rfa:StatusCheckHandoff
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Status Check Handoff"@en ;
+  skos:definition "A durable batch of previously unhandled green and red PR Status Checks given to the Work Item's Implement Session by Investigate PR Status Checks, including available red-check diagnostics and relevant Automated Review Output. Terminal green executions accumulate while the Forge still reports an actual pending execution; Watch hands them off only after the aggregate settles, so staggered greens produce one investigation. Unhandled red executions and merge conflicts still hand off immediately. It is handled as processed when no replacement is expected, as a Checks Triggered Outcome when an action should create new executions, or as an explicit failure or human handoff; terminal review output never creates a waiting outcome. For a settled green-only batch, harness-owned Forge observation may complete the handoff as processed without an Agent Turn when there is demonstrably no positive automated-review evidence (`green-no-review-evidence`); positive or ambiguous review evidence and every batch containing a red check still use the Investigate Agent Turn."@en ;
+  skos:hiddenLabel "Check classification"@en, "one prompt per check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StatusCheckHandoff ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Check classification"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Status Check Handoff for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StatusCheckHandoff ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "one prompt per check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Status Check Handoff for this concept."@en ;
+] .
+
+rfa:ChecksTriggeredOutcome
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Checks Triggered Outcome"@en ;
+  skos:definition "A Status Check Handoff outcome reporting that a completed action, such as a commit push or successful check restart, is expected to create new PR Status Check executions. It handles the old batch and creates a Check-Start Anchor, unlike a processed handoff that expects no replacement execution."@en ;
+  skos:hiddenLabel "Waiting"@en, "processed no-op"@en, "observed replacement check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ChecksTriggeredOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Checks Triggered Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ChecksTriggeredOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "processed no-op"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Checks Triggered Outcome for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ChecksTriggeredOutcome ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "observed replacement check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Checks Triggered Outcome for this concept."@en ;
+] .
+
+rfa:MergeConflictHandoff
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Merge Conflict Handoff"@en ;
+  skos:definition "A highest-priority request given to the Work Item's Implement Session by Resolve PR Merge Conflict when its pull request conflicts with its current base branch. It asks only for rebasing the branch; completed PR Status Checks not previously handed off are retired because the rebase restarts them. A merely behind branch does not trigger this handoff."@en ;
+  skos:hiddenLabel "PR Status Check"@en, "conflict status check"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeConflictHandoff ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "PR Status Check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Conflict Handoff for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:MergeConflictHandoff ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "conflict status check"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Merge Conflict Handoff for this concept."@en ;
+] .
+
+rfa:StepRun
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Step Run"@en ;
+  skos:definition "A durable record of one scheduled execution attempt for a Work Item's Lifecycle Step, created when that attempt is queued and recording when it starts, finishes, and succeeds, fails, is interrupted, or is cancelled before starting. Retried steps produce additional Step Runs rather than replacing earlier attempts, allowing queue wait and execution duration to be measured separately."@en ;
+  skos:hiddenLabel "Step duration"@en, "job attempt"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StepRun ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Step duration"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Step Run for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StepRun ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "job attempt"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Step Run for this concept."@en ;
+] .
+
+rfa:Retry
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Retry"@en ;
+  skos:definition "An explicit operator request to create a new Step Run for a Work Item whose previous run failed. Lifecycle failures are not retried automatically. A failed Step Run has already released the Worker Slot; Retry must re-acquire a Worker Slot, and if none is free the Work Item becomes Waiting for Worker Slot with no Step Run until re-admission. A Needs Human outcome from Investigate PR Status Checks is also retryable: Retry clears the handoff reason, reopens the exact Status Check Handoff consumed by that attempt, and runs Investigate again in the existing Implement Session. A Needs Human outcome from exhausting Review Fix Rounds is also retryable: Retry clears the reason, resets the round counter, and re-enters Review at a fresh reviewing pass in the existing Implement Session. Persisted terminal Failed records with failure code `pr_status_checks_unresolved` from older harness behavior remain retryable by restoring Watch PR Status Checks. Retry is not allowed while a Work Item is paused; the operator must Start first."@en ;
+  skos:hiddenLabel "Queue redelivery"@en, "resume"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Retry ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Queue redelivery"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Retry for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Retry ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "resume"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Retry for this concept."@en ;
+] .
+
+rfa:PauseWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Pause Work Item"@en ;
+  skos:definition "An explicit operator request that marks an unfinished Work Item paused so it will not start further Lifecycle Steps until Start. A running Step Run is not interrupted; after it finishes, the next step is neither enqueued nor started while paused. Step Runs still queued (not running) are cancelled. If the Work Item was Admitted and no Step Run is running, Pause releases its Worker Slot immediately; if a Step Run is still running, the Worker Slot is held until that Step Run finishes, then released. Pause is idempotent when already paused and is rejected for missing, terminal, or Waiting for blockers Work Items (the hold already means do not run; cancel with Reset). A paused Work Item remains unfinished and still blocks Implement Now and Queue for that Issue. The harness also applies Pause Work Item when Issue revalidation finds the Issue closed or missing while the Work Item still owns a Work Item PR that is open, closed unmerged, or of indeterminate lifecycle status, recording an operator-visible reason for that branch—never an invisible non-terminal park with no pause flag and no reason. A confirmed merged PR advances to local cleanup instead of Pause. Start after reopening the Issue resumes the current Lifecycle Step; reopening alone does not auto-Start. A later Refresh Job that finds the Work Item PR merged still supersedes this pause and advances cleanup toward Complete. Closed-unmerged Abandon remains limited to merge-related Needs Human (Decide PR Merge / Merge PR). Distinct from Repository Paused."@en ;
+  skos:hiddenLabel "Suspend"@en, "hold"@en, "Abandon"@en, "Repository Paused"@en, "Waiting for blockers"@en, "silent park"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Suspend"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "hold"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Abandon"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Repository Paused"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Waiting for blockers"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:PauseWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "silent park"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Pause Work Item for this concept."@en ;
+] .
+
+rfa:StartWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Start Work Item"@en ;
+  skos:definition "An explicit operator request that clears a Work Item's paused flag and attempts to re-acquire a Worker Slot. If a Step Run is still running (Pause has not yet released the slot), only the paused flag is cleared so normal advancement resumes when that Step Run finishes. If no Step Run is running and a Worker Slot is free, the Work Item is re-Admitted and a new Step Run for the current Lifecycle Step is enqueued once when the latest run does not require Retry. If no Worker Slot is free and no Step Run is running, the Work Item becomes Waiting for Worker Slot and no Step Run is enqueued until re-admission. Start is idempotent when not paused and is rejected for missing, terminal, or Waiting for blockers Work Items (blockers cannot be bypassed; the hold lifts only when the Issue is Implementable)."@en ;
+  skos:hiddenLabel "Resume"@en, "unpause"@en, "Retry"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StartWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Resume"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Start Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StartWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "unpause"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Start Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:StartWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Retry"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Start Work Item for this concept."@en ;
+] .
+
+rfa:Abandon
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Abandon"@en ;
+  skos:definition "A transition that moves a Work Item with no running Step Run to the terminal Abandoned state while preserving its history. From an operational Lifecycle Step it does not remove the worktree and releases any Worker Slot; from Needs Human it must re-acquire a Worker Slot, run local cleanup, and only Abandons if cleanup succeeds—if no slot is free, the Work Item becomes Waiting for Worker Slot until admitted for that cleanup. It may be operator-directed (including from Needs Human) or applied automatically when a Refresh Job finds that a merge-related Needs Human Work Item's Work Item PR was closed unmerged. Repository removal may apply it to non-running Work Items before deleting that Repository's lifecycle history. An Abandoned Work Item no longer prevents a later Implement Now request for the same Issue. Pause does not block Abandon. Abandon of a Work Item that is only Waiting for Worker Slot (never admitted, or waiting after Start) is immediate with no cleanup and no slot involved."@en ;
+  skos:hiddenLabel "Delete"@en, "cancel"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Abandon ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Delete"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Abandon for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Abandon ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "cancel"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Abandon for this concept."@en ;
+] .
+
+rfa:Reset
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Reset"@en ;
+  skos:definition "An operator-directed erasure of a Work Item that stops queued or running Step Runs, removes the Git worktree and branch, and deletes the Work Item and its Step Run history so the Issue returns to Not Implemented. Unlike Abandon, Reset does not preserve history. Reset is allowed while paused, Waiting for Worker Slot, or Waiting for blockers and removes the Work Item entirely, releasing a Worker Slot if one was held (including when a Step Run is still finishing after Pause). Waiting for blockers has no worktree yet; Reset is the operator cancel for a queued intent."@en ;
+  skos:hiddenLabel "Abandon"@en, "Retry"@en, "cancel"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Reset ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Abandon"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Reset ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Retry"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:Reset ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "cancel"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Reset for this concept."@en ;
+] .
+
+rfa:FailedWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Failed Work Item"@en ;
+  skos:definition "A terminal Work Item that cannot advance because a lifecycle precondition was not met—for example the referenced Issue is closed, missing, or no longer Relevant when the Work Item does not yet own a Work Item PR. Closing or removing the Issue while a Work Item PR is already owned does not produce a Failed Work Item; that path pauses or advances cleanup by PR lifecycle instead. Its Step Run retains the outcome of the Effect itself, and the Work Item records the separate failure reason. Unresolved status checks stop on a retryable failed Step Run rather than producing a Failed Work Item."@en ;
+  skos:hiddenLabel "Failed Step Run"@en, "Abandoned"@en, "Pause Work Item for closed Issue with owned PR"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:FailedWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Failed Step Run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Failed Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:FailedWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Abandoned"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Failed Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:FailedWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Pause Work Item for closed Issue with owned PR"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Failed Work Item for this concept."@en ;
+] .
+
+rfa:NeedsHumanWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Needs Human Work Item"@en ;
+  skos:definition "A Work Item that cannot continue autonomously: either a Status Check Handoff cannot be processed autonomously or requires a human decision, Decide PR Merge requires a human (including when Auto-merge is disabled), Merge PR cannot proceed after its revalidation budget is exhausted or the Forge rejects an unchanged mergeable PR, or Review exhausts its Review Fix Round limit without a clean or deferred outcome. It records a concise intervention reason. Entering Needs Human releases its Worker Slot. It is terminal for ordinary Lifecycle Step advancement, Pause, and Start, and it blocks a second Implement Now or Implement Locally for the same Issue. A Needs Human outcome from Investigate PR Status Checks or from exhausting Review Fix Rounds may be retried after intervention; other Needs Human outcomes are not eligible for Retry. A Refresh Job may still leave Needs Human when a Work Item PR is present: a merged Work Item PR advances to local cleanup toward Complete (superseding the handoff). When the latest step was Decide PR Merge or Merge PR and the PR was closed unmerged, Refresh Abandons after local cleanup succeeds. Those Refresh-driven resumptions must re-acquire a Worker Slot; if none is free, the Work Item becomes Waiting for Worker Slot until admitted. Other Needs Human causes are not auto-resumed by Refresh when the PR is still open."@en ;
+  skos:hiddenLabel "Failed Work Item"@en, "Failed Step Run"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NeedsHumanWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Failed Work Item"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Needs Human Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:NeedsHumanWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Failed Step Run"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Needs Human Work Item for this concept."@en ;
+] .
+
+rfa:CompleteWorkItem
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Complete Work Item"@en ;
+  skos:definition "A terminal Work Item whose remote outcome is finished and whose local cleanup has finished. For changed work, the Work Item PR is merged, either by the harness after a clanker Decide PR Merge decision or by a human (or other external merge). Confirmed merge advances cleanup when known at Step Run Issue revalidation, or later via a Refresh Job—including when that merge supersedes an unfinished operational Lifecycle Step such as Watch or Investigate PR Status Checks, or a Work Item paused because the Issue closed while the Work Item PR was still open. Closing the linked Issue as part of the merge does not turn the Work Item into a Failed Work Item. Owning a Work Item PR number alone never Completes. For a No-Change Outcome, the Issue is closed without a pull request."@en ;
+  skos:hiddenLabel "Approved"@en, "done Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CompleteWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Approved"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Complete Work Item for this concept."@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:CompleteWorkItem ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "done Issue"@en ;
+  rfa:avoidanceRationale "CONTEXT.md prefers Complete Work Item for this concept."@en ;
+] .
+
+rfa:RelevantIssue
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Relevant Issue"@en ;
+  skos:definition "A Ready-labeled Issue in a Supported Issue Hierarchy that remains pertinent to the harness. It must be either an open root Issue, or a direct child whose parent is open and Ready-labeled. It must also have no open or merged Issue-closing PR, or have at least one open or merged Issue-closing PR whose exact identity matches a Work Item PR recorded for that Issue. Closed unmerged (abandoned) Issue-closing PRs are ignored for this test. An Issue-closing PR affects only its own Issue rather than the Issue's parent or children. Unless Include all Issue Authors is on for the Repository, the Issue’s own Issue Author must match the Operator Forge User (case-insensitive); missing or ghost authors never match, and parent authorship does not include or exclude children. A closed root Issue, a child with a closed or non-Ready-labeled parent, or an Issue with only unowned open or merged Issue-closing PRs is not relevant."@en ;
+  skos:hiddenLabel "Active Issue"@en, "Actionable Issue"@en, "Visible Issue"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RelevantIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Active Issue"@en ;
+  rfa:avoidanceRationale "a Relevant Issue may be closed"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RelevantIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Actionable Issue"@en ;
+  rfa:avoidanceRationale "actionability also depends on workflow constraints"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:RelevantIssue ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Visible Issue"@en ;
+  rfa:avoidanceRationale "presentation-specific"@en ;
+] .

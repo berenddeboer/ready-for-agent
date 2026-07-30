@@ -7,9 +7,11 @@ import { describe, expect, it } from "bun:test"
 
 const ontologyRoot = resolve(import.meta.dir, "../../../ontology")
 const fixturesRoot = resolve(ontologyRoot, "fixtures")
+const contextPath = resolve(ontologyRoot, "../CONTEXT.md")
 
 const namespace = {
   owl: "http://www.w3.org/2002/07/owl#",
+  prov: "http://www.w3.org/ns/prov#",
   rdf: "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
   rdfs: "http://www.w3.org/2000/01/rdf-schema#",
   rfa: "https://ready-for-agent.dev/ontology/rfa#",
@@ -27,10 +29,21 @@ const rdfNil = iri(`${namespace.rdf}nil`)
 const rdfsSubClassOf = iri(`${namespace.rdfs}subClassOf`)
 const owlClass = iri(`${namespace.owl}Class`)
 const owlAllDisjointClasses = iri(`${namespace.owl}AllDisjointClasses`)
+const owlAnnotatedProperty = iri(`${namespace.owl}annotatedProperty`)
+const owlAnnotatedSource = iri(`${namespace.owl}annotatedSource`)
+const owlAnnotatedTarget = iri(`${namespace.owl}annotatedTarget`)
+const owlAxiom = iri(`${namespace.owl}Axiom`)
 const owlDisjointWith = iri(`${namespace.owl}disjointWith`)
 const owlMembers = iri(`${namespace.owl}members`)
+const owlNamedIndividual = iri(`${namespace.owl}NamedIndividual`)
+const owlObjectProperty = iri(`${namespace.owl}ObjectProperty`)
+const owlDatatypeProperty = iri(`${namespace.owl}DatatypeProperty`)
+const owlOnProperty = iri(`${namespace.owl}onProperty`)
+const owlRestriction = iri(`${namespace.owl}Restriction`)
+const owlSomeValuesFrom = iri(`${namespace.owl}someValuesFrom`)
 const skosConcept = iri(`${namespace.skos}Concept`)
 const skosDefinition = iri(`${namespace.skos}definition`)
+const skosHiddenLabel = iri(`${namespace.skos}hiddenLabel`)
 const skosNotation = iri(`${namespace.skos}notation`)
 const skosPrefLabel = iri(`${namespace.skos}prefLabel`)
 const shIn = iri(`${namespace.sh}in`)
@@ -38,6 +51,85 @@ const shPath = iri(`${namespace.sh}path`)
 
 const operationalClass = term("OperationalLifecycleStep")
 const terminalClass = term("TerminalWorkItemState")
+const contextTermClass = term("ContextTerm")
+const avoidanceRationale = term("avoidanceRationale")
+
+interface AvoidedLabel {
+  readonly label: string
+  readonly rationale?: string
+}
+
+interface ContextTerm {
+  readonly label: string
+  readonly definition: string
+  readonly avoidedLabels: readonly AvoidedLabel[]
+}
+
+const splitOutsideParentheses = (value: string) => {
+  const entries: string[] = []
+  let depth = 0
+  let start = 0
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === "(") {
+      depth += 1
+    } else if (character === ")") {
+      depth -= 1
+    } else if (character === "," && depth === 0) {
+      entries.push(value.slice(start, index).trim())
+      start = index + 1
+    }
+  }
+
+  entries.push(value.slice(start).trim())
+  return entries
+}
+
+const parseAvoidedLabel = (value: string): AvoidedLabel => {
+  const rationaleStart = value.indexOf(" (")
+  if (rationaleStart === -1 || !value.endsWith(")")) {
+    return { label: value }
+  }
+
+  return {
+    label: value.slice(0, rationaleStart),
+    rationale: value.slice(rationaleStart + 2, -1),
+  }
+}
+
+const parseContextTerms = (source: string) => {
+  const lines = source.split("\n")
+  const terms: ContextTerm[] = []
+
+  for (const [index, line] of lines.entries()) {
+    const exactHeading = line.match(/^\*\*(.+)\*\*:$/)
+    if (exactHeading === null) {
+      continue
+    }
+
+    const definition = lines[index + 1]
+    if (definition === undefined || definition.length === 0) {
+      throw new Error(`Missing definition for ${exactHeading[1]}`)
+    }
+
+    const avoidLine = lines[index + 2]
+    const avoidedLabels =
+      avoidLine?.startsWith("_Avoid_: ") === true
+        ? splitOutsideParentheses(avoidLine.slice("_Avoid_: ".length)).map(
+            parseAvoidedLabel,
+          )
+        : []
+
+    terms.push({
+      label: exactHeading[1]!,
+      definition,
+      avoidedLabels,
+    })
+  }
+
+  return terms
+}
 
 const expectedOperationalTerms = {
   CreateWorktree: ["create_worktree", "Create Worktree"],
@@ -89,7 +181,15 @@ const parseTurtle = (path: string) => {
   return new Store(quads)
 }
 
-const ontology = parseTurtle(resolve(ontologyRoot, "rfa.ttl"))
+const contextTerms = parseContextTerms(readFileSync(contextPath, "utf8"))
+const ontology = new Store(
+  readdirSync(ontologyRoot)
+    .filter((file) => file.endsWith(".ttl") && file !== "shapes.ttl")
+    .sort()
+    .flatMap((file) =>
+      parseTurtle(resolve(ontologyRoot, file)).getQuads(null, null, null, null),
+    ),
+)
 const shapes = parseTurtle(resolve(ontologyRoot, "shapes.ttl"))
 
 const getOnlyObject = (store: Store, subject: Term, predicate: Term) => {
@@ -162,7 +262,10 @@ const superclassClosure = (store: Store, classIri: string) => {
 
   for (const current of pending) {
     for (const parent of store.getObjects(iri(current), rdfsSubClassOf, null)) {
-      const parentIri = namedIri(parent, "rdfs:subClassOf object")
+      if (parent.termType !== "NamedNode") {
+        continue
+      }
+      const parentIri = parent.value
       if (!closure.has(parentIri)) {
         closure.add(parentIri)
         pending.push(parentIri)
@@ -204,8 +307,12 @@ const findDisjointnessViolations = (store: Store) => {
   }
 
   for (const quad of store.getQuads(null, rdfsSubClassOf, null, null)) {
-    classes.add(namedIri(quad.subject, "rdfs:subClassOf subject"))
-    classes.add(namedIri(quad.object, "rdfs:subClassOf object"))
+    if (quad.subject.termType === "NamedNode") {
+      classes.add(quad.subject.value)
+    }
+    if (quad.object.termType === "NamedNode") {
+      classes.add(quad.object.value)
+    }
   }
 
   for (const declaredClass of store.getSubjects(rdfType, owlClass, null)) {
@@ -294,6 +401,250 @@ const expectLifecycleTerm = (
   expect(definition.value.length).toBeGreaterThan(20)
 }
 
+const getContextTerm = (label: string) => {
+  const labelLiteral = DataFactory.literal(label, "en")
+  const subjects = ontology
+    .getSubjects(skosPrefLabel, labelLiteral, null)
+    .filter(
+      (subject) =>
+        ontology.countQuads(subject, rdfType, contextTermClass, null) === 1,
+    )
+
+  expect(subjects).toHaveLength(1)
+  const subject = subjects[0]
+  if (subject === undefined) {
+    throw new Error(`Missing ontology counterpart for CONTEXT.md term ${label}`)
+  }
+
+  return subject
+}
+
+const expectDisjoint = (first: Term, second: Term) => {
+  expect(
+    ontology.countQuads(first, owlDisjointWith, second, null) +
+      ontology.countQuads(second, owlDisjointWith, first, null),
+  ).toBeGreaterThan(0)
+}
+
+const expectSomeValuesFrom = (
+  subject: Term,
+  property: Term,
+  expectedClass: Term,
+) => {
+  const restrictions = ontology
+    .getObjects(subject, rdfsSubClassOf, null)
+    .filter(
+      (candidate) =>
+        ontology.countQuads(candidate, rdfType, owlRestriction, null) === 1 &&
+        ontology.countQuads(candidate, owlOnProperty, property, null) === 1 &&
+        ontology.countQuads(
+          candidate,
+          owlSomeValuesFrom,
+          expectedClass,
+          null,
+        ) === 1,
+    )
+
+  expect(restrictions).toHaveLength(1)
+}
+
+describe("CONTEXT.md vocabulary parity", () => {
+  it("declares exactly one ontology context term for every glossary heading", () => {
+    const expectedLabels = contextTerms.map(({ label }) => label).sort()
+    const actualContextTerms = ontology.getSubjects(
+      rdfType,
+      contextTermClass,
+      null,
+    )
+    const actualLabels = actualContextTerms
+      .map((subject) => getOnlyLiteral(ontology, subject, skosPrefLabel).value)
+      .sort()
+
+    expect(actualLabels).toEqual(expectedLabels)
+    expect(new Set(actualLabels).size).toBe(actualLabels.length)
+  })
+
+  it("keeps every SKOS preferred label in exact parity with glossary headings", () => {
+    const expectedLabels = contextTerms.map(({ label }) => label).sort()
+    const actualLabels = ontology
+      .getObjects(null, skosPrefLabel, null)
+      .map(({ value }) => value)
+      .sort()
+
+    expect(actualLabels).toEqual(expectedLabels)
+  })
+
+  for (const contextEntry of contextTerms) {
+    it(`${contextEntry.label} preserves its definition and avoided labels`, () => {
+      const subject = getContextTerm(contextEntry.label)
+      expect(ontology.countQuads(subject, rdfType, skosConcept, null)).toBe(1)
+
+      const ontologyKinds = [
+        owlClass,
+        owlObjectProperty,
+        owlDatatypeProperty,
+        owlNamedIndividual,
+      ].filter(
+        (kind) => ontology.countQuads(subject, rdfType, kind, null) === 1,
+      )
+      expect(ontologyKinds.length).toBeGreaterThan(0)
+
+      const definition = getOnlyLiteral(ontology, subject, skosDefinition)
+      expect(definition.value).toBe(contextEntry.definition)
+      expect(definition.language).toBe("en")
+
+      const actualHiddenLabels = ontology
+        .getObjects(subject, skosHiddenLabel, null)
+        .map(({ value }) => value)
+        .sort()
+      expect(actualHiddenLabels).toEqual(
+        contextEntry.avoidedLabels.map(({ label }) => label).sort(),
+      )
+
+      for (const avoidedLabel of contextEntry.avoidedLabels) {
+        const labelLiteral = DataFactory.literal(avoidedLabel.label, "en")
+        const annotations = ontology
+          .getSubjects(owlAnnotatedSource, subject, null)
+          .filter(
+            (annotation) =>
+              ontology.countQuads(annotation, rdfType, owlAxiom, null) === 1 &&
+              ontology.countQuads(
+                annotation,
+                owlAnnotatedProperty,
+                skosHiddenLabel,
+                null,
+              ) === 1 &&
+              ontology.countQuads(
+                annotation,
+                owlAnnotatedTarget,
+                labelLiteral,
+                null,
+              ) === 1,
+          )
+        expect(annotations).toHaveLength(1)
+
+        const rationale = getOnlyLiteral(
+          ontology,
+          annotations[0]!,
+          avoidanceRationale,
+        )
+        expect(rationale.language).toBe("en")
+        if (avoidedLabel.rationale !== undefined) {
+          expect(rationale.value).toBe(avoidedLabel.rationale)
+        } else {
+          expect(rationale.value.length).toBeGreaterThan(10)
+        }
+      }
+    })
+  }
+})
+
+describe("full vocabulary semantic distinctions", () => {
+  it("keeps Repository Paused distinct from Pause Work Item", () => {
+    expectDisjoint(term("Paused"), term("PauseWorkItem"))
+  })
+
+  it("keeps Waiting for blockers distinct from Admitted Work Item", () => {
+    expectDisjoint(term("WaitingForBlockers"), term("AdmittedWorkItem"))
+  })
+
+  it("keeps Auto-merge distinct from Merge Mode always", () => {
+    expect(
+      ontology.countQuads(
+        term("MergeModeAlways"),
+        rdfsSubClassOf,
+        term("MergeMode"),
+        null,
+      ),
+    ).toBe(1)
+    expectDisjoint(term("AutoMerge"), term("MergeModeAlways"))
+  })
+
+  it("declares the terminal states pairwise disjoint", () => {
+    const expectedTerminalIris = Object.keys(expectedTerminalTerms).map(
+      (localName) => `${namespace.rfa}${localName}`,
+    )
+    const hasExactTerminalAxiom = ontology
+      .getSubjects(rdfType, owlAllDisjointClasses, null)
+      .some((axiom) => {
+        const members = getOnlyObject(ontology, axiom, owlMembers)
+        const actual = readRdfList(ontology, members)
+          .map(({ value }) => value)
+          .sort()
+        return (
+          JSON.stringify(actual) ===
+          JSON.stringify([...expectedTerminalIris].sort())
+        )
+      })
+
+    expect(hasExactTerminalAxiom).toBe(true)
+  })
+
+  it("aligns execution concepts with PROV-O", () => {
+    expect(
+      ontology.countQuads(
+        term("StepRun"),
+        rdfsSubClassOf,
+        iri(`${namespace.prov}Activity`),
+        null,
+      ),
+    ).toBe(1)
+    expect(
+      ontology.countQuads(
+        term("AgentTurn"),
+        rdfsSubClassOf,
+        iri(`${namespace.prov}Activity`),
+        null,
+      ),
+    ).toBe(1)
+    expect(
+      ontology.countQuads(
+        term("AgentBackend"),
+        rdfsSubClassOf,
+        iri(`${namespace.prov}SoftwareAgent`),
+        null,
+      ),
+    ).toBe(1)
+    expect(
+      ontology.countQuads(
+        term("Operator"),
+        rdfsSubClassOf,
+        iri(`${namespace.prov}Person`),
+        null,
+      ),
+    ).toBe(1)
+  })
+
+  it("attributes outcomes to an Agent Backend or the Harness", () => {
+    expect(
+      ontology.countQuads(
+        term("Outcome"),
+        rdfsSubClassOf,
+        iri(`${namespace.prov}Entity`),
+        null,
+      ),
+    ).toBe(1)
+    expectSomeValuesFrom(
+      term("AgentAttributedOutcome"),
+      iri(`${namespace.prov}wasAttributedTo`),
+      term("AgentBackend"),
+    )
+    expectSomeValuesFrom(
+      term("HarnessAttributedOutcome"),
+      iri(`${namespace.prov}wasAttributedTo`),
+      term("Harness"),
+    )
+    expect(
+      ontology.countQuads(
+        term("AgentReportedOutcome"),
+        rdfsSubClassOf,
+        term("AgentAttributedOutcome"),
+        null,
+      ),
+    ).toBe(1)
+  })
+})
+
 describe("rfa lifecycle ontology", () => {
   it("declares exactly the operational Lifecycle Steps from CONTEXT.md", () => {
     const actualTerms = ontology.getSubjects(rdfType, operationalClass, null)
@@ -339,15 +690,19 @@ describe("rfa lifecycle ontology", () => {
       ),
     ).toBe(1)
 
-    const disjointAxioms = ontology.getSubjects(
-      rdfType,
-      owlAllDisjointClasses,
-      null,
-    )
-    expect(disjointAxioms).toHaveLength(1)
-
-    const members = getOnlyObject(ontology, disjointAxioms[0]!, owlMembers)
-    expectExactIris(readRdfList(ontology, members), expectedStateIris)
+    const hasStateSpaceAxiom = ontology
+      .getSubjects(rdfType, owlAllDisjointClasses, null)
+      .some((axiom) => {
+        const members = getOnlyObject(ontology, axiom, owlMembers)
+        const actual = readRdfList(ontology, members)
+          .map(({ value }) => value)
+          .sort()
+        return (
+          JSON.stringify(actual) ===
+          JSON.stringify([...expectedStateIris].sort())
+        )
+      })
+    expect(hasStateSpaceAxiom).toBe(true)
   })
 
   it("has no disjoint class contradictions", () => {
@@ -418,10 +773,10 @@ const expectedFixtureVerdicts = {
 } as const
 
 describe("SHACL and consistency fixture corpus", () => {
-  it("asserts one fixture and verdict for every required category", () => {
-    const actualCategories = fixtureManifest.fixtures
-      .map(({ category }) => category)
-      .sort()
+  it("asserts at least one fixture and verdict for every required category", () => {
+    const actualCategories = [
+      ...new Set(fixtureManifest.fixtures.map(({ category }) => category)),
+    ].sort()
     expect(actualCategories).toEqual(
       Object.keys(expectedFixtureVerdicts).sort(),
     )
@@ -440,10 +795,35 @@ describe("SHACL and consistency fixture corpus", () => {
       .filter((file) => file.endsWith(".ttl"))
       .sort()
     expect(declaredFiles).toEqual(corpusFiles)
+    expect(declaredFiles).toContain("valid-execution.ttl")
+  })
+
+  it("rejects fixtures that cross each prose-fought distinction", () => {
+    const data = parseTurtle(resolve(fixturesRoot, "contradictory.ttl"))
+    const dataAndOntology = new Store([
+      ...ontology.getQuads(null, null, null, null),
+      ...data.getQuads(null, null, null, null),
+    ])
+    const contradictorySubjects = findDisjointnessViolations(dataAndOntology)
+      .filter(({ kind }) => kind === "individual")
+      .map(({ subject }) => subject)
+
+    expect(contradictorySubjects).toContain(
+      "https://ready-for-agent.dev/ontology/examples#waiting-and-admitted",
+    )
+    expect(contradictorySubjects).toContain(
+      "https://ready-for-agent.dev/ontology/examples#paused-repository-action",
+    )
+    expect(contradictorySubjects).toContain(
+      "https://ready-for-agent.dev/ontology/examples#auto-merge-mode-always",
+    )
+    expect(contradictorySubjects).toContain(
+      "https://ready-for-agent.dev/ontology/examples#two-terminal-states",
+    )
   })
 
   for (const fixture of fixtureManifest.fixtures) {
-    it(`${fixture.category} graph has its asserted verdict`, async () => {
+    it(`${fixture.file} has its asserted ${fixture.category} verdict`, async () => {
       const data = parseTurtle(resolve(fixturesRoot, fixture.file))
       const report = await new SHACLValidator(shapes).validate(data)
       expect(report.conforms).toBe(fixture.conforms)

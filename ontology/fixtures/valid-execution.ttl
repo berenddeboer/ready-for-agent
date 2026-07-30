@@ -1,0 +1,34 @@
+@prefix example: <https://ready-for-agent.dev/ontology/examples#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+
+example:harness
+  a rfa:Harness, prov:SoftwareAgent .
+
+example:agent-backend
+  a rfa:AgentBackend, prov:SoftwareAgent .
+
+example:operator
+  a rfa:Operator, prov:Person .
+
+example:step-run
+  a rfa:StepRun, prov:Activity ;
+  prov:wasAssociatedWith example:harness .
+
+example:agent-turn
+  a rfa:AgentTurn, prov:Activity ;
+  prov:wasAssociatedWith example:agent-backend .
+
+example:agent-outcome
+  a rfa:Outcome, rfa:AgentAttributedOutcome, rfa:AgentReportedOutcome,
+    prov:Entity ;
+  prov:wasAttributedTo example:agent-backend .
+
+example:harness-outcome
+  a rfa:Outcome, rfa:HarnessAttributedOutcome, rfa:MergeRevalidationOutcome,
+    prov:Entity ;
+  prov:wasAttributedTo example:harness .
+
+example:executing-work-item
+  a rfa:WorkItem ;
+  rfa:currentState rfa:Implement .
