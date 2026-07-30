@@ -71,6 +71,9 @@
     },
     {
       "path": "./packages/gitlab-service"
+    },
+    {
+      "path": "./packages/lifecycle-model"
     }
   ]
 }
