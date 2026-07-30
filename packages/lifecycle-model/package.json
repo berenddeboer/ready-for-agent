@@ -1,0 +1,11 @@
+{
+  "name": "@ready-for-agent/lifecycle-model",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@types/n3": "^1.26.1",
+    "n3": "^2.1.1",
+    "rdf-validate-shacl": "^0.6.5"
+  }
+}

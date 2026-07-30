@@ -1,0 +1,22 @@
+{
+  "name": "lifecycle-model",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/lifecycle-model/test",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun test"
+      },
+      "inputs": [
+        "default",
+        "{workspaceRoot}/ontology/**/*.ttl",
+        "{workspaceRoot}/ontology/fixtures/manifest.json"
+      ],
+      "cache": true
+    }
+  }
+}
