@@ -7,15 +7,24 @@
   "targets": {
     "generate": {
       "executor": "nx:run-commands",
+      "dependsOn": ["^build"],
       "options": {
         "cwd": "{projectRoot}",
         "command": "bun scripts/generate-type-defs.ts"
       },
       "inputs": [
-        "{projectRoot}/schema.graphql",
-        "{projectRoot}/scripts/generate-type-defs.ts"
+        "^production",
+        "{projectRoot}/schema.template.graphql",
+        "{projectRoot}/scripts/generate-type-defs.ts",
+        {
+          "dependentTasksOutputFiles": "**/*",
+          "transitive": false
+        }
       ],
-      "outputs": ["{projectRoot}/src/type-defs.gen.ts"],
+      "outputs": [
+        "{projectRoot}/schema.graphql",
+        "{projectRoot}/src/type-defs.gen.ts"
+      ],
       "cache": true
     },
     "build": {
@@ -26,7 +35,7 @@
       "inputs": [
         "default",
         "^production",
-        "{projectRoot}/schema.graphql",
+        "{projectRoot}/schema.template.graphql",
         {
           "dependentTasksOutputFiles": "**/*",
           "transitive": false
@@ -38,7 +47,7 @@
       "inputs": [
         "default",
         "^production",
-        "{projectRoot}/schema.graphql",
+        "{projectRoot}/schema.template.graphql",
         {
           "dependentTasksOutputFiles": "**/*",
           "transitive": false

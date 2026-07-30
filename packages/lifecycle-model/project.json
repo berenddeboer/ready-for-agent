@@ -36,8 +36,7 @@
         "^production",
         "{workspaceRoot}/CONTEXT.md",
         "{workspaceRoot}/ontology/**/*.ttl",
-        "{workspaceRoot}/ontology/fixtures/manifest.json",
-        "{workspaceRoot}/packages/work-item-lifecycle/src/lib/types.ts"
+        "{workspaceRoot}/ontology/fixtures/manifest.json"
       ],
       "cache": true
     }

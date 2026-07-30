@@ -1,6 +1,3 @@
-# This file is generated from schema.template.graphql and lifecycle-model.
-# Run `bunx nx run graphql-schema:generate` to update it.
-
 type Query {
   health: Boolean!
   """
@@ -314,26 +311,7 @@ type RefreshJob {
 }
 
 enum WorkItemState {
-  ASSESS_CHANGES
-  CLOSE_ISSUE
-  COMMIT
-  CREATE_PR
-  CREATE_WORKTREE
-  DECIDE_PR_MERGE
-  IMPLEMENT
-  INSTALL_DEPENDENCIES
-  INVESTIGATE_PR_STATUS_CHECKS
-  LOCAL_CLEANUP
-  MARK_PR_READY_FOR_REVIEW
-  MERGE_PR
-  PRE_COMMIT
-  RESOLVE_PR_MERGE_CONFLICT
-  REVIEW
-  WATCH_PR_STATUS_CHECKS
-  ABANDONED
-  COMPLETE
-  FAILED
-  NEEDS_HUMAN
+  WORK_ITEM_STATE_VALUES
 }
 
 enum WorkItemStatus {

@@ -1,11 +1,24 @@
 import { Duration, Schema } from "effect"
 import { ulid } from "ulidx"
 import {
+  OperationalLifecycleStep,
+  TERMINAL_WORK_ITEM_STATES,
+  TerminalWorkItemState,
+  WorkItemState,
+} from "@ready-for-agent/lifecycle-model"
+import {
   JOBS_COMPLETED_WINDOW_HOURS,
   JOBS_COMPLETED_WINDOW_MS,
 } from "./jobs-completed-window.js"
 
-export { JOBS_COMPLETED_WINDOW_HOURS, JOBS_COMPLETED_WINDOW_MS }
+export {
+  JOBS_COMPLETED_WINDOW_HOURS,
+  JOBS_COMPLETED_WINDOW_MS,
+  OperationalLifecycleStep,
+  TERMINAL_WORK_ITEM_STATES,
+  TerminalWorkItemState,
+  WorkItemState,
+}
 
 export const WorkItemId = Schema.String.pipe(
   Schema.check(Schema.isPattern(/^wi-[0-9A-HJKMNP-TV-Z]{26}$/)),
@@ -22,40 +35,6 @@ export const StepRunId = Schema.String.pipe(
 export type StepRunId = typeof StepRunId.Type
 
 export const makeStepRunId = (): StepRunId => StepRunId.make(`srun-${ulid()}`)
-
-export const OperationalLifecycleStep = Schema.Literals([
-  "create_worktree",
-  "install_dependencies",
-  "implement",
-  "assess_changes",
-  "pre_commit",
-  "review",
-  "commit",
-  "create_pr",
-  "watch_pr_status_checks",
-  "resolve_pr_merge_conflict",
-  "investigate_pr_status_checks",
-  "mark_pr_ready_for_review",
-  "decide_pr_merge",
-  "merge_pr",
-  "close_issue",
-  "local_cleanup",
-])
-export type OperationalLifecycleStep = typeof OperationalLifecycleStep.Type
-
-export const TerminalWorkItemState = Schema.Literals([
-  "complete",
-  "failed",
-  "abandoned",
-  "needs_human",
-])
-export type TerminalWorkItemState = typeof TerminalWorkItemState.Type
-
-export const WorkItemState = Schema.Union([
-  OperationalLifecycleStep,
-  TerminalWorkItemState,
-])
-export type WorkItemState = typeof WorkItemState.Type
 
 export const StepRunStatus = Schema.Literals([
   "queued",
@@ -190,8 +169,6 @@ export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
   stepRunId: StepRunId,
 })
 export type WorkItemStepJob = typeof WorkItemStepJob.Type
-
-export const TERMINAL_WORK_ITEM_STATES = TerminalWorkItemState.literals
 
 export const isTerminalWorkItemState = (
   state: WorkItemState,
