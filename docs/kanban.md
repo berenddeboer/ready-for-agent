@@ -97,6 +97,57 @@ Repository filters sit above the board:
 Tickets remain sorted newest first within each lane. This gives recency without
 destroying the flow grouping supplied by the board.
 
+## Ticket lifecycle chips (lane-scoped collapse)
+
+Kanban tickets reuse the Work Item lifecycle chip row, but **collapse earlier
+lanes by default** so the card focuses on steps for the lane the ticket is in.
+This is **Kanban-only**; Home Jobs and other surfaces keep the full chip list.
+
+### Focus lane
+
+- **Build / Review / PR:** focus = that lane’s phases (same grouping as board
+  placement above).
+- **Attention:** focus = the lifecycle lane the Work Item would occupy from
+  state alone (Build, Review, or PR). Attention placement still wins for the
+  column; chip focus follows lifecycle progress.
+- **Queue:** no change (chips are usually absent).
+- **Merged:** unchanged — no step chips; summary only.
+
+### Earlier lanes
+
+For each **earlier** lifecycle lane (Build → Review → PR order) that has at
+least one chip, show one summary row instead of those chips:
+
+- Collapsed: `▸ {Lane name}  {duration}`
+- Expanded: `▾ {Lane name}  {duration}` plus that lane’s chips underneath
+
+Rules:
+
+- **Name + duration only** on the summary (no status tint, no per-step detail).
+- **Duration** = sum of that lane’s chip `durationMs` values (skip nulls);
+  format like chip durations. Not live-ticking.
+- Expand/collapse is **per earlier lane**, independent, and **ephemeral**
+  (local UI state; not persisted).
+- Expanding a summary **replaces** the collapsed row with the header + chips
+  for that lane; other earlier lanes stay summaries until expanded.
+- **Current-focus-lane chips** are always fully listed after all earlier-lane
+  blocks.
+- Do **not** auto-expand an earlier lane because a chip there failed or needs
+  human; Attention and the status badge carry alarm. Optional later: tint a
+  summary when any chip in that lane is non-success.
+
+### Phase grouping
+
+Chip phases map to Build / Review / PR exactly as in the board model table
+(including PR-path steps from Commit through local cleanup). The collapsed
+GitHub status-checks phase counts as PR.
+
+### Out of scope (v1)
+
+- Home, Completed tab rows, and any non-Kanban chip row.
+- Persisted expand state, hover-only expand, or wall-clock span durations.
+- Hiding in-lane chips (succeeded steps in the focus lane stay visible).
+
 ## Responsive Behavior
 
 Six simultaneously visible columns work on a desktop operator display but do
@@ -171,3 +222,6 @@ systems.
 - No new polling or GraphQL contract is introduced.
 - Lane classifier, tab keyboard behavior, filtering, and mobile lane selection
   are covered by tests.
+- Kanban tickets collapse earlier-lane lifecycle chips into per-lane summary
+  rows (name + summed duration); focus-lane chips stay expanded; expand state
+  is local and ephemeral; Home chip rows are unaffected.
