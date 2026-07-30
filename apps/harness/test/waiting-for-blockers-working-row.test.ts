@@ -77,16 +77,9 @@ describe("Waiting for blockers Working-row polish", () => {
     )
   })
 
-  test("blocked Issue kebab offers Queue only; Actionable keeps Implement", () => {
+  test("Issue kebab offers Queue and Implement actions from shared eligibility", () => {
     const source = homeSource()
-    expect(source).toContain("const isQueueable =")
-    expect(source).toContain("const canQueue =")
-    expect(source).toContain(
-      'issue.state === "OPEN" && !issue.hasChildren && issue.blockedBy.length > 0',
-    )
-    expect(source).toContain(
-      'issue.state === "OPEN" && !issue.hasChildren && issue.blockedBy.length === 0',
-    )
+    expect(source).toContain("issueActionEligibility({")
     expect(source).toContain('queueIssue.isPending ? "Queueing..." : "Queue"')
     expect(source).toContain("{canImplement && (")
     expect(source).toContain("{canQueue && (")

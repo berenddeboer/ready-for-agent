@@ -17,6 +17,10 @@ import {
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
 import { Copy } from "../copy.js"
 import {
+  type GraphqlWorkItemState,
+  issueActionEligibility,
+} from "../issue-action-eligibility.js"
+import {
   formatDuration,
   formatStartedAgo,
   isLiveDurationStatus,
@@ -357,27 +361,7 @@ type RepositoryIssue = {
   }[]
 }
 
-type WorkItemState =
-  | "CREATE_WORKTREE"
-  | "INSTALL_DEPENDENCIES"
-  | "IMPLEMENT"
-  | "ASSESS_CHANGES"
-  | "PRE_COMMIT"
-  | "REVIEW"
-  | "COMMIT"
-  | "CREATE_PR"
-  | "WATCH_PR_STATUS_CHECKS"
-  | "RESOLVE_PR_MERGE_CONFLICT"
-  | "INVESTIGATE_PR_STATUS_CHECKS"
-  | "MARK_PR_READY_FOR_REVIEW"
-  | "DECIDE_PR_MERGE"
-  | "MERGE_PR"
-  | "CLOSE_ISSUE"
-  | "LOCAL_CLEANUP"
-  | "COMPLETE"
-  | "FAILED"
-  | "ABANDONED"
-  | "NEEDS_HUMAN"
+type WorkItemState = GraphqlWorkItemState
 
 type WorkItemStatus =
   | "QUEUED"
@@ -2789,7 +2773,6 @@ function ParentIssueGroup({
   const canImplementAll = isParentImplementAllWithAutoMergeEligible({
     openChildren,
     directChildren: childIssues,
-    workItems,
     workItemsLoading,
   })
   const implementAll = useMutation({
@@ -2923,10 +2906,6 @@ function RepositoryIssueRow({
   workItems: readonly WorkItem[]
   workItemsLoading: boolean
 }) {
-  const isActionable =
-    issue.state === "OPEN" && !issue.hasChildren && issue.blockedBy.length === 0
-  const isQueueable =
-    issue.state === "OPEN" && !issue.hasChildren && issue.blockedBy.length > 0
   const [menuOpen, setMenuOpen] = useState(false)
   const queryClient = useQueryClient()
   const query = workItemsQuery(issue.repositoryId)
@@ -2934,12 +2913,11 @@ function RepositoryIssueRow({
     (workItem) => workItem.issueNumber === issue.issueNumber,
   )
   const latestWorkItem = issueWorkItems.at(-1)
-  const hasUnfinishedWorkItem =
-    latestWorkItem !== undefined &&
-    (!latestWorkItem.isTerminal || latestWorkItem.canRetry)
-  const canImplement =
-    isActionable && !workItemsLoading && !hasUnfinishedWorkItem
-  const canQueue = isQueueable && !workItemsLoading && !hasUnfinishedWorkItem
+  const { canImplement, canQueue } = issueActionEligibility({
+    issue,
+    workItems: issueWorkItems,
+    workItemsLoading,
+  })
   const onImplementSuccess = (workItem: WorkItem) => {
     queryClient.setQueryData<readonly WorkItem[]>(query.queryKey, (current) => [
       ...(current ?? []),

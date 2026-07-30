@@ -70,7 +70,7 @@ describe("shared lifecycle predicates", () => {
   it("defines Actionable Issue with an unfinished Work Item failure", () => {
     expect(
       evaluateActionableIssue(openLeaf, [
-        { id: "wi-current", state: "implement" },
+        { id: "wi-current", state: "implement", canRetry: false },
       ]),
     ).toEqual({
       _tag: "unfinished_work_item_exists",
@@ -78,9 +78,17 @@ describe("shared lifecycle predicates", () => {
     })
     expect(
       evaluateActionableIssue(openLeaf, [
-        { id: "wi-complete", state: "complete" },
+        { id: "wi-complete", state: "complete", canRetry: false },
       ]),
     ).toEqual({ _tag: "match" })
+    expect(
+      evaluateActionableIssue(openLeaf, [
+        { id: "wi-retryable", state: "failed", canRetry: true },
+      ]),
+    ).toEqual({
+      _tag: "unfinished_work_item_exists",
+      workItemId: "wi-retryable",
+    })
   })
 
   it("defines unfinished Work Item and counts Needs Human as unfinished", () => {
@@ -89,15 +97,21 @@ describe("shared lifecycle predicates", () => {
       "needs_human",
     ]
     for (const state of unfinishedStates) {
-      expect(evaluateUnfinishedWorkItem({ state })).toEqual({ _tag: "match" })
+      expect(evaluateUnfinishedWorkItem({ state, canRetry: false })).toEqual({
+        _tag: "match",
+      })
     }
 
     for (const state of ["complete", "failed", "abandoned"] as const) {
-      expect(evaluateUnfinishedWorkItem({ state })).toEqual({
+      expect(evaluateUnfinishedWorkItem({ state, canRetry: false })).toEqual({
         _tag: "work_item_finished",
         state,
       })
     }
+
+    expect(
+      evaluateUnfinishedWorkItem({ state: "failed", canRetry: true }),
+    ).toEqual({ _tag: "match" })
   })
 
   it("defines Relevant Issue hierarchy failures", () => {

@@ -22,6 +22,7 @@
     "@ready-for-agent/gitlab-service": "workspace:*",
     "@ready-for-agent/graphql-schema": "workspace:*",
     "@ready-for-agent/keymaxxer-service": "workspace:*",
+    "@ready-for-agent/lifecycle-model": "workspace:*",
     "@ready-for-agent/local-git": "workspace:*",
     "@ready-for-agent/queue-service": "workspace:*",
     "@ready-for-agent/work-item-lifecycle": "workspace:*",

@@ -14,12 +14,11 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
     blockedBy,
   })
 
-  test("allows one or more open leaf children, including blocked and unfinished", () => {
+  test("allows one or more open leaf children", () => {
     expect(
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
         directChildren: [leaf(2)],
-        workItems: [],
         workItemsLoading: false,
       }),
     ).toBe(true)
@@ -28,58 +27,6 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2), leaf(3)],
         directChildren: [leaf(2), leaf(3)],
-        workItems: [],
-        workItemsLoading: false,
-      }),
-    ).toBe(true)
-
-    expect(
-      isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2, [{ issueNumber: 1 }]), leaf(3)],
-        directChildren: [leaf(2, [{ issueNumber: 1 }]), leaf(3)],
-        workItems: [],
-        workItemsLoading: false,
-      }),
-    ).toBe(true)
-
-    expect(
-      isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2, [{ issueNumber: 1 }])],
-        directChildren: [leaf(2, [{ issueNumber: 1 }])],
-        workItems: [],
-        workItemsLoading: false,
-      }),
-    ).toBe(true)
-
-    // Existing unfinished Work Items are adopted; action stays available.
-    expect(
-      isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2)],
-        directChildren: [leaf(2)],
-        workItems: [{ issueNumber: 2, state: "CREATE_WORKTREE" }],
-        workItemsLoading: false,
-      }),
-    ).toBe(true)
-  })
-
-  test("stays available when some or all open children already have unfinished work", () => {
-    expect(
-      isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2), leaf(3)],
-        directChildren: [leaf(2), leaf(3)],
-        workItems: [{ issueNumber: 2, state: "CREATE_WORKTREE" }],
-        workItemsLoading: false,
-      }),
-    ).toBe(true)
-
-    expect(
-      isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2), leaf(3)],
-        directChildren: [leaf(2), leaf(3)],
-        workItems: [
-          { issueNumber: 2, state: "CREATE_WORKTREE" },
-          { issueNumber: 3, state: "IMPLEMENT" },
-        ],
         workItemsLoading: false,
       }),
     ).toBe(true)
@@ -90,7 +37,6 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [{ issueNumber: 2, hasChildren: true, blockedBy: [] }],
         directChildren: [{ hasChildren: true }],
-        workItems: [],
         workItemsLoading: false,
       }),
     ).toBe(false)
@@ -100,34 +46,9 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(3)],
         directChildren: [{ hasChildren: true }, { hasChildren: false }],
-        workItems: [],
         workItemsLoading: false,
       }),
     ).toBe(false)
-  })
-
-  test("stays available for Needs Human unfinished children (adopt Merge Mode Only)", () => {
-    expect(
-      isParentImplementAllWithAutoMergeEligible({
-        openChildren: [leaf(2)],
-        directChildren: [leaf(2)],
-        workItems: [{ issueNumber: 2, state: "NEEDS_HUMAN" }],
-        workItemsLoading: false,
-      }),
-    ).toBe(true)
-  })
-
-  test("allows complete, failed, and abandoned child history", () => {
-    for (const state of ["COMPLETE", "FAILED", "ABANDONED"] as const) {
-      expect(
-        isParentImplementAllWithAutoMergeEligible({
-          openChildren: [leaf(2)],
-          directChildren: [leaf(2)],
-          workItems: [{ issueNumber: 2, state }],
-          workItemsLoading: false,
-        }),
-      ).toBe(true)
-    }
   })
 
   test("hides while work items are loading and when there are no open children", () => {
@@ -135,7 +56,6 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [leaf(2)],
         directChildren: [leaf(2)],
-        workItems: [],
         workItemsLoading: true,
       }),
     ).toBe(false)
@@ -144,7 +64,6 @@ describe("isParentImplementAllWithAutoMergeEligible", () => {
       isParentImplementAllWithAutoMergeEligible({
         openChildren: [],
         directChildren: [{ hasChildren: false }],
-        workItems: [],
         workItemsLoading: false,
       }),
     ).toBe(false)

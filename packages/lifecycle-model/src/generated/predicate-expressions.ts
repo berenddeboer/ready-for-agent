@@ -15,6 +15,10 @@ type LifecyclePredicateExpression =
       readonly expressions: readonly LifecyclePredicateExpression[]
     }
   | {
+      readonly kind: "union"
+      readonly expressions: readonly LifecyclePredicateExpression[]
+    }
+  | {
       readonly kind: "hasValue"
       readonly property: string
       readonly value: string | number | boolean
@@ -117,12 +121,22 @@ const LIFECYCLE_PREDICATE_EXPRESSIONS: Readonly<
         "name": "WorkItem"
       },
       {
-        "kind": "someValueOutside",
-        "property": "currentState",
-        "excludedValues": [
-          "complete",
-          "failed",
-          "abandoned"
+        "kind": "union",
+        "expressions": [
+          {
+            "kind": "someValueOutside",
+            "property": "currentState",
+            "excludedValues": [
+              "complete",
+              "failed",
+              "abandoned"
+            ]
+          },
+          {
+            "kind": "hasValue",
+            "property": "canRetry",
+            "value": true
+          }
         ]
       }
     ]
@@ -151,6 +165,10 @@ const matchesExpression = (
     }
     case "intersection":
       return expression.expressions.every((entry) =>
+        matchesExpression(entry, facts, evaluating),
+      )
+    case "union":
+      return expression.expressions.some((entry) =>
         matchesExpression(entry, facts, evaluating),
       )
     case "hasValue":

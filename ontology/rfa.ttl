@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.4.0" .
+  owl:versionInfo "0.4.1" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -55,6 +55,14 @@ rfa:currentState
   rdfs:label "current state"@en ;
   skos:definition
     "The single operational Lifecycle Step or terminal state currently held by a Work Item."@en .
+
+rfa:canRetry
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:WorkItem ;
+  rdfs:range xsd:boolean ;
+  rdfs:label "can retry"@en ;
+  skos:definition
+    "True when the Work Item may be retried, including a retryable persisted status-check failure."@en .
 
 rfa:isCurrentIssue
   a owl:DatatypeProperty ;
@@ -178,17 +186,26 @@ rfa:UnfinishedWorkItem
     owl:intersectionOf (
       rfa:WorkItem
       [
-        a owl:Restriction ;
-        owl:onProperty rfa:currentState ;
-        owl:someValuesFrom [
-          owl:complementOf [
-            owl:unionOf (
-              rfa:Complete
-              rfa:Failed
-              rfa:Abandoned
-            )
+        owl:unionOf (
+          [
+            a owl:Restriction ;
+            owl:onProperty rfa:currentState ;
+            owl:someValuesFrom [
+              owl:complementOf [
+                owl:unionOf (
+                  rfa:Complete
+                  rfa:Failed
+                  rfa:Abandoned
+                )
+              ]
+            ]
           ]
-        ]
+          [
+            a owl:Restriction ;
+            owl:onProperty rfa:canRetry ;
+            owl:hasValue true
+          ]
+        )
       ]
     )
   ] .

@@ -37,9 +37,6 @@ import {
   filterWorkItemsByListKind,
   isJobsCompletedWorkItemState,
   isJobsWorkingWorkItem,
-  isRetryableFailedWorkItem,
-  isRetryableNeedsHumanWorkItem,
-  isTerminalWorkItemState,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
   commandExistsOnPath,
@@ -61,10 +58,11 @@ import {
 } from "./repository-credentials.js"
 import { toGraphQLError } from "./to-graphql-error.js"
 import {
-  latestStepRun,
   lifecycleLabels,
   statusLabel,
   workIssueProjection,
+  workItemCanRetry,
+  workItemIsTerminal,
   workItemStateLabel,
   workItemStatus,
   workItemStatusMessage,
@@ -748,10 +746,7 @@ export const createGraphqlApi = (
           statusLabel: (workItem: WorkItemRecord) =>
             statusLabel(workItemStatus(workItem)),
           statusMessage: async (workItem: WorkItemRecord) => {
-            if (
-              isTerminalWorkItemState(workItem.state) ||
-              !workItem.waitingForBlockers
-            ) {
+            if (workItemIsTerminal(workItem) || !workItem.waitingForBlockers) {
               return workItemStatusMessage(workItem)
             }
             return runGraphql(
@@ -770,23 +765,8 @@ export const createGraphqlApi = (
             )
           },
           paused: (workItem: WorkItemRecord) => workItem.paused,
-          canRetry: (workItem: WorkItemRecord) => {
-            const latestStatus = latestStepRun(workItem)?.status
-            const recoverableStatusCheckFailure =
-              isRetryableFailedWorkItem(workItem)
-            return (
-              workItem.waitingSince == null &&
-              !workItem.waitingForBlockers &&
-              !workItem.paused &&
-              (recoverableStatusCheckFailure ||
-                isRetryableNeedsHumanWorkItem(workItem) ||
-                (!isTerminalWorkItemState(workItem.state) &&
-                  (latestStatus === "failed" ||
-                    latestStatus === "interrupted")))
-            )
-          },
-          isTerminal: (workItem: WorkItemRecord) =>
-            isTerminalWorkItemState(workItem.state),
+          canRetry: workItemCanRetry,
+          isTerminal: workItemIsTerminal,
           lifecycleLabels,
           stateReadyAt: (workItem: { stateReadyAt: Date }) =>
             workItem.stateReadyAt.toISOString(),
