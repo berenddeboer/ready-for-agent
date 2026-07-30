@@ -236,7 +236,7 @@ function RootComponent() {
     <div className={shellClassName}>
       <nav
         aria-label="Primary"
-        className="mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 border-b-2 border-ink pb-3"
+        className="primary-nav mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 pb-3"
       >
         <div className="grid gap-1">
           <h1 className="m-0 font-serif text-[clamp(1.6rem,3.2vw,2.25rem)] leading-none font-semibold tracking-[-0.012em]">

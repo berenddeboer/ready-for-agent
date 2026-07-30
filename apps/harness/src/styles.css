@@ -109,50 +109,17 @@
     border-top: 1px solid var(--color-rule-soft);
   }
 
+  /* Full-width bold rule under primary nav (shared across every route).
+     Visual weight matches the former Kanban board masthead separator. */
+  .primary-nav {
+    border-bottom: 0.5rem solid var(--color-ink);
+  }
+
   .industrial-shell {
     --industrial-ink: #151515;
     --industrial-paper: #f4f1e8;
     --industrial-concrete: #dedbd2;
     margin-inline: auto;
-  }
-
-  .board-masthead {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: end;
-    margin-bottom: 1rem;
-    padding: clamp(2rem, 6vw, 5rem) 0 1.1rem;
-    border-bottom: 0.5rem solid var(--industrial-ink);
-  }
-
-  .board-kicker {
-    grid-column: 1 / -1;
-    margin: 0 0 0.5rem;
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-  }
-
-  .board-title {
-    margin: 0;
-    font-size: clamp(3rem, 8vw, 7.5rem);
-    font-weight: 950;
-    line-height: 0.8;
-    letter-spacing: -0.07em;
-    text-transform: uppercase;
-  }
-
-  .board-deck {
-    max-width: 17rem;
-    margin: 0 0 0.25rem 2rem;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
-    font-weight: 700;
-    line-height: 1.35;
-    text-transform: uppercase;
   }
 
   .industrial-shell > section[aria-label="Committed pull requests"] > article {
@@ -431,14 +398,6 @@
 }
 
 @media (max-width: 900px) {
-  .board-masthead {
-    display: block;
-  }
-
-  .board-deck {
-    margin: 1rem 0 0;
-  }
-
   .pipeline-controls {
     display: grid;
     min-width: 0;

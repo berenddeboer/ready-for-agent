@@ -87,12 +87,7 @@ function KanbanPage() {
   const jobsBodyId = "kanban-jobs-card-body"
 
   return (
-    <main className="industrial-shell pt-8 sm:pt-10">
-      <header className="board-masthead">
-        <p className="board-kicker">Autonomous delivery control</p>
-        <h1 className="board-title">Work pipeline</h1>
-        <p className="board-deck">Live production flow from intake to merge.</p>
-      </header>
+    <main className="industrial-shell pt-6 sm:pt-8">
       <section aria-label="Committed pull requests" className="mb-5">
         <CommittedPullRequestsDashboard />
       </section>

@@ -5,6 +5,9 @@ import { describe, expect, test } from "bun:test"
 const rootSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/__root.tsx"), "utf8")
 
+const stylesSource = () =>
+  readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
+
 describe("primary Home / Kanban navigation", () => {
   test("root chrome exposes Home and Kanban Link controls", () => {
     const source = rootSource()
@@ -13,6 +16,33 @@ describe("primary Home / Kanban navigation", () => {
     expect(source).toContain('to="/kanban"')
     expect(source).toMatch(/Home\s*<\/Link>/)
     expect(source).toMatch(/Kanban\s*<\/Link>/)
+  })
+
+  test("primary nav uses a full-width bold black divider on every route", () => {
+    // Issue #670: masthead 0.5rem rule moves under Clanker Harness nav (all routes).
+    const root = rootSource()
+    const styles = stylesSource()
+    const navOpen = root.indexOf('aria-label="Primary"')
+    expect(navOpen).toBeGreaterThan(-1)
+    const navTag = root.slice(navOpen - 80, navOpen + 160)
+    expect(navTag).toContain("primary-nav")
+    // Thin Tailwind border is no longer the nav rule.
+    expect(navTag).not.toMatch(/border-b-2\s+border-ink/)
+    // Shared weight matches the former Kanban masthead separator.
+    const primaryNavBlock = styles.slice(
+      styles.indexOf(".primary-nav {"),
+      styles.indexOf("}", styles.indexOf(".primary-nav {")) + 1,
+    )
+    expect(primaryNavBlock).toContain(".primary-nav {")
+    expect(primaryNavBlock).toContain(
+      "border-bottom: 0.5rem solid var(--color-ink)",
+    )
+    // Divider lives in root layout above Outlet — every child route inherits it.
+    const rootComponent = root.slice(root.indexOf("function RootComponent("))
+    expect(rootComponent.indexOf("primary-nav")).toBeGreaterThan(-1)
+    expect(rootComponent.indexOf("primary-nav")).toBeLessThan(
+      rootComponent.indexOf("<Outlet />"),
+    )
   })
 
   test("groups Home, Kanban, and Settings in one right-aligned control cluster", () => {
