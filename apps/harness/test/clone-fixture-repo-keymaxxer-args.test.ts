@@ -1,5 +1,16 @@
 import { spawnSync } from "node:child_process"
-import { keymaxxerRunArgs } from "../e2e/support/clone-fixture-repo.ts"
+import {
+  githubFixtureSpec,
+  gitlabFixtureSpec,
+  keymaxxerRunArgs,
+} from "../e2e/support/clone-fixture-repo.ts"
+import {
+  FIXTURE_GITHUB_REPOSITORY,
+  FIXTURE_GITHUB_SECRET_NAME,
+  FIXTURE_GITLAB_FORGE_HOST,
+  FIXTURE_GITLAB_PROJECT_PATH,
+  FIXTURE_GITLAB_SECRET_NAME,
+} from "../e2e/support/constants.ts"
 import { describe, expect, test } from "bun:test"
 
 const runAsKeymaxxerJoins = (restAfterDashDash: string[]) => {
@@ -38,5 +49,30 @@ describe("keymaxxer fixture clone command args", () => {
 
     expect(fixed.status).toBe(0)
     expect(fixed.stdout.trim()).toBe("retained-arg")
+  })
+})
+
+describe("fixture clone specs", () => {
+  test("GitHub clone URL injects the canonical secret name", () => {
+    const spec = githubFixtureSpec()
+    expect(spec.secretName).toBe(FIXTURE_GITHUB_SECRET_NAME)
+    expect(spec.account).toBe(FIXTURE_GITHUB_REPOSITORY)
+    expect(spec.cloneUrlTemplate(spec.secretName)).toContain(
+      `x-access-token:\${${FIXTURE_GITHUB_SECRET_NAME}}@github.com/${FIXTURE_GITHUB_REPOSITORY}.git`,
+    )
+  })
+
+  test("GitLab clone URL uses oauth2 token auth on the Forge Host", () => {
+    const spec = gitlabFixtureSpec()
+    expect(spec.secretName).toBe(FIXTURE_GITLAB_SECRET_NAME)
+    expect(spec.provider).toBe("gitlab")
+    expect(spec.account).toBe(
+      `${FIXTURE_GITLAB_FORGE_HOST}/${FIXTURE_GITLAB_PROJECT_PATH}`,
+    )
+    const url = spec.cloneUrlTemplate(spec.secretName)
+    expect(url).toContain(
+      `oauth2:\${${FIXTURE_GITLAB_SECRET_NAME}}@${FIXTURE_GITLAB_FORGE_HOST}/`,
+    )
+    expect(url).toContain(`${FIXTURE_GITLAB_PROJECT_PATH}.git`)
   })
 })

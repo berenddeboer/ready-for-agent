@@ -6,6 +6,7 @@ type TaggedError = {
   readonly field?: string
   readonly repositoryId?: string
   readonly workItemId?: string
+  readonly stepRunId?: string
   readonly issueNumber?: number
   readonly state?: string
   readonly blockerCount?: number
@@ -226,6 +227,16 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
       return gql(
         `Repository not found: ${error.repositoryId}`,
         "REPOSITORY_NOT_FOUND",
+      )
+    case "RepositoryHasRunningStepError":
+      return gql(
+        `Repository ${error.repositoryId} has a running Step Run and cannot be removed`,
+        "REPOSITORY_HAS_RUNNING_STEP",
+        {
+          repositoryId: error.repositoryId,
+          workItemId: error.workItemId,
+          stepRunId: error.stepRunId,
+        },
       )
     case "PathNotFound":
       return gql(
