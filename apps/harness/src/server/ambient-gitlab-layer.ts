@@ -1,5 +1,5 @@
-import { Deferred, Duration, Effect, Layer, Ref } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Deferred, Effect, Layer, Ref } from "effect"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   type GitLabProjectUnavailableError,
   GitLabRequestError,
@@ -7,6 +7,7 @@ import {
   type GitLabServiceShape,
   makeGitLabService,
   makeGitLabServiceFromToken,
+  resolveGlabHostToken,
 } from "@ready-for-agent/gitlab-service"
 
 type GitLabServiceError = GitLabProjectUnavailableError | GitLabRequestError
@@ -43,27 +44,19 @@ export const ambientGitLabLayer = (options: {
 
       const resolveGlabToken = Effect.fn("AmbientGitLab.resolveGlabToken")(
         function* (forgeHost: string) {
-          const output = yield* spawner
-            .string(
-              ChildProcess.make(
-                "glab",
-                ["config", "get", "token", "--host", forgeHost],
-                {
-                  cwd: options.workspaceRoot,
-                  stdin: "ignore",
-                  stderr: "inherit",
-                },
-              ),
-            )
-            .pipe(
-              Effect.timeout(Duration.seconds(60)),
-              Effect.mapError((cause) => authenticationError(forgeHost, cause)),
-            )
-          const token = output.trim()
-          if (token === "") {
+          // Host-specific: shared helper uses `glab auth status --hostname
+          // --show-token` so unconfigured hosts (and config-get fallback tokens)
+          // are rejected, while local tokens still work when the Forge API is
+          // briefly unreachable.
+          const token = yield* resolveGlabHostToken({
+            forgeHost,
+            spawner,
+            cwd: options.workspaceRoot,
+          })
+          if (token === null) {
             return yield* authenticationError(
               forgeHost,
-              "GitLab CLI did not return an authentication token",
+              `GitLab CLI is not authenticated for ${forgeHost}`,
             )
           }
           return token
