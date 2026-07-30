@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
@@ -133,6 +140,98 @@ const initBareRepository = async (root: string) => {
   await git(root, ["clone", "--bare", source, bare])
   return bare
 }
+
+const realGitPath = async (): Promise<string> => {
+  const proc = Bun.spawn(["sh", "-c", "command -v git"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    proc.exited,
+  ])
+  if (exitCode !== 0 || stdout.trim() === "") {
+    throw new Error("could not resolve real git for PATH shim")
+  }
+  return stdout.trim()
+}
+
+/**
+ * Install a `git` shim first on PATH that fails the first N
+ * `worktree remove --force` calls with "Directory not empty", then delegates
+ * to the real git. Returns restore + attempt counter helpers.
+ */
+const installWorktreeRemoveFailShim = async (
+  root: string,
+  options: { readonly failTimes: number },
+) => {
+  const realGit = await realGitPath()
+  const binDir = join(root, "git-shim-bin")
+  const stateFile = join(root, "git-shim-remove-attempts")
+  await mkdir(binDir, { recursive: true })
+  await writeFile(stateFile, "0")
+  const shimPath = join(binDir, "git")
+  const shim = `#!/usr/bin/env bash
+set -euo pipefail
+REAL_GIT=${JSON.stringify(realGit)}
+STATE=${JSON.stringify(stateFile)}
+FAIL_TIMES=${String(options.failTimes)}
+is_force_remove=0
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "worktree" && "$arg" == "remove" ]]; then
+    is_force_remove=1
+  fi
+  if [[ "$arg" == "--force" && "$is_force_remove" -eq 1 ]]; then
+    count=$(cat "$STATE")
+    next=$((count + 1))
+    echo "$next" > "$STATE"
+    if [[ "$count" -lt "$FAIL_TIMES" ]]; then
+      path="\${@: -1}"
+      echo "error: failed to delete '$path': Directory not empty" >&2
+      exit 255
+    fi
+    break
+  fi
+  prev="$arg"
+done
+exec "$REAL_GIT" "$@"
+`
+  await writeFile(shimPath, shim)
+  await chmod(shimPath, 0o755)
+  const previousPath = process.env.PATH ?? ""
+  process.env.PATH = `${binDir}:${previousPath}`
+  return {
+    removeAttempts: async () =>
+      Number.parseInt(await readFile(stateFile, "utf8"), 10),
+    restore: () => {
+      process.env.PATH = previousPath
+    },
+  }
+}
+
+const baseContext = (input: {
+  readonly workItemId: string
+  readonly repositoryId: string
+  readonly issueNumber?: number
+}) =>
+  ({
+    workItemId: input.workItemId,
+    repositoryId: input.repositoryId,
+    issueNumber: input.issueNumber ?? 42,
+    issueTitle: null,
+    agentBackend: "opencode",
+    model: "opencode/test",
+    thinkingLevel: "low",
+    reviewModel: "opencode/test",
+    reviewThinkingLevel: "low",
+    worktreePath: null,
+    startingCommitOid: null,
+    completionSummary: null,
+    publicationTitle: null,
+    publicationBody: null,
+    sessionId: null,
+  }) as const
 
 describe("removeWorktree", () => {
   it("cleans up GitLab remote MRs and branch via GitLabService", async () => {
@@ -470,25 +569,10 @@ describe("removeWorktree", () => {
             localPath: bare,
             isBare: true,
           })
-          const context = {
+          const context = baseContext({
             workItemId,
             repositoryId: repository.id,
-            issueNumber: 42,
-            issueTitle: null,
-            agentBackend: "opencode",
-            model: "opencode/test",
-            thinkingLevel: "low",
-            reviewModel: "opencode/test",
-            reviewThinkingLevel: "low",
-            worktreePath: null,
-            startingCommitOid: null,
-            completionSummary: null,
-
-            publicationTitle: null,
-
-            publicationBody: null,
-            sessionId: null,
-          } as const
+          })
 
           const created = yield* createWorktree(context)
           yield* Effect.promise(() =>
@@ -504,6 +588,95 @@ describe("removeWorktree", () => {
         expect(error.stderr).toContain("locked working tree")
       }
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("retries worktree remove once after Directory not empty and succeeds", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-retry-ok-"))
+    const shim = await installWorktreeRemoveFailShim(root, { failTimes: 1 })
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+
+      const { path, branch } = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = baseContext({
+            workItemId,
+            repositoryId: repository.id,
+          })
+          const created = yield* createWorktree(context)
+          yield* localCleanup({
+            ...context,
+            worktreePath: created.worktreePath,
+          })
+          return {
+            path: created.worktreePath,
+            branch: workItemBranchName({
+              projectPath: "acme/widgets",
+              issueNumber: 42,
+              workItemId,
+            }),
+          }
+        }),
+      )
+
+      expect(await Bun.file(join(path, "README.md")).exists()).toBe(false)
+      expect(await git(bare, ["branch", "--list", branch])).toBe("")
+      // First remove failed (shim), second remove succeeded (real git).
+      expect(await shim.removeAttempts()).toBe(2)
+    } finally {
+      shim.restore()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("fails Local cleanup when Directory not empty persists after one retry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-retry-fail-"))
+    const shim = await installWorktreeRemoveFailShim(root, { failTimes: 2 })
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+
+      const error = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = baseContext({
+            workItemId,
+            repositoryId: repository.id,
+          })
+          const created = yield* createWorktree(context)
+          return yield* localCleanup({
+            ...context,
+            worktreePath: created.worktreePath,
+          }).pipe(Effect.flip)
+        }),
+      )
+
+      expect(error._tag).toBe("GitCommandError")
+      expect(error.message.toLowerCase()).toContain("directory not empty")
+      if (error._tag === "GitCommandError") {
+        expect(error.stderr.toLowerCase()).toContain("directory not empty")
+      }
+      // Exactly one automatic retry: two force-remove attempts total.
+      expect(await shim.removeAttempts()).toBe(2)
+    } finally {
+      shim.restore()
       await rm(root, { recursive: true, force: true })
     }
   })
