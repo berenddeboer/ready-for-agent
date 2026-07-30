@@ -10,8 +10,9 @@ import {
 
 /**
  * Mounts the Harness's existing live invalidation subscriptions for the
- * board-only route. Repository cards normally own these subscriptions on the
- * dashboard, so /kanban mounts them without rendering repository management.
+ * board-only route. Repository cards own these subscriptions on `/repos`, and
+ * Home mounts its own for Jobs, so /kanban mounts them without rendering
+ * repository management.
  */
 export function KanbanLiveUpdates({
   repositoryIds,

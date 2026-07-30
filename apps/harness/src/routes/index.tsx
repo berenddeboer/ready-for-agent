@@ -5,7 +5,7 @@ import {
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Link, createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import { JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
@@ -527,25 +527,90 @@ export const Route = createFileRoute("/")({
 function HomePage() {
   return (
     <main className="pt-8 sm:pt-10">
-      <Suspense fallback={<RepositoryCardsSkeleton />}>
-        <HomeBody />
-      </Suspense>
+      <HomeBody />
     </main>
   )
 }
 
+/**
+ * Live invalidation for Home's Jobs list and committed-PR dashboard.
+ * Repository management owns its own subscriptions on `/repos`.
+ *
+ * Uses non-suspense queries so a repositories failure cannot unmount the
+ * dashboard. Jobs soft-fails repositories the same way (see JobsCard).
+ * Surfaces membership SSE transport-health so operators on Home still see
+ * when live updates are unavailable.
+ */
+function HomeLiveUpdates() {
+  const queryClient = useQueryClient()
+  const { data: repositories } = useQuery(repositoriesQuery)
+  const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
+  const repositoryIdsRef = useRef((repositories ?? []).map(({ id }) => id))
+  repositoryIdsRef.current = (repositories ?? []).map(({ id }) => id)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void followRepositoryMembershipLive({
+      queryClient,
+      repositoriesQuery,
+      signal: controller.signal,
+      onLiveUpdatesUnavailable: setLiveUpdatesUnavailable,
+    })
+    return () => controller.abort()
+  }, [queryClient])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void followRepositoryIssuesLive({
+      getRepositoryIds: () => repositoryIdsRef.current,
+      queryClient,
+      queries: {
+        repositories: repositoriesQuery,
+        issues: issuesQuery,
+        workItems: workItemsQuery,
+      },
+      signal: controller.signal,
+    })
+    return () => controller.abort()
+  }, [queryClient])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void followRepositoryWorkItemsLive({
+      getRepositoryIds: () => repositoryIdsRef.current,
+      queryClient,
+      queries: {
+        workItems: workItemsQuery,
+      },
+      signal: controller.signal,
+    })
+    return () => controller.abort()
+  }, [queryClient])
+
+  const warningPresentation = liveUpdatesWarningPresentation(
+    liveUpdatesUnavailable,
+  )
+  if (warningPresentation === null) {
+    return null
+  }
+  return (
+    <p
+      className="mb-4 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep"
+      role="status"
+    >
+      {warningPresentation.message}
+    </p>
+  )
+}
+
 function HomeBody() {
-  const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const { collapsed: jobsCollapsed, toggleCollapsed: toggleJobsCollapsed } =
     useCardCollapsed(jobsCardCollapseId())
   const jobsBodyId = "jobs-card-body"
 
-  if (repositories.length === 0) {
-    return <RepositoryCards />
-  }
-
   return (
     <>
+      <HomeLiveUpdates />
       <section aria-label="Committed pull requests" className="mb-10">
         <CommittedPullRequestsDashboard />
       </section>
@@ -563,15 +628,10 @@ function HomeBody() {
         </div>
         {!jobsCollapsed && (
           <div id={jobsBodyId}>
-            <Suspense fallback={<JobsCardSkeleton />}>
-              <JobsCard />
-            </Suspense>
+            <JobsCard />
           </div>
         )}
       </section>
-      <div className="mt-10 border-t-2 border-ink pt-6">
-        <RepositoryCards />
-      </div>
     </>
   )
 }
@@ -722,7 +782,7 @@ export function CommittedPullRequestsDashboard() {
   )
 }
 
-function RepositoryCards() {
+export function RepositoryCards() {
   const queryClient = useQueryClient()
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const { data: addRepositoryCommand } = useSuspenseQuery(
@@ -851,7 +911,7 @@ function AddRepositoryGuidance({
   heading?: string
 }) {
   const queryClient = useQueryClient()
-  // Non-suspense: default false hides Browse until known so parent HomeBody
+  // Non-suspense: default false hides Browse until known so parent Repos
   // Suspense is not re-triggered after repositories/command already painted.
   const { data: directoryPickerAvailable = false } = useQuery(
     directoryPickerAvailableQuery,
@@ -3425,7 +3485,13 @@ function JobsCard() {
     workItemId: string
     sessionId: string
   } | null>(null)
-  const { data: repositories } = useSuspenseQuery(repositoriesQuery)
+  // Soft-fail repositories so a load error cannot unmount Home's dashboard
+  // (Suspense only catches promises; there is no ErrorBoundary on HomeBody).
+  const {
+    data: repositories = [],
+    isPending: repositoriesPending,
+    isError: repositoriesFailed,
+  } = useQuery(repositoriesQuery)
   const workingQueries = useQueries({
     queries: repositories.map((repository) =>
       jobsWorkingWorkItemsQuery(repository.id),
@@ -3488,16 +3554,38 @@ function JobsCard() {
       : selectedTab === "failed"
         ? failedQueries
         : completedQueries
-  const loading = activeQueries.some((query) => query.isLoading)
-  const failed = activeQueries.some((query) => query.isError)
+  const loading =
+    repositoriesPending || activeQueries.some((query) => query.isLoading)
+  const failed =
+    repositoriesFailed || activeQueries.some((query) => query.isError)
   const emptyMessage = jobsTabEmptyMessage(selectedTab)
   const listAriaLabel = jobsTabListAriaLabel(selectedTab)
+
+  if (repositoriesPending && repositories.length === 0) {
+    return <JobsCardSkeleton />
+  }
+
+  if (repositoriesFailed) {
+    return (
+      <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
+        <p className="m-0 text-sm text-oxblood-deep" role="alert">
+          Could not load jobs. Please try again.
+        </p>
+      </article>
+    )
+  }
 
   if (repositories.length === 0) {
     return (
       <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
         <p className="m-0 font-serif text-sm italic text-ink-soft">
-          Add a repository to see jobs.
+          <Link
+            to="/repos"
+            className="text-oxblood underline decoration-rule underline-offset-4 hover:text-oxblood-deep"
+          >
+            Add a repository
+          </Link>{" "}
+          to see jobs.
         </p>
       </article>
     )
@@ -4103,7 +4191,7 @@ function RepositoryIssuesSkeleton() {
   )
 }
 
-function RepositoryCardsSkeleton() {
+export function RepositoryCardsSkeleton() {
   return (
     <section
       className="grid grid-cols-1 gap-8"

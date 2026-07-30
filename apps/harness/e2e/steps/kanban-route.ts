@@ -152,12 +152,15 @@ Then("I am on the Kanban board", async ({ page }) => {
 
 Then("I am on the Home dashboard", async ({ page }) => {
   await expect(page).toHaveURL(/\/$/)
-  // Home-only landmark present with zero or more Repositories (stable across
-  // the shared live-e2e database after other features add a checkout).
+  // Home keeps the dashboard + Jobs; repository management lives on /repos.
   await expect(
-    page.getByRole("region", { name: "Add a repository" }),
+    page.getByRole("region", { name: "Committed pull requests" }),
   ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible()
   await expect(
     page.getByRole("region", { name: "Lifecycle pipeline" }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole("region", { name: "Configured repositories" }),
   ).toHaveCount(0)
 })
