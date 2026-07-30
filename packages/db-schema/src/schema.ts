@@ -357,11 +357,9 @@ export const workItem = snakeCase.table(
       .$defaultFn(() => Date.now()),
   },
   (t) => [
-    uniqueIndex("work_item_one_unfinished_v2_uidx")
+    uniqueIndex("work_item_one_unfinished_v4_uidx")
       .on(t.repositoryId, t.issueNumber)
-      .where(
-        sql`${t.state} NOT IN ('complete', 'failed', 'abandoned', 'needs_human')`,
-      ),
+      .where(sql`${t.state} NOT IN ('complete', 'failed', 'abandoned')`),
     index("work_item_repository_issue_created_idx").on(
       t.repositoryId,
       t.issueNumber,

@@ -101,6 +101,7 @@ describe("runMigrations", () => {
           { name: "20260728120000_work_item_merge_mode" },
           { name: "20260729120000_work_item_publication_copy" },
           { name: "20260729160000_forge_identity_foundation" },
+          { name: "20260730140857_unfinished_work_item_index" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -311,6 +312,243 @@ describe("runMigrations", () => {
         expect(rows).toEqual([
           { id: "new-attempt", state: "abandoned" },
           { id: "old-handoff", state: "local_cleanup" },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("replaces the unfinished Work Item guards on a populated database without losing history", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260730140857_unfinished_work_item_index/migration.sql",
+      ),
+      "utf8",
+    )
+    const folder = await migrationFolder(
+      "20260730140857_unfinished_work_item_index",
+      migrationSql,
+    )
+    const states = [
+      "create_worktree",
+      "install_dependencies",
+      "implement",
+      "assess_changes",
+      "pre_commit",
+      "review",
+      "commit",
+      "create_pr",
+      "watch_pr_status_checks",
+      "resolve_pr_merge_conflict",
+      "investigate_pr_status_checks",
+      "mark_pr_ready_for_review",
+      "decide_pr_merge",
+      "merge_pr",
+      "close_issue",
+      "local_cleanup",
+      "complete",
+      "failed",
+      "abandoned",
+      "needs_human",
+    ] as const
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE work_item (
+            id text PRIMARY KEY,
+            repository_id text NOT NULL,
+            issue_number integer NOT NULL,
+            state text NOT NULL
+          )
+        `)
+        yield* sql.unsafe(`
+          CREATE TABLE step_run (
+            id text PRIMARY KEY,
+            work_item_id text NOT NULL,
+            step text NOT NULL
+          )
+        `)
+        yield* sql.unsafe(`
+          CREATE UNIQUE INDEX work_item_one_unfinished_v2_uidx
+          ON work_item (repository_id, issue_number)
+          WHERE state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+        `)
+        yield* sql.unsafe(`
+          CREATE TRIGGER work_item_one_unfinished_v3_insert
+          BEFORE INSERT ON work_item
+          WHEN NEW.state NOT IN ('complete', 'failed', 'abandoned')
+            AND EXISTS (
+              SELECT 1 FROM work_item
+              WHERE repository_id = NEW.repository_id
+                AND issue_number = NEW.issue_number
+                AND state NOT IN ('complete', 'failed', 'abandoned')
+            )
+          BEGIN
+            SELECT RAISE(ABORT, 'work_item_one_unfinished_v3_uidx');
+          END
+        `)
+        yield* sql.unsafe(`
+          CREATE TRIGGER work_item_one_unfinished_v3_update
+          BEFORE UPDATE OF repository_id, issue_number, state ON work_item
+          WHEN NEW.state NOT IN ('complete', 'failed', 'abandoned')
+            AND EXISTS (
+              SELECT 1 FROM work_item
+              WHERE id <> NEW.id
+                AND repository_id = NEW.repository_id
+                AND issue_number = NEW.issue_number
+                AND state NOT IN ('complete', 'failed', 'abandoned')
+            )
+          BEGIN
+            SELECT RAISE(ABORT, 'work_item_one_unfinished_v3_uidx');
+          END
+        `)
+
+        for (const [index, state] of states.entries()) {
+          const issueNumber =
+            state === "complete" ||
+            state === "failed" ||
+            state === "abandoned" ||
+            state === "needs_human"
+              ? 900
+              : index + 1
+          yield* sql.unsafe(
+            `INSERT INTO work_item (id, repository_id, issue_number, state)
+             VALUES (?, 'repo-1', ?, ?)`,
+            [`wi-${state}`, issueNumber, state],
+          )
+          yield* sql.unsafe(
+            `INSERT INTO step_run (id, work_item_id, step) VALUES (?, ?, ?)`,
+            [`srun-${state}`, `wi-${state}`, state],
+          )
+        }
+
+        const workItemsBefore = yield* sql.unsafe(
+          `SELECT id, repository_id, issue_number, state
+           FROM work_item
+           ORDER BY id`,
+        )
+        const stepRunsBefore = yield* sql.unsafe(
+          `SELECT id, work_item_id, step FROM step_run ORDER BY id`,
+        )
+
+        const migration = yield* Effect.exit(runMigrations(folder))
+        expect(migration._tag).toBe("Success")
+
+        const workItemsAfter = yield* sql.unsafe(
+          `SELECT id, repository_id, issue_number, state
+           FROM work_item
+           ORDER BY id`,
+        )
+        const stepRunsAfter = yield* sql.unsafe(
+          `SELECT id, work_item_id, step FROM step_run ORDER BY id`,
+        )
+        expect(workItemsAfter).toEqual(workItemsBefore)
+        expect(stepRunsAfter).toEqual(stepRunsBefore)
+
+        const indexes = (yield* sql.unsafe(`
+          SELECT name, sql
+          FROM sqlite_master
+          WHERE type = 'index'
+            AND name LIKE 'work_item_one_unfinished%'
+        `)) as readonly {
+          readonly name: string
+          readonly sql: string
+        }[]
+        expect(indexes).toHaveLength(1)
+        expect(indexes[0]?.name).toBe("work_item_one_unfinished_v4_uidx")
+        expect(indexes[0]?.sql).toContain(
+          "NOT IN ('complete', 'failed', 'abandoned')",
+        )
+        expect(indexes[0]?.sql).not.toContain("needs_human")
+
+        const triggers = yield* sql.unsafe(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'trigger'
+            AND name LIKE 'work_item_one_unfinished_v3_%'
+        `)
+        expect(triggers).toEqual([])
+
+        const needsHumanConflict = yield* Effect.exit(
+          sql.unsafe(
+            `INSERT INTO work_item (id, repository_id, issue_number, state)
+             VALUES ('wi-conflict', 'repo-1', 900, 'implement')`,
+          ),
+        )
+        expect(needsHumanConflict._tag).toBe("Failure")
+
+        yield* sql.unsafe(
+          `INSERT INTO work_item (id, repository_id, issue_number, state)
+           VALUES ('wi-later-history', 'repo-1', 900, 'complete')`,
+        )
+        const preservedHistory = yield* sql.unsafe(
+          `SELECT id FROM work_item WHERE issue_number = 900 ORDER BY id`,
+        )
+        expect(preservedHistory).toEqual([
+          { id: "wi-abandoned" },
+          { id: "wi-complete" },
+          { id: "wi-failed" },
+          { id: "wi-later-history" },
+          { id: "wi-needs_human" },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("keeps the old index and rows when unexpected legacy conflicts block the replacement", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260730140857_unfinished_work_item_index/migration.sql",
+      ),
+      "utf8",
+    )
+    const folder = await migrationFolder(
+      "20260730140857_unfinished_work_item_index",
+      migrationSql,
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(`
+          CREATE TABLE work_item (
+            id text PRIMARY KEY,
+            repository_id text NOT NULL,
+            issue_number integer NOT NULL,
+            state text NOT NULL
+          )
+        `)
+        yield* sql.unsafe(`
+          CREATE UNIQUE INDEX work_item_one_unfinished_v2_uidx
+          ON work_item (repository_id, issue_number)
+          WHERE state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+        `)
+        yield* sql.unsafe(`
+          INSERT INTO work_item VALUES
+            ('wi-handoff', 'repo-1', 42, 'needs_human'),
+            ('wi-conflict', 'repo-1', 42, 'implement')
+        `)
+
+        const migration = yield* Effect.exit(runMigrations(folder))
+        expect(migration._tag).toBe("Failure")
+
+        const indexes = yield* sql.unsafe(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'index'
+            AND name LIKE 'work_item_one_unfinished%'
+          ORDER BY name
+        `)
+        expect(indexes).toEqual([{ name: "work_item_one_unfinished_v2_uidx" }])
+        const rows = yield* sql.unsafe(
+          `SELECT id, state FROM work_item ORDER BY id`,
+        )
+        expect(rows).toEqual([
+          { id: "wi-conflict", state: "implement" },
+          { id: "wi-handoff", state: "needs_human" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
