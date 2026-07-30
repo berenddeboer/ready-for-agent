@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GraphqlRouteImport } from './routes/graphql'
 import { Route as KanbanRouteImport } from './routes/kanban'
+import { Route as ReposRouteImport } from './routes/repos'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,44 @@ const KanbanRoute = KanbanRouteImport.update({
   path: '/kanban',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReposRoute = ReposRouteImport.update({
+  id: '/repos',
+  path: '/repos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
+  '/repos': typeof ReposRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
+  '/repos': typeof ReposRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
+  '/repos': typeof ReposRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/graphql' | '/kanban'
+  fullPaths: '/' | '/graphql' | '/kanban' | '/repos'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/graphql' | '/kanban'
-  id: '__root__' | '/' | '/graphql' | '/kanban'
+  to: '/' | '/graphql' | '/kanban' | '/repos'
+  id: '__root__' | '/' | '/graphql' | '/kanban' | '/repos'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   GraphqlRoute: typeof GraphqlRoute
   KanbanRoute: typeof KanbanRoute
+  ReposRoute: typeof ReposRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +92,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof KanbanRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/repos': {
+      id: '/repos'
+      path: '/repos'
+      fullPath: '/repos'
+      preLoaderRoute: typeof ReposRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +106,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   GraphqlRoute: GraphqlRoute,
   KanbanRoute: KanbanRoute,
+  ReposRoute: ReposRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

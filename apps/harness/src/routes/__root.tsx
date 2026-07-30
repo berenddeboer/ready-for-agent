@@ -203,6 +203,23 @@ function HomeNavIcon() {
   )
 }
 
+function ReposNavIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M4 7.5c0-1.5 3.6-2.5 8-2.5s8 1 8 2.5v9c0 1.5-3.6 2.5-8 2.5s-8-1-8-2.5v-9Z" />
+      <path d="M4 7.5c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5" />
+      <path d="M4 12c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5" />
+    </svg>
+  )
+}
+
 function KanbanNavIcon() {
   return (
     <svg
@@ -268,6 +285,15 @@ function RootComponent() {
               >
                 <HomeNavIcon />
                 Home
+              </Link>
+              <Link
+                to="/repos"
+                className={primaryNavLinkClassName}
+                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+                activeProps={{ className: primaryNavLinkActiveClassName }}
+              >
+                <ReposNavIcon />
+                Repos
               </Link>
               <Link
                 to="/kanban"
@@ -732,7 +758,7 @@ function SettingsButton({ leading }: { leading: ReactNode }) {
           </button>
         </div>
       )}
-      {/* Home / Kanban / Settings share one right-aligned control cluster.
+      {/* Home / Repos / Kanban / Settings share one right-aligned control cluster.
           Status banners above stay nav-level siblings (outside the cluster). */}
       <div className="ml-auto flex items-center gap-2 self-center">
         {leading}

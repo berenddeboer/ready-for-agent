@@ -166,7 +166,26 @@ const ensureNoConfiguredRepositories = async () => {
 Given("the Harness has no configured Repositories", async ({ page }) => {
   test.setTimeout(SCENARIO_TIMEOUT_MS)
   await ensureNoConfiguredRepositories()
+  // Home keeps the dashboard and Jobs; empty-state guidance lives on /repos.
+  // Prefer collapse-independent landmarks (Jobs body may be collapsed).
   await page.goto("/")
+  await expect(
+    page.getByRole("region", { name: "Committed pull requests" }),
+  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible()
+  await expect(
+    page
+      .getByRole("navigation", { name: "Primary" })
+      .getByRole("link", { name: "Repos" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Configured repositories" }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole("heading", { name: "No repositories configured" }),
+  ).toHaveCount(0)
+
+  await page.goto("/repos")
   await expect(
     page.getByRole("heading", { name: "No repositories configured" }),
   ).toBeVisible()
@@ -174,16 +193,8 @@ Given("the Harness has no configured Repositories", async ({ page }) => {
     page.getByRole("region", { name: "Configured repositories" }),
   ).toHaveCount(0)
   await expect(
-    page.getByRole("region", { name: "Committed pull requests" }),
-  ).toHaveCount(0)
-  await expect(page.getByText("Today", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("Yesterday", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("This week", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("Last week", { exact: true })).toHaveCount(0)
-  await expect(page.getByText("Two weeks ago", { exact: true })).toHaveCount(0)
-  await expect(page.getByRole("region", { name: "Jobs" })).toHaveCount(0)
-  await expect(page.getByRole("heading", { name: "Jobs" })).toHaveCount(0)
-  await expect(page.getByText("Add a repository to see jobs.")).toHaveCount(0)
+    page.getByRole("region", { name: "Add a repository" }),
+  ).toBeVisible()
 })
 
 Given("the End-to-End Fixture Repository is checked out", async ({ world }) => {
@@ -282,7 +293,7 @@ Then("the Repository appears in the Harness", async ({ page, world }) => {
   const forge = world.fixtureForge ?? "github"
   const display = world.fixtureDisplayRepository ?? displayRepositoryFor(forge)
 
-  await page.goto("/")
+  await page.goto("/repos")
   await expect(
     page.getByRole("region", { name: "Configured repositories" }),
   ).toBeVisible({ timeout: 30_000 })

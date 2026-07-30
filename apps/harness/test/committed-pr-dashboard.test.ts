@@ -351,21 +351,19 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("{twoWeeksAgo}")
   })
 
-  test("hides PR dashboard and Jobs when no repositories are configured", () => {
+  test("always shows PR dashboard and Jobs; repository management lives on /repos", () => {
     const source = homeSource()
     const homeBody = source.slice(
       source.indexOf("function HomeBody()"),
       source.indexOf("function CommittedPullRequestsDashboard()"),
     )
-    expect(homeBody).toContain("repositories.length === 0")
-    expect(homeBody).toContain("return <RepositoryCards />")
-    const emptyBranch = homeBody.slice(
-      homeBody.indexOf("repositories.length === 0"),
-      homeBody.indexOf("return ("),
-    )
-    expect(emptyBranch).not.toContain("<CommittedPullRequestsDashboard")
-    expect(emptyBranch).not.toContain("<JobsCard")
-    expect(emptyBranch).not.toContain('aria-label="Committed pull requests"')
-    expect(emptyBranch).not.toContain('aria-label="Jobs"')
+    expect(homeBody).toContain("<CommittedPullRequestsDashboard />")
+    expect(homeBody).toContain("<JobsCard />")
+    expect(homeBody).toContain('aria-label="Committed pull requests"')
+    expect(homeBody).toContain('aria-label="Jobs"')
+    // Repository cards / empty-state guidance moved off Home.
+    expect(homeBody).not.toContain("<RepositoryCards")
+    expect(homeBody).not.toContain("return <RepositoryCards />")
+    expect(homeBody).not.toContain("repositories.length === 0")
   })
 })
