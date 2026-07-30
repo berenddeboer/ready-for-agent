@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.3.0" .
+  owl:versionInfo "0.4.0" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -55,6 +55,143 @@ rfa:currentState
   rdfs:label "current state"@en ;
   skos:definition
     "The single operational Lifecycle Step or terminal state currently held by a Work Item."@en .
+
+rfa:isCurrentIssue
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:boolean ;
+  rdfs:label "is current Issue"@en ;
+  skos:definition
+    "True when the Issue is present in the current Issue store projection, whose contents are Relevant Issues."@en .
+
+rfa:isOpenIssue
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:boolean .
+
+rfa:hasChildren
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:boolean .
+
+rfa:listedBlockerCount
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:nonNegativeInteger .
+
+rfa:unfinishedWorkItemCount
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:nonNegativeInteger .
+
+rfa:isInSupportedIssueHierarchy
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:boolean .
+
+rfa:satisfiesClosingPullRequestCondition
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:boolean ;
+  rdfs:label "satisfies closing Pull Request condition"@en ;
+  skos:definition
+    "True when the Issue has no active Issue-closing Pull Request, or at least one active Issue-closing Pull Request is an owned Work Item PR."@en .
+
+rfa:isIssueAuthorIncluded
+  a owl:DatatypeProperty ;
+  rdfs:domain rfa:Issue ;
+  rdfs:range xsd:boolean .
+
+# Code generation derives executable matchers for these five classes. Each
+# class has one equivalent-class definition and no second axiom.
+rfa:LeafIssue
+  owl:equivalentClass [
+    owl:intersectionOf (
+      rfa:Issue
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:hasChildren ;
+        owl:hasValue false
+      ]
+    )
+  ] .
+
+rfa:RelevantIssue
+  owl:equivalentClass [
+    owl:intersectionOf (
+      rfa:ReadyLabeledIssue
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:isInSupportedIssueHierarchy ;
+        owl:hasValue true
+      ]
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:satisfiesClosingPullRequestCondition ;
+        owl:hasValue true
+      ]
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:isIssueAuthorIncluded ;
+        owl:hasValue true
+      ]
+    )
+  ] .
+
+rfa:ImplementableIssue
+  owl:equivalentClass [
+    owl:intersectionOf (
+      rfa:LeafIssue
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:isCurrentIssue ;
+        owl:hasValue true
+      ]
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:isOpenIssue ;
+        owl:hasValue true
+      ]
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:listedBlockerCount ;
+        owl:hasValue 0
+      ]
+    )
+  ] .
+
+rfa:ActionableIssue
+  owl:equivalentClass [
+    owl:intersectionOf (
+      rfa:ImplementableIssue
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:unfinishedWorkItemCount ;
+        owl:hasValue 0
+      ]
+    )
+  ] .
+
+rfa:UnfinishedWorkItem
+  a owl:Class ;
+  owl:equivalentClass [
+    owl:intersectionOf (
+      rfa:WorkItem
+      [
+        a owl:Restriction ;
+        owl:onProperty rfa:currentState ;
+        owl:someValuesFrom [
+          owl:complementOf [
+            owl:unionOf (
+              rfa:Complete
+              rfa:Failed
+              rfa:Abandoned
+            )
+          ]
+        ]
+      ]
+    )
+  ] .
 
 rfa:Transition
   a owl:Class ;

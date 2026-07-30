@@ -35,6 +35,7 @@ const owlAnnotatedSource = iri(`${namespace.owl}annotatedSource`)
 const owlAnnotatedTarget = iri(`${namespace.owl}annotatedTarget`)
 const owlAxiom = iri(`${namespace.owl}Axiom`)
 const owlDisjointWith = iri(`${namespace.owl}disjointWith`)
+const owlEquivalentClass = iri(`${namespace.owl}equivalentClass`)
 const owlMembers = iri(`${namespace.owl}members`)
 const owlNamedIndividual = iri(`${namespace.owl}NamedIndividual`)
 const owlObjectProperty = iri(`${namespace.owl}ObjectProperty`)
@@ -544,6 +545,20 @@ describe("CONTEXT.md vocabulary parity", () => {
 })
 
 describe("full vocabulary semantic distinctions", () => {
+  it("defines each shared predicate as exactly one class expression", () => {
+    for (const localName of [
+      "LeafIssue",
+      "ImplementableIssue",
+      "ActionableIssue",
+      "RelevantIssue",
+      "UnfinishedWorkItem",
+    ]) {
+      expect(
+        ontology.countQuads(term(localName), owlEquivalentClass, null, null),
+      ).toBe(1)
+    }
+  })
+
   it("keeps Repository Paused distinct from Pause Work Item", () => {
     expectDisjoint(term("Paused"), term("PauseWorkItem"))
   })
