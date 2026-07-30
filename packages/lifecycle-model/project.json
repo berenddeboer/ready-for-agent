@@ -1,21 +1,43 @@
 {
   "name": "lifecycle-model",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/lifecycle-model/test",
+  "sourceRoot": "packages/lifecycle-model/src",
   "projectType": "library",
   "tags": [],
   "targets": {
-    "test": {
+    "generate": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun test"
+        "command": "bun scripts/generate-lifecycle-state.ts"
+      },
+      "inputs": ["default", "{workspaceRoot}/ontology/rfa.ttl"],
+      "outputs": ["{projectRoot}/src/generated/work-item-state.ts"],
+      "cache": false
+    },
+    "check-generated": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun scripts/generate-lifecycle-state.ts --check"
+      },
+      "inputs": ["default", "{workspaceRoot}/ontology/rfa.ttl"],
+      "cache": true
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["check-generated"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions=@ready-for-agent/source test"
       },
       "inputs": [
         "default",
+        "^production",
         "{workspaceRoot}/CONTEXT.md",
         "{workspaceRoot}/ontology/**/*.ttl",
-        "{workspaceRoot}/ontology/fixtures/manifest.json"
+        "{workspaceRoot}/ontology/fixtures/manifest.json",
+        "{workspaceRoot}/packages/work-item-lifecycle/src/lib/types.ts"
       ],
       "cache": true
     }
