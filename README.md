@@ -10,6 +10,8 @@ Label your issues with `ready-for-agent`, then select an issue in the
 UI to start working on it, or select a parent to implement all child
 issues.
 
+<img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
+
 It very much supports a HITL workflow (Human in the Loop): you design,
 you architect, you verify where needed.
 
@@ -20,7 +22,10 @@ create tickets (`/to-tickets1`). These tickets will be labled with
 ready-for-agent, and show up immediately. Install his [Skills for Real Engineers](https://github.com/mattpocock/skills) to get started with this
 workflow.
 
-<img src="ready-for-agent.png" alt="Ready for Agent" width="90%" />
+Step 1 to 3 is you. Step 4 and 5 is the harness.
+
+<img src="docs/way-of-working.png" alt="Way of Working" width="40%" />
+
 
 ## How it works
 
