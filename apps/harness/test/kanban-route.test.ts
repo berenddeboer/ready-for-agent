@@ -5,6 +5,9 @@ import { describe, expect, test } from "bun:test"
 const kanbanSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/kanban.tsx"), "utf8")
 
+const rootSource = () =>
+  readFileSync(join(import.meta.dir, "../src/routes/__root.tsx"), "utf8")
+
 const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
@@ -204,6 +207,35 @@ describe("/kanban route", () => {
     expect(desktopStyles).toContain(".job-ticket")
     expect(desktopStyles).toContain(".lane-switcher")
     expect(desktopStyles).toContain("display: none")
+  })
+
+  test("uses full viewport width only on /kanban while other routes keep 88rem", () => {
+    // Root shell is route-aware: drop max-w-[88rem] for Kanban only; gutters stay.
+    const root = rootSource()
+    const rootComponent = root.slice(root.indexOf("function RootComponent("))
+    expect(rootComponent).toContain("useLocation")
+    expect(rootComponent).toContain('pathname === "/kanban"')
+    // Shared gutters apply on every route (single base string, not duplicated).
+    expect(rootComponent).toContain(
+      "mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12",
+    )
+    // 88rem remains available for non-Kanban routes, gated by the Kanban check.
+    expect(rootComponent).toContain("max-w-[88rem]")
+    expect(rootComponent).toMatch(
+      /(?:isKanbanPage|pathname === "\/kanban")[\s\S]{0,200}max-w-\[88rem\]|max-w-\[88rem\][\s\S]{0,200}(?:isKanbanPage|pathname === "\/kanban")/,
+    )
+    // Cap is not a static always-on className on the wrapper.
+    expect(rootComponent).not.toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
+
+    // industrial-shell must not re-impose a second width cap under Kanban.
+    const styles = stylesSource()
+    const shellBlock = styles.slice(
+      styles.indexOf(".industrial-shell {"),
+      styles.indexOf("}", styles.indexOf(".industrial-shell {")) + 1,
+    )
+    expect(shellBlock).toContain(".industrial-shell {")
+    expect(shellBlock).not.toContain("max-width: 100rem")
+    expect(shellBlock).not.toMatch(/max-width\s*:/)
   })
 
   test("uses a touch-scrollable repository row and three-column lane selector on mobile", () => {
