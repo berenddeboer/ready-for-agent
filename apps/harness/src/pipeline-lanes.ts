@@ -24,7 +24,7 @@ export const PIPELINE_LANES = [
 }[]
 
 /** Ordered lifecycle lanes used for earlier-lane chip collapse. */
-export const LIFECYCLE_PIPELINE_LANE_ORDER = [
+const LIFECYCLE_PIPELINE_LANE_ORDER = [
   "build",
   "review",
   "pr",
@@ -40,7 +40,7 @@ const LIFECYCLE_LANE_LABEL: Record<LifecyclePipelineLaneId, string> = {
  * Work Item states that place a ticket in Build. Shared with chip phase
  * grouping so board placement and Kanban chip collapse stay aligned.
  */
-export const BUILD_LIFECYCLE_STATES = [
+const BUILD_LIFECYCLE_STATES = [
   "CREATE_WORKTREE",
   "INSTALL_DEPENDENCIES",
   "IMPLEMENT",
@@ -49,14 +49,14 @@ export const BUILD_LIFECYCLE_STATES = [
 ] as const
 
 /** Work Item states that place a ticket in Review. */
-export const REVIEW_LIFECYCLE_STATES = ["REVIEW"] as const
+const REVIEW_LIFECYCLE_STATES = ["REVIEW"] as const
 
 /**
  * Work Item states that place a ticket in PR (Commit through local cleanup).
  * Chip phase GITHUB_STATUS_CHECKS is the collapsed watch/investigate phase
  * and also maps to PR even though it is not a Work Item state.
  */
-export const PR_LIFECYCLE_STATES = [
+const PR_LIFECYCLE_STATES = [
   "COMMIT",
   "CREATE_PR",
   "WATCH_PR_STATUS_CHECKS",
@@ -156,7 +156,7 @@ export function lifecycleLaneForPhase(
   return null
 }
 
-export function lifecycleLaneLabel(lane: LifecyclePipelineLaneId): string {
+function lifecycleLaneLabel(lane: LifecyclePipelineLaneId): string {
   return LIFECYCLE_LANE_LABEL[lane]
 }
 
