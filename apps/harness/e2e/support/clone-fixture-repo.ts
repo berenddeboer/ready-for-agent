@@ -14,7 +14,25 @@ import {
   KeymaxxerService,
   sidecarKeymaxxerLayer,
 } from "@ready-for-agent/keymaxxer-service"
-import { FIXTURE_REPOSITORY, FIXTURE_SECRET_NAME } from "./constants.ts"
+import {
+  FIXTURE_GITHUB_REPOSITORY,
+  FIXTURE_GITHUB_SECRET_NAME,
+  FIXTURE_GITLAB_FORGE_HOST,
+  FIXTURE_GITLAB_PROJECT_PATH,
+  FIXTURE_GITLAB_SECRET_NAME,
+  FIXTURE_GITLAB_VAULT_ACCOUNT,
+} from "./constants.ts"
+
+export type FixtureForge = "github" | "gitlab"
+
+export type FixtureCloneSpec = {
+  readonly forge: FixtureForge
+  readonly secretName: string
+  readonly provider: "github" | "gitlab"
+  readonly account: string
+  readonly displayRepository: string
+  readonly cloneUrlTemplate: (secretName: string) => string
+}
 
 class CloneFixtureError extends Data.TaggedError("CloneFixtureError")<{
   readonly message: string
@@ -24,12 +42,40 @@ const supportDir = dirname(fileURLToPath(import.meta.url))
 const workspaceRoot = resolve(supportDir, "../../../..")
 const fixtureVaultDir = resolve(workspaceRoot, "e2e/fixtures/keymaxxer")
 
-const missingCredentialMessage = [
-  `Live e2e requires a Keymaxxer credential for account ${FIXTURE_REPOSITORY}`,
-  `(canonical name ${FIXTURE_SECRET_NAME}, provider=github).`,
-  "Add that secret to your vault, or set E2E_KEYMAXXER_MASTER_KEY / KEYMAXXER_MASTER_KEY",
-  "to use the checked-in fixture vault.",
-].join(" ")
+export const githubFixtureSpec = (): FixtureCloneSpec => ({
+  forge: "github",
+  secretName: FIXTURE_GITHUB_SECRET_NAME,
+  provider: "github",
+  account: FIXTURE_GITHUB_REPOSITORY,
+  displayRepository: FIXTURE_GITHUB_REPOSITORY,
+  cloneUrlTemplate: (secretName) =>
+    `https://x-access-token:\${${secretName}}@github.com/${FIXTURE_GITHUB_REPOSITORY}.git`,
+})
+
+export const gitlabFixtureSpec = (): FixtureCloneSpec => ({
+  forge: "gitlab",
+  secretName: FIXTURE_GITLAB_SECRET_NAME,
+  provider: "gitlab",
+  account: FIXTURE_GITLAB_VAULT_ACCOUNT,
+  displayRepository: FIXTURE_GITLAB_PROJECT_PATH,
+  // GitLab HTTPS clones authenticate as oauth2:<token> (see Create PR push).
+  cloneUrlTemplate: (secretName) =>
+    `https://oauth2:\${${secretName}}@${FIXTURE_GITLAB_FORGE_HOST}/${FIXTURE_GITLAB_PROJECT_PATH}.git`,
+})
+
+const missingCredentialMessage = (spec: FixtureCloneSpec) => {
+  const regenHint =
+    spec.forge === "gitlab"
+      ? "Regenerate with: ./scripts/regenerate-e2e-keymaxxer-vault.sh --with-gitlab (see docs/e2e-fixture.md)."
+      : "Regenerate with: ./scripts/regenerate-e2e-keymaxxer-vault.sh (see docs/e2e-fixture.md)."
+  return [
+    `Live e2e requires a Keymaxxer credential for account ${spec.account}`,
+    `(canonical name ${spec.secretName}, provider=${spec.provider}).`,
+    "Add that secret to your vault, or set E2E_KEYMAXXER_MASTER_KEY / KEYMAXXER_MASTER_KEY",
+    "to use the checked-in fixture vault.",
+    regenHint,
+  ].join(" ")
+}
 
 const keymaxxerBin = () => {
   const workspaceBin = resolve(workspaceRoot, "node_modules/.bin/keymaxxer")
@@ -77,7 +123,7 @@ const fixtureVaultEnv = (): NodeJS.ProcessEnv | null => {
   }
 }
 
-const assertSecretPresentViaCli = (env: NodeJS.ProcessEnv) => {
+const listKeymaxxerOutput = (env: NodeJS.ProcessEnv): string => {
   const listed = spawnSync(keymaxxerBin(), ["list"], {
     env,
     encoding: "utf8",
@@ -86,19 +132,50 @@ const assertSecretPresentViaCli = (env: NodeJS.ProcessEnv) => {
   if (listed.status !== 0) {
     throw new Error(
       [
-        "Failed to list Keymaxxer secrets before cloning the fixture Repository.",
+        "Failed to list Keymaxxer secrets before cloning a fixture Repository.",
         listed.stderr?.trim() ||
           listed.stdout?.trim() ||
-          missingCredentialMessage,
+          "keymaxxer list failed",
       ].join("\n"),
     )
   }
-  const output = `${listed.stdout}\n${listed.stderr}`
-  if (
-    !output.includes(FIXTURE_SECRET_NAME) &&
-    !output.includes(FIXTURE_REPOSITORY)
-  ) {
-    throw new Error(missingCredentialMessage)
+  return `${listed.stdout}\n${listed.stderr}`
+}
+
+/**
+ * Whether the fixture vault (or ambient vault when not in fixture mode)
+ * currently lists the given e2e credential. Used to soft-skip the GitLab
+ * scenario until the operator regenerates the dual-secret vault.
+ *
+ * Infrastructure failures (missing master key, keymaxxer list errors) throw;
+ * only a successful list that lacks the secret returns false.
+ */
+export const hasFixtureCredential = (
+  spec: FixtureCloneSpec = gitlabFixtureSpec(),
+): boolean => {
+  let fixtureHome: string | undefined
+  try {
+    const fixtureEnv = fixtureVaultEnv()
+    if (fixtureEnv?.HOME) {
+      fixtureHome = fixtureEnv.HOME
+    }
+    const env = fixtureEnv ?? process.env
+    const output = listKeymaxxerOutput(env)
+    return output.includes(spec.secretName) || output.includes(spec.account)
+  } finally {
+    if (fixtureHome) {
+      rmSync(fixtureHome, { recursive: true, force: true })
+    }
+  }
+}
+
+const assertSecretPresentViaCli = (
+  env: NodeJS.ProcessEnv,
+  spec: FixtureCloneSpec,
+) => {
+  const output = listKeymaxxerOutput(env)
+  if (!output.includes(spec.secretName) && !output.includes(spec.account)) {
+    throw new Error(missingCredentialMessage(spec))
   }
 }
 
@@ -107,21 +184,25 @@ export const keymaxxerRunArgs = (
   command: string,
 ): string[] => ["run", "--secrets", secretName, "--", command]
 
-const cloneViaCli = (checkoutParent: string, env: NodeJS.ProcessEnv) => {
-  assertSecretPresentViaCli(env)
+const cloneViaCli = (
+  checkoutParent: string,
+  env: NodeJS.ProcessEnv,
+  spec: FixtureCloneSpec,
+) => {
+  assertSecretPresentViaCli(env, spec)
   const dest = join(checkoutParent, "repo")
   const cloneCommand = [
     "git",
     "clone",
     "--depth",
     "1",
-    `"https://x-access-token:\${${FIXTURE_SECRET_NAME}}@github.com/${FIXTURE_REPOSITORY}.git"`,
+    `"${spec.cloneUrlTemplate(spec.secretName)}"`,
     `"${dest}"`,
   ].join(" ")
 
   const result = spawnSync(
     keymaxxerBin(),
-    keymaxxerRunArgs(FIXTURE_SECRET_NAME, cloneCommand),
+    keymaxxerRunArgs(spec.secretName, cloneCommand),
     {
       env,
       encoding: "utf8",
@@ -139,28 +220,32 @@ const cloneViaCli = (checkoutParent: string, env: NodeJS.ProcessEnv) => {
       detail.toLowerCase().includes("unknown secret") ||
       detail.toLowerCase().includes("no such secret")
     ) {
-      throw new Error(`${missingCredentialMessage}\n${detail}`)
+      throw new Error(`${missingCredentialMessage(spec)}\n${detail}`)
     }
     throw new Error(
-      `Failed to clone ${FIXTURE_REPOSITORY} through Keymaxxer.\n${detail}`,
+      `Failed to clone ${spec.displayRepository} through Keymaxxer.\n${detail}`,
     )
   }
   return dest
 }
 
-const cloneViaSidecar = async (checkoutParent: string, sidecarUrl: string) => {
+const cloneViaSidecar = async (
+  checkoutParent: string,
+  sidecarUrl: string,
+  spec: FixtureCloneSpec,
+) => {
   const dest = join(checkoutParent, "repo")
 
   const program = Effect.gen(function* () {
     const keymaxxer = yield* KeymaxxerService
     yield* keymaxxer.initialize
     const secretName = yield* keymaxxer.findSecret({
-      provider: "github",
-      account: FIXTURE_REPOSITORY,
+      provider: spec.provider,
+      account: spec.account,
     })
     if (secretName === null) {
       return yield* new CloneFixtureError({
-        message: missingCredentialMessage,
+        message: missingCredentialMessage(spec),
       })
     }
     const cloneCommand = [
@@ -168,7 +253,7 @@ const cloneViaSidecar = async (checkoutParent: string, sidecarUrl: string) => {
       "clone",
       "--depth",
       "1",
-      `"https://x-access-token:\${${secretName}}@github.com/${FIXTURE_REPOSITORY}.git"`,
+      `"${spec.cloneUrlTemplate(secretName)}"`,
       `"${dest}"`,
     ].join(" ")
     const result = yield* keymaxxer.runWithSecrets({
@@ -180,7 +265,7 @@ const cloneViaSidecar = async (checkoutParent: string, sidecarUrl: string) => {
     if (result.exitCode !== 0 || !existsSync(join(dest, ".git"))) {
       return yield* new CloneFixtureError({
         message: [
-          `Failed to clone ${FIXTURE_REPOSITORY} through Keymaxxer Sidecar.`,
+          `Failed to clone ${spec.displayRepository} through Keymaxxer Sidecar.`,
           result.stderr.trim() ||
             result.stdout.trim() ||
             `exit ${result.exitCode}`,
@@ -196,35 +281,51 @@ const cloneViaSidecar = async (checkoutParent: string, sidecarUrl: string) => {
 }
 
 /**
- * Clone the private End-to-End Fixture Repository through Keymaxxer into a
- * fresh temporary checkout. Leaves ~/.keymaxxer untouched in local mode.
+ * Clone an End-to-End Fixture Repository through Keymaxxer into a fresh
+ * temporary checkout. Leaves ~/.keymaxxer untouched in local mode.
  */
-export const cloneFixtureRepository = async (): Promise<{
+export const cloneFixtureRepository = async (
+  forge: FixtureForge = "github",
+): Promise<{
   readonly checkoutPath: string
   readonly cleanup: () => void
+  readonly spec: FixtureCloneSpec
 }> => {
+  const spec = forge === "gitlab" ? gitlabFixtureSpec() : githubFixtureSpec()
   const checkoutParent = mkdtempSync(
-    join(tmpdir(), "rfa-e2e-fixture-checkout-"),
+    join(tmpdir(), `rfa-e2e-${forge}-fixture-checkout-`),
   )
+  let fixtureVaultHome: string | undefined
   const cleanup = () => {
     rmSync(checkoutParent, { recursive: true, force: true })
+    if (fixtureVaultHome) {
+      rmSync(fixtureVaultHome, { recursive: true, force: true })
+      fixtureVaultHome = undefined
+    }
   }
 
   try {
     const fixtureEnv = fixtureVaultEnv()
     if (fixtureEnv !== null) {
-      const checkoutPath = cloneViaCli(checkoutParent, fixtureEnv)
-      return { checkoutPath, cleanup }
+      if (fixtureEnv.HOME) {
+        fixtureVaultHome = fixtureEnv.HOME
+      }
+      const checkoutPath = cloneViaCli(checkoutParent, fixtureEnv, spec)
+      return { checkoutPath, cleanup, spec }
     }
 
     const sidecarUrl = process.env.KEYMAXXER_SIDECAR_URL?.trim()
     if (sidecarUrl) {
-      const checkoutPath = await cloneViaSidecar(checkoutParent, sidecarUrl)
-      return { checkoutPath, cleanup }
+      const checkoutPath = await cloneViaSidecar(
+        checkoutParent,
+        sidecarUrl,
+        spec,
+      )
+      return { checkoutPath, cleanup, spec }
     }
 
-    const checkoutPath = cloneViaCli(checkoutParent, process.env)
-    return { checkoutPath, cleanup }
+    const checkoutPath = cloneViaCli(checkoutParent, process.env, spec)
+    return { checkoutPath, cleanup, spec }
   } catch (error) {
     cleanup()
     throw error

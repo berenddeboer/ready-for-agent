@@ -71,15 +71,21 @@ without wrapping the Harness in a second coordinator process.
 
 The Gherkin operator journeys under `e2e/features/` run the production build
 against a fresh isolated Harness database. They verify adding and refreshing
-the private End-to-End Fixture Repository through the real operator binary, as
-well as the dedicated Kanban pipeline route.
+the GitHub and GitLab End-to-End Fixture Repositories through the real operator
+binary, as well as the dedicated Kanban pipeline route.
 
 ```bash
 bunx nx run harness:e2e
 ```
 
-Local runs leave `~/.keymaxxer` untouched and use your matching
-`provider=github` / `account=berenddeboer/test-ready-for-agent` credential
-(normal Keymaxxer prompts allowed). CI will unlock the checked-in fixture vault
-with `E2E_KEYMAXXER_MASTER_KEY` (see `docs/e2e-fixture.md` and
-`docs/adr/0021-live-harness-end-to-end-test.md`).
+Local runs leave `~/.keymaxxer` untouched and use your matching fixture
+credentials (normal Keymaxxer prompts allowed):
+
+- GitHub: `provider=github` / `account=berenddeboer/test-ready-for-agent`
+- GitLab: `provider=gitlab` /
+  `account=git.drupalcode.org/<fixture-project-path>`
+
+CI unlocks the checked-in fixture vault with `E2E_KEYMAXXER_MASTER_KEY`. The
+GitLab scenario soft-skips until that vault includes the GitLab secret; set
+`E2E_REQUIRE_GITLAB=1` to fail closed after bootstrap. See `docs/e2e-fixture.md`
+and `docs/adr/0021-live-harness-end-to-end-test.md`.
