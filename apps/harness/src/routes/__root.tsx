@@ -11,6 +11,7 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  useLocation,
 } from "@tanstack/react-router"
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
 import {
@@ -220,8 +221,19 @@ function KanbanNavIcon() {
 }
 
 function RootComponent() {
+  // Kanban needs the full viewport for six pipeline lanes; other routes keep
+  // the shared 88rem reading-width cap. Gutters stay on every route.
+  const pathname = useLocation({ select: (location) => location.pathname })
+  const isKanbanPage = pathname === "/kanban"
+  const shellClassName = [
+    "mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12",
+    isKanbanPage ? undefined : "max-w-[88rem]",
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(" ")
+
   return (
-    <div className="mx-auto min-h-screen w-full max-w-[88rem] px-5 py-6 sm:px-8 lg:px-12">
+    <div className={shellClassName}>
       <nav
         aria-label="Primary"
         className="mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 border-b-2 border-ink pb-3"
