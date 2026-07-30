@@ -15,8 +15,8 @@ export const verifyProjectProgram = (args: ReadonlyArray<string>) =>
       yield* decodeArgument(args[2], "project path"),
     )
     const gitlab = yield* GitLabService
-    yield* gitlab.verifyProject(repository)
-    yield* writeStandardOutput("ok")
+    const resolved = yield* gitlab.verifyProject(repository)
+    yield* writeStandardOutput(JSON.stringify(resolved))
   })
 
 if (import.meta.main) runGitLabCli(verifyProjectProgram(process.argv.slice(2)))

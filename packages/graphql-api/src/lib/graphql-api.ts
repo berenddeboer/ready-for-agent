@@ -287,9 +287,14 @@ const verifyRepositoryIdentity = Effect.fn(
   readonly forgeHost: string
   readonly projectPath: string
 }) {
-  if (identity.forge !== "gitlab") return
+  if (identity.forge !== "gitlab") return identity
   const gitlab = yield* GitLabService
-  yield* gitlab.verifyProject(identity)
+  const resolved = yield* gitlab.verifyProject(identity)
+  return {
+    forge: identity.forge,
+    forgeHost: resolved.forgeHost,
+    projectPath: resolved.projectPath,
+  }
 })
 
 const toNativeResponse = (response: unknown): Response => {
@@ -981,24 +986,28 @@ export const createGraphqlApi = (
                   nextIdentity.forgeHost !== repository.forgeHost ||
                   nextIdentity.projectPath.toLowerCase() !==
                     repository.projectPath.toLowerCase()
-                if (identityChanging) {
-                  yield* verifyRepositoryIdentity(nextIdentity)
-                }
+                // Verify (and resolve canonical API host) before persisting
+                // identity changes so SSH remote hosts do not become Forge Host.
+                const resolvedIdentity = identityChanging
+                  ? yield* verifyRepositoryIdentity(nextIdentity)
+                  : nextIdentity
                 // Coordinate with Work Item creation when the effective backend
                 // may change so Implement Now cannot capture a pre-activate id.
                 const updated = yield* active.withConfigCoordination(
                   Effect.gen(function* () {
                     const updated = yield* db.updateRepositorySettings({
                       repositoryId: args.input.repositoryId,
-                      ...(args.input.forge === undefined
+                      ...(args.input.forge === undefined && !identityChanging
                         ? {}
-                        : { forge: args.input.forge }),
-                      ...(args.input.forgeHost === undefined
+                        : { forge: resolvedIdentity.forge }),
+                      ...(args.input.forgeHost === undefined &&
+                      !identityChanging
                         ? {}
-                        : { forgeHost: args.input.forgeHost }),
-                      ...(args.input.projectPath === undefined
+                        : { forgeHost: resolvedIdentity.forgeHost }),
+                      ...(args.input.projectPath === undefined &&
+                      !identityChanging
                         ? {}
-                        : { projectPath: args.input.projectPath }),
+                        : { projectPath: resolvedIdentity.projectPath }),
                       paused: args.input.paused,
                       ...(args.input.selectedAgentBackend !== undefined
                         ? {
@@ -1074,9 +1083,14 @@ export const createGraphqlApi = (
           addRepository: async (_parent: unknown, args: AddRepositoryArgs) =>
             runGraphql(
               Effect.gen(function* () {
-                yield* verifyRepositoryIdentity(args.input)
+                const resolved = yield* verifyRepositoryIdentity(args.input)
                 const db = yield* DbService
-                const added = yield* db.addRepository(args.input)
+                const added = yield* db.addRepository({
+                  ...args.input,
+                  forge: resolved.forge,
+                  forgeHost: resolved.forgeHost,
+                  projectPath: resolved.projectPath,
+                })
                 yield* activatePollingIfCredentialed(added, {
                   metadataTimeout: keymaxxerMetadataTimeout,
                 }).pipe(
@@ -1110,11 +1124,11 @@ export const createGraphqlApi = (
                 const localGit = yield* LocalGit
                 const db = yield* DbService
                 const inspected = yield* localGit.inspect(path)
-                yield* verifyRepositoryIdentity(inspected)
+                const resolved = yield* verifyRepositoryIdentity(inspected)
                 const added = yield* db.addRepository({
-                  forge: inspected.forge,
-                  forgeHost: inspected.forgeHost,
-                  projectPath: inspected.projectPath,
+                  forge: resolved.forge,
+                  forgeHost: resolved.forgeHost,
+                  projectPath: resolved.projectPath,
                   localPath: inspected.localPath,
                   isBare: inspected.isBare,
                 })

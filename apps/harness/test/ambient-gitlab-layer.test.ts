@@ -23,7 +23,7 @@ const repository = {
 const service = (
   overrides: Partial<GitLabServiceShape> = {},
 ): GitLabServiceShape => ({
-  verifyProject: () => Effect.void,
+  verifyProject: (repository) => Effect.succeed(repository),
   getAuthenticatedUserLogin: () => Effect.succeed("operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
@@ -150,9 +150,9 @@ test("public project verification falls back to anonymous access", async () => {
     },
     makeAnonymousService: () =>
       service({
-        verifyProject: () => {
+        verifyProject: (identity) => {
           anonymousVerifications += 1
-          return Effect.void
+          return Effect.succeed(identity)
         },
         hasCredentials: () => Effect.succeed(false),
         hasAmbientCredentials: () => Effect.succeed(false),

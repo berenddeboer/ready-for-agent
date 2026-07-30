@@ -25,7 +25,13 @@ const parseUrlRemote = (
     if (!["http:", "https:", "ssh:", "git:"].includes(url.protocol)) {
       return undefined
     }
-    return { host: url.hostname, path: url.pathname }
+    // HTTP(S) non-default ports belong in the Forge Host guess so verify can
+    // reach self-hosted GitLab on e.g. :8443. SSH/git ports are transport-only
+    // and must not be treated as the API host port.
+    const includePort =
+      (url.protocol === "http:" || url.protocol === "https:") && url.port !== ""
+    const host = includePort ? `${url.hostname}:${url.port}` : url.hostname
+    return { host, path: url.pathname }
   } catch {
     return undefined
   }
@@ -34,7 +40,9 @@ const parseUrlRemote = (
 /**
  * Guess Forge identity from a clone remote. GitHub spellings retain the
  * canonical github.com identity; every other network git host is a GitLab
- * guess that must be verified (and may be corrected) before persistence.
+ * guess. The SSH/remote host is not authoritative for GitLab Forge Host —
+ * import verifies against the Forge API and persists the instance's
+ * canonical API/web host (e.g. git.drupal.org SSH → git.drupalcode.org).
  */
 export const parseForgeRemote = (
   remoteUrl: string,

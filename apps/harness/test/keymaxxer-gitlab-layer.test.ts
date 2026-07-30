@@ -244,6 +244,107 @@ describe("Keymaxxer-backed GitLab layer", () => {
     expect(error).toBeInstanceOf(GitLabProjectUnavailableError)
   })
 
+  test("verifyProject decodes JSON host rewrite from the vault helper", async () => {
+    const sshGuess = {
+      forge: "gitlab",
+      forgeHost: "git.drupal.org",
+      projectPath: "project/oauth_client",
+    } as const
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: ({ account }) =>
+        Effect.succeed(
+          account === "git.drupal.org/project/oauth_client"
+            ? "GITLAB_TOKEN_SSH_GUESS"
+            : null,
+        ),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            forge: "gitlab",
+            forgeHost: "Git.DrupalCode.Org",
+            projectPath: "project/oauth_client",
+          }),
+          stderr: "",
+        }),
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const resolved = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.verifyProject(sshGuess)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(resolved).toEqual({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    })
+  })
+
+  test("verifyProject treats legacy ok helper stdout as no host change", async () => {
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({ exitCode: 0, stdout: "ok", stderr: "" }),
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const resolved = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* gitlab.verifyProject(repository)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(resolved).toEqual(repository)
+  })
+
+  test("verifyProject maps invalid helper JSON to GitLabRequestError", async () => {
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITLAB_TOKEN_PROJECT_OAUTH_CLIENT"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: "not-json",
+          stderr: "",
+        }),
+    })
+    const layer = keymaxxerGitLabLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+      Layer.provide(platformLayer),
+    )
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        return yield* Effect.flip(gitlab.verifyProject(repository))
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(GitLabRequestError)
+  })
+
   test("maps helper non-zero exit to GitLabRequestError", async () => {
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
       initialize: Effect.void,
@@ -341,7 +442,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
       workspaceRoot: "/workspace",
       // Force ambient credential probes to be a pure no (no glab/network).
       makeService: () => ({
-        verifyProject: () => Effect.void,
+        verifyProject: (repository) => Effect.succeed(repository),
         getAuthenticatedUserLogin: () => Effect.succeed("operator"),
         listReadyIssues: () => Effect.succeed([]),
         hasCredentials: () =>
@@ -357,7 +458,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
         ...gitlabLifecycleStub,
       }),
       makeAnonymousService: () => ({
-        verifyProject: () => Effect.void,
+        verifyProject: (repository) => Effect.succeed(repository),
         getAuthenticatedUserLogin: () => Effect.succeed("anonymous"),
         listReadyIssues: () => Effect.succeed([]),
         hasCredentials: () => Effect.succeed(false),
@@ -396,7 +497,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
       environment: { GITLAB_TOKEN: "ambient-token" },
       vaultMetadataBudget: Duration.millis(40),
       makeService: () => ({
-        verifyProject: () => Effect.void,
+        verifyProject: (repository) => Effect.succeed(repository),
         getAuthenticatedUserLogin: () => Effect.succeed("operator"),
         listReadyIssues: () => {
           ambientListCalls += 1
@@ -439,7 +540,7 @@ describe("Keymaxxer-backed GitLab layer", () => {
       workspaceRoot: "/workspace",
       environment: { GITLAB_TOKEN: "ambient-token" },
       makeService: () => ({
-        verifyProject: () => Effect.void,
+        verifyProject: (repository) => Effect.succeed(repository),
         getAuthenticatedUserLogin: () => Effect.succeed("operator"),
         listReadyIssues: () => {
           ambientListCalls += 1

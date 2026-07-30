@@ -18,7 +18,7 @@ export const stubGitLabServiceLayer = (
   Layer.succeed(
     GitLabService,
     GitLabService.of({
-      verifyProject: () => Effect.void,
+      verifyProject: (repository) => Effect.succeed(repository),
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
       hasCredentials: () => Effect.succeed(true),

@@ -181,12 +181,13 @@ describe("GitLab issue-source adapter", () => {
       fakeFetch({
         "/api/v4/projects/project%2Foauth_client": {
           path_with_namespace: "project/oauth_client",
+          web_url: "https://git.drupalcode.org/project/oauth_client",
         },
       }),
     )
     await expect(
       Effect.runPromise(present.verifyProject(repository)),
-    ).resolves.toBeUndefined()
+    ).resolves.toEqual(repository)
 
     const missing = makeGitLabServiceFromToken(
       "test-token",
@@ -202,6 +203,78 @@ describe("GitLab issue-source adapter", () => {
     expect(result).toEqual(
       Result.fail(new GitLabProjectUnavailableError(repository)),
     )
+  })
+
+  test("resolves the canonical API host when SSH remote host differs", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/project%2Foauth_client": {
+          path_with_namespace: "project/oauth_client",
+          web_url: "https://git.drupalcode.org/project/oauth_client",
+        },
+      }),
+    )
+
+    const resolved = await Effect.runPromise(
+      service.verifyProject({
+        forge: "gitlab",
+        forgeHost: "git.drupal.org",
+        projectPath: "project/oauth_client",
+      }),
+    )
+
+    expect(resolved).toEqual({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+    })
+  })
+
+  test("keeps the guessed Forge Host when project web_url is absent", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/group%2Fnested%2Fproject": {
+          path_with_namespace: "group/nested/project",
+        },
+      }),
+    )
+
+    const guessed = {
+      forge: "gitlab",
+      forgeHost: "gitlab.example",
+      projectPath: "group/nested/project",
+    }
+    await expect(
+      Effect.runPromise(service.verifyProject(guessed)),
+    ).resolves.toEqual(guessed)
+  })
+
+  test("preserves a non-default port from project web_url", async () => {
+    const service = makeGitLabServiceFromToken(
+      "test-token",
+      fakeFetch({
+        "/api/v4/projects/group%2Fapp": {
+          path_with_namespace: "group/app",
+          web_url: "https://gitlab.example.com:8443/group/app",
+        },
+      }),
+    )
+
+    const resolved = await Effect.runPromise(
+      service.verifyProject({
+        forge: "gitlab",
+        forgeHost: "ssh.gitlab.example.com",
+        projectPath: "group/app",
+      }),
+    )
+
+    expect(resolved).toEqual({
+      forge: "gitlab",
+      forgeHost: "gitlab.example.com:8443",
+      projectPath: "group/app",
+    })
   })
 
   test("preserves authentication status on request failures", async () => {

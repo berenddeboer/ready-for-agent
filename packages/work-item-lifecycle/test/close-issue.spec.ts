@@ -145,7 +145,7 @@ describe("closeIssue", () => {
       },
     } satisfies GitHubServiceShape)
     const gitlab = Layer.succeed(GitLabService, {
-      verifyProject: () => Effect.void,
+      verifyProject: (repository) => Effect.succeed(repository),
       getAuthenticatedUserLogin: () => Effect.succeed("operator"),
       listReadyIssues: () => Effect.succeed([]),
       hasCredentials: () => Effect.succeed(true),

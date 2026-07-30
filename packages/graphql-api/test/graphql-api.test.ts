@@ -197,7 +197,7 @@ const defaultGithub: GitHubServiceShape = {
 }
 
 const defaultGitlab: GitLabServiceShape = {
-  verifyProject: () => Effect.void,
+  verifyProject: (repository) => Effect.succeed(repository),
   getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
   listReadyIssues: () => Effect.succeed([]),
   hasCredentials: () => Effect.succeed(true),
@@ -488,9 +488,10 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        verifyProject: ({ forgeHost, projectPath }) =>
+        verifyProject: (identity) =>
           Effect.sync(() => {
-            actions.push(`verify:${forgeHost}/${projectPath}`)
+            actions.push(`verify:${identity.forgeHost}/${identity.projectPath}`)
+            return identity
           }),
         hasCredentials: () => Effect.succeed(false),
         hasAmbientCredentials: () => Effect.succeed(false),
@@ -525,6 +526,88 @@ describe("GraphQL API", () => {
       "verify:gitlab.com/acme/widgets",
       "add:gitlab.com/acme/widgets",
     ])
+  })
+
+  test("persists the canonical GitLab API host when verify resolves a different host", async () => {
+    let addedInput: {
+      forge: "github" | "gitlab"
+      forgeHost: string
+      projectPath: string
+      localPath: string
+      isBare: boolean
+    } | null = null
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        addRepository: (input) => {
+          addedInput = input
+          return Effect.succeed({
+            ...repository,
+            forge: input.forge,
+            forgeHost: input.forgeHost,
+            projectPath: input.projectPath,
+            localPath: input.localPath,
+            isBare: input.isBare,
+          })
+        },
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        inspect: (path) =>
+          Effect.succeed({
+            forge: "gitlab" as const,
+            forgeHost: "git.drupal.org",
+            projectPath: "project/oauth_client",
+            localPath: path,
+            isBare: false,
+            paused: true as const,
+          }),
+      },
+      {},
+      {
+        verifyProject: (identity) =>
+          Effect.succeed({
+            forge: identity.forge,
+            forgeHost: "git.drupalcode.org",
+            projectPath: identity.projectPath,
+          }),
+        hasCredentials: () => Effect.succeed(false),
+        hasAmbientCredentials: () => Effect.succeed(false),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation AddLocal($path: String!) {
+          addLocalRepository(path: $path) {
+            forge
+            forgeHost
+            projectPath
+          }
+        }`,
+        variables: { path: "/tmp/oauth_client" },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        addLocalRepository: {
+          forge: "gitlab",
+          forgeHost: "git.drupalcode.org",
+          projectPath: "project/oauth_client",
+        },
+      },
+    })
+    expect(addedInput).toEqual({
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      localPath: "/tmp/oauth_client",
+      isBare: false,
+    })
   })
 
   test("rejects an unknown GitLab project before saving", async () => {
@@ -1782,9 +1865,9 @@ describe("GraphQL API", () => {
       {},
       {},
       {
-        verifyProject: () => {
+        verifyProject: (identity) => {
           verifications += 1
-          return Effect.void
+          return Effect.succeed(identity)
         },
       },
     )
@@ -1821,6 +1904,97 @@ describe("GraphQL API", () => {
       },
     })
     expect(verifications).toBe(0)
+  })
+
+  test("persists canonical Forge Host when updateRepositorySettings re-verifies identity", async () => {
+    const gitlabRepository = makeRepositoryRecord({
+      id: repository.id,
+      forge: "gitlab",
+      forgeHost: "git.drupal.org",
+      projectPath: "project/oauth_client",
+    })
+    let settingsInput: {
+      forgeHost?: string
+      projectPath?: string
+    } | null = null
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        listRepositories: Effect.succeed([gitlabRepository]),
+        updateRepositorySettings: (input) => {
+          settingsInput = {
+            forgeHost: input.forgeHost,
+            projectPath: input.projectPath,
+          }
+          return Effect.succeed({
+            ...gitlabRepository,
+            forge: input.forge ?? gitlabRepository.forge,
+            forgeHost: input.forgeHost ?? gitlabRepository.forgeHost,
+            projectPath: input.projectPath ?? gitlabRepository.projectPath,
+          })
+        },
+      },
+      {},
+      {
+        // Identity correction suspends then re-activates Issue Polling.
+        removeKeyed: () => Effect.succeed(0),
+        ensureKeyed: () => Effect.succeed(makeJobId()),
+      },
+      {},
+      {},
+      {},
+      {},
+      {
+        verifyProject: (identity) =>
+          Effect.succeed({
+            forge: identity.forge,
+            forgeHost: "git.drupalcode.org",
+            projectPath: identity.projectPath,
+          }),
+        hasCredentials: () => Effect.succeed(false),
+        hasAmbientCredentials: () => Effect.succeed(false),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+          updateRepositorySettings(input: $input) {
+            forgeHost
+            projectPath
+          }
+        }`,
+        variables: {
+          input: {
+            repositoryId: gitlabRepository.id,
+            forge: "gitlab",
+            forgeHost: "git.drupal.org",
+            projectPath: "project/other_client",
+            paused: true,
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            autoMerge: false,
+            includeAllIssueAuthors: false,
+            waitForReadyForReviewChecks: true,
+          },
+        },
+      }),
+    )
+
+    expect(await response.json()).toEqual({
+      data: {
+        updateRepositorySettings: {
+          forgeHost: "git.drupalcode.org",
+          projectPath: "project/other_client",
+        },
+      },
+    })
+    expect(settingsInput).toEqual({
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/other_client",
+    })
   })
 
   test("exposes scoped gate counts on Config and Repository", async () => {
