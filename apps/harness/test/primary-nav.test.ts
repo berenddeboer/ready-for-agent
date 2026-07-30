@@ -8,16 +8,18 @@ const rootSource = () =>
 const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
-describe("primary Home / Repos / Kanban navigation", () => {
-  test("root chrome exposes Home, Repos, and Kanban Link controls", () => {
+describe("primary Home / Repos / Kanban / Completed navigation", () => {
+  test("root chrome exposes Home, Repos, Kanban, and Completed Link controls", () => {
     const source = rootSource()
     expect(source).toContain('aria-label="Primary"')
     expect(source).toContain('to="/"')
     expect(source).toContain('to="/repos"')
     expect(source).toContain('to="/kanban"')
+    expect(source).toContain('to="/completed"')
     expect(source).toMatch(/Home\s*<\/Link>/)
     expect(source).toMatch(/Repos\s*<\/Link>/)
     expect(source).toMatch(/Kanban\s*<\/Link>/)
+    expect(source).toMatch(/Completed\s*<\/Link>/)
   })
 
   test("primary nav uses a full-width bold black divider on every route", () => {
@@ -47,7 +49,7 @@ describe("primary Home / Repos / Kanban navigation", () => {
     )
   })
 
-  test("groups Home, Repos, Kanban, and Settings in one right-aligned control cluster", () => {
+  test("groups Home, Repos, Kanban, Completed, and Settings in one right-aligned control cluster", () => {
     const source = rootSource()
     const clusterMarker =
       'className="ml-auto flex items-center gap-2 self-center"'
@@ -57,7 +59,7 @@ describe("primary Home / Repos / Kanban navigation", () => {
       /className="ml-auto inline-flex items-center gap-2 border/,
     )
 
-    // Home, Repos, and Kanban are passed as leading into SettingsButton (same cluster).
+    // Destinations are passed as leading into SettingsButton (same cluster).
     const settingsBlock = source.slice(
       source.indexOf("<SettingsButton"),
       source.indexOf("</nav>"),
@@ -66,15 +68,20 @@ describe("primary Home / Repos / Kanban navigation", () => {
     expect(settingsBlock).toContain('to="/"')
     expect(settingsBlock).toContain('to="/repos"')
     expect(settingsBlock).toContain('to="/kanban"')
+    expect(settingsBlock).toContain('to="/completed"')
     expect(settingsBlock).toContain("<HomeNavIcon />")
     expect(settingsBlock).toContain("<ReposNavIcon />")
     expect(settingsBlock).toContain("<KanbanNavIcon />")
+    expect(settingsBlock).toContain("<CompletedNavIcon />")
     const homeIdx = settingsBlock.indexOf('to="/"')
     const reposIdx = settingsBlock.indexOf('to="/repos"')
     const kanbanIdx = settingsBlock.indexOf('to="/kanban"')
+    const completedIdx = settingsBlock.indexOf('to="/completed"')
     expect(homeIdx).toBeGreaterThan(-1)
     expect(reposIdx).toBeGreaterThan(homeIdx)
     expect(kanbanIdx).toBeGreaterThan(reposIdx)
+    // Completed sits after Kanban (and after Repos).
+    expect(completedIdx).toBeGreaterThan(kanbanIdx)
 
     // Cluster wraps leading destinations and the Settings trigger.
     const clusterStart = source.indexOf(
@@ -95,19 +102,22 @@ describe("primary Home / Repos / Kanban navigation", () => {
     expect(brandIdx).toBeLessThan(source.indexOf("<SettingsButton"))
   })
 
-  test("Home, Repos, and Kanban use stroke icons matching Settings icon language", () => {
+  test("Home, Repos, Kanban, and Completed use stroke icons matching Settings icon language", () => {
     const source = rootSource()
     expect(source).toContain("function HomeNavIcon()")
     expect(source).toContain("function ReposNavIcon()")
     expect(source).toContain("function KanbanNavIcon()")
+    expect(source).toContain("function CompletedNavIcon()")
     expect(source).toContain("<HomeNavIcon />")
     expect(source).toContain("<ReposNavIcon />")
     expect(source).toContain("<KanbanNavIcon />")
+    expect(source).toContain("<CompletedNavIcon />")
     // Icons: aria-hidden, size-3.5, stroke currentColor (same as Settings gear).
     for (const iconFn of [
       "HomeNavIcon",
       "ReposNavIcon",
       "KanbanNavIcon",
+      "CompletedNavIcon",
     ] as const) {
       const start = source.indexOf(`function ${iconFn}(`)
       expect(start).toBeGreaterThan(-1)
@@ -184,19 +194,22 @@ describe("primary Home / Repos / Kanban navigation", () => {
     // Destinations are client Links, not raw <a href> only.
     expect(source).not.toMatch(/<a\s+href=["']\/kanban["']/)
     expect(source).not.toMatch(/<a\s+href=["']\/repos["']/)
+    expect(source).not.toMatch(/<a\s+href=["']\/completed["']/)
     expect(source).not.toMatch(/<a\s+href=["']\/["']/)
   })
 
-  test("shared nav lives in root layout so Home, Repos, and Kanban all inherit it", () => {
+  test("shared nav lives in root layout so Home, Repos, Kanban, and Completed inherit it", () => {
     const source = rootSource()
     const rootComponent = source.slice(
       source.indexOf("function RootComponent("),
     )
     expect(rootComponent).toContain('to="/repos"')
     expect(rootComponent).toContain('to="/kanban"')
+    expect(rootComponent).toContain('to="/completed"')
     expect(rootComponent).toMatch(/Home\s*<\/Link>/)
     expect(rootComponent).toMatch(/Repos\s*<\/Link>/)
     expect(rootComponent).toMatch(/Kanban\s*<\/Link>/)
+    expect(rootComponent).toMatch(/Completed\s*<\/Link>/)
     expect(rootComponent).toContain("<Outlet />")
     expect(rootComponent.indexOf("Home")).toBeLessThan(
       rootComponent.indexOf("<Outlet />"),

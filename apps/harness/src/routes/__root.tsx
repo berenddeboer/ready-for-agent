@@ -237,6 +237,21 @@ function KanbanNavIcon() {
   )
 }
 
+function CompletedNavIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
+  )
+}
+
 function RootComponent() {
   // Kanban needs the full viewport for six pipeline lanes; other routes keep
   // the shared 88rem reading-width cap. Gutters stay on every route.
@@ -303,6 +318,15 @@ function RootComponent() {
               >
                 <KanbanNavIcon />
                 Kanban
+              </Link>
+              <Link
+                to="/completed"
+                className={primaryNavLinkClassName}
+                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+                activeProps={{ className: primaryNavLinkActiveClassName }}
+              >
+                <CompletedNavIcon />
+                Completed
               </Link>
             </>
           }

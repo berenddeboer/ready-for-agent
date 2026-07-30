@@ -2,6 +2,7 @@ import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import { openPullRequestCountsQueryKey } from "../src/refresh-open-pull-request-count-live.js"
 import {
   committedPullRequestsCountQueryKeyPrefix,
+  completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../src/refresh-work-items-live.js"
 import { describe, expect, test } from "bun:test"
@@ -1163,5 +1164,95 @@ describe("Repository Work Item live-query coordination", () => {
         workItemsQuery.queryKey,
       ),
     ).toEqual([{ id: `wi-${fetchesAfterConnect}` }])
+  })
+
+  test("an invalidation refetches cached historical completed-work-items pages", async () => {
+    const repositoryId = "repo-01JSELECTED000000000000000"
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    let completedHistoryFetches = 0
+    let completedHistory = {
+      items: [{ id: "wi-old" }],
+      page: 1,
+      pageSize: 20,
+      totalCount: 1,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    }
+    const completedHistoryQuery = {
+      queryKey: [...completedWorkItemsHistoryQueryKeyPrefix, 1, 20] as const,
+      queryFn: async () => {
+        completedHistoryFetches += 1
+        return completedHistory
+      },
+    }
+    // Seed the cache the way /completed would (observer + fetch).
+    const stopObserving = observeQuery(queryClient, completedHistoryQuery)
+    await queryClient.fetchQuery({ ...completedHistoryQuery, staleTime: 0 })
+    const fetchesAfterSeed = completedHistoryFetches
+
+    let releaseInvalidation: (() => void) | undefined
+    const invalidation = new Promise<void>((resolve) => {
+      releaseInvalidation = resolve
+    })
+    let connected: (() => void) | undefined
+    const connectedPromise = new Promise<void>((resolve) => {
+      connected = resolve
+    })
+    const controller = new AbortController()
+    const live = followRepositoryWorkItemsLive({
+      getRepositoryIds: () => [repositoryId],
+      queryClient,
+      queries: {
+        workItems: (id: string) => ({
+          queryKey: ["work-items", id] as const,
+          queryFn: async () => [],
+        }),
+      },
+      signal: controller.signal,
+      retryDelayMs: 10,
+      stream: async ({ onConnected, onChange, signal }) => {
+        await onConnected()
+        connected?.()
+        await invalidation
+        if (signal.aborted) return
+        await onChange(repositoryId)
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) {
+            resolve()
+            return
+          }
+          signal.addEventListener("abort", () => resolve(), { once: true })
+        })
+      },
+    })
+
+    await connectedPromise
+    // Connect refreshAll also refreshes completed history when cached.
+    await waitFor(() => completedHistoryFetches > fetchesAfterSeed)
+    const fetchesAfterConnect = completedHistoryFetches
+
+    completedHistory = {
+      items: [{ id: "wi-new" }, { id: "wi-old" }],
+      page: 1,
+      pageSize: 20,
+      totalCount: 2,
+      hasNextPage: false,
+      hasPreviousPage: false,
+    }
+    releaseInvalidation?.()
+
+    await waitFor(() => completedHistoryFetches > fetchesAfterConnect)
+    expect(
+      queryClient.getQueryData<typeof completedHistory>(
+        completedHistoryQuery.queryKey,
+      ),
+    ).toEqual(completedHistory)
+
+    controller.abort()
+    await live
+    stopObserving()
   })
 })

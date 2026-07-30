@@ -63,6 +63,15 @@ type Query {
     limit: Int
   ): [WorkItem!]!
   """
+  Historical Completed Work Items across all repositories (Complete and
+  Abandoned only). Ordered by stateReadyAt newest-first. No rolling 24-hour
+  window (unlike workItems listKind COMPLETED). Page is 1-based; defaults are
+  page 1 and pageSize 20. pageSize is clamped to a maximum of 100; invalid or
+  non-positive pageSize falls back to 20. Server-side pagination — not an
+  unbounded client list.
+  """
+  completedWorkItems(page: Int, pageSize: Int): CompletedWorkItemsConnection!
+  """
   Count of unique Work Items that committed a pull request in [from, to).
   A Work Item counts when it has a non-null GitHub PR number and at least one
   successful commit Step Run whose finished_at falls in the half-open range.
@@ -186,6 +195,24 @@ enum WorkItemsListKind {
   WORKING
   FAILED
   COMPLETED
+}
+
+"""
+One page of historical Completed Work Items (all repositories).
+"""
+type CompletedWorkItemsConnection {
+  items: [WorkItem!]!
+  """
+  1-based page that was served (after normalization).
+  """
+  page: Int!
+  pageSize: Int!
+  """
+  Total Complete + Abandoned Work Items across every repository.
+  """
+  totalCount: Int!
+  hasNextPage: Boolean!
+  hasPreviousPage: Boolean!
 }
 
 type Config {

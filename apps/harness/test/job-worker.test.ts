@@ -304,6 +304,8 @@ const queueLayer = (
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
@@ -1767,6 +1769,8 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
@@ -1875,6 +1879,8 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
@@ -1946,6 +1952,8 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
@@ -2083,6 +2091,8 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
@@ -2277,6 +2287,8 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,
@@ -2393,6 +2405,8 @@ describe("Job worker", () => {
       getWorkItem: unused,
       listWorkItemsForIssue: unused,
       listWorkItemsForRepository: () => Effect.succeed([]),
+      listCompletedWorkItems: () =>
+        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
       ownsSessionId: () => Effect.succeed(false),
       countCommittedPullRequests: () => Effect.succeed(0),
       continueAfterHumanPrOutcome: unused,

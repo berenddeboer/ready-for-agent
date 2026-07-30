@@ -6,6 +6,11 @@ export const committedPullRequestsCountQueryKeyPrefix = [
   "committed-pull-requests-count",
 ] as const
 
+/** Historical Completed page (all repos); not scoped by repositoryId. */
+export const completedWorkItemsHistoryQueryKeyPrefix = [
+  "completed-work-items",
+] as const
+
 const configQueryKey = ["config"] as const
 /**
  * Per-repo unfinished gate (`blockingUnfinishedWorkItemCount`) lives here.
@@ -250,12 +255,27 @@ export const followRepositoryWorkItemsLive = async ({
     })()
   }
 
+  /**
+   * Keep the historical Completed archive fresh when Work Items change.
+   * Only active observers (the page the operator is viewing) — inactive
+   * cached pages stay stale until remounted, avoiding multi-page serial
+   * refetches on every lifecycle SSE event.
+   */
+  const refreshCompletedWorkItemsHistory = async () => {
+    if (signal.aborted) return
+    await refreshCachedQueries(completedWorkItemsHistoryQueryKeyPrefix, {
+      activeOnly: true,
+    })
+  }
+
   const refresh = async (repositoryId: string) => {
     // Do not await counts here: the SSE subscriber awaits each onChange, so
     // awaiting aggregates would serialize one full count refresh per event and
     // defeat coalescing under bursty lifecycle notifications.
     scheduleCommittedPullRequestsCounts()
     scheduleOpenPullRequestCounts()
+    // History is fire-and-forget: do not gate the SSE loop on archive latency.
+    void refreshCompletedWorkItemsHistory()
     await Promise.all([
       refreshWorkItems(repositoryId),
       // Harness Settings includes the global unfinished Work Item count.
@@ -273,6 +293,8 @@ export const followRepositoryWorkItemsLive = async ({
     scheduleOpenPullRequestCounts()
     await Promise.all([
       ...repositoryIds.map((repositoryId) => refreshWorkItems(repositoryId)),
+      // Connect/visibility still await active history so the open archive is current.
+      refreshCompletedWorkItemsHistory(),
       refreshCommittedPullRequestsCounts(),
       refreshCachedQueries(configQueryKey),
       refreshCachedQueries(repositoriesQueryKey),
@@ -320,6 +342,9 @@ export const followRepositoryWorkItemsLive = async ({
       queryKey: committedPullRequestsCountQueryKeyPrefix,
     })
     void queryClient.cancelQueries({ queryKey: ["work-items"] })
+    void queryClient.cancelQueries({
+      queryKey: completedWorkItemsHistoryQueryKeyPrefix,
+    })
     // Do not cancel openPullRequestCountsQueryKey: that projection is owned by
     // followOpenPullRequestCountLive; this follower only schedules invalidation.
   }

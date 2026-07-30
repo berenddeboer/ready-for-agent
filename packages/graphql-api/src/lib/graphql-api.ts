@@ -31,6 +31,8 @@ import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { DirectoryPicker, LocalGit } from "@ready-for-agent/local-git"
 import type { QueueService } from "@ready-for-agent/queue-service"
 import {
+  COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE,
+  COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE,
   WorkItemLifecycle,
   type WorkItemRecord,
   type WorkItemsListKind,
@@ -138,9 +140,33 @@ type WorkItemsArgs = IssuesArgs & {
   limit?: number
 }
 
+type CompletedWorkItemsArgs = {
+  page?: number | null
+  pageSize?: number | null
+}
+
 type CommittedPullRequestsCountArgs = {
   from: string
   to: string
+}
+
+/** Normalize 1-based page / pageSize for historical Completed pagination. */
+const normalizeCompletedWorkItemsPage = (
+  page: number | null | undefined,
+  pageSize: number | null | undefined,
+): { page: number; pageSize: number } => {
+  const normalizedPage =
+    page === null || page === undefined || !Number.isFinite(page)
+      ? 1
+      : Math.max(1, Math.trunc(page))
+  const normalizedPageSize =
+    pageSize === null ||
+    pageSize === undefined ||
+    !Number.isFinite(pageSize) ||
+    pageSize < 1
+      ? COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE
+      : Math.min(COMPLETED_WORK_ITEMS_MAX_PAGE_SIZE, Math.trunc(pageSize))
+  return { page: normalizedPage, pageSize: normalizedPageSize }
 }
 
 type SessionArgs = {
@@ -609,6 +635,34 @@ export const createGraphqlApi = (
                   nowMs,
                 )
               }).pipe(Effect.withSpan("graphql-api.workItems")),
+            ),
+          completedWorkItems: async (
+            _parent: unknown,
+            args: CompletedWorkItemsArgs,
+          ) =>
+            runGraphql(
+              Effect.gen(function* () {
+                const { page, pageSize } = normalizeCompletedWorkItemsPage(
+                  args.page,
+                  args.pageSize,
+                )
+                const lifecycle = yield* WorkItemLifecycle
+                const result = yield* lifecycle.listCompletedWorkItems({
+                  page,
+                  pageSize,
+                })
+                const hasPreviousPage = result.page > 1
+                const hasNextPage =
+                  result.page * result.pageSize < result.totalCount
+                return {
+                  items: result.items,
+                  page: result.page,
+                  pageSize: result.pageSize,
+                  totalCount: result.totalCount,
+                  hasNextPage,
+                  hasPreviousPage,
+                }
+              }).pipe(Effect.withSpan("graphql-api.completedWorkItems")),
             ),
           committedPullRequestsCount: async (
             _parent: unknown,

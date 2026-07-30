@@ -185,11 +185,16 @@ describe("JobsCard live updates", () => {
   test("Completed Session id opens usage dialog; Working/Failed keep plain copy", () => {
     const { source, jobsCard } = jobsCardSource()
     expect(jobsCard).toContain('selectedTab === "completed"')
-    expect(jobsCard).toContain("setSessionDialog({")
-    expect(jobsCard).toContain("workItemId: workItem.id")
-    expect(jobsCard).toContain("sessionId")
+    expect(jobsCard).toContain("<CompletedWorkItemRow")
+    expect(jobsCard).toContain("setSessionDialog({ workItemId, sessionId })")
     expect(jobsCard).toContain("SessionUsageDialog")
-    expect(jobsCard).toContain("showValue={false}")
+    // Session usage chrome lives on the shared completed row (Jobs + /completed).
+    const row = readFileSync(
+      join(import.meta.dir, "../src/completed-work-item-row.tsx"),
+      "utf8",
+    )
+    expect(row).toContain("onOpenSession(workItem.id, sessionId)")
+    expect(row).toContain("showValue={false}")
     expect(source).toContain("sessionQuery")
     expect(source).toContain("session: {")
     expect(source).toContain("availability: true")

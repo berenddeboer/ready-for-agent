@@ -325,6 +325,7 @@ const makeRuntime = (
     getWorkItem: unused,
     listWorkItemsForIssue: unused,
     listWorkItemsForRepository: unused,
+    listCompletedWorkItems: unused,
     ownsSessionId: () => Effect.succeed(false),
     countCommittedPullRequests: unused,
     continueAfterHumanPrOutcome: unused,
@@ -4383,6 +4384,254 @@ describe("GraphQL API", () => {
         )
         .map((item) => item.id),
     )
+  })
+
+  test("paginates historical completedWorkItems across repositories without the 24h window", async () => {
+    const nowMs = Date.now()
+    const hourMs = 60 * 60 * 1000
+    const completed = Array.from({ length: 25 }, (_, index) => {
+      const readyAt = nowMs - index * hourMs
+      return {
+        ...workItem,
+        id: makeWorkItemId(),
+        repositoryId: index % 2 === 0 ? repository.id : "repo-other",
+        issueNumber: index + 1,
+        state: (index % 2 === 0 ? "complete" : "abandoned") as
+          | "complete"
+          | "abandoned",
+        createdAt: new Date(readyAt - hourMs),
+        updatedAt: new Date(readyAt),
+        stateReadyAt: new Date(readyAt),
+        stepRuns: [],
+      }
+    })
+    // Older than 24 h — still in historical list (index 24 => 24 h ago is
+    // boundary; add an explicit 48 h item).
+    const completedTooOldForJobsTab = {
+      ...workItem,
+      id: makeWorkItemId(),
+      repositoryId: "repo-other",
+      issueNumber: 99,
+      state: "complete" as const,
+      createdAt: new Date(nowMs - 72 * hourMs),
+      updatedAt: new Date(nowMs - 48 * hourMs),
+      stateReadyAt: new Date(nowMs - 48 * hourMs),
+      stepRuns: [],
+    }
+    const implementing = {
+      ...workItem,
+      id: makeWorkItemId(),
+      state: "implement" as const,
+      createdAt: new Date(nowMs),
+      updatedAt: new Date(nowMs),
+      stateReadyAt: new Date(nowMs),
+      stepRuns: [],
+    }
+
+    let lastListArgs: { page: number; pageSize: number } | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listCompletedWorkItems: (options) => {
+          lastListArgs = options
+          const all = [...completed, completedTooOldForJobsTab, implementing]
+            .filter(
+              (item) => item.state === "complete" || item.state === "abandoned",
+            )
+            .sort(
+              (left, right) =>
+                right.stateReadyAt.getTime() - left.stateReadyAt.getTime(),
+            )
+          const offset = (options.page - 1) * options.pageSize
+          return Effect.succeed({
+            items: all.slice(offset, offset + options.pageSize),
+            page: options.page,
+            pageSize: options.pageSize,
+            totalCount: all.length,
+          })
+        },
+      },
+    )
+
+    const firstResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Completed($page: Int, $pageSize: Int) {
+          completedWorkItems(page: $page, pageSize: $pageSize) {
+            items { id state repositoryId }
+            page
+            pageSize
+            totalCount
+            hasNextPage
+            hasPreviousPage
+          }
+        }`,
+        variables: { page: 1, pageSize: 20 },
+      }),
+    )
+    const firstBody = (await firstResponse.json()) as {
+      data: {
+        completedWorkItems: {
+          items: readonly {
+            id: string
+            state: string
+            repositoryId: string
+          }[]
+          page: number
+          pageSize: number
+          totalCount: number
+          hasNextPage: boolean
+          hasPreviousPage: boolean
+        }
+      }
+    }
+
+    expect(lastListArgs).toEqual({ page: 1, pageSize: 20 })
+    expect(firstBody.data.completedWorkItems.page).toBe(1)
+    expect(firstBody.data.completedWorkItems.pageSize).toBe(20)
+    expect(firstBody.data.completedWorkItems.totalCount).toBe(26)
+    expect(firstBody.data.completedWorkItems.items).toHaveLength(20)
+    expect(firstBody.data.completedWorkItems.hasNextPage).toBe(true)
+    expect(firstBody.data.completedWorkItems.hasPreviousPage).toBe(false)
+    expect(
+      firstBody.data.completedWorkItems.items.some(
+        (item) => item.id === completedTooOldForJobsTab.id,
+      ),
+    ).toBe(false) // oldest is on a later page
+    expect(
+      firstBody.data.completedWorkItems.items.every(
+        (item) => item.state === "COMPLETE" || item.state === "ABANDONED",
+      ),
+    ).toBe(true)
+
+    const secondResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query Completed($page: Int, $pageSize: Int) {
+          completedWorkItems(page: $page, pageSize: $pageSize) {
+            items { id }
+            page
+            totalCount
+            hasNextPage
+            hasPreviousPage
+          }
+        }`,
+        variables: { page: 2, pageSize: 20 },
+      }),
+    )
+    const secondBody = (await secondResponse.json()) as {
+      data: {
+        completedWorkItems: {
+          items: readonly { id: string }[]
+          page: number
+          totalCount: number
+          hasNextPage: boolean
+          hasPreviousPage: boolean
+        }
+      }
+    }
+    expect(lastListArgs).toEqual({ page: 2, pageSize: 20 })
+    expect(secondBody.data.completedWorkItems.items).toHaveLength(6)
+    expect(secondBody.data.completedWorkItems.hasNextPage).toBe(false)
+    expect(secondBody.data.completedWorkItems.hasPreviousPage).toBe(true)
+    expect(
+      secondBody.data.completedWorkItems.items.map((item) => item.id),
+    ).toContain(completedTooOldForJobsTab.id)
+
+    // Defaults: page 1, pageSize 20
+    const defaultResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          completedWorkItems {
+            page
+            pageSize
+            totalCount
+          }
+        }`,
+      }),
+    )
+    const defaultBody = (await defaultResponse.json()) as {
+      data: {
+        completedWorkItems: {
+          page: number
+          pageSize: number
+          totalCount: number
+        }
+      }
+    }
+    expect(lastListArgs).toEqual({ page: 1, pageSize: 20 })
+    expect(defaultBody.data.completedWorkItems.page).toBe(1)
+    expect(defaultBody.data.completedWorkItems.pageSize).toBe(20)
+  })
+
+  test("normalizes completedWorkItems page and pageSize edge cases", async () => {
+    let lastListArgs: { page: number; pageSize: number } | undefined
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {
+        listCompletedWorkItems: (options) => {
+          lastListArgs = options
+          return Effect.succeed({
+            items: [],
+            page: options.page,
+            pageSize: options.pageSize,
+            totalCount: 0,
+          })
+        },
+      },
+    )
+
+    const cases: readonly {
+      readonly variables: { page?: number; pageSize?: number }
+      readonly expected: { page: number; pageSize: number }
+    }[] = [
+      {
+        variables: { page: 0, pageSize: 20 },
+        expected: { page: 1, pageSize: 20 },
+      },
+      {
+        variables: { page: -2, pageSize: 20 },
+        expected: { page: 1, pageSize: 20 },
+      },
+      // GraphQL Int variables only — fractional values are not part of the contract.
+      {
+        variables: { page: 2, pageSize: 0 },
+        expected: { page: 2, pageSize: 20 },
+      },
+      {
+        variables: { page: 3, pageSize: -5 },
+        expected: { page: 3, pageSize: 20 },
+      },
+      {
+        variables: { page: 1, pageSize: 500 },
+        expected: { page: 1, pageSize: 100 },
+      },
+    ]
+
+    for (const { variables, expected } of cases) {
+      const response = await createGraphqlApi(runtime).fetch(
+        graphqlRequest({
+          query: `query Completed($page: Int, $pageSize: Int) {
+            completedWorkItems(page: $page, pageSize: $pageSize) {
+              page
+              pageSize
+            }
+          }`,
+          variables,
+        }),
+      )
+      const body = (await response.json()) as {
+        data: {
+          completedWorkItems: { page: number; pageSize: number }
+        }
+      }
+      expect(lastListArgs).toEqual(expected)
+      expect(body.data.completedWorkItems).toEqual(expected)
+    }
   })
 
   test("filters Failed Work Items to non-retryable terminal failures", async () => {

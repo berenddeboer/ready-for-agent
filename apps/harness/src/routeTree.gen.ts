@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CompletedRouteImport } from './routes/completed'
 import { Route as GraphqlRouteImport } from './routes/graphql'
 import { Route as KanbanRouteImport } from './routes/kanban'
 import { Route as ReposRouteImport } from './routes/repos'
@@ -17,6 +18,11 @@ import { Route as ReposRouteImport } from './routes/repos'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompletedRoute = CompletedRouteImport.update({
+  id: '/completed',
+  path: '/completed',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GraphqlRoute = GraphqlRouteImport.update({
@@ -37,12 +43,14 @@ const ReposRoute = ReposRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/completed': typeof CompletedRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/completed': typeof CompletedRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
@@ -50,20 +58,22 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/completed': typeof CompletedRoute
   '/graphql': typeof GraphqlRoute
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/graphql' | '/kanban' | '/repos'
+  fullPaths: '/' | '/completed' | '/graphql' | '/kanban' | '/repos'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/graphql' | '/kanban' | '/repos'
-  id: '__root__' | '/' | '/graphql' | '/kanban' | '/repos'
+  to: '/' | '/completed' | '/graphql' | '/kanban' | '/repos'
+  id: '__root__' | '/' | '/completed' | '/graphql' | '/kanban' | '/repos'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CompletedRoute: typeof CompletedRoute
   GraphqlRoute: typeof GraphqlRoute
   KanbanRoute: typeof KanbanRoute
   ReposRoute: typeof ReposRoute
@@ -76,6 +86,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/completed': {
+      id: '/completed'
+      path: '/completed'
+      fullPath: '/completed'
+      preLoaderRoute: typeof CompletedRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/graphql': {
@@ -104,6 +121,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CompletedRoute: CompletedRoute,
   GraphqlRoute: GraphqlRoute,
   KanbanRoute: KanbanRoute,
   ReposRoute: ReposRoute,
