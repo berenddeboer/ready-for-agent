@@ -16,6 +16,20 @@ import { workItemBranchName, workItemWorktreePath } from "./worktree-names.js"
 
 const REMOTE_CLEANUP_TIMEOUT = Duration.seconds(60)
 
+/** Brief pause before a single automatic retry of a transient worktree delete. */
+const WORKTREE_REMOVE_RETRY_DELAY = Duration.seconds(1)
+
+/**
+ * Git sometimes fails `worktree remove --force` with exit 255 / "Directory not
+ * empty" while handles or delayed unlinks still hold the tree. One automatic
+ * retry usually succeeds; other failures (e.g. locked working tree) are not
+ * retried.
+ */
+const isDirectoryNotEmptyError = (error: GitCommandError): boolean => {
+  const haystack = `${error.message}\n${error.stderr}`.toLowerCase()
+  return haystack.includes("directory not empty")
+}
+
 const resolveRepository = (repositoryId: string) =>
   Effect.gen(function* () {
     const db = yield* DbService
@@ -333,7 +347,7 @@ const removeLocalArtifacts = (
     for (const worktreePath of candidates) {
       const listed = yield* worktreeListContains(gitRepository, worktreePath)
       if (listed) {
-        yield* runGit(gitRepository, [
+        const forceRemoveOnce = runGit(gitRepository, [
           "worktree",
           "remove",
           "--force",
@@ -348,6 +362,20 @@ const removeLocalArtifacts = (
               ])
               if (!stillListed && !stillPresent) return
               return yield* error
+            }),
+          ),
+        )
+
+        yield* forceRemoveOnce.pipe(
+          Effect.catchTag("GitCommandError", (error) =>
+            Effect.gen(function* () {
+              // Transient "Directory not empty" often clears after a short wait;
+              // retry the git remove once before failing Local cleanup.
+              if (!isDirectoryNotEmptyError(error)) {
+                return yield* error
+              }
+              yield* Effect.sleep(WORKTREE_REMOVE_RETRY_DELAY)
+              return yield* forceRemoveOnce
             }),
           ),
         )
