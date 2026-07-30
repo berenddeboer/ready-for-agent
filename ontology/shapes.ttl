@@ -74,6 +74,54 @@ rfa:LifecycleVocabularyShape
     sh:message "Every lifecycle term must have one English definition."@en ;
   ] .
 
+rfa:TransitionShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:Transition ;
+  sh:property [
+    sh:path rfa:fromStep ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:class rfa:LifecycleState ;
+    sh:message "A transition must have one declared from-step."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:toStep ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:class rfa:LifecycleState ;
+    sh:message "A transition must have one declared to-step."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:guard ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype <http://www.w3.org/2001/XMLSchema#string> ;
+    sh:minLength 1 ;
+    sh:message "A transition must have one non-empty guard name."@en ;
+  ] ;
+  sh:property [
+    sh:path rfa:reasonCode ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:class rfa:StepRunReason ;
+    sh:message "A transition must have one Step Run reason code."@en ;
+  ] .
+
+rfa:StepRunReasonShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:StepRunReason ;
+  sh:property [
+    sh:path skos:notation ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype <http://www.w3.org/2001/XMLSchema#string> ;
+    sh:minLength 1 ;
+    sh:message "A Step Run reason must have one runtime notation."@en ;
+  ] .
+
 rfa:OperationalLifecycleStepShape
   a sh:NodeShape ;
   sh:targetClass rfa:OperationalLifecycleStep ;
