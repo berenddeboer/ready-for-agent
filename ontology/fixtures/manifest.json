@@ -1,0 +1,28 @@
+{
+  "fixtures": [
+    {
+      "file": "valid.ttl",
+      "category": "valid",
+      "conforms": true,
+      "consistent": true
+    },
+    {
+      "file": "invalid.ttl",
+      "category": "invalid",
+      "conforms": false,
+      "consistent": true
+    },
+    {
+      "file": "missing-fact.ttl",
+      "category": "missing-fact",
+      "conforms": false,
+      "consistent": true
+    },
+    {
+      "file": "contradictory.ttl",
+      "category": "contradictory",
+      "conforms": false,
+      "consistent": false
+    }
+  ]
+}

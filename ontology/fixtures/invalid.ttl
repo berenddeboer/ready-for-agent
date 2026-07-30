@@ -1,0 +1,6 @@
+@prefix example: <https://ready-for-agent.dev/ontology/examples#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+
+example:invalid-work-item
+  a rfa:WorkItem ;
+  rfa:currentState example:ProbablyDone .

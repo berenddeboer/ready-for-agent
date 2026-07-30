@@ -1,0 +1,98 @@
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+rfa:LifecycleVocabularyShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:OperationalLifecycleStep ;
+  sh:targetClass rfa:TerminalWorkItemState ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue owl:Class ;
+    sh:message "Every lifecycle term must be declared as an OWL class."@en ;
+  ] ;
+  sh:property [
+    sh:path rdf:type ;
+    sh:hasValue skos:Concept ;
+    sh:message "Every lifecycle term must be declared as a SKOS concept."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:notation ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:datatype <http://www.w3.org/2001/XMLSchema#string> ;
+    sh:message "Every lifecycle term must have one runtime notation."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:prefLabel ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "Every lifecycle term must have one English preferred label."@en ;
+  ] ;
+  sh:property [
+    sh:path skos:definition ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:languageIn ("en") ;
+    sh:uniqueLang true ;
+    sh:message "Every lifecycle term must have one English definition."@en ;
+  ] .
+
+rfa:OperationalLifecycleStepShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:OperationalLifecycleStep ;
+  sh:property [
+    sh:path rdfs:subClassOf ;
+    sh:hasValue rfa:OperationalLifecycleStep ;
+    sh:message
+      "Every operational term must specialize Operational Lifecycle Step."@en ;
+  ] .
+
+rfa:TerminalWorkItemStateShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:TerminalWorkItemState ;
+  sh:property [
+    sh:path rdfs:subClassOf ;
+    sh:hasValue rfa:TerminalWorkItemState ;
+    sh:message
+      "Every terminal term must specialize terminal Work Item state."@en ;
+  ] .
+
+rfa:WorkItemShape
+  a sh:NodeShape ;
+  sh:targetClass rfa:WorkItem ;
+  sh:property [
+    sh:path rfa:currentState ;
+    sh:minCount 1 ;
+    sh:maxCount 1 ;
+    sh:nodeKind sh:IRI ;
+    sh:in (
+      rfa:CreateWorktree
+      rfa:InstallDependencies
+      rfa:Implement
+      rfa:AssessChanges
+      rfa:PreCommit
+      rfa:Review
+      rfa:Commit
+      rfa:CreatePr
+      rfa:WatchPrStatusChecks
+      rfa:ResolvePrMergeConflict
+      rfa:InvestigatePrStatusChecks
+      rfa:MarkPrReadyForReview
+      rfa:DecidePrMerge
+      rfa:MergePr
+      rfa:CloseIssue
+      rfa:LocalCleanup
+      rfa:Complete
+      rfa:Failed
+      rfa:NeedsHuman
+      rfa:Abandoned
+    ) ;
+    sh:message
+      "A Work Item must have exactly one declared lifecycle state."@en ;
+  ] .

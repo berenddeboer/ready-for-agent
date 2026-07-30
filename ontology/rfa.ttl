@@ -1,0 +1,256 @@
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+<https://ready-for-agent.dev/ontology/rfa>
+  a owl:Ontology ;
+  dcterms:title "Ready for Agent Work Item lifecycle ontology"@en ;
+  dcterms:description
+    "The operational Lifecycle Steps and terminal Work Item states."@en ;
+  dcterms:source
+    <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
+  owl:versionInfo "0.1.0" .
+
+rfa:LifecycleState
+  a owl:Class ;
+  skos:prefLabel "Lifecycle state"@en ;
+  skos:definition
+    "The next action required for a Work Item, or a terminal Work Item state."@en .
+
+rfa:OperationalLifecycleStep
+  a owl:Class ;
+  rdfs:subClassOf rfa:LifecycleState ;
+  owl:disjointWith rfa:TerminalWorkItemState ;
+  skos:prefLabel "Operational Lifecycle Step"@en ;
+  skos:definition
+    "A non-terminal Lifecycle Step that the harness can run for a Work Item."@en .
+
+rfa:TerminalWorkItemState
+  a owl:Class ;
+  rdfs:subClassOf rfa:LifecycleState ;
+  skos:prefLabel "terminal Work Item state"@en ;
+  skos:definition
+    "A Lifecycle state in which ordinary Work Item advancement has stopped."@en .
+
+rfa:WorkItem
+  a owl:Class ;
+  skos:prefLabel "Work Item"@en ;
+  skos:definition
+    "A durable record of one operator-requested attempt to complete a Leaf Issue's objective through the work lifecycle."@en .
+
+rfa:currentState
+  a owl:ObjectProperty ;
+  rdfs:domain rfa:WorkItem ;
+  rdfs:range rfa:LifecycleState ;
+  skos:prefLabel "current state"@en ;
+  skos:definition
+    "The single operational Lifecycle Step or terminal state currently held by a Work Item."@en .
+
+rfa:CreateWorktree
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "create_worktree" ;
+  skos:prefLabel "Create Worktree"@en ;
+  skos:definition
+    "The Lifecycle Step that creates the Work Item's isolated Git worktree and records its starting commit."@en .
+
+rfa:InstallDependencies
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "install_dependencies" ;
+  skos:prefLabel "Install Dependencies"@en ;
+  skos:definition
+    "The Lifecycle Step that installs the Repository dependencies required to work on the Work Item."@en .
+
+rfa:Implement
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "implement" ;
+  skos:prefLabel "Implement"@en ;
+  skos:definition
+    "The Lifecycle Step that starts or continues the Work Item's Session with an Agent Turn to complete the Issue's objective."@en .
+
+rfa:AssessChanges
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "assess_changes" ;
+  skos:prefLabel "Assess Changes"@en ;
+  skos:definition
+    "The Lifecycle Step after Implement that determines whether the Work Item produced repository changes before repository quality gates run."@en .
+
+rfa:PreCommit
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "pre_commit" ;
+  skos:prefLabel "Pre-Commit"@en ;
+  skos:definition
+    "The Lifecycle Step that runs the Repository's git pre-commit hook on staged Work Item changes before Review."@en .
+
+rfa:Review
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "review" ;
+  skos:prefLabel "Review"@en ;
+  skos:definition
+    "The Lifecycle Step after Pre-Commit that critiques the Work Item's repository changes and may apply accepted Review Findings before Commit."@en .
+
+rfa:Commit
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "commit" ;
+  skos:prefLabel "Commit"@en ;
+  skos:definition
+    "The Lifecycle Step after successful Review that creates the local git commit for the Work Item's changes."@en .
+
+rfa:CreatePr
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "create_pr" ;
+  skos:prefLabel "Create PR"@en ;
+  skos:definition
+    "The Lifecycle Step that pushes committed Work Item changes and creates their draft pull request."@en .
+
+rfa:WatchPrStatusChecks
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "watch_pr_status_checks" ;
+  skos:prefLabel "Watch PR Status Checks"@en ;
+  skos:definition
+    "The Lifecycle Step that observes the Work Item PR for merge conflicts, Status Check Handoffs, and settled completion conditions."@en .
+
+rfa:ResolvePrMergeConflict
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "resolve_pr_merge_conflict" ;
+  skos:prefLabel "Resolve PR Merge Conflict"@en ;
+  skos:definition
+    "The Lifecycle Step that asks the Work Item's Implement Session to rebase a conflicting pull-request branch."@en .
+
+rfa:InvestigatePrStatusChecks
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "investigate_pr_status_checks" ;
+  skos:prefLabel "Investigate PR Status Checks"@en ;
+  skos:definition
+    "The Lifecycle Step that processes a durable Status Check Handoff in the Work Item's Implement Session."@en .
+
+rfa:MarkPrReadyForReview
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "mark_pr_ready_for_review" ;
+  skos:prefLabel "Mark PR Ready for Review"@en ;
+  skos:definition
+    "The Lifecycle Step that changes a settled draft Work Item PR to ready for review."@en .
+
+rfa:DecidePrMerge
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "decide_pr_merge" ;
+  skos:prefLabel "Decide PR Merge"@en ;
+  skos:definition
+    "The Lifecycle Step that decides whether a settled Work Item PR may be merged by the harness or requires a human."@en .
+
+rfa:MergePr
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "merge_pr" ;
+  skos:prefLabel "Merge PR"@en ;
+  skos:definition
+    "The Lifecycle Step that revalidates and merges an approved Work Item PR through its Forge."@en .
+
+rfa:CloseIssue
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "close_issue" ;
+  skos:prefLabel "Close Issue"@en ;
+  skos:definition
+    "The Lifecycle Step that publishes a No-Change Outcome's completion summary and closes the Work Item's Issue."@en .
+
+rfa:LocalCleanup
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:OperationalLifecycleStep ;
+  rdfs:subClassOf rfa:OperationalLifecycleStep ;
+  skos:notation "local_cleanup" ;
+  skos:prefLabel "local cleanup"@en ;
+  skos:definition
+    "The Lifecycle Step that removes the Work Item's local worktree and branch after its remote outcome is finished."@en .
+
+rfa:Complete
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  skos:notation "complete" ;
+  skos:prefLabel "Complete"@en ;
+  skos:definition
+    "A terminal Work Item state whose remote outcome and local cleanup have both finished."@en .
+
+rfa:Failed
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  skos:notation "failed" ;
+  skos:prefLabel "Failed"@en ;
+  skos:definition
+    "A terminal Work Item state that cannot advance because a lifecycle precondition was not met."@en .
+
+rfa:NeedsHuman
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  skos:notation "needs_human" ;
+  skos:prefLabel "Needs Human"@en ;
+  skos:definition
+    "A Work Item state that cannot continue autonomously and records the intervention required from a human."@en .
+
+rfa:Abandoned
+  a owl:Class, owl:NamedIndividual, skos:Concept,
+    rfa:TerminalWorkItemState ;
+  rdfs:subClassOf rfa:TerminalWorkItemState ;
+  skos:notation "abandoned" ;
+  skos:prefLabel "Abandoned"@en ;
+  skos:definition
+    "A terminal Work Item state that preserves history after the attempt is stopped without completion."@en .
+
+[
+  a owl:AllDisjointClasses ;
+  owl:members (
+    rfa:CreateWorktree
+    rfa:InstallDependencies
+    rfa:Implement
+    rfa:AssessChanges
+    rfa:PreCommit
+    rfa:Review
+    rfa:Commit
+    rfa:CreatePr
+    rfa:WatchPrStatusChecks
+    rfa:ResolvePrMergeConflict
+    rfa:InvestigatePrStatusChecks
+    rfa:MarkPrReadyForReview
+    rfa:DecidePrMerge
+    rfa:MergePr
+    rfa:CloseIssue
+    rfa:LocalCleanup
+    rfa:Complete
+    rfa:Failed
+    rfa:NeedsHuman
+    rfa:Abandoned
+  )
+] .

@@ -1,0 +1,5 @@
+@prefix example: <https://ready-for-agent.dev/ontology/examples#> .
+@prefix rfa: <https://ready-for-agent.dev/ontology/rfa#> .
+
+example:missing-state-work-item
+  a rfa:WorkItem .
