@@ -1,0 +1,1030 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway, not for production.
+  Wayfinder ticket #690 ("Prototype: clanker direction A", map #689).
+
+  Plan: one full-page Harness homepage (nav + committed-PR stats + Kanban
+  board) in a single standalone HTML file. Direction A's angle: the
+  "night-shift control cabinet" — a dark operator console. Lanes are
+  backlit bays keyed by their lane color (no grey concrete, no warm paper,
+  no serif). Queue carries a hazard-striped intake hint pointing to Repos.
+
+  Run: open this file in a browser (no build, no server needed).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction A · Night-shift console — Clanker Harness prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Archivo+Black&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------------
+     Direction A tokens — charcoal deck + saturated signal colors.
+     Lane colors are the fixed pipeline identity (unchanged):
+       Queue #ffd21c · Build #1976d2 · Review #7654b5
+       PR #168b62 · Attention #ff4d1c · Merged #151515
+  ------------------------------------------------------------------ */
+  :root {
+    --deck: #131417;
+    --deck-2: #191b1f;
+    --panel: #1e2126;
+    --panel-2: #252931;
+    --line: #050505;
+    --edge: #363b43;
+    --edge-soft: #2a2e35;
+    --ink: #edece6;
+    --ink-dim: #a4a7ae;
+    --ink-faint: #71757d;
+
+    --lane-queue: #ffd21c;
+    --lane-build: #1976d2;
+    --lane-review: #7654b5;
+    --lane-pr: #168b62;
+    --lane-attention: #ff4d1c;
+    --lane-merged: #151515;
+
+    --ok: #3ecf7a;
+    --bad: #ff5a4e;
+    --warn: #ffb02e;
+    --teal: #3fb0a4;
+    --violet: #b08fe8;
+
+    --font-display: "Archivo Black", "Arial Black", "Helvetica Neue", sans-serif;
+    --font-sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-width: 20rem;
+    min-height: 100vh;
+    background-color: var(--deck);
+    /* brushed deck plate: horizontal grain + faint top light */
+    background-image:
+      radial-gradient(140% 70% at 50% -20%, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0) 55%),
+      repeating-linear-gradient(0deg, rgb(255 255 255 / 0.012) 0 1px, rgb(255 255 255 / 0) 1px 3px);
+    background-attachment: fixed;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--lane-queue); color: #151515; }
+
+  a { color: inherit; }
+
+  .page {
+    margin-inline: auto;
+    width: 100%;
+    padding: 1.5rem 2rem 4rem;
+  }
+
+  /* ============================ Masthead ============================ */
+
+  .mast {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem 1.5rem;
+    padding-bottom: 0.9rem;
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.7rem, 3.4vw, 2.4rem);
+    font-weight: 400;
+    line-height: 0.95;
+    letter-spacing: -0.015em;
+    text-transform: uppercase;
+  }
+
+  .brand h1 a { color: var(--ink); text-decoration: none; }
+  .brand h1 a:hover { color: var(--lane-queue); }
+
+  .brand .ver {
+    display: inline-block;
+    margin-top: 0.45rem;
+    border: 1px solid var(--edge);
+    background: var(--panel);
+    padding: 0.15rem 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  .nav {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* Cabinet pushbuttons: raised by default, pressed when active. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 2px solid var(--line);
+    background: var(--panel-2);
+    padding: 0.55rem 0.9rem;
+    box-shadow: 3px 3px 0 var(--line);
+    color: var(--ink-dim);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition: transform 60ms ease, box-shadow 60ms ease, background 120ms ease;
+  }
+
+  .btn:hover { background: #2d323b; color: var(--ink); }
+
+  .btn[aria-current="page"] {
+    background: var(--ink);
+    color: var(--line);
+    box-shadow: 1px 1px 0 var(--line);
+    transform: translate(2px, 2px);
+  }
+
+  .btn svg { width: 0.9rem; height: 0.9rem; }
+
+  /* Riveted steel rule under the masthead (replaces the 0.5rem ink bar). */
+  .mast-rule {
+    height: 10px;
+    border-block: 1px solid var(--edge);
+    background-color: var(--line);
+    background-image: radial-gradient(circle 1.75px at 14px 50%, #43484f 1.75px, rgb(0 0 0 / 0) 2.25px);
+    background-size: 56px 100%;
+    background-repeat: repeat-x;
+  }
+
+  /* ======================= Committed-PR readouts ===================== */
+
+  .readouts {
+    margin-top: 1.4rem;
+    border: 2px solid var(--line);
+    background: var(--panel);
+    box-shadow: 5px 5px 0 var(--line);
+  }
+
+  .readouts-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid var(--edge-soft);
+    padding: 0.5rem 0.85rem;
+  }
+
+  .plate-label {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .readouts-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--edge-soft);
+  }
+
+  .readout {
+    background: var(--panel);
+    padding: 0.8rem 0.85rem 0.9rem;
+  }
+
+  .readout .r-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* Inset counter module: sunken black window, phosphor digits. */
+  .readout .r-window {
+    display: inline-block;
+    margin-top: 0.45rem;
+    min-width: 3.2ch;
+    border: 1px solid var(--line);
+    background: #0b0c0e;
+    box-shadow: inset 0 2px 6px rgb(0 0 0 / 0.85), inset 0 -1px 0 rgb(255 255 255 / 0.05);
+    padding: 0.3rem 0.55rem 0.25rem;
+    text-align: right;
+  }
+
+  .readout .r-value {
+    font-family: var(--font-mono);
+    font-size: clamp(1.5rem, 2.4vw, 2.1rem);
+    font-weight: 600;
+    line-height: 1;
+    color: var(--ink);
+    text-shadow: 0 0 12px rgb(237 236 230 / 0.25);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ============================ Jobs ================================ */
+
+  .jobs { margin-top: 1.4rem; }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 2px solid var(--line);
+    border-bottom: 0;
+    background: var(--panel);
+    padding: 0.75rem;
+  }
+
+  .tabs, .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .tab, .filter {
+    border: 1px solid var(--edge);
+    background: transparent;
+    padding: 0.5rem 0.7rem;
+    color: var(--ink-dim);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .tab:hover, .filter:hover { border-color: var(--ink-faint); color: var(--ink); }
+
+  .tab[aria-selected="true"], .filter[aria-pressed="true"] {
+    border-color: var(--line);
+    background: var(--ink);
+    color: var(--line);
+  }
+
+  /* ====================== Board: six backlit bays =================== */
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 2px;
+    border: 2px solid var(--line);
+    background: var(--line);
+  }
+
+  .lane {
+    min-width: 0;
+    min-height: 26rem;
+    /* The bay glow: a wash of the lane color fading into the deck —
+       lane identity WITHOUT the old grey concrete fill. */
+    background:
+      linear-gradient(180deg, var(--bay-glow) 0%, rgb(0 0 0 / 0) 16rem),
+      var(--deck-2);
+  }
+
+  .lane-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    min-height: 5.1rem;
+    padding: 0.7rem;
+    border-bottom: 2px solid var(--line);
+    background: var(--lc);
+    color: var(--lt, #fff);
+  }
+
+  /* Merged is near-black: give the plate a machined edge so it reads
+     against the dark deck. */
+  .lane-header.machined { box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.16); }
+
+  .lane-no {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    opacity: 0.72;
+  }
+
+  .lane-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 400;
+    line-height: 0.9;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+  }
+
+  .lane-count {
+    font-family: var(--font-mono);
+    font-size: 1.9rem;
+    font-weight: 600;
+    line-height: 0.8;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lane-stack {
+    display: grid;
+    align-content: start;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 0.6rem;
+    list-style: none;
+  }
+
+  .lane-empty {
+    margin: 0.55rem;
+    padding-top: 0.9rem;
+    border-top: 1px dashed var(--edge);
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    line-height: 1.5;
+    text-transform: uppercase;
+  }
+
+  /* ============================ Tickets ============================= */
+
+  .ticket {
+    position: relative;
+    min-width: 0;
+    border: 2px solid var(--line);
+    background: var(--panel);
+    padding: 0.65rem 0.65rem 0.65rem 0.8rem;
+    box-shadow: 3px 3px 0 var(--line);
+  }
+
+  .ticket::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 5px;
+    background: var(--tc, var(--edge));
+  }
+
+  .t-repo {
+    margin: 0 0 0.4rem;
+    overflow: hidden;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .t-title {
+    display: block;
+    color: var(--ink);
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+  }
+
+  .t-title:hover { color: var(--lane-queue); text-decoration: underline; text-decoration-thickness: 2px; }
+
+  .t-title .num { font-family: var(--font-mono); font-weight: 600; color: var(--ink-dim); }
+
+  .t-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
+  }
+
+  /* Status / state chips — signal tints on dark. */
+  .chip {
+    display: inline-block;
+    border: 1px solid currentColor;
+    padding: 0.22rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .chip-state  { color: var(--ink-dim); background: rgb(255 255 255 / 0.04); }
+  .chip-ok     { color: var(--ok);     background: rgb(62 207 122 / 0.12); }
+  .chip-bad    { color: var(--bad);    background: rgb(255 90 78 / 0.13); }
+  .chip-warn   { color: var(--warn);   background: rgb(255 176 46 / 0.12); }
+  .chip-teal   { color: var(--teal);   background: rgb(63 176 164 / 0.12); }
+  .chip-violet { color: var(--violet); background: rgb(176 143 232 / 0.13); }
+
+  .icon-btn {
+    flex: none;
+    border: 1px solid var(--edge);
+    background: var(--panel-2);
+    width: 1.5rem;
+    height: 1.5rem;
+    color: var(--ink-dim);
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .icon-btn:hover { border-color: var(--ink-faint); color: var(--ink); }
+
+  .t-runtime {
+    display: grid;
+    gap: 0.25rem;
+    margin-top: 0.55rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--edge-soft);
+  }
+
+  .t-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--ink-faint);
+  }
+
+  .t-meta .session {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-dim);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  .t-meta .session:hover { color: var(--lane-queue); }
+
+  /* Lifecycle step chips + collapsed earlier-lane summaries. */
+  .t-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.55rem;
+  }
+
+  .step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    border: 1px solid var(--edge);
+    background: var(--deck);
+    padding: 0.25rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--ink-dim);
+    white-space: nowrap;
+  }
+
+  .step .dot { width: 0.45rem; height: 0.45rem; flex: none; }
+  .step.done  { color: var(--ink-dim); }
+  .step.done .dot { background: var(--ok); }
+  .step.live  { border-color: rgb(25 118 210 / 0.65); color: #7db4ea; }
+  .step.live .dot { background: var(--lane-build); box-shadow: 0 0 8px rgb(25 118 210 / 0.9); }
+  .step.fail  { border-color: rgb(255 90 78 / 0.6); color: #ff9a92; }
+  .step.fail .dot { background: var(--bad); }
+  .step.wait  { color: var(--ink-faint); }
+  .step.wait .dot { border: 1px solid var(--ink-faint); }
+  .step .dur { color: var(--ink-faint); font-weight: 500; }
+
+  .lane-summary {
+    display: block;
+    width: 100%;
+    margin-top: 0.55rem;
+    border: 1px solid var(--edge-soft);
+    background: var(--deck);
+    padding: 0.3rem 0.45rem;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-align: left;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .lane-summary:hover { color: var(--ink-dim); border-color: var(--edge); }
+
+  .status-msg {
+    margin: 0.5rem 0 0;
+    font-size: 0.7rem;
+    line-height: 1.4;
+    color: #ff9a92;
+  }
+
+  /* Merged-lane compact summary. */
+  .t-merged {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--edge-soft);
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    color: var(--ink-faint);
+  }
+
+  .pr-badge {
+    display: inline-flex;
+    margin-top: 0.5rem;
+    border: 1px solid var(--edge);
+    padding: 0.22rem 0.45rem;
+    color: var(--ink-dim);
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .pr-badge:hover { border-color: var(--lane-pr); color: var(--ok); }
+
+  /* ================= Queue intake hint → Repos ====================== */
+
+  .intake {
+    display: block;
+    position: relative;
+    margin: 0.6rem;
+    border: 2px solid var(--line);
+    background: var(--panel);
+    box-shadow: 3px 3px 0 var(--line);
+    text-decoration: none;
+  }
+
+  /* hazard stripe header strip */
+  .intake::before {
+    content: "";
+    display: block;
+    height: 8px;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--lane-queue) 0 10px,
+      var(--line) 10px 20px
+    );
+  }
+
+  .intake-body { padding: 0.65rem 0.75rem 0.75rem; }
+
+  .intake-tag {
+    display: inline-block;
+    border: 1px solid var(--lane-queue);
+    padding: 0.15rem 0.4rem;
+    color: var(--lane-queue);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+
+  .intake-text {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--ink);
+    font-size: 0.74rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .intake-cta {
+    display: inline-block;
+    margin-top: 0.5rem;
+    color: var(--lane-queue);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .intake:hover .intake-cta { text-decoration: underline; text-decoration-thickness: 2px; }
+  .intake:hover { border-color: var(--lane-queue); }
+
+  /* ============================ Footer ============================== */
+
+  .proto-note {
+    margin-top: 2.5rem;
+    border-top: 1px solid var(--edge-soft);
+    padding-top: 0.9rem;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.08em;
+    line-height: 1.6;
+    text-transform: uppercase;
+  }
+
+  /* ========================== Responsive ============================ */
+
+  @media (max-width: 1100px) {
+    .board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .lane { min-height: 14rem; }
+  }
+
+  @media (max-width: 720px) {
+    .page { padding: 1rem 0.9rem 3rem; }
+    .board { display: block; }
+    .lane { min-height: 0; margin-bottom: 2px; }
+    .lane-header { position: static; min-height: 0; }
+    .readouts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nav { margin-left: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ Nav shell ============================ -->
+  <header class="mast">
+    <div class="brand">
+      <h1><a href="/">Clanker Harness</a></h1>
+      <span class="ver" title="Ready for Agent v0.0.0">v0.0.0</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <a class="btn" href="/" aria-current="page">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-6h4v6"/></svg>
+        Home
+      </a>
+      <a class="btn" href="/repos">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7.5c0-1.5 3.6-2.5 8-2.5s8 1 8 2.5v9c0 1.5-3.6 2.5-8 2.5s-8-1-8-2.5v-9Z"/><path d="M4 7.5c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5"/><path d="M4 12c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5"/></svg>
+        Repos
+      </a>
+      <a class="btn" href="/completed">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        Completed
+      </a>
+      <button class="btn" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+        Settings
+      </button>
+    </nav>
+  </header>
+  <div class="mast-rule" aria-hidden="true"></div>
+
+  <main>
+    <!-- ===================== Committed PR readouts ===================== -->
+    <section class="readouts" aria-label="Committed pull requests">
+      <div class="readouts-head">
+        <p class="plate-label">Committed pull requests</p>
+        <p class="plate-label" aria-hidden="true">CTR-05</p>
+      </div>
+      <div class="readouts-grid">
+        <div class="readout">
+          <span class="r-label">Today</span><br>
+          <span class="r-window"><span class="r-value">4</span></span>
+        </div>
+        <div class="readout">
+          <span class="r-label">Yesterday</span><br>
+          <span class="r-window"><span class="r-value">6</span></span>
+        </div>
+        <div class="readout">
+          <span class="r-label">This week</span><br>
+          <span class="r-window"><span class="r-value">23</span></span>
+        </div>
+        <div class="readout">
+          <span class="r-label">Last week</span><br>
+          <span class="r-window"><span class="r-value">19</span></span>
+        </div>
+        <div class="readout">
+          <span class="r-label">Two weeks ago</span><br>
+          <span class="r-window"><span class="r-value">31</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ Jobs ============================== -->
+    <section class="jobs" aria-label="Jobs">
+      <div class="controls">
+        <div class="tabs" role="tablist" aria-label="Jobs">
+          <button class="tab" type="button" role="tab" aria-selected="true">Pipeline</button>
+          <button class="tab" type="button" role="tab" aria-selected="false" tabindex="-1">Completed last 24 h (5)</button>
+        </div>
+        <fieldset class="filters">
+          <legend class="sr-only" style="position:absolute;left:-9999px">Filter jobs by repository</legend>
+          <button class="filter" type="button" aria-pressed="true">All sources</button>
+          <button class="filter" type="button" aria-pressed="false">berenddeboer/ready-for-agent</button>
+          <button class="filter" type="button" aria-pressed="false">berenddeboer/agentsview</button>
+        </fieldset>
+      </div>
+
+      <section class="board" aria-label="Lifecycle pipeline">
+
+        <!-- ============ 01 · Queue ============ -->
+        <section class="lane" style="--bay-glow: rgb(255 210 28 / 0.07)" aria-labelledby="lane-queue">
+          <header class="lane-header" style="--lc:#ffd21c;--lt:#151515">
+            <div>
+              <span class="lane-no">01 / 06</span>
+              <h3 class="lane-title" id="lane-queue">Queue</h3>
+            </div>
+            <span class="lane-count">2<span style="position:absolute;left:-9999px"> jobs</span></span>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#ffd21c">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/694"><span class="num">#694</span> Prototype: clanker direction E</a>
+              <div class="t-row">
+                <span class="chip chip-violet">Waiting for worker slot</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>opencode</span><span>·</span><span>queued 4m ago</span></div>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#ffd21c">
+              <p class="t-repo" title="berenddeboer/agentsview">berenddeboer/agentsview</p>
+              <a class="t-title" href="https://github.com/berenddeboer/agentsview/issues/512"><span class="num">#512</span> Migrate legacy blocked-by links to native dependencies</a>
+              <div class="t-row">
+                <span class="chip chip-teal">Waiting for blockers</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>blocked by</span><a class="session" href="https://github.com/berenddeboer/agentsview/issues/508">#508</a><span>and</span><a class="session" href="https://github.com/berenddeboer/agentsview/issues/511">#511</a></div>
+              </div>
+            </li>
+          </ul>
+          <!-- Queue discoverability hint → Repos -->
+          <a class="intake" id="intake" href="/repos">
+            <div class="intake-body">
+              <span class="intake-tag">Intake</span>
+              <span class="intake-text">Feed the queue — work starts at your sources.</span>
+              <span class="intake-cta">Manage repos →</span>
+            </div>
+          </a>
+        </section>
+
+        <!-- ============ 02 · Build ============ -->
+        <section class="lane" style="--bay-glow: rgb(25 118 210 / 0.10)" aria-labelledby="lane-build">
+          <header class="lane-header" style="--lc:#1976d2;--lt:#ffffff">
+            <div>
+              <span class="lane-no">02 / 06</span>
+              <h3 class="lane-title" id="lane-build">Build</h3>
+            </div>
+            <span class="lane-count">3</span>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#1976d2">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/688"><span class="num">#688</span> Surface per-session token usage in the Harness UI</a>
+              <div class="t-row">
+                <span class="chip chip-state">Implement</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_9f24c1a7</span><span title="Copy">⧉</span></div>
+                <div class="t-meta">~/src/ready-for-agent/worktree2</div>
+              </div>
+              <div class="t-steps">
+                <span class="step done"><span class="dot"></span>Create worktree <span class="dur">8s</span></span>
+                <span class="step done"><span class="dot"></span>Install deps <span class="dur">41s</span></span>
+                <span class="step live"><span class="dot"></span>Implement <span class="dur">6m 12s</span></span>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#1976d2">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/676"><span class="num">#676</span> Add blocked-by edges to the to-tickets flow</a>
+              <div class="t-row">
+                <span class="chip chip-state">Pre-commit</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_71bd03e2</span><span title="Copy">⧉</span></div>
+                <div class="t-meta">~/src/ready-for-agent/worktree4</div>
+              </div>
+              <div class="t-steps">
+                <span class="step done"><span class="dot"></span>Create worktree <span class="dur">6s</span></span>
+                <span class="step done"><span class="dot"></span>Install deps <span class="dur">38s</span></span>
+                <span class="step done"><span class="dot"></span>Implement <span class="dur">11m 03s</span></span>
+                <span class="step done"><span class="dot"></span>Assess changes <span class="dur">52s</span></span>
+                <span class="step live"><span class="dot"></span>Pre-commit <span class="dur">19s</span></span>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#1976d2">
+              <p class="t-repo" title="berenddeboer/agentsview">berenddeboer/agentsview</p>
+              <a class="t-title" href="https://github.com/berenddeboer/agentsview/issues/118"><span class="num">#118</span> Recover off-screen Hyprland windows into view</a>
+              <div class="t-row">
+                <span class="chip chip-state">Install deps</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>claude</span><span>-</span><span class="session">c9d2f1aa</span><span title="Copy">⧉</span></div>
+                <div class="t-meta">~/src/agentsview/wt-118</div>
+              </div>
+              <div class="t-steps">
+                <span class="step done"><span class="dot"></span>Create worktree <span class="dur">5s</span></span>
+                <span class="step live"><span class="dot"></span>Install deps <span class="dur">33s</span></span>
+                <span class="step wait"><span class="dot"></span>Implement</span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ 03 · Review ============ -->
+        <section class="lane" style="--bay-glow: rgb(118 84 181 / 0.13)" aria-labelledby="lane-review">
+          <header class="lane-header" style="--lc:#7654b5;--lt:#ffffff">
+            <div>
+              <span class="lane-no">03 / 06</span>
+              <h3 class="lane-title" id="lane-review">Review</h3>
+            </div>
+            <span class="lane-count">1</span>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#7654b5">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/681"><span class="num">#681</span> Grill-first triage for external pull requests</a>
+              <div class="t-row">
+                <span class="chip chip-state">Review</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_33aa90d1</span><span title="Copy">⧉</span></div>
+                <div class="t-meta">~/src/ready-for-agent/worktree5</div>
+              </div>
+              <button class="lane-summary" type="button">▸ Build · 18m 44s</button>
+              <div class="t-steps">
+                <span class="step live" style="border-color:rgb(118 84 181 / 0.65);color:#c3a6f2"><span class="dot" style="background:#7654b5;box-shadow:0 0 8px rgb(118 84 181 / 0.9)"></span>Review <span class="dur">2m 41s</span></span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ 04 · PR ============ -->
+        <section class="lane" style="--bay-glow: rgb(22 139 98 / 0.13)" aria-labelledby="lane-pr">
+          <header class="lane-header" style="--lc:#168b62;--lt:#ffffff">
+            <div>
+              <span class="lane-no">04 / 06</span>
+              <h3 class="lane-title" id="lane-pr">PR</h3>
+            </div>
+            <span class="lane-count">2</span>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#168b62">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/677"><span class="num">#677</span> fix: clean worktree slot branch after abandon</a>
+              <div class="t-row">
+                <span class="chip chip-state">Watch status checks</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_5e77b2c0</span><span title="Copy">⧉</span></div>
+              </div>
+              <button class="lane-summary" type="button">▸ Build · 12m 10s</button>
+              <button class="lane-summary" type="button">▸ Review · 3m 02s</button>
+              <div class="t-steps">
+                <span class="step done"><span class="dot"></span>Commit <span class="dur">9s</span></span>
+                <span class="step done"><span class="dot"></span>Create PR <span class="dur">14s</span></span>
+                <span class="step live" style="border-color:rgb(22 139 98 / 0.65);color:#5fd6a8"><span class="dot" style="background:#168b62;box-shadow:0 0 8px rgb(22 139 98 / 0.9)"></span>Status checks <span class="dur">1m 20s</span></span>
+              </div>
+              <a class="pr-badge" href="https://github.com/berenddeboer/ready-for-agent/pull/678">PR #678</a>
+            </li>
+            <li class="ticket" style="--tc:#168b62">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/660"><span class="num">#660</span> Document the Harness operator runbook</a>
+              <div class="t-row">
+                <span class="chip chip-state">Decide PR merge</span>
+                <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>queued</span><span>·</span><span>poll cycle</span></div>
+              </div>
+              <button class="lane-summary" type="button">▸ Build · 9m 31s</button>
+              <button class="lane-summary" type="button">▸ Review · 1m 48s</button>
+              <div class="t-steps">
+                <span class="step done"><span class="dot"></span>Status checks <span class="dur">3m 12s</span></span>
+                <span class="step wait"><span class="dot"></span>Decide merge</span>
+              </div>
+              <a class="pr-badge" href="https://github.com/berenddeboer/ready-for-agent/pull/661">PR #661</a>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ 05 · Attention ============ -->
+        <section class="lane" style="--bay-glow: rgb(255 77 28 / 0.10)" aria-labelledby="lane-attention">
+          <header class="lane-header" style="--lc:#ff4d1c;--lt:#151515">
+            <div>
+              <span class="lane-no">05 / 06</span>
+              <h3 class="lane-title" id="lane-attention">Attention</h3>
+            </div>
+            <span class="lane-count">1</span>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#ff4d1c">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/655"><span class="num">#655</span> Session usage dialog overflows on narrow screens</a>
+              <div class="t-row">
+                <span class="chip chip-warn">Needs human</span>
+                <button class="icon-btn" type="button" title="Resume" aria-label="Resume">▶</button>
+              </div>
+              <div class="t-runtime">
+                <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_08cf41b9</span><span title="Copy">⧉</span></div>
+                <div class="t-meta">~/src/ready-for-agent/worktree6</div>
+              </div>
+              <p class="status-msg">Pre-commit failed: biome check — 2 errors in session-usage-dialog.tsx</p>
+              <button class="lane-summary" type="button">▸ Build · 7m 19s</button>
+              <div class="t-steps">
+                <span class="step fail"><span class="dot"></span>Pre-commit <span class="dur">21s</span></span>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ 06 · Merged ============ -->
+        <section class="lane" style="--bay-glow: rgb(255 255 255 / 0.035)" aria-labelledby="lane-merged">
+          <header class="lane-header machined" style="--lc:#151515;--lt:#ffffff">
+            <div>
+              <span class="lane-no">06 / 06</span>
+              <h3 class="lane-title" id="lane-merged">Merged</h3>
+            </div>
+            <span class="lane-count">2</span>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#4a4f57">
+              <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/648"><span class="num">#648</span> Add Queue discoverability copy to kanban docs</a>
+              <div class="t-merged">
+                <span>Started 2h ago</span>
+                <span>Elapsed 24m</span>
+              </div>
+              <a class="pr-badge" href="https://github.com/berenddeboer/ready-for-agent/pull/649">PR #649</a>
+            </li>
+            <li class="ticket" style="--tc:#4a4f57">
+              <p class="t-repo" title="berenddeboer/agentsview">berenddeboer/agentsview</p>
+              <a class="t-title" href="https://github.com/berenddeboer/agentsview/issues/97"><span class="num">#97</span> Persist project renames across full resync</a>
+              <div class="t-merged">
+                <span>Started 5h ago</span>
+                <span>Elapsed 1h 12m</span>
+              </div>
+              <a class="pr-badge" href="https://github.com/berenddeboer/agentsview/pull/98">PR #98</a>
+            </li>
+          </ul>
+          <p class="lane-empty">Lane keeps the last 24 h — older rows on Completed</p>
+        </section>
+
+      </section>
+    </section>
+  </main>
+
+  <p class="proto-note">
+    Prototype — wayfinder #690 · clanker direction A “night-shift console” · throwaway artifact · no build required
+  </p>
+
+</div>
+</body>
+</html>
