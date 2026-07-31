@@ -1,0 +1,886 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway, not for production.
+  Wayfinder ticket #698 ("Prototype: completed page in the chosen direction", map #689).
+
+  Plan: one full-page Harness Completed page (nav shell + archive list +
+  pagination) as a single standalone HTML file, in the blend chosen on
+  ticket #695: direction D ("Interchange") as the visual base, de-trained —
+  stark station white, saturated lane-color nameboards + roundel motif,
+  B's flush stamped-plate nav, plain language (no transit jargon, no
+  network-key footer), old-dashboard simplicity. Both themes specced from
+  a two-theme token layer; the theme toggle plate flips light/dark, and
+  ?theme=light|dark pins a theme for sharing.
+
+  Run: open this file in a browser (no build, no server needed).
+-->
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Completed page — chosen blend · Clanker Harness prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------------
+     Two-theme token layer — both themes from day one (per #695).
+     Lane colors are the fixed pipeline identity (unchanged):
+       Queue #ffd21c · Build #1976d2 · Review #7654b5
+       PR #168b62 · Attention #ff4d1c · Merged #151515
+     ------------------------------------------------------------------ */
+  :root {
+    --lane-queue: #ffd21c;
+    --lane-build: #1976d2;
+    --lane-review: #7654b5;
+    --lane-pr: #168b62;
+    --lane-attention: #ff4d1c;
+    --lane-merged: #151515;
+
+    --font-display: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  :root, [data-theme="light"] {
+    --paper: #ffffff;
+    --panel: #ffffff;
+    --ink: #151515;
+    --ink-dim: #4a4a4a;
+    --ink-faint: #8b8b8b;
+    --line-soft: rgb(21 21 21 / 0.30);
+    --line-ghost: rgb(21 21 21 / 0.12);
+    --signal: #ffd21c;
+
+    /* Masthead band (stays a dark supergraphic band in both themes) */
+    --mast-bg: #101314;
+    --mast-ink: #ffffff;
+    --mast-dim: #b9b9b9;
+    --mast-faint: #7c7c7c;
+    --mast-plate: #2b2f33;
+    --mast-plate-hover: #3a4046;
+    --mast-plate-ink: #d7dbd9;
+    --mast-plate-rivet: rgb(0 0 0 / 0.6);
+    --mast-plate-hi: rgb(255 255 255 / 0.14);
+    --mast-plate-active: #e8ece9;
+    --mast-plate-active-ink: #101314;
+    --mast-plate-active-rivet: rgb(16 19 18 / 0.5);
+
+    /* Stamped plates on paper (B's aluminium, flush-mounted) */
+    --plate: #dfe4e1;
+    --plate-hover: #cfd6d2;
+    --plate-ink: #23282b;
+    --plate-rivet: rgb(16 19 18 / 0.55);
+    --plate-hi: rgb(255 255 255 / 0.65);
+    --plate-lo: rgb(16 19 18 / 0.12);
+
+    /* Merged = black #151515. On light paper it needs no halo. */
+    --merged-halo: transparent;
+    --stamp-bg: #151515;
+    --stamp-ink: #ffffff;
+    --stamp-border: transparent;
+    --leg-done-bg: #151515;
+    --leg-done-ink: #ffffff;
+    --prbadge-bg: #151515;
+    --prbadge-ink: #ffffff;
+    --prbadge-border: transparent;
+  }
+
+  [data-theme="dark"] {
+    --paper: #15181b;
+    --panel: #1c2024;
+    --ink: #f2f3f1;
+    --ink-dim: #c6cac8;
+    --ink-faint: #7f8583;
+    --line-soft: rgb(242 243 241 / 0.32);
+    --line-ghost: rgb(242 243 241 / 0.14);
+    --signal: #ffd21c;
+
+    --mast-bg: #000000;
+    --mast-ink: #ffffff;
+    --mast-dim: #b9b9b9;
+    --mast-faint: #7c7c7c;
+    --mast-plate: #232629;
+    --mast-plate-hover: #32373b;
+    --mast-plate-ink: #d7dbd9;
+    --mast-plate-rivet: rgb(0 0 0 / 0.65);
+    --mast-plate-hi: rgb(255 255 255 / 0.12);
+    --mast-plate-active: #e8ece9;
+    --mast-plate-active-ink: #101314;
+    --mast-plate-active-rivet: rgb(16 19 18 / 0.5);
+
+    --plate: #2b2f33;
+    --plate-hover: #3a4046;
+    --plate-ink: #d7dbd9;
+    --plate-rivet: rgb(0 0 0 / 0.6);
+    --plate-hi: rgb(255 255 255 / 0.14);
+    --plate-lo: rgb(0 0 0 / 0.35);
+
+    /* Merged black vanishes on dark paper: white halo, like D's roundel. */
+    --merged-halo: rgb(242 243 241 / 0.85);
+    --stamp-bg: #151515;
+    --stamp-ink: #f2f3f1;
+    --stamp-border: var(--merged-halo);
+    --leg-done-bg: #e8ece9;
+    --leg-done-ink: #101314;
+    --prbadge-bg: #151515;
+    --prbadge-ink: #f2f3f1;
+    --prbadge-border: var(--merged-halo);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-width: 20rem;
+    min-height: 100vh;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--signal); color: #151515; }
+
+  a { color: inherit; }
+
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .mast :focus-visible { outline-color: var(--signal); }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* ============ Masthead — supergraphic band + plate nav ============ */
+
+  .mast {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.2rem 2.5rem;
+    padding: 1.5rem 2.2rem 1.35rem;
+    background: var(--mast-bg);
+    color: var(--mast-ink);
+  }
+
+  .brand-kicker {
+    margin: 0 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--mast-faint);
+  }
+  .brand-kicker b { color: var(--mast-dim); font-weight: 400; }
+
+  .brand h1 {
+    margin: 0;
+    font-size: clamp(2rem, 4.2vw, 3.1rem);
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: -0.015em;
+    text-transform: uppercase;
+  }
+  .brand h1 a { color: var(--mast-ink); text-decoration: none; }
+  .brand h1 a:hover { color: var(--signal); }
+
+  .brand-sub {
+    margin: 0.55rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--mast-dim);
+  }
+  .brand-sub .ok { color: var(--signal); }
+
+  /* Nav: B's stamped plates, flush-mounted on the band */
+  .nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .plate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 2px solid #000;
+    background-color: var(--mast-plate);
+    background-image:
+      radial-gradient(circle 1.6px at 7px 7px, var(--mast-plate-rivet) 1.6px, transparent 2.1px),
+      radial-gradient(circle 1.6px at calc(100% - 7px) 7px, var(--mast-plate-rivet) 1.6px, transparent 2.1px);
+    box-shadow: inset 0 1px 0 var(--mast-plate-hi), inset 0 -2px 0 rgb(0 0 0 / 0.3);
+    padding: 0.55rem 0.95rem;
+    color: var(--mast-plate-ink);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .plate:hover { background-color: var(--mast-plate-hover); color: var(--mast-ink); }
+  .plate[aria-current="page"] {
+    background-color: var(--mast-plate-active);
+    background-image:
+      radial-gradient(circle 1.6px at 7px 7px, var(--mast-plate-active-rivet) 1.6px, transparent 2.1px),
+      radial-gradient(circle 1.6px at calc(100% - 7px) 7px, var(--mast-plate-active-rivet) 1.6px, transparent 2.1px);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65), inset 0 -2px 0 rgb(16 19 18 / 0.12);
+    color: var(--mast-plate-active-ink);
+  }
+  .plate svg { width: 0.9rem; height: 0.9rem; }
+
+  /* Lane-colour ribbon under the masthead (visual motif, no jargon) */
+  .ribbon { display: flex; height: 0.4rem; }
+  .ribbon i { flex: 1; }
+
+  .page {
+    max-width: 80rem;
+    margin: 0 auto;
+    padding: 1.8rem 2.2rem 3rem;
+  }
+
+  /* ======================= Page header ============================= */
+
+  .pagehead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.8rem 2rem;
+    margin-bottom: 1.7rem;
+  }
+  .kicker-tag {
+    display: inline-block;
+    background: var(--signal);
+    color: #151515;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+  }
+  .pagehead h1 {
+    margin: 0.6rem 0 0;
+    font-size: clamp(1.7rem, 3.2vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    line-height: 0.95;
+  }
+  .lede {
+    margin: 0.6rem 0 0;
+    max-width: 44rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--ink-dim);
+  }
+  .pagehead-note {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  /* ============ Archive slab — end of the line (Merged stop) ======== */
+
+  .archive { margin-top: 0.5rem; }
+
+  /* Route line fragment with the Merged roundel riding it */
+  .archive-line {
+    position: relative;
+    height: 1.3rem;
+  }
+  .archive-line::before {
+    content: "";
+    position: absolute;
+    top: 0.55rem;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--ink);
+  }
+  .roundel {
+    position: absolute;
+    top: 0;
+    left: 2.2rem;
+    width: 2.1rem;
+    height: 2.1rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--lane-merged);
+    color: #ffffff;
+    border: 2px solid #ffffff;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+  }
+
+  /* Nameboard — the slab header in Merged black */
+  .nameboard {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.5rem 0.8rem 0.55rem;
+    background: var(--lane-merged);
+    color: #ffffff;
+    border: 2px solid var(--ink);
+  }
+  .nameboard h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .nb-sub {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.65);
+  }
+  .nb-count {
+    margin-left: auto;
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .archive-body {
+    border: 1.5px solid var(--ink);
+    border-top: 0;
+    background: var(--panel);
+    padding: 0.8rem;
+    display: grid;
+    gap: 0.6rem;
+    align-content: start;
+  }
+
+  /* Refresh-failed banner */
+  .banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 0.9rem;
+    border: 2px solid var(--ink);
+    padding: 0.5rem 0.7rem;
+  }
+  .banner-tag {
+    background: var(--lane-attention);
+    color: #151515;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.45rem;
+    white-space: nowrap;
+  }
+  .banner p {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+  }
+
+  /* ======================= Archive rows ============================ */
+
+  .row {
+    border: 1.5px solid var(--ink);
+    padding: 0.6rem 0.75rem 0.7rem 1rem;
+    display: grid;
+    gap: 0.38rem;
+  }
+  /* Complete: the 6px Merged line bar. In dark, a white halo hairline
+     keeps the black bar readable (same move as the roundel halo). */
+  .row--complete {
+    box-shadow: inset 6px 0 0 var(--lane-merged), inset 8px 0 0 var(--merged-halo);
+  }
+  /* Abandoned: never reached the end of the line — dashed, ghosted */
+  .row--abandoned {
+    border-style: dashed;
+    border-color: var(--ink-faint);
+  }
+
+  .row-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.3rem 0.8rem;
+  }
+  .repo {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .t {
+    margin: 0.15rem 0 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink);
+    text-decoration: none;
+    display: inline-block;
+  }
+  a.t:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--signal);
+  }
+  .t .num {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    font-weight: 400;
+    color: var(--ink-dim);
+  }
+  .row--abandoned .t { color: var(--ink-dim); }
+
+  .stamp {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 0.22rem 0.5rem;
+  }
+  .stamp--complete {
+    background: var(--stamp-bg);
+    color: var(--stamp-ink);
+    border: 1.5px solid var(--stamp-border);
+  }
+  .stamp--abandoned {
+    background: transparent;
+    color: var(--ink-dim);
+    border: 1.5px dashed var(--ink-faint);
+  }
+
+  .meta {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .meta .sess {
+    color: var(--ink-dim);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .meta .summary {
+    text-transform: none;
+    letter-spacing: 0.02em;
+    color: var(--ink-dim);
+  }
+
+  /* Journey legs — every step the item passed, all done (or failed) */
+  .row-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .leg {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
+    border: 1.5px solid var(--ink);
+    color: var(--ink-dim);
+    padding: 0.16rem 0.38rem;
+    white-space: nowrap;
+  }
+  .leg--done { background: var(--leg-done-bg); color: var(--leg-done-ink); border-color: var(--leg-done-bg); }
+  .leg--fail { background: var(--lane-attention); color: #151515; border-color: #151515; font-weight: 700; }
+  .leg--skip { border-style: dashed; color: var(--ink-faint); border-color: var(--line-soft); }
+
+  .prbadge {
+    margin-left: auto;
+    background: var(--prbadge-bg);
+    color: var(--prbadge-ink);
+    border: 1.5px solid var(--prbadge-border);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0.2rem 0.5rem;
+    text-decoration: none;
+  }
+  a.prbadge:hover { background: var(--lane-pr); color: #ffffff; border-color: var(--lane-pr); }
+  .nochange {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border: 1.5px dashed var(--line-soft);
+    padding: 0.2rem 0.45rem;
+  }
+
+  /* Empty state */
+  .archive-empty {
+    margin: 0;
+    padding: 2.6rem 0.5rem;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .sample-cap {
+    margin: 2.2rem 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ======================= Pagination ============================== */
+
+  .pager {
+    margin-top: 1.1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem 1.2rem;
+  }
+  .pager-note {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .pager-btns { display: flex; gap: 0.5rem; }
+  .plate-mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 2px solid var(--ink);
+    background-color: var(--plate);
+    background-image:
+      radial-gradient(circle 1.4px at 6px 6px, var(--plate-rivet) 1.4px, transparent 1.9px),
+      radial-gradient(circle 1.4px at calc(100% - 6px) 6px, var(--plate-rivet) 1.4px, transparent 1.9px);
+    box-shadow: inset 0 1px 0 var(--plate-hi), inset 0 -2px 0 var(--plate-lo);
+    padding: 0.42rem 0.8rem;
+    color: var(--plate-ink);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .plate-mini:hover { background-color: var(--plate-hover); }
+  .banner .plate-mini { margin-left: auto; }
+
+  .proto-note {
+    margin: 2.4rem 0 0;
+    padding-top: 0.9rem;
+    border-top: 2px solid var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ========================== Responsive =========================== */
+
+  @media (max-width: 900px) {
+    .mast { padding: 1.2rem 1.4rem 1.1rem; }
+    .page { padding: 1.3rem 1.4rem 2.4rem; }
+    .roundel { left: 1rem; }
+    .row { padding-left: 0.85rem; }
+    .pagehead-note { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================ Masthead ========================== -->
+<header class="mast">
+  <div class="brand">
+    <p class="brand-kicker">Ready for Agent · Operator board · <b>RFA v0.9.2</b></p>
+    <h1><a href="/">Clanker Harness</a></h1>
+    <p class="brand-sub"><span class="ok">All lanes live</span> — 3 building · 1 in review · 2 at merge</p>
+  </div>
+  <nav class="nav" aria-label="Primary">
+    <a class="plate" href="/">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-6h4v6"/></svg>
+      Home
+    </a>
+    <a class="plate" href="/repos">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7.5c0-1.5 3.6-2.5 8-2.5s8 1 8 2.5v9c0 1.5-3.6 2.5-8 2.5s-8-1-8-2.5v-9Z"/><path d="M4 7.5c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5"/><path d="M4 12c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5"/></svg>
+      Repos
+    </a>
+    <a class="plate" href="/completed" aria-current="page">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+      Completed
+    </a>
+    <button class="plate" type="button">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+      Settings
+    </button>
+    <button class="plate" type="button" id="theme-toggle" aria-label="Switch colour theme">
+      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
+      <span id="theme-toggle-label">Dark</span>
+    </button>
+  </nav>
+</header>
+<div class="ribbon" aria-hidden="true">
+  <i style="background: var(--lane-queue)"></i>
+  <i style="background: var(--lane-build)"></i>
+  <i style="background: var(--lane-review)"></i>
+  <i style="background: var(--lane-pr)"></i>
+  <i style="background: var(--lane-attention)"></i>
+  <i style="background: var(--lane-merged)"></i>
+</div>
+
+<div class="page">
+
+  <!-- ========================= Page header ========================== -->
+  <header class="pagehead">
+    <div>
+      <span class="kicker-tag">History</span>
+      <h1>Completed work items</h1>
+      <p class="lede">Complete and abandoned work across every repository, newest first. The board's Completed tab shows the last rolling window; this page is the full archive.</p>
+    </div>
+    <p class="pagehead-note">Newest first · All repositories</p>
+  </header>
+
+  <!-- ========================= Archive slab ========================= -->
+  <section class="archive" aria-label="Completed work items archive">
+    <div class="archive-line" aria-hidden="true">
+      <span class="roundel">06</span>
+    </div>
+    <header class="nameboard">
+      <h2 id="archive-h">Full archive</h2>
+      <span class="nb-sub">Complete + abandoned</span>
+      <span class="nb-count">178<span class="sr-only"> completed work items</span></span>
+    </header>
+
+    <div class="archive-body">
+
+      <div class="banner" role="status">
+        <span class="banner-tag">Refresh failed</span>
+        <p>Could not refresh completed work items. Showing the last loaded page.</p>
+        <button class="plate-mini" type="button">Retry</button>
+      </div>
+
+      <ul class="rows" style="list-style:none;margin:0;padding:0;display:grid;gap:0.6rem" aria-label="Completed work items">
+
+        <li class="row row--complete">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/697"><span class="num">#697</span> · E2E first-run settings save to blank slate</a>
+            </div>
+            <span class="stamp stamp--complete">Complete</span>
+          </div>
+          <p class="meta">OpenCode — <span class="sess" title="9a2c55e8b1d0">9a2c…55e8</span> ⧉ — WT worktree3 · Merged 38 min ago · Elapsed 23 m</p>
+          <div class="row-foot">
+            <span class="leg leg--done">✓ BUILD · 14M</span>
+            <span class="leg leg--done">✓ REVIEW · 6M</span>
+            <span class="leg leg--done">✓ CHECKS · 2M</span>
+            <span class="leg leg--done">✓ MERGE · 1M</span>
+            <a class="prbadge" href="https://github.com/berenddeboer/ready-for-agent/pull/700" aria-label="Open pull request #700">PR #700 ↗</a>
+          </div>
+        </li>
+
+        <li class="row row--complete">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/684"><span class="num">#684</span> · Triage label sync on reopen</a>
+            </div>
+            <span class="stamp stamp--complete">Complete</span>
+          </div>
+          <p class="meta">OpenCode — <span class="sess" title="f5d890b3c2e1">f5d8…90b3</span> ⧉ — WT worktree5 · Merged 2 h ago · Elapsed 31 m</p>
+          <div class="row-foot">
+            <span class="leg leg--done">✓ BUILD · 11M</span>
+            <span class="leg leg--done">✓ REVIEW · 14M</span>
+            <span class="leg leg--done">✓ CHECKS · 4M</span>
+            <span class="leg leg--done">✓ MERGE · 2M</span>
+            <a class="prbadge" href="https://github.com/berenddeboer/ready-for-agent/pull/687" aria-label="Open pull request #687">PR #687 ↗</a>
+          </div>
+        </li>
+
+        <li class="row row--complete">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="acme/payments-api">acme/payments-api</p>
+              <a class="t" href="https://github.com/acme/payments-api/issues/501"><span class="num">#501</span> · Void capture on duplicate authorisation</a>
+            </div>
+            <span class="stamp stamp--complete">Complete</span>
+          </div>
+          <p class="meta">OpenCode — <span class="sess" title="e07b31c9a4d2">e07b…31c9</span> ⧉ — WT worktree2 · Merged yesterday · Elapsed 41 m</p>
+          <div class="row-foot">
+            <span class="leg leg--done">✓ BUILD · 19M</span>
+            <span class="leg leg--done">✓ REVIEW · 9M</span>
+            <span class="leg leg--done">✓ CHECKS · 6M</span>
+            <span class="leg leg--done">✓ MERGE · 1M</span>
+            <a class="prbadge" href="https://github.com/acme/payments-api/pull/506" aria-label="Open pull request #506">PR #506 ↗</a>
+          </div>
+        </li>
+
+        <li class="row row--complete">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/671"><span class="num">#671</span> · Audit OpenCode session tokens per cohort</a>
+            </div>
+            <span class="stamp stamp--complete">Complete</span>
+          </div>
+          <p class="meta">OpenCode — <span class="sess" title="b81d2f07e3a9">b81d…2f07</span> ⧉ — WT worktree4 · Finished yesterday · Elapsed 12 m</p>
+          <p class="meta"><span class="summary">“Audit already covered by the token-report skill — no code change required.”</span></p>
+          <div class="row-foot">
+            <span class="leg leg--done">✓ BUILD · 10M</span>
+            <span class="leg leg--skip">○ NO PR NEEDED</span>
+            <span class="nochange">No change</span>
+          </div>
+        </li>
+
+        <li class="row row--abandoned">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="acme/web-storefront">acme/web-storefront</p>
+              <a class="t" href="https://github.com/acme/web-storefront/issues/208"><span class="num">#208</span> · Rebuild checkout totals on tax change</a>
+            </div>
+            <span class="stamp stamp--abandoned">Abandoned</span>
+          </div>
+          <p class="meta">OpenCode — <span class="sess" title="2c6f14d7b8c5">2c6f…14d7</span> ⧉ · Withdrawn 2 d ago · Review failed twice</p>
+          <div class="row-foot">
+            <span class="leg leg--done">✓ BUILD · 11M</span>
+            <span class="leg leg--fail">✕ REVIEW · 3M</span>
+            <span class="leg leg--skip">○ PR</span>
+          </div>
+        </li>
+
+        <li class="row row--abandoned">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+              <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/659"><span class="num">#659</span> · Session picker sort order</a>
+            </div>
+            <span class="stamp stamp--abandoned">Abandoned</span>
+          </div>
+          <p class="meta">OpenCode — No session · Withdrawn 3 d ago · Never left the queue</p>
+          <div class="row-foot">
+            <span class="leg leg--skip">○ BUILD</span>
+            <span class="leg leg--skip">○ REVIEW</span>
+            <span class="leg leg--skip">○ PR</span>
+          </div>
+        </li>
+
+        <li class="row row--complete">
+          <div class="row-top">
+            <div style="min-width:0">
+              <p class="repo" title="acme/payments-api">acme/payments-api</p>
+              <a class="t" href="https://github.com/acme/payments-api/issues/519"><span class="num">#519</span> · Add idempotency keys to POST /charges</a>
+            </div>
+            <span class="stamp stamp--complete">Complete</span>
+          </div>
+          <p class="meta">OpenCode — <span class="sess" title="c4e077a1d6b0">c4e0…77a1</span> ⧉ — WT worktree1 · Merged 3 d ago · Elapsed 52 m</p>
+          <div class="row-foot">
+            <span class="leg leg--done">✓ BUILD · 34M</span>
+            <span class="leg leg--done">✓ REVIEW · 11M</span>
+            <span class="leg leg--done">✓ CHECKS · 5M</span>
+            <span class="leg leg--done">✓ MERGE · 2M</span>
+            <a class="prbadge" href="https://github.com/acme/payments-api/pull/523" aria-label="Open pull request #523">PR #523 ↗</a>
+          </div>
+        </li>
+
+      </ul>
+    </div>
+  </section>
+
+  <!-- ========================= Pagination =========================== -->
+  <nav class="pager" aria-label="Completed work items pagination">
+    <p class="pager-note" aria-live="polite">Page 2 of 9 · 21–40 of 178</p>
+    <div class="pager-btns">
+      <button class="plate-mini" type="button" aria-label="Previous page of completed work items">← Prev</button>
+      <button class="plate-mini" type="button" aria-label="Next page of completed work items">Next →</button>
+    </div>
+  </nav>
+
+  <!-- ===================== Sample: empty state ====================== -->
+  <p class="sample-cap">◌ Sample — empty archive</p>
+  <section class="archive" aria-label="Empty archive sample">
+    <header class="nameboard">
+      <h2>Full archive</h2>
+      <span class="nb-sub">Complete + abandoned</span>
+      <span class="nb-count">0</span>
+    </header>
+    <div class="archive-body">
+      <p class="archive-empty">No completed work items yet</p>
+    </div>
+  </section>
+
+  <p class="proto-note">Prototype — wayfinder #698 · completed page in the chosen blend · throwaway · not for production</p>
+
+</div>
+
+<script>
+  // Theme: ?theme=light|dark wins, else prefers-color-scheme. No persistence.
+  (() => {
+    const root = document.documentElement;
+    const btn = document.getElementById("theme-toggle");
+    const label = document.getElementById("theme-toggle-label");
+    const apply = (theme) => {
+      root.setAttribute("data-theme", theme);
+      label.textContent = theme === "dark" ? "Light" : "Dark";
+      btn.setAttribute("aria-pressed", theme === "dark" ? "true" : "false");
+    };
+    const pinned = new URLSearchParams(location.search).get("theme");
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    apply(pinned === "dark" || pinned === "light" ? pinned : (mql.matches ? "dark" : "light"));
+    btn.addEventListener("click", () => {
+      apply(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    });
+    if (!pinned && mql.addEventListener) {
+      mql.addEventListener("change", (e) => { apply(e.matches ? "dark" : "light"); });
+    }
+  })();
+</script>
+
+</body>
+</html>
