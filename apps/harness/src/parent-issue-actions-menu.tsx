@@ -1,5 +1,6 @@
 import { type MouseEvent, type ReactNode, useEffect, useState } from "react"
 import { evaluateLeafIssue } from "@ready-for-agent/lifecycle-model"
+import { Banner } from "./banner.js"
 
 export type ParentIssueActionsMenuProps = {
   readonly parentIssueNumber: number
@@ -42,61 +43,63 @@ export function ParentIssueActionsMenu({
     }
   }, [menuId, menuOpen])
 
+  // Kebab only — parent-group failures are rendered in-flow under the summary
+  // (see ParentIssueGroup). errorMessage remains for isolated unit tests of
+  // the presentational shell.
   return (
-    <span className="relative" data-parent-issue-menu={menuId}>
-      <button
-        type="button"
-        className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-        aria-label={`Actions for parent issue #${parentIssueNumber}`}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        disabled={pending}
-        onClick={(event: MouseEvent<HTMLButtonElement>) => {
-          // Keep parent <details> summary from toggling when opening the kebab.
-          event.stopPropagation()
-          setMenuOpen((open) => !open)
-        }}
-      >
-        <svg
-          aria-hidden="true"
-          className="size-4"
-          viewBox="0 0 24 24"
-          fill="currentColor"
+    <>
+      <span className="relative" data-parent-issue-menu={menuId}>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={`Actions for parent issue #${parentIssueNumber}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          disabled={pending}
+          onClick={(event: MouseEvent<HTMLButtonElement>) => {
+            // Keep parent <details> summary from toggling when opening the kebab.
+            event.stopPropagation()
+            setMenuOpen((open) => !open)
+          }}
         >
-          <circle cx="12" cy="5" r="1.75" />
-          <circle cx="12" cy="12" r="1.75" />
-          <circle cx="12" cy="19" r="1.75" />
-        </svg>
-      </button>
-      {menuOpen && (
-        <div
-          role="menu"
-          className="absolute top-full right-0 z-10 mt-1 min-w-56 border border-rule-2 bg-panel py-1 font-sans normal-case tracking-normal shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
-            disabled={pending}
-            onClick={(event: MouseEvent<HTMLButtonElement>) => {
-              event.stopPropagation()
-              setMenuOpen(false)
-              onImplementAllWithAutoMerge()
-            }}
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="1.75" />
+            <circle cx="12" cy="12" r="1.75" />
+            <circle cx="12" cy="19" r="1.75" />
+          </svg>
+        </button>
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute top-full right-0 z-10 mt-1 min-w-56 border-2 border-ink bg-panel py-1"
           >
-            {pending ? "Starting..." : "Implement all with auto-merge"}
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              role="menuitem"
+              className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
+              disabled={pending}
+              onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                event.stopPropagation()
+                setMenuOpen(false)
+                onImplementAllWithAutoMerge()
+              }}
+            >
+              {pending ? "Starting..." : "Implement all with auto-merge"}
+            </button>
+          </div>
+        )}
+      </span>
       {errorMessage !== null && (
-        <p
-          className="absolute top-full right-0 z-10 mt-1 w-56 border border-rule-2 bg-panel px-2 py-1.5 font-sans text-xs font-normal text-oxblood-deep normal-case tracking-normal"
+        <Banner
+          className="banner--compact parent-issue-error"
+          tone="alarm"
+          tag="Error"
           role="alert"
         >
           {errorMessage}
-        </p>
+        </Banner>
       )}
-    </span>
+    </>
   )
 }
 

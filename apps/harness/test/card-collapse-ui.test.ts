@@ -42,6 +42,6 @@ describe("collapsible repository cards", () => {
     expect(source).toContain("aria-controls={controlsId}")
     expect(source).toContain("Expand ")
     expect(source).toContain("Collapse ")
-    expect(source).toContain("focus-visible:outline-2")
+    expect(source).toContain("icon-btn")
   })
 })

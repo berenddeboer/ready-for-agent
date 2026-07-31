@@ -975,10 +975,7 @@ export function RepositoryCards() {
   return (
     <>
       {warning}
-      <section
-        className="grid grid-cols-1 gap-12 sm:gap-16"
-        aria-label="Configured repositories"
-      >
+      <section className="repo-cards" aria-label="Configured repositories">
         {repositories.map((repository) => (
           <RepositoryCard
             issuesChangeCount={issuesChangeCounts[repository.id] ?? 0}
@@ -987,7 +984,7 @@ export function RepositoryCards() {
           />
         ))}
       </section>
-      <div className="mt-12 sm:mt-16">
+      <div className="mt-10 sm:mt-12">
         <AddRepositoryGuidance command={addRepositoryCommand} />
       </div>
     </>
@@ -1159,23 +1156,25 @@ function AddRepositoryGuidance({
   }
 
   return (
-    <section
-      className="border border-dashed border-rule-2 bg-panel px-6 py-12 text-center sm:px-10"
-      aria-label="Add a repository"
-    >
+    <section className="blank-slate" aria-label="Add a repository">
       {heading !== undefined ? (
-        <h2 className="m-0 font-serif text-2xl font-semibold text-ink">
-          {heading}
-        </h2>
+        <>
+          <span className="kicker-tag">Setup</span>
+          <h2 className="blank-slate-title">{heading}</h2>
+        </>
       ) : null}
       <form
-        className={`mx-auto flex w-full max-w-xl flex-col gap-3 ${heading !== undefined ? "mt-6" : "mt-0"}`}
+        className={
+          heading !== undefined
+            ? "blank-slate-form"
+            : "blank-slate-form blank-slate-form--flush"
+        }
         onSubmit={onSubmit}
       >
         <label className="sr-only" htmlFor="add-repository-path">
           Local repository path
         </label>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+        <div className="blank-slate-path-row">
           <input
             id="add-repository-path"
             type="text"
@@ -1191,24 +1190,20 @@ function AddRepositoryGuidance({
             autoComplete="off"
             spellCheck={false}
             disabled={busy}
-            className="min-w-0 flex-1 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2 placeholder:text-ink-faint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:opacity-60"
+            className="blank-slate-input"
           />
-          <div className="flex shrink-0 gap-2">
+          <div className="blank-slate-actions">
             {directoryPickerAvailable ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => pickDirectory.mutate()}
-                className="border border-rule-2 bg-panel px-3 py-2 text-sm font-semibold text-ink-2 transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+                className="plate-mini"
               >
                 {pickDirectory.isPending ? "Browsing…" : "Browse…"}
               </button>
             ) : null}
-            <button
-              type="submit"
-              disabled={busy}
-              className="bg-oxblood px-3 py-2 text-sm font-semibold tracking-wide text-on-solid uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
-            >
+            <button type="submit" disabled={busy} className="plate-primary">
               {addLocalRepository.isPending
                 ? "Adding…"
                 : inspectLocalRepository.isPending
@@ -1220,14 +1215,11 @@ function AddRepositoryGuidance({
           </div>
         </div>
         {inspection !== null ? (
-          <fieldset className="grid gap-3 border border-rule p-4 text-left">
-            <legend className="px-1 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-              Confirm forge identity
-            </legend>
-            <label className="grid gap-1 text-sm font-semibold text-ink-2">
+          <fieldset className="blank-slate-fieldset">
+            <legend>Confirm forge identity</legend>
+            <label className="blank-slate-field">
               Forge
               <select
-                className="border border-rule-2 bg-paper px-3 py-2 font-normal"
                 value={inspection.forge}
                 onChange={(event) =>
                   setInspection({
@@ -1240,10 +1232,9 @@ function AddRepositoryGuidance({
                 <option value="gitlab">GitLab</option>
               </select>
             </label>
-            <label className="grid gap-1 text-sm font-semibold text-ink-2">
+            <label className="blank-slate-field">
               Forge host
               <input
-                className="border border-rule-2 bg-paper px-3 py-2 font-mono font-normal"
                 required
                 value={inspection.forgeHost}
                 onChange={(event) =>
@@ -1254,10 +1245,9 @@ function AddRepositoryGuidance({
                 }
               />
             </label>
-            <label className="grid gap-1 text-sm font-semibold text-ink-2">
+            <label className="blank-slate-field">
               Project path
               <input
-                className="border border-rule-2 bg-paper px-3 py-2 font-mono font-normal"
                 required
                 value={inspection.projectPath}
                 onChange={(event) =>
@@ -1268,27 +1258,29 @@ function AddRepositoryGuidance({
                 }
               />
             </label>
-            <p className="m-0 text-xs text-ink-faint">
+            <p className="blank-slate-hint">
               The project is verified against this forge before it is saved.
             </p>
           </fieldset>
         ) : null}
         {errorMessage !== null ? (
-          <p className="m-0 text-left text-sm text-oxblood-deep" role="alert">
+          <Banner
+            className="banner--compact w-full"
+            tone="alarm"
+            tag="Error"
+            role="alert"
+          >
             {errorMessage}
-          </p>
+          </Banner>
         ) : null}
       </form>
-      <p
-        className="mt-8 mb-0 text-center text-xs tracking-[0.18em] text-ink-faint uppercase"
-        aria-hidden="true"
-      >
-        --- or ---
-      </p>
-      <p className="mt-6 text-sm text-ink-soft">
+      <div className="blank-slate-divider" aria-hidden="true">
+        <span>or</span>
+      </div>
+      <p className="blank-slate-cli">
         Add a local Git repository with the operator binary:
       </p>
-      <code className="mt-4 inline-block max-w-full overflow-x-auto border border-rule-2 bg-paper px-3 py-2 font-mono text-sm text-ink-2">
+      <code className="guidance-code max-w-full overflow-x-auto">
         {command}
       </code>
     </section>
@@ -1956,9 +1948,13 @@ function RepositoryCard({
   const pauseLabel = repository.paused
     ? "Unpause repository"
     : "Pause repository"
-  const pauseButtonClass = repository.paused
-    ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
-    : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
+  const pauseButtonClassName = [
+    "icon-btn",
+    pauseFailed ? "icon-btn--armed" : null,
+    !pauseFailed && repository.paused ? "icon-btn--paused" : null,
+  ]
+    .filter((part): part is string => part != null)
+    .join(" ")
   const repositoryLabel = `${repository.projectPath}`
   // Dedicated count projection: loading/last-known must not block the card.
   const {
@@ -1982,19 +1978,17 @@ function RepositoryCard({
   const repositoryBodyId = `repository-card-body-${repository.id}`
 
   return (
-    <article className="relative min-w-0 border-t-2 border-ink-soft pt-7 first:border-t-0 first:pt-0 sm:pt-8">
-      <div
-        className={`flex flex-wrap items-start justify-between gap-x-4 gap-y-2 ${repositoryCollapsed ? "" : "mb-5"}`}
-      >
-        <h2 className="m-0 flex min-w-0 max-w-full items-baseline gap-x-2 font-serif text-2xl font-semibold tracking-[-0.012em]">
+    <article className="repo-card">
+      <div className="repo-card-head">
+        <h2 className="repo-card-title">
           <a
-            className="min-w-0 truncate text-ink hover:text-oxblood hover:underline"
+            className="repo-card-link"
             href={`https://${repository.forgeHost}/${repository.projectPath}`}
           >
             {repositoryLabel}
           </a>
           <span
-            className="shrink-0 font-mono text-sm font-semibold tracking-normal text-ink-faint tabular-nums"
+            className="repo-card-pr-count"
             title={pullRequestCountLabel}
             aria-busy={pullRequestCountLoading ? true : undefined}
           >
@@ -2002,7 +1996,7 @@ function RepositoryCard({
             <span aria-hidden="true">{pullRequestCountDisplay}</span>
           </span>
         </h2>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="repo-card-controls">
           <CardCollapseToggle
             collapsed={repositoryCollapsed}
             onToggle={toggleRepositoryCollapsed}
@@ -2011,7 +2005,7 @@ function RepositoryCard({
           />
           <button
             type="button"
-            className={`inline-flex size-8 items-center justify-center border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${pauseFailed ? "border-oxblood text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood" : pauseButtonClass}`}
+            className={pauseButtonClassName}
             disabled={pausePending}
             onClick={() =>
               repository.paused
@@ -2028,7 +2022,7 @@ function RepositoryCard({
             {pausePending ? (
               <svg
                 aria-hidden="true"
-                className="size-4 animate-spin motion-reduce:animate-none"
+                className="animate-spin motion-reduce:animate-none"
                 viewBox="0 0 24 24"
                 fill="none"
               >
@@ -2049,21 +2043,11 @@ function RepositoryCard({
                 />
               </svg>
             ) : repository.paused ? (
-              <svg
-                aria-hidden="true"
-                className="size-4"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                 <path d="m8 5 11 7-11 7V5Z" />
               </svg>
             ) : (
-              <svg
-                aria-hidden="true"
-                className="size-4"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                 <rect x="6" y="5" width="4" height="14" rx="1" />
                 <rect x="14" y="5" width="4" height="14" rx="1" />
               </svg>
@@ -2072,18 +2056,13 @@ function RepositoryCard({
           <span className="relative" data-repo-menu={repository.id}>
             <button
               type="button"
-              className="inline-flex size-8 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+              className="icon-btn"
               aria-label={`Actions for ${repository.projectPath}`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
             >
-              <svg
-                aria-hidden="true"
-                className="size-4"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-              >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                 <circle cx="12" cy="5" r="1.75" />
                 <circle cx="12" cy="12" r="1.75" />
                 <circle cx="12" cy="19" r="1.75" />
@@ -2092,12 +2071,12 @@ function RepositoryCard({
             {menuOpen && (
               <div
                 role="menu"
-                className="absolute top-full right-0 z-10 mt-1 min-w-40 border border-rule-2 bg-panel py-1 shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
+                className="absolute top-full right-0 z-10 mt-1 min-w-40 border-2 border-ink bg-panel py-1"
               >
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                  className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
                   onClick={() => {
                     setMenuOpen(false)
                     openSettings()
@@ -2105,11 +2084,11 @@ function RepositoryCard({
                 >
                   Settings
                 </button>
-                <hr className="my-1 border-t border-rule" />
+                <hr className="my-1 border-t border-[var(--line-ghost)]" />
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-2 text-left text-sm font-medium text-oxblood hover:bg-oxblood-wash disabled:cursor-wait disabled:opacity-50"
+                  className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink uppercase hover:bg-[var(--lane-attention)] hover:text-[#151515] disabled:cursor-wait disabled:opacity-50"
                   disabled={removeRepository.isPending}
                   onClick={() => {
                     setMenuOpen(false)
@@ -2538,64 +2517,47 @@ function RepositoryCard({
       </dialog>
       {!repositoryCollapsed && (
         <div id={repositoryBodyId}>
-          <dl className="m-0 grid gap-x-8 gap-y-1.5 border-y border-rule py-3 sm:grid-cols-2">
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Path:
-              </dt>
-              <dd
-                className="m-0 min-w-0 truncate font-mono text-ink-2"
-                title={repository.localPath}
-              >
-                {repository.localPath}
-              </dd>
+          <dl className="repo-meta">
+            <div className="repo-meta-row">
+              <dt>Path</dt>
+              <dd title={repository.localPath}>{repository.localPath}</dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Checkout:
-              </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
-                {repository.isBare ? "Bare repository" : "Working tree"}
-              </dd>
+            <div className="repo-meta-row">
+              <dt>Checkout</dt>
+              <dd>{repository.isBare ? "Bare repository" : "Working tree"}</dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Agent Backend:
-              </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
+            <div className="repo-meta-row">
+              <dt>Agent Backend</dt>
+              <dd>
                 {repository.selectedAgentBackend === null
                   ? `Harness default (${repository.effectiveAgentBackend})`
                   : repository.effectiveAgentBackend}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Build model:
-              </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
+            <div className="repo-meta-row">
+              <dt>Build model</dt>
+              <dd>
                 {repository.defaultModel ??
                   (repository.selectedAgentBackend === null
-                    ? `Default (${
+                    ? `Harness default (${
                         config.data?.defaultModel ?? "not configured"
                       })`
                     : "Harness default")}
                 {" · "}
                 {repository.defaultThinkingLevel ??
                   (repository.selectedAgentBackend === null
-                    ? `Default (${
+                    ? `Harness default (${
                         config.data?.defaultThinkingLevel ?? "not configured"
                       })`
                     : "Harness default")}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Review model:
-              </dt>
-              <dd className="m-0 min-w-0 truncate font-mono text-ink-2">
+            <div className="repo-meta-row">
+              <dt>Review model</dt>
+              <dd>
                 {repository.reviewModel ??
                   (repository.selectedAgentBackend === null
-                    ? `Default (${
+                    ? `Harness default (${
                         config.data?.reviewModel ??
                         `Build (${
                           repository.defaultModel ??
@@ -2607,7 +2569,7 @@ function RepositoryCard({
                 {" · "}
                 {repository.reviewThinkingLevel ??
                   (repository.selectedAgentBackend === null
-                    ? `Default (${
+                    ? `Harness default (${
                         config.data?.reviewThinkingLevel ??
                         `Build (${
                           repository.defaultThinkingLevel ??
@@ -2618,27 +2580,19 @@ function RepositoryCard({
                     : "Harness default")}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Auto-merge:
-              </dt>
-              <dd className="m-0 font-mono text-ink-2">
-                {repository.autoMerge ? "Enabled" : "Disabled"}
-              </dd>
+            <div className="repo-meta-row">
+              <dt>Auto-merge</dt>
+              <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Include all Issue Authors:
-              </dt>
-              <dd className="m-0 font-mono text-ink-2">
+            <div className="repo-meta-row">
+              <dt>Include all Issue Authors</dt>
+              <dd>
                 {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
               </dd>
             </div>
-            <div className="flex min-w-0 items-baseline gap-1.5 text-xs">
-              <dt className="shrink-0 font-mono font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                Wait for ready checks:
-              </dt>
-              <dd className="m-0 font-mono text-ink-2">
+            <div className="repo-meta-row">
+              <dt>Wait for ready checks</dt>
+              <dd>
                 {repository.waitForReadyForReviewChecks
                   ? "Enabled"
                   : "Disabled"}
@@ -2654,17 +2608,19 @@ function RepositoryCard({
                 role={addGitHubToken.isError ? "alert" : "status"}
                 action={
                   githubTokenCreated ? (
-                    <BannerActionButton
+                    <button
+                      type="button"
+                      className="plate-primary"
                       disabled={addGitHubToken.isPending}
                       onClick={() => addGitHubToken.mutate()}
                     >
                       {addGitHubToken.isPending
                         ? "Waiting for Keymaxxer"
                         : "Store in Keymaxxer"}
-                    </BannerActionButton>
+                    </button>
                   ) : (
                     <a
-                      className="plate-mini"
+                      className="plate-primary"
                       href={repository.credential.githubTokenCreationUrl}
                       onClick={() => setGithubTokenCreated(true)}
                       rel="noreferrer"
@@ -2679,7 +2635,7 @@ function RepositoryCard({
                 {githubTokenCreated ? (
                   <p className="m-0 mt-1">
                     Store the generated token as{" "}
-                    <code className="font-bold">
+                    <code className="guidance-code">
                       {repository.credential.githubTokenSecretName}
                     </code>{" "}
                     in Keymaxxer. Already-created tokens are not upgraded
@@ -2690,7 +2646,7 @@ function RepositoryCard({
                   <p className="m-0 mt-1">
                     Create a fine-grained token, choose{" "}
                     <strong>Only select repositories</strong>, select{" "}
-                    <code className="font-bold">
+                    <code className="guidance-code">
                       {repository.projectPath.split("/").at(-1)}
                     </code>
                     , and allow <strong>Actions: Read and write</strong>{" "}
@@ -2715,17 +2671,19 @@ function RepositoryCard({
                 role={addGitLabToken.isError ? "alert" : "status"}
                 action={
                   gitlabTokenCreated ? (
-                    <BannerActionButton
+                    <button
+                      type="button"
+                      className="plate-primary"
                       disabled={addGitLabToken.isPending}
                       onClick={() => addGitLabToken.mutate()}
                     >
                       {addGitLabToken.isPending
                         ? "Waiting for Keymaxxer"
                         : "Store in Keymaxxer"}
-                    </BannerActionButton>
+                    </button>
                   ) : (
                     <a
-                      className="plate-mini"
+                      className="plate-primary"
                       href={repository.credential.githubTokenCreationUrl}
                       onClick={() => setGitlabTokenCreated(true)}
                       rel="noreferrer"
@@ -2743,12 +2701,12 @@ function RepositoryCard({
                   {gitlabTokenCreated ? (
                     <>
                       Store the generated token as{" "}
-                      <code className="font-bold">
+                      <code className="guidance-code">
                         {repository.credential.githubTokenSecretName}
                       </code>{" "}
                       in Keymaxxer when available (provider{" "}
-                      <code className="font-bold">gitlab</code>, account{" "}
-                      <code className="font-bold">
+                      <code className="guidance-code">gitlab</code>, account{" "}
+                      <code className="guidance-code">
                         {repository.forgeHost}/{repository.projectPath}
                       </code>
                       ). Or set ambient auth without Keymaxxer:{" "}
@@ -2757,15 +2715,15 @@ function RepositoryCard({
                     <>
                       Create a personal access token on this GitLab instance
                       with API access for{" "}
-                      <code className="font-bold">
+                      <code className="guidance-code">
                         {repository.projectPath}
                       </code>
                       . Store it in Keymaxxer when available, or set ambient
                       auth:{" "}
                     </>
                   )}
-                  <code className="font-bold">GITLAB_TOKEN</code> or{" "}
-                  <code className="font-bold">
+                  <code className="guidance-code">GITLAB_TOKEN</code> or{" "}
+                  <code className="guidance-code">
                     glab auth login --hostname {repository.forgeHost}
                   </code>{" "}
                   before starting the Harness.
@@ -2773,21 +2731,19 @@ function RepositoryCard({
                 {addGitLabToken.isError ? (
                   <p className="m-0 mt-1">
                     Keymaxxer setup was cancelled or failed. Use ambient{" "}
-                    <code className="font-bold">GITLAB_TOKEN</code> or{" "}
-                    <code className="font-bold">glab auth login</code> and
+                    <code className="guidance-code">GITLAB_TOKEN</code> or{" "}
+                    <code className="guidance-code">glab auth login</code> and
                     restart the Harness if Keymaxxer is unavailable.
                   </p>
                 ) : null}
               </Banner>
             )}
-          <div className="mt-5">
-            <div className="mb-2 flex items-baseline justify-between gap-3">
-              <h3 className="m-0 font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
-                Relevant issues
-              </h3>
+          <div className="repo-issues">
+            <div className="repo-issues-head">
+              <h3 className="repo-issues-kicker">Relevant issues</h3>
               <button
                 type="button"
-                className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+                className="icon-btn"
                 disabled={refreshingIssues || !repository.credential.configured}
                 onClick={() => refreshIssues.mutate()}
                 aria-label={
@@ -2803,7 +2759,11 @@ function RepositoryCard({
               >
                 <svg
                   aria-hidden="true"
-                  className={`size-4 ${refreshingIssues ? "animate-spin motion-reduce:animate-none" : ""}`}
+                  className={
+                    refreshingIssues
+                      ? "animate-spin motion-reduce:animate-none"
+                      : undefined
+                  }
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -2817,14 +2777,17 @@ function RepositoryCard({
               </button>
             </div>
             {refreshIssues.isError && (
-              <p className="mb-2 text-sm text-oxblood-deep" role="alert">
+              <Banner
+                className="banner--compact mb-2"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 Failed to refresh issues.
-              </p>
+              </Banner>
             )}
             {repository.issuesReconciledAt === null ? (
-              <p className="m-0 font-serif text-sm italic text-ink-soft">
-                Not refreshed yet.
-              </p>
+              <p className="repo-issues-empty">Not refreshed yet.</p>
             ) : (
               <Suspense fallback={<RepositoryIssuesSkeleton />}>
                 <RepositoryIssues
@@ -2836,9 +2799,14 @@ function RepositoryCard({
             )}
           </div>
           {removeRepository.isError && (
-            <p className="mt-3 mb-0 text-sm text-oxblood-deep" role="alert">
+            <Banner
+              className="banner--compact mt-3"
+              tone="alarm"
+              tag="Error"
+              role="alert"
+            >
               Could not remove repository. Please try again.
-            </p>
+            </Banner>
           )}
         </div>
       )}
@@ -2859,7 +2827,7 @@ function RepositoryIssues({
 
   if (issues.length === 0) {
     return (
-      <p className="m-0 font-serif text-sm italic text-ink-soft">
+      <p className="repo-issues-empty">
         No issues found this harness can work on.
       </p>
     )
@@ -2874,7 +2842,7 @@ function RepositoryIssues({
   }
 
   return (
-    <ul className="m-0 grid list-none gap-1 p-0">
+    <ul className="repo-issues-list">
       {issues.map((issue) => {
         if (issue.parent !== null) return null
         if (!issue.hasChildren) {
@@ -2982,35 +2950,28 @@ function ParentIssueGroup({
 
   return (
     <li className="min-w-0">
-      <details
-        className="group -mx-2 border border-rule-2 bg-panel px-2 py-1"
-        open
-      >
-        <summary className="grid cursor-pointer list-none grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2 py-1.5 marker:content-none">
-          <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
-            #{parent.issueNumber}
-          </span>
+      <details className="parent-issue" open>
+        <summary>
+          <span className="repo-issue-num">#{parent.issueNumber}</span>
           <span className="min-w-0">
             <a
-              className="font-serif text-[0.95rem] font-semibold text-ink hover:text-oxblood hover:underline"
+              className="repo-issue-title"
               href={parent.url}
               onClick={(event) => event.stopPropagation()}
             >
               {parent.title}
             </a>
             {parent.issueAuthor !== null && parent.issueAuthor !== "" && (
-              <span className="mt-0.5 block font-mono text-xs text-ink-faint">
-                {parent.issueAuthor}
-              </span>
+              <span className="repo-issue-author">{parent.issueAuthor}</span>
             )}
           </span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            <span className="font-mono text-xs font-semibold tracking-[0.1em] text-ink-faint uppercase">
+          <span className="parent-issue-summary-actions">
+            <span className="parent-issue-closed-count">
               {closedChildren}/{childIssues.length} closed
             </span>
             <svg
               aria-hidden="true"
-              className="size-3.5 text-ink-faint transition-transform group-open:rotate-180"
+              className="parent-issue-chevron"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -3025,17 +2986,25 @@ function ParentIssueGroup({
                 parentIssueNumber={parent.issueNumber}
                 menuId={parent.id}
                 pending={implementAll.isPending}
-                errorMessage={
-                  implementAll.isError
-                    ? "Could not start Implement all with auto-merge. Refresh the issues and try again."
-                    : null
-                }
+                // Error Banner is in-flow under the summary (not under the kebab).
+                errorMessage={null}
                 onImplementAllWithAutoMerge={() => implementAll.mutate()}
               />
             )}
           </span>
         </summary>
-        <ul className="relative m-0 grid list-none gap-1 py-1 pl-0 before:absolute before:top-0 before:bottom-1 before:-left-2 before:w-px before:bg-rule-2">
+        {implementAll.isError && (
+          <Banner
+            className="banner--compact parent-issue-error"
+            tone="alarm"
+            tag="Error"
+            role="alert"
+          >
+            Could not start Implement all with auto-merge. Refresh the issues
+            and try again.
+          </Banner>
+        )}
+        <ul className="parent-issue-children">
           {childIssues.map((child) => (
             <RepositoryIssueRow
               issue={child}
@@ -3148,51 +3117,35 @@ function RepositoryIssueRow({
   }, [issue.id, menuOpen])
 
   return (
-    <li
-      className={`min-w-0 text-sm ${issue.blockedBy.length > 0 ? "-mx-2 border border-sepia/40 bg-amber-wash px-2 py-2" : "entry-rule py-2"}`}
-    >
-      <div className="grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-start gap-2">
-        <span className="font-mono text-xs leading-5 font-semibold text-oxblood">
-          #{issue.issueNumber}
-        </span>
+    <li className="repo-issue">
+      <div className="repo-issue-row">
+        <span className="repo-issue-num">#{issue.issueNumber}</span>
         <span className="min-w-0">
-          <a
-            className="font-serif text-[0.95rem] font-semibold break-words text-ink hover:text-oxblood hover:underline"
-            href={issue.url}
-          >
+          <a className="repo-issue-title" href={issue.url}>
             {issue.title}
           </a>
           {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
-            <span className="mt-0.5 block font-mono text-xs text-ink-faint">
-              {issue.issueAuthor}
-            </span>
+            <span className="repo-issue-author">{issue.issueAuthor}</span>
           )}
         </span>
-        <span className="flex shrink-0 items-center gap-1">
+        <span className="repo-issue-actions">
           {issue.state === "CLOSED" && (
-            <span className="stamp border-rule-2 text-ink-faint">Closed</span>
+            <span className="stamp stamp--closed">Closed</span>
           )}
           {issue.blockedBy.length > 0 && (
-            <span className="stamp border-sepia/50 bg-amber-wash text-sepia">
-              Blocked
-            </span>
+            <span className="stamp stamp--blocked">Blocked</span>
           )}
           {(canImplement || canQueue) && (
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
-                className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-ink-soft hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+                className="icon-btn"
                 aria-label={`Actions for issue #${issue.issueNumber}`}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 onClick={() => setMenuOpen((open) => !open)}
               >
-                <svg
-                  aria-hidden="true"
-                  className="size-4"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
+                <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
                   <circle cx="12" cy="5" r="1.75" />
                   <circle cx="12" cy="12" r="1.75" />
                   <circle cx="12" cy="19" r="1.75" />
@@ -3201,14 +3154,14 @@ function RepositoryIssueRow({
               {menuOpen && (
                 <div
                   role="menu"
-                  className="absolute top-full right-0 z-10 mt-1 min-w-44 border border-rule-2 bg-panel py-1 shadow-[0_12px_30px_rgb(28_22_14_/_18%)]"
+                  className="absolute top-full right-0 z-10 mt-1 min-w-44 border-2 border-ink bg-panel py-1"
                 >
                   {canImplement && (
                     <>
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                        className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
                         disabled={implementPending}
                         onClick={() => {
                           setMenuOpen(false)
@@ -3224,7 +3177,7 @@ function RepositoryIssueRow({
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                        className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
                         disabled={implementPending}
                         onClick={() => {
                           setMenuOpen(false)
@@ -3243,7 +3196,7 @@ function RepositoryIssueRow({
                     <button
                       type="button"
                       role="menuitem"
-                      className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"
+                      className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
                       disabled={implementPending}
                       onClick={() => {
                         setMenuOpen(false)
@@ -3285,24 +3238,24 @@ function RepositoryIssueRow({
       {(implementNow.isError ||
         implementLocally.isError ||
         queueIssue.isError) && (
-        <p className="mt-1.5 mb-0 pl-11 text-xs text-oxblood-deep" role="alert">
+        <Banner
+          className="banner--compact repo-issue-error"
+          tone="alarm"
+          tag="Error"
+          role="alert"
+        >
           {queueIssue.isError
             ? "Could not queue issue. Refresh the issues and try again."
             : "Could not start implementation. Refresh the issues and try again."}
-        </p>
+        </Banner>
       )}
       {issue.blockedBy.length > 0 && (
-        <p className="mt-1.5 mb-0 pl-11 font-mono text-xs text-sepia">
+        <p className="repo-issue-blocked-by">
           Blocked by{" "}
           {issue.blockedBy.map((blocker, index) => (
             <span key={blocker.issueUrl}>
               {index > 0 && ", "}
-              <a
-                className="font-semibold underline decoration-rule-2 underline-offset-2 hover:text-oxblood"
-                href={blocker.issueUrl}
-              >
-                #{blocker.issueNumber}
-              </a>
+              <a href={blocker.issueUrl}>#{blocker.issueNumber}</a>
             </span>
           ))}
         </p>
@@ -3850,7 +3803,7 @@ export function WorkItemLifecycleStatus({
   )
 
   return (
-    <div className={compact ? "mt-2" : "field-rule mt-2 ml-11 px-3 py-2"}>
+    <div className={compact ? "mt-2" : "lifecycle-inset"}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="job-ticket-runtime-line uppercase tracking-[0.1em]">
           {formatStartedAgo(workItem.createdAt, nowMs)}
@@ -4035,15 +3988,12 @@ function RepositoryIssuesSkeleton() {
 export function RepositoryCardsSkeleton() {
   return (
     <section
-      className="grid grid-cols-1 gap-8"
+      className="repo-cards"
       aria-label="Loading repositories"
       aria-busy="true"
     >
       {[0, 1].map((item) => (
-        <div
-          className="grid min-w-0 gap-4 border-t border-rule-2 py-5 first:border-t-0 first:pt-0"
-          key={item}
-        >
+        <div className="repo-card-skeleton" key={item}>
           <span className="block h-[0.85rem] w-[35%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
           <span className="block h-[1.6rem] w-[65%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
           <span className="block h-[0.85rem] w-[90%] animate-pulse bg-paper-2 motion-reduce:animate-none" />

@@ -15,7 +15,7 @@ export function CardCollapseToggle({
   return (
     <button
       type="button"
-      className="inline-flex size-8 shrink-0 items-center justify-center border border-rule-2 bg-panel text-ink-soft transition hover:border-ink-soft hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+      className="icon-btn"
       aria-expanded={!collapsed}
       aria-controls={controlsId}
       aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}
@@ -23,7 +23,7 @@ export function CardCollapseToggle({
     >
       <svg
         aria-hidden="true"
-        className={`size-4 transition-transform ${collapsed ? "" : "rotate-180"}`}
+        className={`transition-transform ${collapsed ? "" : "rotate-180"}`}
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

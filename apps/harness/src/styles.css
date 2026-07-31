@@ -868,20 +868,6 @@
 
   /* ---------- Legacy Ledger helpers (unmigrated surfaces) ---------- */
 
-  .stamp {
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--color-rule-2);
-    padding: 0.0625rem 0.4375rem;
-    font-family: var(--font-sans);
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.1em;
-    line-height: 1.4;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
   .field-rule {
     border: 1px solid var(--color-rule);
     background-color: var(--color-panel);
@@ -1693,6 +1679,590 @@
     background: var(--lane-pr);
     border-color: transparent;
     color: #fff;
+  }
+
+  /* §5.3 Primary plate (Save, Inspect/Confirm, credential CTAs) */
+  .plate-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border: 2px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0.46rem 0.95rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .plate-primary:hover {
+    background: var(--signal);
+    color: #151515;
+  }
+
+  .plate-primary:disabled {
+    cursor: wait;
+    opacity: 0.55;
+  }
+
+  /* §5.6 Stamps (exception chips — Closed, Blocked, No change) */
+  .stamp {
+    display: inline-flex;
+    align-items: center;
+    border: 1.5px solid var(--ink-faint);
+    padding: 0.2rem 0.45rem;
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    white-space: nowrap;
+    color: var(--ink-dim);
+    background: transparent;
+  }
+
+  .stamp--closed,
+  .stamp--neutral {
+    border-style: dashed;
+    border-color: var(--ink-faint);
+    color: var(--ink-dim);
+    background: transparent;
+  }
+
+  .stamp--blocked {
+    border-style: solid;
+    border-color: var(--lane-queue);
+    background: var(--lane-queue);
+    color: #151515;
+  }
+
+  /* ---------- Repos page + blank slate (§4.6–4.7) ---------- */
+
+  .repo-cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+
+  /* Repo card: 1.5px ink-bordered ticket card */
+  .repo-card {
+    position: relative;
+    min-width: 0;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    padding: 1rem 1.1rem 1.15rem;
+  }
+
+  .repo-card-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.6rem 1rem;
+  }
+
+  .repo-card-title {
+    display: flex;
+    min-width: 0;
+    max-width: 100%;
+    margin: 0;
+    align-items: baseline;
+    gap: 0.55rem;
+    font-family: var(--font-display);
+    font-size: 1.06rem;
+    font-weight: 600;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+  }
+
+  .repo-card-link {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--ink);
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .repo-card-link:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--signal);
+  }
+
+  .repo-card-pr-count {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .repo-card-controls {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  /* Meta table: hairline top/bottom, two columns, mono dt/dd */
+  .repo-meta {
+    display: grid;
+    gap: 0.55rem 2rem;
+    margin: 0.95rem 0 0;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--line-ghost);
+    border-bottom: 1px solid var(--line-ghost);
+  }
+
+  @media (min-width: 640px) {
+    .repo-meta {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .repo-meta-row {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .repo-meta dt {
+    flex-shrink: 0;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .repo-meta dd {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--ink-dim);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Guidance / credential mono chips */
+  .guidance-code {
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    padding: 0.18rem 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--ink);
+    vertical-align: baseline;
+  }
+
+  .repo-issues {
+    margin-top: 1.1rem;
+  }
+
+  .repo-issues-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+  }
+
+  .repo-issues-kicker {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .repo-issues-list {
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .repo-issues-empty {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* Issue rows — ticket anatomy; no amber wash on blocked */
+  .repo-issue {
+    min-width: 0;
+    padding: 0.55rem 0;
+    border-top: 1px solid var(--line-ghost);
+  }
+
+  .repo-issue:first-child {
+    border-top: 0;
+    padding-top: 0.15rem;
+  }
+
+  .repo-issue-row {
+    display: grid;
+    grid-template-columns: 2.4rem minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.45rem 0.55rem;
+  }
+
+  .repo-issue-num {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--ink-dim);
+  }
+
+  .repo-issue-title {
+    display: block;
+    margin: 0;
+    overflow-wrap: anywhere;
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 500;
+    line-height: 1.3;
+    text-decoration: none;
+  }
+
+  a.repo-issue-title:hover {
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--signal);
+  }
+
+  .repo-issue-author {
+    display: block;
+    margin-top: 0.15rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+  }
+
+  .repo-issue-actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .repo-issue-blocked-by {
+    margin: 0.4rem 0 0;
+    padding-left: 2.95rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+  }
+
+  .repo-issue-blocked-by a {
+    color: var(--ink);
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .repo-issue-blocked-by a:hover {
+    text-decoration-thickness: 2px;
+    text-decoration-color: var(--signal);
+  }
+
+  /* Indent leaf action errors under the title column (matches blocked-by line). */
+  .repo-issue-error {
+    margin: 0.4rem 0 0;
+    margin-left: 2.95rem;
+  }
+
+  /* In-flow parent implement-all error (under summary, not absolute on kebab). */
+  .parent-issue-error {
+    margin: 0.45rem 0.65rem 0.55rem;
+  }
+
+  /* Parent issue groups: details card + soft left rule for children */
+  .parent-issue {
+    min-width: 0;
+    margin: 0.35rem 0;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+  }
+
+  .parent-issue > summary {
+    display: grid;
+    cursor: pointer;
+    list-style: none;
+    grid-template-columns: 2.4rem minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.45rem 0.55rem;
+    padding: 0.55rem 0.65rem;
+  }
+
+  .parent-issue > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .parent-issue-closed-count {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .parent-issue-summary-actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .parent-issue-chevron {
+    width: 0.85rem;
+    height: 0.85rem;
+    color: var(--ink-faint);
+    transition: transform 120ms ease;
+  }
+
+  .parent-issue[open] .parent-issue-chevron {
+    transform: rotate(180deg);
+  }
+
+  .parent-issue-children {
+    position: relative;
+    display: grid;
+    gap: 0;
+    margin: 0;
+    padding: 0.15rem 0.65rem 0.55rem 0.85rem;
+    list-style: none;
+    border-top: 1px solid var(--line-ghost);
+  }
+
+  .parent-issue-children::before {
+    content: "";
+    position: absolute;
+    top: 0.35rem;
+    bottom: 0.45rem;
+    left: 0;
+    width: 2px;
+    background: var(--line-soft);
+  }
+
+  /* Latest work item lifecycle chrome in 1.5px inset panel */
+  .lifecycle-inset {
+    margin: 0.5rem 0 0 2.95rem;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    padding: 0.55rem 0.65rem;
+  }
+
+  /* Blank slate (§4.7) — home + repos zero-repo state */
+  .blank-slate {
+    display: grid;
+    justify-items: center;
+    border: 2px dashed var(--ink);
+    background: var(--panel);
+    padding: 2.4rem 1.5rem 2.2rem;
+    text-align: center;
+  }
+
+  @media (min-width: 640px) {
+    .blank-slate {
+      padding: 2.8rem 2.5rem 2.5rem;
+    }
+  }
+
+  .blank-slate-title {
+    margin: 0.7rem 0 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.35rem, 2.6vw, 1.85rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    line-height: 1.05;
+    color: var(--ink);
+  }
+
+  .blank-slate-form {
+    display: flex;
+    width: 100%;
+    max-width: 36rem;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1.4rem;
+    text-align: left;
+  }
+
+  .blank-slate-form--flush {
+    margin-top: 0;
+  }
+
+  .blank-slate-path-row {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .blank-slate-path-row {
+      flex-direction: row;
+      align-items: stretch;
+    }
+  }
+
+  .blank-slate-input {
+    min-width: 0;
+    flex: 1 1 auto;
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    padding: 0.55rem 0.7rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--ink);
+  }
+
+  .blank-slate-input::placeholder {
+    color: var(--ink-faint);
+  }
+
+  .blank-slate-input:disabled {
+    opacity: 0.6;
+  }
+
+  .blank-slate-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.45rem;
+  }
+
+  .blank-slate-fieldset {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+    border: 1.5px solid var(--ink);
+    padding: 0.9rem 1rem 1rem;
+  }
+
+  .blank-slate-fieldset legend {
+    padding: 0 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .blank-slate-field {
+    display: grid;
+    gap: 0.35rem;
+    font-family: var(--font-display);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--ink-dim);
+  }
+
+  .blank-slate-field select,
+  .blank-slate-field input {
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    padding: 0.5rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--ink);
+  }
+
+  .blank-slate-hint {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+  }
+
+  .blank-slate-divider {
+    display: flex;
+    width: 100%;
+    max-width: 36rem;
+    align-items: center;
+    gap: 0.85rem;
+    margin-top: 1.6rem;
+  }
+
+  .blank-slate-divider::before,
+  .blank-slate-divider::after {
+    content: "";
+    flex: 1 1 auto;
+    height: 1px;
+    background: var(--line-ghost);
+  }
+
+  .blank-slate-divider span {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .blank-slate-cli {
+    margin: 1rem 0 0;
+    max-width: 36rem;
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--ink-dim);
+  }
+
+  .blank-slate .guidance-code {
+    margin-top: 0.75rem;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.82rem;
+  }
+
+  .repo-card-skeleton {
+    display: grid;
+    gap: 0.75rem;
+    border: 1.5px solid var(--line-ghost);
+    background: var(--panel);
+    padding: 1rem 1.1rem;
   }
 }
 
