@@ -14,7 +14,7 @@ import {
   sumLaneDurationMs,
 } from "./pipeline-lanes.js"
 
-export type ArchiveLegKind = "done" | "skip" | "fail"
+type ArchiveLegKind = "done" | "skip" | "fail"
 
 /** CSS custom props for lane-coloured done legs. */
 export type ArchiveLegLane = "build" | "review" | "pr"
@@ -147,7 +147,7 @@ export const isArchiveAbandoned = (
   workItem: Pick<ArchiveWorkItemInput, "status" | "state">,
 ): boolean => workItem.status === "ABANDONED" || workItem.state === "ABANDONED"
 
-export const isArchiveComplete = (
+const isArchiveComplete = (
   workItem: Pick<ArchiveWorkItemInput, "status" | "state">,
 ): boolean =>
   workItem.status === "COMPLETE" ||
