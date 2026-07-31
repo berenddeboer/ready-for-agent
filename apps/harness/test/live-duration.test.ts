@@ -1,9 +1,12 @@
 import {
   formatDuration,
+  formatSessionShort,
   formatStartedAgo,
+  formatTerminalAgo,
   isLiveDurationStatus,
   liveDurationMs,
   totalElapsedMs,
+  worktreeLeafName,
 } from "../src/live-duration.js"
 import { describe, expect, test } from "bun:test"
 
@@ -106,6 +109,38 @@ describe("formatStartedAgo", () => {
     expect(formatStartedAgo(createdAt, 1_000_000 + 15 * 60_000)).toBe(
       "Started 15 min ago",
     )
+  })
+})
+
+describe("formatTerminalAgo", () => {
+  test("uses compact archive relative phrases", () => {
+    const at = new Date(1_000_000).toISOString()
+    expect(formatTerminalAgo(at, "Merged", 1_000_000 + 38 * 60_000)).toBe(
+      "Merged 38 min ago",
+    )
+    expect(formatTerminalAgo(at, "Merged", 1_000_000 + 2 * 3_600_000)).toBe(
+      "Merged 2 h ago",
+    )
+    expect(formatTerminalAgo(at, "Withdrawn", 1_000_000 + 25 * 3_600_000)).toBe(
+      "Withdrawn yesterday",
+    )
+    expect(formatTerminalAgo(at, "Finished", 1_000_000 + 3 * 86_400_000)).toBe(
+      "Finished 3 d ago",
+    )
+  })
+})
+
+describe("formatSessionShort", () => {
+  test("shortens long session ids with an ellipsis", () => {
+    expect(formatSessionShort("9a2c55e8b1d0")).toBe("9a2c…b1d0")
+    expect(formatSessionShort("short")).toBe("short")
+  })
+})
+
+describe("worktreeLeafName", () => {
+  test("returns the path leaf for archive meta", () => {
+    expect(worktreeLeafName("/tmp/rfa/worktree3")).toBe("worktree3")
+    expect(worktreeLeafName("worktree5/")).toBe("worktree5")
   })
 })
 

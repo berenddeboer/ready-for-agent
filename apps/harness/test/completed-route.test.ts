@@ -17,6 +17,9 @@ const rowSource = () =>
     "utf8",
   )
 
+const stylesSource = () =>
+  readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
+
 const routeTreeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routeTree.gen.ts"), "utf8")
 
@@ -69,6 +72,37 @@ describe("/completed route", () => {
     expect(source).toContain("COMPLETED_WORK_ITEMS_PAGE_SIZE")
   })
 
+  test("renders Interchange archive slab: pagehead, nameboard, 06 roundel", () => {
+    const source = completedSource()
+    expect(source).toContain('className="pagehead"')
+    expect(source).toContain('className="kicker-tag"')
+    expect(source).toContain("History")
+    expect(source).toContain("Completed work items")
+    expect(source).toContain('className="lede"')
+    expect(source).toContain('className="pagehead-note"')
+    expect(source).toContain("Newest first · All repositories")
+    expect(source).toContain('className="archive"')
+    expect(source).toContain('className="archive-line"')
+    expect(source).toContain('className="roundel"')
+    expect(source).toContain(">06</")
+    expect(source).toContain('className="nameboard"')
+    expect(source).toContain("Full archive")
+    expect(source).toContain("Complete + abandoned")
+    expect(source).toContain('className="nb-count"')
+    expect(source).toContain('className="archive-body"')
+    expect(source).toContain('className="archive-empty"')
+    expect(source).toContain("No completed work items yet")
+
+    const styles = stylesSource()
+    expect(styles).toContain(".archive-row--complete")
+    expect(styles).toContain(".archive-row--abandoned")
+    expect(styles).toContain(".archive-stamp--abandoned")
+    expect(styles).toContain(".leg--lane")
+    expect(styles).toContain(".leg--fail")
+    expect(styles).toContain("--merged-halo")
+    expect(styles).toContain(".plate-mini")
+  })
+
   test("reuses CompletedWorkItemRow for historical completed cards", () => {
     const source = completedSource()
     expect(source).toContain("<CompletedWorkItemRow")
@@ -78,16 +112,28 @@ describe("/completed route", () => {
     expect(row).toContain("export function CompletedWorkItemRow(")
     expect(row).toContain("workItem.agentBackend.label")
     expect(row).toContain("onOpenSession")
-    expect(row).toContain("<WorkItemLifecycleStatus")
+    expect(row).toContain("planArchiveLegs")
+    expect(row).toContain("archive-row--complete")
+    expect(row).toContain("archive-row--abandoned")
+    expect(row).toContain("archive-stamp--abandoned")
+    expect(row).toContain("Abandoned")
+    expect(row).toContain("No change")
+    expect(row).toContain("prbadge")
     expect(row).toContain("workItemIssueUrl")
     expect(row).toContain("workItemPullRequestUrl")
+    // Complete is unstamped; board lifecycle chrome stays off this surface.
+    expect(row).not.toContain("WorkItemLifecycleStatus")
+    expect(row).not.toContain("stateLabel")
   })
 
   test("exposes accessible previous/next pagination with current page indication", () => {
     const source = completedSource()
     expect(source).toContain('aria-label="Completed work items pagination"')
-    expect(source).toContain("Previous")
-    expect(source).toContain("Next")
+    expect(source).toContain("← Prev")
+    expect(source).toContain("Next →")
+    expect(source).toContain('className="plate-mini"')
+    expect(source).toContain('className="pager"')
+    expect(source).toContain('className="pager-note"')
     expect(source).toContain(
       'aria-label="Previous page of completed work items"',
     )
@@ -102,8 +148,8 @@ describe("/completed route", () => {
 
   test("handles empty archive vs empty page, loading, and error states", () => {
     const source = completedSource()
-    expect(source).toContain("No completed work items yet.")
-    expect(source).toContain("No completed work items on this page.")
+    expect(source).toContain("No completed work items yet")
+    expect(source).toContain("No completed work items on this page")
     expect(source).toContain("resolvedTotalCount === 0")
     expect(source).toContain("setPage(totalPages)")
     expect(source).toContain("Loading completed work items")
