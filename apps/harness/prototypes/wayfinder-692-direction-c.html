@@ -1,0 +1,944 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway, not for production.
+  Wayfinder ticket #692 ("Prototype: clanker direction C", map #689).
+
+  Plan: one full-page Harness homepage (nav + committed-PR stats + Kanban
+  board) in a single standalone HTML file. Direction C's angle: the
+  "works drawing" — the operator reads the engineering blueprint the
+  plant was built from. Fine white line-work on cyanotype blue; the page
+  is the sheet (zone-marked frame, sheet-index nav, title block); lanes
+  are flagged drawing sections on open grid (no grey concrete, no glow,
+  no warm paper, no serif). Queue carries a dashed construction-line
+  intake feed annotated to SHT 02 (Repos).
+
+  Run: open this file in a browser (no build, no server needed).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction C · Works drawing — Clanker Harness prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;600&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------------
+     Direction C tokens — cyanotype sheet + white line-work.
+     Lane colors are the fixed pipeline identity (unchanged):
+       Queue #ffd21c · Build #1976d2 · Review #7654b5
+       PR #168b62 · Attention #ff4d1c · Merged #151515
+  ------------------------------------------------------------------ */
+  :root {
+    --sheet: #14355c;
+    --sheet-deep: #0e2a4b;
+    --part: rgb(10 30 55 / 0.58);
+    --grid-minor: rgb(255 255 255 / 0.045);
+    --grid-major: rgb(255 255 255 / 0.09);
+    --ink: #e9f1f9;
+    --ink-dim: #b6c9dd;
+    --ink-faint: #7f99b6;
+    --line: rgb(233 241 249 / 0.9);
+    --line-soft: rgb(233 241 249 / 0.34);
+    --line-ghost: rgb(233 241 249 / 0.16);
+    --on-sheet: #10283f;
+
+    --lane-queue: #ffd21c;
+    --lane-build: #1976d2;
+    --lane-review: #7654b5;
+    --lane-pr: #168b62;
+    --lane-attention: #ff4d1c;
+    --lane-merged: #151515;
+
+    --font-tech: "Oswald", "Arial Narrow", "Helvetica Neue", sans-serif;
+    --font-mono: "Space Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-width: 20rem;
+    min-height: 100vh;
+    padding: 2.6rem 3rem 3.4rem;
+    background-color: var(--sheet);
+    /* cyanotype grid: minor 20px, major 100px */
+    background-image:
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(var(--grid-minor) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+    background-size: 100px 100px, 100px 100px, 20px 20px, 20px 20px;
+    background-attachment: fixed;
+    color: var(--ink);
+    font-family: var(--font-tech);
+    font-weight: 300;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--lane-queue); color: #151515; }
+
+  a { color: inherit; }
+
+  :focus-visible { outline: 1.5px solid var(--lane-queue); outline-offset: 2px; }
+
+  /* ====================== Drawing sheet frame ====================== */
+
+  .frame {
+    position: fixed;
+    inset: 0.7rem;
+    border: 1.5px solid var(--line);
+    pointer-events: none;
+    z-index: 20;
+  }
+
+  .zone {
+    position: absolute;
+    display: flex;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+  }
+  .zone span { background: var(--sheet); padding: 0 0.2rem; }
+  .zone-top, .zone-bottom {
+    left: 2rem; right: 2rem;
+    justify-content: space-evenly;
+  }
+  .zone-top { top: -0.42rem; }
+  .zone-bottom { bottom: -0.42rem; }
+  .zone-left, .zone-right {
+    top: 2rem; bottom: 2rem;
+    flex-direction: column;
+    justify-content: space-evenly;
+  }
+  .zone-left { left: -0.28rem; }
+  .zone-right { right: -0.28rem; }
+  .zone-left span, .zone-right span { padding: 0.2rem 0; }
+
+  .page { position: relative; z-index: 1; }
+
+  /* ============================ Masthead =========================== */
+
+  .mast {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+    padding-bottom: 1.1rem;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .brand-dwg {
+    margin: 0 0 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.22em;
+    color: var(--ink-faint);
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-size: clamp(1.9rem, 3.6vw, 2.6rem);
+    font-weight: 600;
+    line-height: 0.95;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+  }
+  .brand h1 a { color: var(--ink); text-decoration: none; }
+  .brand h1 a:hover { color: var(--lane-queue); }
+
+  .brand-sub {
+    margin: 0.45rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.18em;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+  }
+  .brand-sub .rev { color: var(--lane-queue); }
+
+  /* Nav as the sheet index table */
+  .sheetnav { display: grid; gap: 0.3rem; justify-items: end; }
+  .sheetnav-cap {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.26em;
+    color: var(--ink-faint);
+  }
+  .sheetnav-row { display: flex; flex-wrap: wrap; }
+  .cell {
+    display: grid;
+    gap: 0.1rem;
+    min-width: 5.4rem;
+    padding: 0.4rem 0.7rem 0.45rem;
+    border: 1px solid var(--line-soft);
+    margin-left: -1px;
+    color: var(--ink-dim);
+    text-decoration: none;
+  }
+  .cell:first-child { margin-left: 0; }
+  .cell .sht {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.16em;
+    color: var(--ink-faint);
+  }
+  .cell .lbl {
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  button.cell { appearance: none; background: transparent; font: inherit; cursor: pointer; text-align: left; }
+  .cell:hover { border-color: var(--line); color: var(--ink); position: relative; }
+  .cell.active { background: var(--ink); color: var(--on-sheet); position: relative; }
+  .cell.active .sht { color: rgb(16 40 63 / 0.65); }
+
+  /* ===================== PR throughput schedule ==================== */
+
+  .schedule {
+    margin-top: 1.4rem;
+    border: 1px solid var(--line);
+  }
+  .schedule-head {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.45rem 0.8rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .tag {
+    background: var(--ink);
+    color: var(--on-sheet);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    padding: 0.15rem 0.45rem;
+    white-space: nowrap;
+  }
+  .schedule-head h2 {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 500;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  .schedule-head .through {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.14em;
+    color: var(--ink-faint);
+  }
+  .schedule-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .qty {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.55rem 0.8rem 0.6rem;
+    border-left: 1px solid var(--line-ghost);
+  }
+  .qty:first-child { border-left: 0; }
+  .qty-num {
+    font-size: 2rem;
+    font-weight: 500;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .qty-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ============================ Controls =========================== */
+
+  .controls {
+    margin-top: 1.4rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem 1.5rem;
+  }
+  .tabs { display: flex; }
+  .tab {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--line-soft);
+    margin-left: -1px;
+    padding: 0.45rem 0.9rem;
+    color: var(--ink-dim);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .tab:first-child { margin-left: 0; }
+  .tab:hover { border-color: var(--line); color: var(--ink); position: relative; }
+  .tab.active { background: var(--ink); border-color: var(--ink); color: var(--on-sheet); font-weight: 700; position: relative; }
+  .filters { display: flex; flex-wrap: wrap; border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .filter {
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--line-ghost);
+    margin-left: -1px;
+    padding: 0.4rem 0.7rem;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+  }
+  .filter:first-child { margin-left: 0; }
+  .filter:hover { border-color: var(--line-soft); color: var(--ink); position: relative; }
+  .filter.active { border-color: var(--line); color: var(--ink); position: relative; box-shadow: inset 0 -2px 0 var(--lane-queue); }
+
+  /* ====================== Dimension annotation ===================== */
+
+  .dim {
+    margin: 1.2rem 0 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .dim-tick { width: 1px; height: 0.65rem; background: var(--line); }
+  .dim-line { flex: 1; border-top: 1px solid var(--line-soft); }
+  .dim-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.3em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* ============================== Board ============================ */
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.9rem;
+    align-items: start;
+  }
+
+  .lane { display: grid; gap: 0.5rem; }
+
+  /* Section flag: saturated survey flag with a notch, lane color stays. */
+  .flag {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 1.3rem 0.55rem 0.7rem;
+    background: var(--lane);
+    color: var(--on-lane);
+    clip-path: polygon(0 0, 100% 0, calc(100% - 0.7rem) 50%, 100% 100%, 0 100%);
+  }
+  .flag--dark { box-shadow: inset 0 0 0 1px rgb(233 241 249 / 0.5); }
+  .flag-sec {
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    letter-spacing: 0.1em;
+    opacity: 0.72;
+    white-space: nowrap;
+  }
+  .flag h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+  .flag-count {
+    margin-left: auto;
+    font-size: 1.45rem;
+    font-weight: 600;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Bay: open drawing zone — grid shows through, lane color only as
+     corner location ticks. No fill, no wash, no grey. */
+  .bay {
+    position: relative;
+    border: 1px solid var(--line-soft);
+    padding: 0.6rem;
+    display: grid;
+    gap: 0.6rem;
+    align-content: start;
+    min-height: 9rem;
+  }
+  .bay::before, .bay::after {
+    content: "";
+    position: absolute;
+    width: 0.7rem;
+    height: 0.7rem;
+  }
+  .bay::before {
+    top: -1px; left: -1px;
+    border-top: 2px solid var(--lane);
+    border-left: 2px solid var(--lane);
+  }
+  .bay::after {
+    bottom: -1px; right: -1px;
+    border-bottom: 2px solid var(--lane);
+    border-right: 2px solid var(--lane);
+  }
+  /* Attention bay: hatched danger section (drafting convention). */
+  .bay--hazard {
+    background-image: repeating-linear-gradient(
+      45deg,
+      rgb(255 77 28 / 0.075) 0 2px,
+      transparent 2px 10px
+    );
+  }
+  /* Merged bay: black location ticks vanish on the sheet — draw them
+     as white witness marks instead. */
+  .bay--dark::before, .bay--dark::after { border-color: var(--line); }
+
+  .lane-empty {
+    margin: 0;
+    padding: 1.6rem 0.4rem;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.26em;
+    color: var(--ink-faint);
+  }
+
+  /* ===================== Tickets — drawn parts ===================== */
+
+  .part {
+    background: var(--part);
+    border: 1px solid var(--line-soft);
+    padding: 0.55rem 0.6rem 0.65rem;
+    display: grid;
+    gap: 0.4rem;
+  }
+  .part-repo {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .part-title {
+    margin: 0;
+    font-size: 0.86rem;
+    font-weight: 400;
+    line-height: 1.28;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  a.part-title:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--lane-queue); }
+  .part-title .num {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+  }
+  .part-state {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+  }
+  .state {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border: 1px solid var(--line-soft);
+    padding: 0.18rem 0.4rem;
+  }
+  .state--hold { border-style: dashed; }
+  .state--alarm { border: 1.5px solid var(--lane-attention); color: #ffab90; }
+  .pause {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--ink-faint);
+    border: 1px solid var(--line-ghost);
+    padding: 0.1rem 0.32rem;
+    cursor: pointer;
+  }
+  .pause:hover { color: var(--ink); border-color: var(--line-soft); }
+  .part-rt {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .part-rt .sess { color: var(--ink-dim); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .chip {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
+    border: 1px solid var(--line-soft);
+    color: var(--ink-dim);
+    padding: 0.16rem 0.38rem;
+    white-space: nowrap;
+  }
+  .chip--run { background: var(--ink); border-color: var(--ink); color: var(--on-sheet); font-weight: 700; }
+  .chip--queued { border-style: dashed; color: var(--ink-faint); }
+  .chip--fail { border: 3px double var(--lane-attention); color: #ffab90; font-weight: 700; padding: 0.08rem 0.32rem; }
+
+  .collapsed {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    border-left: 2px solid var(--line-soft);
+    padding-left: 0.45rem;
+  }
+
+  .part-meta {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+  .prbadge {
+    justify-self: start;
+    background: var(--ink);
+    color: var(--on-sheet);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0.18rem 0.45rem;
+    text-decoration: none;
+  }
+  a.prbadge:hover { background: var(--lane-pr); color: #fff; }
+
+  /* ================= Queue intake feed (Note N1) =================== */
+
+  .chute {
+    position: relative;
+    border: 1.5px dashed var(--lane-queue);
+    padding: 0.65rem 0.7rem 0.7rem;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .noteflag {
+    position: absolute;
+    top: -0.55rem;
+    left: -0.55rem;
+    width: 1.3rem;
+    height: 1.3rem;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--lane-queue);
+    border-radius: 50%;
+    background: var(--sheet);
+    color: var(--lane-queue);
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    font-weight: 700;
+  }
+  .chute-title {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.24em;
+    color: var(--lane-queue);
+    text-transform: uppercase;
+  }
+  .chute-text {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--ink-dim);
+  }
+  .chute-link {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: var(--lane-queue);
+    text-transform: uppercase;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .chute-link:hover { color: #fff; }
+
+  /* ========================== Title block ========================== */
+
+  .sheetfoot {
+    margin-top: 2.6rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .proto-note {
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.2em;
+    color: var(--ink-faint);
+    text-transform: uppercase;
+  }
+  .tb { border-collapse: collapse; }
+  .tb td {
+    border: 1px solid var(--line-soft);
+    padding: 0.28rem 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.12em;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .tb td b { color: var(--ink); font-weight: 700; }
+
+  /* ========================== Responsive =========================== */
+
+  @media (max-width: 1500px) {
+    .board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 900px) {
+    body { padding: 1.8rem 1.6rem 2.6rem; }
+    .frame { inset: 0.45rem; }
+    .zone { display: none; }
+    .board { grid-template-columns: minmax(0, 1fr); }
+    .schedule-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .qty { border-left: 0; border-top: 1px solid var(--line-ghost); }
+    .qty:nth-child(-n+2) { border-top: 0; }
+    .qty:nth-child(even) { border-left: 1px solid var(--line-ghost); }
+    .sheetnav { justify-items: start; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Sheet frame with zone marks (decorative) -->
+<div class="frame" aria-hidden="true">
+  <div class="zone zone-top"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+  <div class="zone zone-bottom"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+  <div class="zone zone-left"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+  <div class="zone zone-right"><span>A</span><span>B</span><span>C</span><span>D</span></div>
+</div>
+
+<div class="page">
+
+  <!-- ============================ Masthead ========================= -->
+  <header class="mast">
+    <div class="brand">
+      <p class="brand-dwg">DWG CLNK-0101 · REV C · SCALE NTS</p>
+      <h1><a href="/">Clanker Harness</a></h1>
+      <p class="brand-sub">Pipeline layout — operator board · <span class="rev">RFA v0.9.2</span></p>
+    </div>
+    <nav class="sheetnav" aria-label="Primary">
+      <span class="sheetnav-cap">Sheet index</span>
+      <div class="sheetnav-row">
+        <a class="cell active" href="/" aria-current="page"><span class="sht">SHT 01</span><span class="lbl">Home</span></a>
+        <a class="cell" href="/repos"><span class="sht">SHT 02</span><span class="lbl">Repos</span></a>
+        <a class="cell" href="/completed"><span class="sht">SHT 03</span><span class="lbl">Completed</span></a>
+        <button class="cell" type="button"><span class="sht">SHT 04</span><span class="lbl">Settings</span></button>
+      </div>
+    </nav>
+  </header>
+
+  <!-- =================== PR throughput schedule ==================== -->
+  <section class="schedule" aria-label="Committed pull requests">
+    <header class="schedule-head">
+      <span class="tag">TABLE T-01</span>
+      <h2>PR throughput schedule</h2>
+      <span class="through">QTY = MERGED PRs PER PERIOD</span>
+    </header>
+    <div class="schedule-grid">
+      <div class="qty"><span class="qty-num">4</span><span class="qty-label">Today</span></div>
+      <div class="qty"><span class="qty-num">3</span><span class="qty-label">Yesterday</span></div>
+      <div class="qty"><span class="qty-num">17</span><span class="qty-label">This week</span></div>
+      <div class="qty"><span class="qty-num">12</span><span class="qty-label">Last week</span></div>
+      <div class="qty"><span class="qty-num">9</span><span class="qty-label">2 wks ago</span></div>
+    </div>
+  </section>
+
+  <!-- =========================== Controls ========================== -->
+  <section class="controls" aria-label="Jobs">
+    <div class="tabs" role="tablist" aria-label="Jobs">
+      <button class="tab active" type="button" role="tab" aria-selected="true">Pipeline</button>
+      <button class="tab" type="button" role="tab" aria-selected="false">Completed last 24 h (7)</button>
+    </div>
+    <fieldset class="filters">
+      <legend class="sr-only">Filter jobs by repository</legend>
+      <button class="filter active" type="button" aria-pressed="true">All sources</button>
+      <button class="filter" type="button" aria-pressed="false">berenddeboer/ready-for-agent</button>
+      <button class="filter" type="button" aria-pressed="false">acme/payments-api</button>
+      <button class="filter" type="button" aria-pressed="false">acme/web-storefront</button>
+    </fieldset>
+  </section>
+
+  <!-- ==================== Dimension annotation ===================== -->
+  <div class="dim" aria-hidden="true">
+    <span class="dim-tick"></span>
+    <span class="dim-line"></span>
+    <span class="dim-label">Six bays — flow L → R</span>
+    <span class="dim-line"></span>
+    <span class="dim-tick"></span>
+  </div>
+
+  <!-- ============================= Board =========================== -->
+  <main class="board" aria-label="Lifecycle pipeline">
+
+    <!-- SEC 01 — Queue -->
+    <section class="lane" style="--lane: var(--lane-queue); --on-lane: #151515" aria-labelledby="lane-queue">
+      <header class="flag">
+        <span class="flag-sec">SEC 01/06</span>
+        <h3 id="lane-queue">Queue</h3>
+        <span class="flag-count">2</span>
+      </header>
+      <div class="bay">
+        <article class="part">
+          <p class="part-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="part-title" href="https://github.com/acme/payments-api/issues/512"><span class="num">#512</span> Retry failed settlement webhooks</a>
+          <div class="part-state">
+            <span class="state state--hold">Waiting for blockers</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — NO SESSION</p>
+        </article>
+        <article class="part">
+          <p class="part-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="part-title" href="https://github.com/berenddeboer/ready-for-agent/issues/702"><span class="num">#702</span> Index session transcripts for search</a>
+          <div class="part-state">
+            <span class="state state--hold">Waiting for worker slot</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — NO SESSION</p>
+        </article>
+        <aside class="chute">
+          <span class="noteflag" aria-hidden="true">N1</span>
+          <p class="chute-title">Intake feed</p>
+          <p class="chute-text">Feed the queue — work enters from configured sources.</p>
+          <a class="chute-link" href="/repos">▶ See SHT 02 — Manage Repos</a>
+        </aside>
+      </div>
+    </section>
+
+    <!-- SEC 02 — Build -->
+    <section class="lane" style="--lane: var(--lane-build); --on-lane: #ffffff" aria-labelledby="lane-build">
+      <header class="flag">
+        <span class="flag-sec">SEC 02/06</span>
+        <h3 id="lane-build">Build</h3>
+        <span class="flag-count">3</span>
+      </header>
+      <div class="bay">
+        <article class="part">
+          <p class="part-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="part-title" href="https://github.com/berenddeboer/ready-for-agent/issues/689"><span class="num">#689</span> Unified industrial design for the Harness UI</a>
+          <div class="part-state">
+            <span class="state">Implementing</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="7f3a9c2e">7f3a…9c2e</span> ⧉</p>
+          <p class="part-rt">WT worktree1</p>
+          <div class="chips">
+            <span class="chip">✓ WORKTREE · 4S</span>
+            <span class="chip">✓ DEPS · 41S</span>
+            <span class="chip chip--run">▷ IMPLEMENT · 12M</span>
+          </div>
+        </article>
+        <article class="part">
+          <p class="part-repo" title="acme/web-storefront">acme/web-storefront</p>
+          <a class="part-title" href="https://github.com/acme/web-storefront/issues/208"><span class="num">#208</span> Rebuild checkout totals on tax change</a>
+          <div class="part-state">
+            <span class="state">Installing deps</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="b81d2f07">b81d…2f07</span> ⧉</p>
+          <p class="part-rt">WT worktree4</p>
+          <div class="chips">
+            <span class="chip">✓ WORKTREE · 3S</span>
+            <span class="chip chip--run">▷ DEPS · 26S</span>
+          </div>
+        </article>
+        <article class="part">
+          <p class="part-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="part-title" href="https://github.com/acme/payments-api/issues/519"><span class="num">#519</span> Add idempotency keys to POST /charges</a>
+          <div class="part-state">
+            <span class="state">Implementing</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="c4e077a1">c4e0…77a1</span> ⧉</p>
+          <p class="part-rt">WT worktree2</p>
+          <div class="chips">
+            <span class="chip">✓ WORKTREE · 5S</span>
+            <span class="chip">✓ DEPS · 38S</span>
+            <span class="chip chip--run">▷ IMPLEMENT · 34M</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- SEC 03 — Review -->
+    <section class="lane" style="--lane: var(--lane-review); --on-lane: #ffffff" aria-labelledby="lane-review">
+      <header class="flag">
+        <span class="flag-sec">SEC 03/06</span>
+        <h3 id="lane-review">Review</h3>
+        <span class="flag-count">1</span>
+      </header>
+      <div class="bay">
+        <article class="part">
+          <p class="part-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="part-title" href="https://github.com/berenddeboer/ready-for-agent/issues/697"><span class="num">#697</span> E2E first-run settings save to blank slate</a>
+          <div class="part-state">
+            <span class="state">Reviewing</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="9a2c55e8">9a2c…55e8</span> ⧉</p>
+          <p class="part-rt">WT worktree3</p>
+          <p class="collapsed">▸ BUILD — 14 M</p>
+          <div class="chips">
+            <span class="chip chip--run">▷ REVIEW · 6M</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- SEC 04 — PR -->
+    <section class="lane" style="--lane: var(--lane-pr); --on-lane: #ffffff" aria-labelledby="lane-pr">
+      <header class="flag">
+        <span class="flag-sec">SEC 04/06</span>
+        <h3 id="lane-pr">PR</h3>
+        <span class="flag-count">2</span>
+      </header>
+      <div class="bay">
+        <article class="part">
+          <p class="part-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="part-title" href="https://github.com/acme/payments-api/issues/505"><span class="num">#505</span> Expose refund reasons in the API</a>
+          <div class="part-state">
+            <span class="state">Watching checks</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="e07b31c9">e07b…31c9</span> ⧉</p>
+          <p class="collapsed">▸ BUILD — 9 M</p>
+          <p class="collapsed">▸ REVIEW — 3 M</p>
+          <div class="chips">
+            <span class="chip">✓ COMMIT · 2S</span>
+            <span class="chip chip--run">▷ CHECKS · 5M</span>
+            <span class="chip chip--queued">○ MERGE</span>
+          </div>
+        </article>
+        <article class="part">
+          <p class="part-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="part-title" href="https://github.com/berenddeboer/ready-for-agent/issues/684"><span class="num">#684</span> Triage label sync on reopen</a>
+          <div class="part-state">
+            <span class="state">Resolving conflict</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="f5d890b3">f5d8…90b3</span> ⧉</p>
+          <p class="part-rt">WT worktree5</p>
+          <p class="collapsed">▸ BUILD — 11 M</p>
+          <div class="chips">
+            <span class="chip chip--run">▷ CONFLICT · 2M</span>
+            <span class="chip chip--queued">○ CHECKS</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- SEC 05 — Attention -->
+    <section class="lane" style="--lane: var(--lane-attention); --on-lane: #151515" aria-labelledby="lane-attention">
+      <header class="flag">
+        <span class="flag-sec">SEC 05/06</span>
+        <h3 id="lane-attention">Attention</h3>
+        <span class="flag-count">1</span>
+      </header>
+      <div class="bay bay--hazard">
+        <article class="part">
+          <p class="part-repo" title="acme/web-storefront">acme/web-storefront</p>
+          <a class="part-title" href="https://github.com/acme/web-storefront/issues/211"><span class="num">#211</span> Cart totals drift after currency switch</a>
+          <div class="part-state">
+            <span class="state state--alarm">Needs human — review failed</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="part-rt">OPENCODE — <span class="sess" title="2c6f14d7">2c6f…14d7</span> ⧉</p>
+          <p class="collapsed">▸ BUILD — 17 M</p>
+          <div class="chips">
+            <span class="chip chip--fail">✕ REVIEW · 3M</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- SEC 06 — Merged -->
+    <section class="lane" style="--lane: var(--lane-merged); --on-lane: #ffffff" aria-labelledby="lane-merged">
+      <header class="flag flag--dark">
+        <span class="flag-sec">SEC 06/06</span>
+        <h3 id="lane-merged">Merged</h3>
+        <span class="flag-count">2</span>
+      </header>
+      <div class="bay bay--dark">
+        <article class="part">
+          <p class="part-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="part-title" href="https://github.com/berenddeboer/ready-for-agent/issues/697"><span class="num">#697</span> E2E first-run settings save to blank slate</a>
+          <p class="part-meta">Started 3 h ago · Elapsed 23 m</p>
+          <a class="prbadge" href="https://github.com/berenddeboer/ready-for-agent/pull/698" aria-label="Open pull request #698">PR #698</a>
+        </article>
+        <article class="part">
+          <p class="part-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="part-title" href="https://github.com/acme/payments-api/issues/501"><span class="num">#501</span> Void capture on duplicate authorisation</a>
+          <p class="part-meta">Started 5 h ago · Elapsed 31 m</p>
+          <a class="prbadge" href="https://github.com/acme/payments-api/pull/506" aria-label="Open pull request #506">PR #506</a>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================== Title block ======================== -->
+  <footer class="sheetfoot">
+    <p class="proto-note">Prototype — direction C · throwaway · not for production</p>
+    <table class="tb" aria-label="Title block">
+      <tr>
+        <td>Drawn <b>RFA-OPS</b></td>
+        <td>Dwg no <b>CLNK-0101</b></td>
+        <td>Rev <b>C</b></td>
+      </tr>
+      <tr>
+        <td>Checked <b>—</b></td>
+        <td>Scale <b>NTS</b></td>
+        <td>Sheet <b>1 of 1</b></td>
+      </tr>
+    </table>
+  </footer>
+
+</div>
+</body>
+</html>
