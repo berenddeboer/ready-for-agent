@@ -129,14 +129,23 @@ describe("ParentIssueActionsMenu", () => {
       join(import.meta.dir, "../src/parent-issue-actions-menu.tsx"),
       "utf8",
     )
-    // §4.10 / phase 4: icon-btn trigger; mono uppercase items (no Ledger shadow).
+    // §4.10: icon-btn trigger; shared menu-panel / menu-item (no Ledger shadow).
     expect(source).toContain('className="icon-btn"')
     expect(source).toMatch(
-      /role="menu"[\s\S]*?border-2 border-ink[\s\S]*?role="menuitem"/,
+      /role="menu"[\s\S]*?menu-panel[\s\S]*?role="menuitem"/,
     )
-    expect(source).toContain("font-mono")
-    expect(source).toContain("uppercase")
+    expect(source).toContain('className="menu-item"')
     expect(source).not.toContain("shadow-[")
+    const styles = readFileSync(
+      join(import.meta.dir, "../src/styles.css"),
+      "utf8",
+    )
+    expect(styles).toContain(".menu-panel")
+    expect(styles).toContain(".menu-item")
+    expect(styles).toMatch(
+      /\.menu-item\s*\{[^}]*font-family:\s*var\(--font-mono\)/s,
+    )
+    expect(styles).toMatch(/\.menu-item\s*\{[^}]*text-transform:\s*uppercase/s)
   })
 })
 

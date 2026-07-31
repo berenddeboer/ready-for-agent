@@ -174,7 +174,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   shellComponent: RootDocument,
   notFoundComponent: () => (
-    <div className="field-rule mx-auto mt-12 max-w-xl p-8 text-center">
+    <div className="not-found-panel">
       <p>Page not found.</p>
       <Link
         className="mt-2 inline-block text-ink underline decoration-signal underline-offset-4 hover:text-ink-dim"
@@ -845,7 +845,7 @@ function SettingsChrome() {
 
       <dialog
         ref={dialogRef}
-        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-black/50"
+        className="dialog-panel"
         aria-labelledby="settings-title"
         onCancel={(event) => {
           if (updateConfig.isPending) event.preventDefault()
@@ -853,25 +853,24 @@ function SettingsChrome() {
         onClose={() => setDialogOpen(false)}
       >
         <form onSubmit={saveSettings}>
-          <div className="border-b border-rule px-6 py-5">
-            <p className="font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
-              Harness defaults
-            </p>
-            <h2
-              id="settings-title"
-              className="mt-1.5 font-serif text-2xl font-semibold tracking-[-0.01em]"
-            >
+          <div className="dialog-header">
+            <p className="dialog-kicker">Harness defaults</p>
+            <h2 id="settings-title" className="dialog-title">
               Harness settings
             </h2>
-            <p className="mt-1.5 text-sm text-ink-soft">
+            <p className="dialog-lede">
               Defaults for agent sessions and Agent Turn concurrency.
             </p>
             {showUnconfiguredGuidance && (
-              <p className="mt-3 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact mt-3"
+                tone="guidance"
+                tag="Setup"
+              >
                 Select a default agent backend, and default build model.
                 Optionally select a different review model (recommended). You
                 can override this per configured repo.
-              </p>
+              </Banner>
             )}
             {!backendChanging &&
               (unavailableStatuses.length > 0 ||
@@ -884,34 +883,41 @@ function SettingsChrome() {
                       ? [defaultStatus as AgentBackendStatusRow]
                       : []
                   ).map((row) => (
-                    <p
+                    <Banner
                       key={row.backend.id}
-                      className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+                      className="banner--compact"
+                      tone="alarm"
+                      tag="Backend"
+                      role="alert"
                     >
                       <span className="font-semibold">{row.backend.label}</span>
                       {": "}
                       {row.reason ?? "Agent Backend is unavailable."}
-                    </p>
+                    </Banner>
                   ))}
                 </div>
               )}
           </div>
 
-          <div className="grid gap-5 px-6 py-5">
+          <div className="dialog-body">
             {config.isPending || modelsLoading ? (
-              <p className="text-sm text-ink-soft">Loading settings...</p>
+              <p className="dialog-loading">Loading settings...</p>
             ) : config.isError ||
               (!backendChanging &&
                 (models.isError || backendStatus.isError)) ? (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 Settings could not be loaded. Close this dialog and try again.
-              </p>
+              </Banner>
             ) : (
               <>
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field">
                   Default Agent Backend
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="selectedAgentBackend"
                     value={selectedAgentBackend}
                     disabled={backendChangeBlocked || updateConfig.isPending}
@@ -927,7 +933,7 @@ function SettingsChrome() {
                       ),
                     )}
                   </select>
-                  <span className="text-xs font-normal text-ink-faint">
+                  <span className="dialog-field-hint">
                     {backendChangeBlocked
                       ? `${blockingUnfinishedWorkItemCount} unfinished Work Item${
                           blockingUnfinishedWorkItemCount === 1 ? "" : "s"
@@ -941,14 +947,12 @@ function SettingsChrome() {
                   </span>
                 </label>
 
-                <div className="grid gap-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="m-0 text-xs font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                      Active Agent Backends
-                    </p>
+                <div className="dialog-status-block">
+                  <div className="dialog-status-head">
+                    <p className="dialog-status-label">Active Agent Backends</p>
                     <button
                       type="button"
-                      className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
+                      className="plate-mini"
                       disabled={recheckBusy || backendChanging}
                       onClick={() => {
                         void recheckAllBackends()
@@ -966,14 +970,9 @@ function SettingsChrome() {
                     const isDefault = row.backend.id === savedAgentBackend
                     const rowRechecking = recheckingBackendId === row.backend.id
                     return (
-                      <div
-                        key={row.backend.id}
-                        className="flex flex-wrap items-center justify-between gap-2 border border-rule bg-paper-2 px-3 py-2"
-                      >
-                        <p className="m-0 text-xs text-ink-soft">
-                          <span className="font-semibold text-ink-2">
-                            {row.backend.label}
-                          </span>
+                      <div key={row.backend.id} className="dialog-status-row">
+                        <p className="m-0">
+                          <strong>{row.backend.label}</strong>
                           {isDefault ? " · Default" : null}
                           {row.kind === "READY" ? " · Ready" : " · Unavailable"}
                           {backendChanging &&
@@ -986,7 +985,7 @@ function SettingsChrome() {
                         </p>
                         <button
                           type="button"
-                          className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 hover:bg-paper-2 disabled:opacity-50"
+                          className="plate-mini"
                           disabled={recheckBusy || backendChanging}
                           onClick={() => {
                             setRecheckAllFailures([])
@@ -1001,24 +1000,28 @@ function SettingsChrome() {
                     )
                   })}
                   {statuses.length === 0 && defaultStatus === undefined && (
-                    <p className="m-0 text-xs text-ink-soft">
+                    <p className="dialog-loading">
                       No Active Agent Backend status yet.
                     </p>
                   )}
                 </div>
 
                 {backendChanging && previewError !== null && (
-                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                  <Banner
+                    className="banner--compact"
+                    tone="alarm"
+                    tag="Preview"
+                    role="alert"
+                  >
                     Preview failed: {previewError}. Model fields stay disabled
                     until preview succeeds. Active backend is unchanged until
                     Save.
-                  </p>
+                  </Banner>
                 )}
 
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field dialog-field-mono">
                   Build model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="defaultModel"
                     value={defaultModel}
                     onChange={(event) => {
@@ -1058,27 +1061,31 @@ function SettingsChrome() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs font-normal text-ink-faint">
+                  <span className="dialog-field-hint">
                     Used for implement and other build steps.
                   </span>
                 </label>
 
                 {defaultModel.length > 0 && hasUnavailableBuildModel ? (
-                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                  <Banner
+                    className="banner--compact"
+                    tone="alarm"
+                    tag="Model"
+                    role="alert"
+                  >
                     Build effort (thinking) is unavailable — the selected model
                     is not in the Agent Model catalog. Choose another build
                     model.
-                  </p>
+                  </Banner>
                 ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
-                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
+                  <p className="dialog-note">
                     Build effort (thinking) is unavailable — this model has no
                     effort (thinking) options.
                   </p>
                 ) : (
-                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  <label className="dialog-field">
                     Build effort (thinking)
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       name="defaultThinkingLevel"
                       value={defaultThinkingLevel}
                       onChange={(event) =>
@@ -1102,17 +1109,16 @@ function SettingsChrome() {
                         </option>
                       ))}
                     </select>
-                    <span className="text-xs font-normal text-ink-faint">
+                    <span className="dialog-field-hint">
                       Optional effort (thinking) for this model. Options come
                       from the selected model.
                     </span>
                   </label>
                 )}
 
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field dialog-field-mono">
                   Review model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                     name="reviewModel"
                     value={reviewModel}
                     disabled={modelsDisabled}
@@ -1140,7 +1146,7 @@ function SettingsChrome() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-xs font-normal text-ink-faint">
+                  <span className="dialog-field-hint">
                     Used only for the review step. Empty uses the build model.
                   </span>
                 </label>
@@ -1148,22 +1154,26 @@ function SettingsChrome() {
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
                   (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
-                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                  <Banner
+                    className="banner--compact"
+                    tone="alarm"
+                    tag="Model"
+                    role="alert"
+                  >
                     Review effort (thinking) is unavailable — the selected model
                     is not in the Agent Model catalog. Choose another model or
                     use the build model.
-                  </p>
+                  </Banner>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
-                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
+                  <p className="dialog-note">
                     Review effort (thinking) is unavailable — this model has no
                     effort (thinking) options.
                   </p>
                 ) : (
-                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  <label className="dialog-field">
                     Review effort (thinking)
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
                       name="reviewThinkingLevel"
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
@@ -1188,10 +1198,9 @@ function SettingsChrome() {
                   </label>
                 )}
 
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field">
                   Max concurrent Agent Turns
                   <input
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="maxConcurrentAgentTurns"
                     type="number"
                     min={1}
@@ -1202,16 +1211,15 @@ function SettingsChrome() {
                       setMaxConcurrentOpencodeSessions(event.target.value)
                     }
                   />
-                  <span className="text-xs font-normal text-ink-faint">
+                  <span className="dialog-field-hint">
                     Caps how many Agent Turn CLI processes run at once (default
                     2). Agent-free steps and model listing are not counted.
                   </span>
                 </label>
 
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field">
                   Max concurrent Work Items
                   <input
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
                     name="maxConcurrentWorkItems"
                     type="number"
                     min={1}
@@ -1222,7 +1230,7 @@ function SettingsChrome() {
                       setMaxConcurrentWorkItems(event.target.value)
                     }
                   />
-                  <span className="text-xs font-normal text-ink-faint">
+                  <span className="dialog-field-hint">
                     Caps how many Work Items may be Admitted at once (Worker
                     Slots, default 5). Extra Implement requests wait for a free
                     slot.
@@ -1232,37 +1240,52 @@ function SettingsChrome() {
             )}
 
             {updateConfig.isError && (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 {updateConfig.error instanceof Error
                   ? updateConfig.error.message
                   : "Settings could not be saved. Check the values and try again."}
-              </p>
+              </Banner>
             )}
             {recheckAllFailures.length > 0 && (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Recheck"
+                role="alert"
+              >
                 Recheck failed for{" "}
                 {recheckAllFailures.length === 1
                   ? recheckAllFailures[0]
                   : recheckAllFailures.join(", ")}
                 . Other backends may have refreshed. Try again after fixing
                 those Agent Backends.
-              </p>
+              </Banner>
             )}
             {recheckAllFailures.length === 0 && recheckBackend.isError && (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Recheck"
+                role="alert"
+              >
                 Recheck failed
                 {recheckBackend.variables !== undefined
                   ? ` for ${backendLabelForId(recheckBackend.variables)}`
                   : ""}
                 . Try again after fixing that Agent Backend.
-              </p>
+              </Banner>
             )}
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-rule bg-paper-2 px-6 py-4">
+          <div className="dialog-footer">
             <button
               type="button"
-              className="border border-rule-2 px-4 py-2 text-sm font-semibold text-ink-soft hover:bg-paper"
+              className="plate-mini"
               onClick={() => {
                 dialogRef.current?.close()
                 setDialogOpen(false)
@@ -1273,7 +1296,8 @@ function SettingsChrome() {
             </button>
             <button
               type="submit"
-              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-on-solid uppercase hover:bg-oxblood-deep disabled:cursor-not-allowed disabled:opacity-50"
+              className="plate-primary"
+              aria-busy={updateConfig.isPending || undefined}
               disabled={
                 config.isPending ||
                 config.isError ||
@@ -1287,7 +1311,7 @@ function SettingsChrome() {
                 (!backendChanging && defaultModel.length === 0)
               }
             >
-              {updateConfig.isPending ? "Saving..." : "Save settings"}
+              {updateConfig.isPending ? "Saving…" : "Save settings"}
             </button>
           </div>
         </form>

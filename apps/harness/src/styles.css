@@ -33,21 +33,13 @@
   /* §2.2 Neutrals */
   --paper: #ffffff;
   --panel: #ffffff;
-  /* Elevated / inset surfaces used by unmigrated dialogs + chips */
-  --paper-2: #f0f1ef;
-  --paper-3: #e6e8e5;
   --ink: #151515;
   --ink-dim: #4a4a4a;
   --ink-faint: #8b8b8b;
   --line-soft: rgb(21 21 21 / 0.3);
   --line-ghost: rgb(21 21 21 / 0.12);
-  --rule: #d8c9a8;
-  --rule-2: #cbbb96;
-  --rule-soft: #e7dcc2;
   --signal: #ffd21c;
   --merged-halo: transparent;
-  /* Inverse text on saturated fills (oxblood CTAs) — never theme-flips */
-  --on-solid: #ffffff;
   /* Modal scrim — always dims, never inverts with ink */
   --scrim: rgb(21 21 21 / 0.45);
 
@@ -83,19 +75,13 @@
   color-scheme: dark;
   --paper: #15181b;
   --panel: #1c2024;
-  --paper-2: #23282c;
-  --paper-3: #2b3035;
   --ink: #f2f3f1;
   --ink-dim: #c6cac8;
   --ink-faint: #7f8583;
   --line-soft: rgb(242 243 241 / 0.32);
   --line-ghost: rgb(242 243 241 / 0.14);
-  --rule: rgb(242 243 241 / 0.28);
-  --rule-2: rgb(242 243 241 / 0.22);
-  --rule-soft: rgb(242 243 241 / 0.14);
   --signal: #ffd21c;
   --merged-halo: rgb(242 243 241 / 0.85);
-  --on-solid: #ffffff;
   --scrim: rgb(0 0 0 / 0.55);
 
   --mast-bg: #000000;
@@ -125,34 +111,18 @@
 
 /*
   Tailwind @theme aliases map Interchange tokens to utilities.
-  Oxblood/wash accents stay fixed (unmigrated dialogs); surfaces + ink flip.
+  Surfaces + ink flip with data-theme; lane colors stay fixed.
 */
 @theme {
   --color-paper: var(--paper);
-  --color-paper-2: var(--paper-2);
-  --color-paper-3: var(--paper-3);
   --color-panel: var(--panel);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-dim);
   --color-ink-soft: var(--ink-dim);
   --color-ink-faint: var(--ink-faint);
-  --color-rule: var(--rule);
-  --color-rule-2: var(--rule-2);
-  --color-rule-soft: var(--rule-soft);
-  --color-on-solid: var(--on-solid);
+  --color-line-soft: var(--line-soft);
+  --color-line-ghost: var(--line-ghost);
   --color-scrim: var(--scrim);
-  --color-oxblood: #7a1d2a;
-  --color-oxblood-deep: #5c141f;
-  --color-vermilion: #b8341b;
-  --color-sepia: #6c4f20;
-  --color-olive: #4a5d2c;
-  --color-olive-wash: #eef0e2;
-  --color-amber-wash: #f3e6c8;
-  --color-oxblood-wash: #f0ddd9;
-  --color-vermilion-wash: #f4e1d8;
-  --color-violet-wash: #e7dff0;
-  --color-teal: #2f5d50;
-  --color-teal-wash: #e2ebe7;
   --color-signal: var(--signal);
   --color-lane-queue: var(--lane-queue);
   --color-lane-build: var(--lane-build);
@@ -160,10 +130,6 @@
   --color-lane-pr: var(--lane-pr);
   --color-lane-attention: var(--lane-attention);
   --color-lane-merged: var(--lane-merged);
-  /* Serif kept until phase 5 teardown when no surface references it. */
-  --font-serif:
-    "Iowan Old Style", "Palatino Linotype", "URW Palladio L", Palatino,
-    "Book Antiqua", Georgia, "Times New Roman", serif;
   --font-display: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-sans: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono:
@@ -866,15 +832,382 @@
     gap: 0.5rem;
   }
 
-  /* ---------- Legacy Ledger helpers (unmigrated surfaces) ---------- */
+  /* ---------- Dialogs (§4.9) ---------- */
 
-  .field-rule {
-    border: 1px solid var(--color-rule);
-    background-color: var(--color-panel);
+  .dialog-panel {
+    margin: auto;
+    width: min(92vw, 32rem);
+    border: 2px solid var(--ink);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 0;
+    box-shadow: none;
   }
 
-  .entry-rule {
-    border-top: 1px solid var(--color-rule-soft);
+  .dialog-panel::backdrop {
+    background: var(--scrim);
+  }
+
+  .dialog-panel--narrow {
+    width: min(92vw, 28rem);
+  }
+
+  .dialog-header {
+    border-bottom: 1px solid var(--line-ghost);
+    padding: 1.25rem 1.5rem;
+  }
+
+  .dialog-header--compact {
+    padding: 1rem 1.25rem;
+  }
+
+  .dialog-kicker {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .dialog-title {
+    margin: 0.5rem 0 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.2rem, 2.4vw, 1.45rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    line-height: 1.05;
+    color: var(--ink);
+  }
+
+  .dialog-title--sm {
+    font-size: 1.1rem;
+  }
+
+  /* Forge paths keep true case (case-sensitive hosts / project paths). */
+  .dialog-title--path {
+    text-transform: none;
+    letter-spacing: -0.01em;
+    word-break: break-all;
+  }
+
+  .dialog-lede {
+    margin: 0.45rem 0 0;
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    line-height: 1.4;
+    color: var(--ink-dim);
+  }
+
+  .dialog-body {
+    display: grid;
+    gap: 1.15rem;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .dialog-body--compact {
+    padding: 1rem 1.25rem;
+  }
+
+  .dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    border-top: 1px solid var(--line-ghost);
+    background: var(--panel);
+    padding: 0.9rem 1.5rem;
+  }
+
+  .dialog-footer--compact {
+    padding: 0.75rem 1.25rem;
+  }
+
+  .dialog-field {
+    display: grid;
+    min-width: 0;
+    gap: 0.4rem;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .dialog-field > select,
+  .dialog-field > input:not([type="checkbox"]),
+  .dialog-input {
+    width: 100%;
+    min-width: 0;
+    border: 1.5px solid var(--ink);
+    background: var(--paper);
+    padding: 0.5rem 0.7rem;
+    font-size: 0.88rem;
+    font-weight: 400;
+    color: var(--ink);
+  }
+
+  /* Match global :focus-visible (2px ink) — do not zero outline on fields. */
+  .dialog-field > select:focus-visible,
+  .dialog-field > input:not([type="checkbox"]):focus-visible,
+  .dialog-input:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 2px;
+  }
+
+  .dialog-field > select:disabled,
+  .dialog-field > input:not([type="checkbox"]):disabled,
+  .dialog-input:disabled {
+    color: var(--ink-faint);
+    cursor: not-allowed;
+    opacity: 0.7;
+  }
+
+  .dialog-field-mono > select,
+  .dialog-field-mono > input:not([type="checkbox"]),
+  .dialog-input--mono {
+    font-family: var(--font-mono);
+  }
+
+  .dialog-field-hint {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 400;
+    letter-spacing: 0.02em;
+    color: var(--ink-faint);
+  }
+
+  .dialog-check {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--ink-dim);
+  }
+
+  .dialog-check input[type="checkbox"],
+  .dialog-field input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--signal);
+  }
+
+  .dialog-check .dialog-field-hint {
+    flex: 1 1 100%;
+    margin-left: 1.75rem;
+  }
+
+  .dialog-status-block {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .dialog-status-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .dialog-status-label {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .dialog-status-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border: 1px solid var(--line-ghost);
+    background: var(--panel);
+    padding: 0.5rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+  }
+
+  .dialog-status-row strong {
+    font-weight: 700;
+    color: var(--ink);
+  }
+
+  .dialog-fieldset {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0;
+    border: 1.5px solid var(--ink);
+    padding: 0.9rem 1rem 1rem;
+  }
+
+  .dialog-fieldset legend {
+    padding: 0 0.35rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .dialog-note {
+    margin: 0;
+    border: 1px solid var(--line-ghost);
+    background: var(--panel);
+    padding: 0.65rem 0.75rem;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    line-height: 1.4;
+    color: var(--ink-dim);
+  }
+
+  .dialog-loading {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    color: var(--ink-dim);
+  }
+
+  .dialog-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+  }
+
+  .dialog-table th {
+    padding: 0.4rem 0.75rem 0.4rem 0;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--ink-dim);
+  }
+
+  .dialog-table td {
+    padding: 0.4rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  .dialog-table tr {
+    border-bottom: 1px solid var(--line-ghost);
+  }
+
+  .dialog-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  /* No-change completion summary (Interchange panel; display body text) */
+  .completion-summary {
+    margin-top: 0.4rem;
+    border: 1.5px solid var(--ink);
+    background: var(--panel);
+    padding: 0.5rem 0.65rem;
+  }
+
+  .completion-summary p {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 0.88rem;
+    line-height: 1.4;
+    color: var(--ink-dim);
+    white-space: pre-wrap;
+  }
+
+  .not-found-panel {
+    margin: 3rem auto 0;
+    max-width: 36rem;
+    border: 2px solid var(--ink);
+    background: var(--panel);
+    padding: 2rem;
+    text-align: center;
+  }
+
+  /* ---------- Menus (§4.10) ---------- */
+
+  .menu-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10;
+    margin-top: 0.25rem;
+    min-width: 10rem;
+    border: 2px solid var(--ink);
+    background: var(--panel);
+    padding: 0.25rem 0;
+    box-shadow: none;
+  }
+
+  .menu-item {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    cursor: pointer;
+  }
+
+  .menu-item:is(:hover, :focus-visible) {
+    background: var(--plate-hover);
+    color: var(--ink);
+  }
+
+  .menu-item--destructive:is(:hover, :focus-visible) {
+    background: var(--lane-attention);
+    color: #151515;
+  }
+
+  .menu-item:disabled {
+    cursor: wait;
+    opacity: 0.5;
+  }
+
+  .menu-sep {
+    margin: 0.25rem 0;
+    border: 0;
+    border-top: 1px solid var(--line-ghost);
+  }
+
+  /* ---------- Skeletons (§4.11) ---------- */
+
+  .skeleton {
+    display: block;
+    background: var(--line-ghost);
+    animation: skeleton-pulse 1.2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton {
+      animation: none;
+    }
+  }
+
+  @keyframes skeleton-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
   }
 
   /* ---------- Board shell + merged-PR stats (§4.2–4.4, §5, §6) ---------- */
@@ -993,6 +1326,7 @@
     height: 2.75rem;
     margin: 0.55rem 0.15rem 0.7rem;
     background: var(--line-ghost);
+    animation: skeleton-pulse 1.2s ease-in-out infinite;
   }
 
   .merged-pr-stats-cell .merged-pr-stats-skeleton {
@@ -1001,6 +1335,12 @@
 
   [data-theme="dark"] .merged-pr-stats-skeleton {
     background: rgb(255 255 255 / 0.1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .merged-pr-stats-skeleton {
+      animation: none;
+    }
   }
 
   .merged-pr-stats-body {
@@ -1709,8 +2049,13 @@
   }
 
   .plate-primary:disabled {
-    cursor: wait;
+    cursor: not-allowed;
     opacity: 0.55;
+  }
+
+  /* Pending mutations only — validation-disabled stays not-allowed. */
+  .plate-primary:disabled[aria-busy="true"] {
+    cursor: wait;
   }
 
   /* §5.6 Stamps (exception chips — Closed, Blocked, No change) */
