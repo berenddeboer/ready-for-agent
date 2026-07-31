@@ -5,9 +5,6 @@
  */
 import type { LifecyclePipelineLaneId } from "./pipeline-lanes.js"
 
-/** @deprecated Prefer CSS component classes; kept for test/source compatibility. */
-export const jobsProgressMinTextClassName = "text-xs"
-
 export const lifecycleStepChipClassName = "leg leg--done"
 
 export const statusBadgeBaseClassName = "status-tag"
