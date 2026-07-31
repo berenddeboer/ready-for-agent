@@ -2,7 +2,7 @@
 
 export type ThemeMode = "light" | "dark"
 
-export const THEME_QUERY_PARAM = "theme"
+const THEME_QUERY_PARAM = "theme"
 
 /** Runs before paint so the first frame matches system / ?theme= pin. */
 export const THEME_BOOTSTRAP_SCRIPT = `(function(){try{var p=new URLSearchParams(location.search).get(${JSON.stringify(THEME_QUERY_PARAM)});var t=(p==="dark"||p==="light")?p:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`
