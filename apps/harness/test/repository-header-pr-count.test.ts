@@ -79,8 +79,7 @@ describe("repository header pull request count", () => {
     expect(header).toContain('className="sr-only"')
     expect(header).toContain("{pullRequestCountLabel}")
     expect(header).toContain('aria-hidden="true"')
-    expect(header).toContain("shrink-0")
-    expect(header).toContain("tabular-nums")
+    expect(header).toContain("repo-card-pr-count")
   })
 
   test("header uses presentation helper with isPending and isFetching", () => {

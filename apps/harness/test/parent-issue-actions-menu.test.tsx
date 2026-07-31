@@ -101,6 +101,12 @@ describe("ParentIssueActionsMenu", () => {
     )
     expect(html).toContain('role="alert"')
     expect(html).toContain("Could not start Implement all with auto-merge")
+    // In-flow alarm Banner (not absolute under kebab).
+    expect(html).toContain("banner--compact")
+    expect(html).toContain("parent-issue-error")
+    expect(html).toContain("banner-tag")
+    expect(html).toContain("Error")
+    expect(html).not.toContain("absolute top-full right-0 z-10 mt-1 w-56")
   })
 
   test("menu source exposes sole menuitem label Implement all with auto-merge", () => {
@@ -118,19 +124,19 @@ describe("ParentIssueActionsMenu", () => {
     expect(source.match(/role="menuitem"/g)?.length).toBe(1)
   })
 
-  test("menu shell resets inherited mono/uppercase styles to match other app menus", () => {
+  test("menu uses Interchange mono uppercase menuitems and icon-btn trigger", () => {
     const source = readFileSync(
       join(import.meta.dir, "../src/parent-issue-actions-menu.tsx"),
       "utf8",
     )
-    // Other menus (leaf issue, repository card) use plain sans menuitems.
-    // Explicit resets keep the kebab menu correct if a parent stamp/label wraps it.
+    // §4.10 / phase 4: icon-btn trigger; mono uppercase items (no Ledger shadow).
+    expect(source).toContain('className="icon-btn"')
     expect(source).toMatch(
-      /role="menu"[\s\S]*?font-sans[\s\S]*?normal-case[\s\S]*?tracking-normal/,
+      /role="menu"[\s\S]*?border-2 border-ink[\s\S]*?role="menuitem"/,
     )
-    expect(source).toContain(
-      'className="block w-full px-3 py-2 text-left text-sm font-medium text-ink-2 hover:bg-paper-2"',
-    )
+    expect(source).toContain("font-mono")
+    expect(source).toContain("uppercase")
+    expect(source).not.toContain("shadow-[")
   })
 })
 
@@ -149,20 +155,15 @@ describe("ParentIssueGroup control order", () => {
 
     // Anchor on the UI closed-count label, not the closedChildren prop name.
     const closedLabel = group.indexOf("childIssues.length} closed")
-    const chevron = group.indexOf("group-open:rotate-180")
+    const chevron = group.indexOf("parent-issue-chevron")
     const kebab = group.indexOf("<ParentIssueActionsMenu")
     expect(closedLabel).toBeGreaterThanOrEqual(0)
     expect(chevron).toBeGreaterThan(closedLabel)
     expect(kebab).toBeGreaterThan(chevron)
 
-    // Stamp mono/uppercase applies only to the closed count, not the controls.
-    // Chevron keeps text-ink-faint for currentColor without re-wrapping the menu.
-    expect(group).toMatch(
-      /font-mono text-xs font-semibold tracking-\[0\.1em\] text-ink-faint uppercase[\s\S]*?closed/,
-    )
-    expect(group).toContain(
-      "size-3.5 text-ink-faint transition-transform group-open:rotate-180",
-    )
+    // Closed-count mono chip sits left of the chevron and kebab.
+    expect(group).toContain("parent-issue-closed-count")
+    expect(group).toContain("parent-issue-summary-actions")
     expect(group).not.toMatch(/flex shrink-0 items-center gap-1\.5 font-mono/)
   })
 })

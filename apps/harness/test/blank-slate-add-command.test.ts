@@ -71,6 +71,25 @@ describe("blank-slate add repository command", () => {
     expect(blank).toContain('heading="No repositories configured"')
   })
 
+  test("blank slate uses Interchange §4.7 Setup kicker, dashed panel, primary plate", () => {
+    const guidance = addRepositoryGuidanceSource()
+    expect(guidance).toContain('className="blank-slate"')
+    expect(guidance).toContain('className="kicker-tag"')
+    expect(guidance).toContain("Setup")
+    expect(guidance).toContain("blank-slate-title")
+    expect(guidance).toContain("blank-slate-input")
+    expect(guidance).toContain("plate-mini")
+    expect(guidance).toContain("plate-primary")
+    expect(guidance).toContain("blank-slate-fieldset")
+    expect(guidance).toContain("Confirm forge identity")
+    expect(guidance).toContain("guidance-code")
+    expect(guidance).toContain('tone="alarm"')
+    expect(guidance).toContain('role="alert"')
+    // Ledger serif / oxblood CTA language is gone from this surface.
+    expect(guidance).not.toContain("font-serif")
+    expect(guidance).not.toContain("bg-oxblood")
+  })
+
   test("shows add-repository guidance in the empty state via shared blank slate", () => {
     const cards = repositoryCardsSource()
     const emptyStart = cards.indexOf("if (repositories.length === 0)")
@@ -119,7 +138,8 @@ describe("blank-slate add repository command", () => {
     // Host folder dialog is long-lived; must not share the batched client.
     expect(guidance).toContain("graphqlUnbatched.mutation")
     expect(guidance).toContain("Browse…")
-    expect(guidance).toContain("--- or ---")
+    expect(guidance).toContain("blank-slate-divider")
+    expect(guidance).toContain(">or</")
     expect(guidance).toContain('id="add-repository-path"')
     expect(guidance).toContain('placeholder="/path/to/local/repo"')
     expect(guidance).toContain(
@@ -129,7 +149,7 @@ describe("blank-slate add repository command", () => {
     expect(guidance).toContain("pickToAddBridging")
     expect(guidance).toContain("setPickToAddBridging(true)")
 
-    const separatorAt = guidance.indexOf("--- or ---")
+    const separatorAt = guidance.indexOf("blank-slate-divider")
     const cliCopyAt = guidance.indexOf(
       "Add a local Git repository with the operator binary:",
     )

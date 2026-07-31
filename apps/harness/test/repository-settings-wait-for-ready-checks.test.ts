@@ -33,6 +33,6 @@ describe("Repository settings Wait for checks to start after ready for review", 
     )
     expect(source).toContain("repository.waitForReadyForReviewChecks")
     expect(source).toContain('? "Enabled"')
-    expect(source).toContain("Wait for ready checks:")
+    expect(source).toContain("Wait for ready checks")
   })
 })
