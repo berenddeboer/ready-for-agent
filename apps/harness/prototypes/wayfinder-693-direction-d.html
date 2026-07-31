@@ -1,0 +1,981 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway, not for production.
+  Wayfinder ticket #693 ("Prototype: clanker direction D", map #689).
+
+  Plan: one full-page Harness homepage (nav + committed-PR stats + Kanban
+  board) in a single standalone HTML file. Direction D's angle: the
+  "interchange" — the operator reads the pipeline as a transit network.
+  Six stops on a line diagram; the saturated lane colors become line
+  colors carried by station roundels and nameboards (no grey lane fills,
+  no warm paper, no serif). Stark station white, black supergraphic
+  bands, grotesque wayfinding type. Queue carries a Transfer sign:
+  change here for Repos.
+
+  Run: open this file in a browser (no build, no server needed).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction D · Interchange — Clanker Harness prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------------
+     Direction D tokens — transit interchange.
+     Lane colors are the fixed pipeline identity (unchanged):
+       Queue #ffd21c · Build #1976d2 · Review #7654b5
+       PR #168b62 · Attention #ff4d1c · Merged #151515
+  ------------------------------------------------------------------ */
+  :root {
+    --paper: #ffffff;
+    --ink: #151515;
+    --ink-dim: #4a4a4a;
+    --ink-faint: #8b8b8b;
+    --line-soft: rgb(21 21 21 / 0.30);
+    --line-ghost: rgb(21 21 21 / 0.12);
+    --signal: #ffd21c; /* network accent = the Queue line */
+    --mast-dim: #b9b9b9;
+    --mast-faint: #7c7c7c;
+
+    --lane-queue: #ffd21c;
+    --lane-build: #1976d2;
+    --lane-review: #7654b5;
+    --lane-pr: #168b62;
+    --lane-attention: #ff4d1c;
+    --lane-merged: #151515;
+
+    --font-display: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-width: 20rem;
+    min-height: 100vh;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--signal); color: var(--ink); }
+
+  a { color: inherit; }
+
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .mast :focus-visible { outline-color: var(--signal); }
+
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* ================= Masthead — station supergraphic ================ */
+
+  .mast {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.2rem 2.5rem;
+    padding: 1.5rem 2.2rem 1.35rem;
+    background: var(--ink);
+    color: #fff;
+  }
+
+  .brand-kicker {
+    margin: 0 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--mast-faint);
+  }
+  .brand-kicker b { color: var(--mast-dim); font-weight: 400; }
+
+  .brand h1 {
+    margin: 0;
+    font-size: clamp(2rem, 4.2vw, 3.1rem);
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: -0.015em;
+    text-transform: uppercase;
+  }
+  .brand h1 a { color: #fff; text-decoration: none; }
+  .brand h1 a:hover { color: var(--signal); }
+
+  .brand-sub {
+    margin: 0.55rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--mast-dim);
+  }
+  .brand-sub .ok { color: var(--signal); }
+
+  /* Nav as a line map: stops on a route */
+  .linemap { display: grid; gap: 0.45rem; justify-items: end; }
+  .linemap-cap {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--mast-faint);
+  }
+  .stops {
+    position: relative;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.7rem;
+  }
+  /* the route line behind the stop dots */
+  .stops::before {
+    content: "";
+    position: absolute;
+    top: 0.42rem;
+    left: 0.45rem;
+    right: 0.45rem;
+    height: 2px;
+    background: rgb(255 255 255 / 0.4);
+  }
+  .stop {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--mast-dim);
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  button.stop {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+  }
+  .stop .dot {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 50%;
+    border: 2px solid rgb(255 255 255 / 0.75);
+    background: var(--ink);
+    flex-shrink: 0;
+  }
+  /* mask the route line where it passes behind stop labels */
+  .stop > span:last-child {
+    position: relative;
+    background: var(--ink);
+    padding-right: 0.1rem;
+  }
+  .stop:hover { color: #fff; }
+  .stop:hover .dot { border-color: var(--signal); }
+  .stop.active { color: #fff; }
+  .stop.active .dot { background: #fff; border-color: #fff; }
+  .stop.active:hover .dot { background: var(--signal); border-color: var(--signal); }
+
+  /* Network ribbon: the six lines under the masthead */
+  .ribbon { display: flex; height: 0.4rem; }
+  .ribbon i { flex: 1; }
+
+  .page { padding: 1.6rem 2.2rem 3rem; }
+
+  /* ================= Service board — departure band ================= */
+
+  .svc {
+    border: 2px solid var(--ink);
+    background: var(--ink);
+    color: #fff;
+  }
+  .svc-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.5rem 0.9rem;
+    border-bottom: 1px solid rgb(255 255 255 / 0.22);
+  }
+  .svc-tag {
+    background: var(--signal);
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+    white-space: nowrap;
+  }
+  .svc-head h2 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+  .svc-note {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.14em;
+    color: var(--mast-faint);
+    text-transform: uppercase;
+  }
+  .svc-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .qty {
+    display: grid;
+    gap: 0.15rem;
+    padding: 0.6rem 0.9rem 0.75rem;
+    border-left: 1px solid rgb(255 255 255 / 0.14);
+  }
+  .qty:first-child { border-left: 0; }
+  .qty-num {
+    font-size: clamp(2.1rem, 3vw, 2.9rem);
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .qty-label {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--mast-dim);
+  }
+
+  /* =========================== Controls ============================ */
+
+  .controls {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem 1.5rem;
+  }
+  .tabs { display: flex; }
+  .tab {
+    appearance: none;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    margin-left: -2px;
+    padding: 0.5rem 1rem;
+    color: var(--ink-dim);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .tab:first-child { margin-left: 0; }
+  .tab:hover { color: var(--ink); position: relative; }
+  .tab.active {
+    background: var(--ink);
+    color: #fff;
+    position: relative;
+  }
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-inline-size: 0;
+  }
+  .filter {
+    appearance: none;
+    background: var(--paper);
+    border: 1px solid var(--line-soft);
+    margin-left: -1px;
+    padding: 0.42rem 0.75rem;
+    color: var(--ink-faint);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+  }
+  .filter:first-child { margin-left: 0; }
+  .filter:hover { border-color: var(--ink); color: var(--ink); position: relative; }
+  .filter.active {
+    border-color: var(--ink);
+    color: var(--ink);
+    font-weight: 700;
+    position: relative;
+    box-shadow: inset 0 -3px 0 var(--ink);
+  }
+
+  /* ================= Network — six stops on one line =============== */
+
+  .network {
+    position: relative;
+    margin-top: 1.6rem;
+    padding-top: 1.15rem; /* room for roundels riding the route line */
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.9rem;
+    align-items: start;
+  }
+  /* the route line, station-centre to station-centre */
+  .network::before {
+    content: "";
+    position: absolute;
+    top: calc(1.15rem + 1.05rem - 2px);
+    left: calc(100% / 12);
+    right: calc(100% / 12);
+    height: 4px;
+    background: var(--ink);
+  }
+
+  .lane { position: relative; z-index: 1; }
+
+  /* Station roundel on the line */
+  .roundel {
+    margin: 0 auto;
+    width: 2.1rem;
+    height: 2.1rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--lane);
+    color: var(--on-lane);
+    border: 2px solid var(--ink);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  /* Merged: black disc needs a white halo to read on the black line */
+  .lane--merged .roundel {
+    border-color: #fff;
+    outline: 2px solid var(--ink);
+  }
+
+  /* Station nameboard — lane color does the identity work */
+  .nameboard {
+    margin-top: 0.45rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.42rem 0.65rem 0.48rem;
+    background: var(--lane);
+    color: var(--on-lane);
+    border: 2px solid var(--ink);
+  }
+  .nameboard h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .nb-count {
+    margin-left: auto;
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Platform: open station floor — no fill, no grey */
+  .platform {
+    border: 1.5px solid var(--ink);
+    border-top: 0;
+    padding: 0.65rem;
+    display: grid;
+    gap: 0.65rem;
+    align-content: start;
+    min-height: 9rem;
+  }
+  .platform-empty {
+    margin: 0;
+    padding: 1.6rem 0.4rem;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ================= Departures — tickets ========================== */
+
+  .dep {
+    border: 1.5px solid var(--ink);
+    border-left: 0;
+    box-shadow: inset 6px 0 0 var(--lane); /* the line this service is on */
+    padding: 0.55rem 0.65rem 0.7rem 0.95rem;
+    display: grid;
+    gap: 0.4rem;
+  }
+  .dep-repo {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dep-title {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 500;
+    line-height: 1.28;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  a.dep-title:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--signal);
+  }
+  .dep-title .num {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--ink-dim);
+  }
+  .dep-status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+  }
+  .tag {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    border: 1.5px solid var(--ink);
+    padding: 0.18rem 0.4rem;
+  }
+  .tag--hold { border-style: dashed; }
+  .tag--alarm {
+    background: var(--lane-attention);
+    color: var(--ink);
+  }
+  .pause {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--ink-faint);
+    border: 1px solid var(--line-ghost);
+    padding: 0.1rem 0.32rem;
+    cursor: pointer;
+  }
+  .pause:hover { color: var(--ink); border-color: var(--line-soft); }
+  .dep-rt {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dep-rt .sess {
+    color: var(--ink-dim);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+  .via {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border-left: 2px solid var(--line-soft);
+    padding-left: 0.45rem;
+  }
+
+  /* Legs of the journey — step chips */
+  .legs { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .leg {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.06em;
+    border: 1.5px solid var(--ink);
+    color: var(--ink-dim);
+    padding: 0.16rem 0.38rem;
+    white-space: nowrap;
+  }
+  .leg--done { background: var(--ink); color: #fff; }
+  .leg--run { background: var(--lane); color: var(--on-lane); }
+  .leg--next { border-style: dashed; color: var(--ink-faint); }
+  .leg--fail { background: var(--lane-attention); color: var(--ink); font-weight: 700; }
+
+  .dep-meta {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .prbadge {
+    justify-self: start;
+    background: var(--ink);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0.2rem 0.5rem;
+    text-decoration: none;
+  }
+  a.prbadge:hover { background: var(--lane-pr); }
+
+  /* ================= Queue transfer sign → Repos =================== */
+
+  .transfer {
+    background: var(--lane-queue);
+    color: var(--ink);
+    border: 2px solid var(--ink);
+    padding: 0.6rem 0.7rem 0.7rem;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .transfer-head {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .transfer-tag {
+    background: var(--ink);
+    color: var(--lane-queue);
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 0.16rem 0.45rem;
+  }
+  .transfer-glyph { font-size: 0.95rem; font-weight: 700; }
+  .transfer-text {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 500;
+    line-height: 1.35;
+  }
+  .transfer-link {
+    justify-self: start;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink);
+    text-decoration: underline;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 3px;
+  }
+  .transfer-link:hover { background: var(--ink); color: var(--lane-queue); text-decoration: none; }
+
+  /* ========================= Network key =========================== */
+
+  .key {
+    margin-top: 2.4rem;
+    border-top: 2px solid var(--ink);
+    padding-top: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+  }
+  .key-tag {
+    background: var(--ink);
+    color: #fff;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+  }
+  .key-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 1.4rem;
+    flex: 1;
+  }
+  .key-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .key-list i {
+    align-self: center;
+    width: 0.7rem;
+    height: 0.7rem;
+    border: 1.5px solid var(--ink);
+    background: var(--c);
+    flex-shrink: 0;
+  }
+  .key-list b { color: var(--ink); font-weight: 700; }
+  .proto-note {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  /* ========================== Responsive =========================== */
+
+  @media (max-width: 1500px) {
+    .network { padding-top: 0; }
+    .network::before { display: none; }
+    .roundel {
+      position: absolute;
+      top: 0.5rem;
+      left: 0.55rem;
+      z-index: 2;
+      width: 1.4rem;
+      height: 1.4rem;
+      margin: 0;
+      font-size: 0.52rem;
+    }
+    .lane--merged .roundel { border-color: #fff; outline: 0; }
+    .nameboard { margin-top: 0; padding-left: 2.3rem; }
+    .network { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 900px) {
+    .mast { padding: 1.2rem 1.4rem 1.1rem; }
+    .page { padding: 1.2rem 1.4rem 2.4rem; }
+    .linemap { justify-items: start; }
+    .network { grid-template-columns: minmax(0, 1fr); }
+    .svc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .qty { border-left: 0; border-top: 1px solid rgb(255 255 255 / 0.14); }
+    .qty:nth-child(-n+2) { border-top: 0; }
+    .qty:nth-child(even) { border-left: 1px solid rgb(255 255 255 / 0.14); }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================ Masthead ========================== -->
+<header class="mast">
+  <div class="brand">
+    <p class="brand-kicker">Ready for Agent · Operator board · <b>RFA v0.9.2</b></p>
+    <h1><a href="/">Clanker Harness</a></h1>
+    <p class="brand-sub">Six-stop work network — <span class="ok">all lines running</span></p>
+  </div>
+  <nav class="linemap" aria-label="Primary">
+    <span class="linemap-cap">System map</span>
+    <div class="stops">
+      <a class="stop active" href="/" aria-current="page"><i class="dot" aria-hidden="true"></i><span>Home</span></a>
+      <a class="stop" href="/repos"><i class="dot" aria-hidden="true"></i><span>Repos</span></a>
+      <a class="stop" href="/completed"><i class="dot" aria-hidden="true"></i><span>Completed</span></a>
+      <button class="stop" type="button"><i class="dot" aria-hidden="true"></i><span>Settings</span></button>
+    </div>
+  </nav>
+</header>
+<div class="ribbon" aria-hidden="true">
+  <i style="background: var(--lane-queue)"></i>
+  <i style="background: var(--lane-build)"></i>
+  <i style="background: var(--lane-review)"></i>
+  <i style="background: var(--lane-pr)"></i>
+  <i style="background: var(--lane-attention)"></i>
+  <i style="background: var(--lane-merged)"></i>
+</div>
+
+<div class="page">
+
+  <!-- ======================= Service board ========================= -->
+  <section class="svc" aria-label="Committed pull requests">
+    <header class="svc-head">
+      <span class="svc-tag">Service board</span>
+      <h2>Merged PR throughput</h2>
+      <span class="svc-note">Qty per period · local time</span>
+    </header>
+    <div class="svc-grid">
+      <div class="qty"><span class="qty-num">4</span><span class="qty-label">Today</span></div>
+      <div class="qty"><span class="qty-num">3</span><span class="qty-label">Yesterday</span></div>
+      <div class="qty"><span class="qty-num">17</span><span class="qty-label">This week</span></div>
+      <div class="qty"><span class="qty-num">12</span><span class="qty-label">Last week</span></div>
+      <div class="qty"><span class="qty-num">9</span><span class="qty-label">2 wks ago</span></div>
+    </div>
+  </section>
+
+  <!-- ========================== Controls =========================== -->
+  <section class="controls" aria-label="Jobs">
+    <div class="tabs" role="tablist" aria-label="Jobs">
+      <button class="tab active" type="button" role="tab" aria-selected="true">Pipeline</button>
+      <button class="tab" type="button" role="tab" aria-selected="false">Completed 24 h · 7</button>
+    </div>
+    <fieldset class="filters">
+      <legend class="sr-only">Filter jobs by repository</legend>
+      <button class="filter active" type="button" aria-pressed="true">All sources</button>
+      <button class="filter" type="button" aria-pressed="false">berenddeboer/ready-for-agent</button>
+      <button class="filter" type="button" aria-pressed="false">acme/payments-api</button>
+      <button class="filter" type="button" aria-pressed="false">acme/web-storefront</button>
+    </fieldset>
+  </section>
+
+  <!-- =========================== Network =========================== -->
+  <main class="network" aria-label="Lifecycle pipeline">
+
+    <!-- STOP 01 — Queue -->
+    <section class="lane" style="--lane: var(--lane-queue); --on-lane: #151515" aria-labelledby="stop-queue">
+      <span class="roundel" aria-hidden="true">01</span>
+      <header class="nameboard">
+        <h3 id="stop-queue">Queue</h3>
+        <span class="nb-count">2<span class="sr-only"> jobs</span></span>
+      </header>
+      <div class="platform">
+        <article class="dep">
+          <p class="dep-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="dep-title" href="https://github.com/acme/payments-api/issues/512"><span class="num">#512</span> Retry failed settlement webhooks</a>
+          <div class="dep-status">
+            <span class="tag tag--hold">Waiting for blockers</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — NO SESSION</p>
+        </article>
+        <article class="dep">
+          <p class="dep-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="dep-title" href="https://github.com/berenddeboer/ready-for-agent/issues/702"><span class="num">#702</span> Index session transcripts for search</a>
+          <div class="dep-status">
+            <span class="tag tag--hold">Waiting for worker slot</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — NO SESSION</p>
+        </article>
+        <aside class="transfer">
+          <div class="transfer-head">
+            <span class="transfer-tag">Transfer</span>
+            <span class="transfer-glyph" aria-hidden="true">⇄</span>
+          </div>
+          <p class="transfer-text">Feed the queue — work enters the network at your sources.</p>
+          <a class="transfer-link" href="/repos">Change here for Repos → Manage repos</a>
+        </aside>
+      </div>
+    </section>
+
+    <!-- STOP 02 — Build -->
+    <section class="lane" style="--lane: var(--lane-build); --on-lane: #ffffff" aria-labelledby="stop-build">
+      <span class="roundel" aria-hidden="true">02</span>
+      <header class="nameboard">
+        <h3 id="stop-build">Build</h3>
+        <span class="nb-count">3<span class="sr-only"> jobs</span></span>
+      </header>
+      <div class="platform">
+        <article class="dep">
+          <p class="dep-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="dep-title" href="https://github.com/berenddeboer/ready-for-agent/issues/689"><span class="num">#689</span> Unified industrial design for the Harness UI</a>
+          <div class="dep-status">
+            <span class="tag">Implementing</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="7f3a9c2e">7f3a…9c2e</span> ⧉</p>
+          <p class="dep-rt">WT worktree1</p>
+          <div class="legs">
+            <span class="leg leg--done">✓ WORKTREE · 4S</span>
+            <span class="leg leg--done">✓ DEPS · 41S</span>
+            <span class="leg leg--run">▷ IMPLEMENT · 12M</span>
+          </div>
+        </article>
+        <article class="dep">
+          <p class="dep-repo" title="acme/web-storefront">acme/web-storefront</p>
+          <a class="dep-title" href="https://github.com/acme/web-storefront/issues/208"><span class="num">#208</span> Rebuild checkout totals on tax change</a>
+          <div class="dep-status">
+            <span class="tag">Installing deps</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="b81d2f07">b81d…2f07</span> ⧉</p>
+          <p class="dep-rt">WT worktree4</p>
+          <div class="legs">
+            <span class="leg leg--done">✓ WORKTREE · 3S</span>
+            <span class="leg leg--run">▷ DEPS · 26S</span>
+          </div>
+        </article>
+        <article class="dep">
+          <p class="dep-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="dep-title" href="https://github.com/acme/payments-api/issues/519"><span class="num">#519</span> Add idempotency keys to POST /charges</a>
+          <div class="dep-status">
+            <span class="tag">Implementing</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="c4e077a1">c4e0…77a1</span> ⧉</p>
+          <p class="dep-rt">WT worktree2</p>
+          <div class="legs">
+            <span class="leg leg--done">✓ WORKTREE · 5S</span>
+            <span class="leg leg--done">✓ DEPS · 38S</span>
+            <span class="leg leg--run">▷ IMPLEMENT · 34M</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- STOP 03 — Review -->
+    <section class="lane" style="--lane: var(--lane-review); --on-lane: #ffffff" aria-labelledby="stop-review">
+      <span class="roundel" aria-hidden="true">03</span>
+      <header class="nameboard">
+        <h3 id="stop-review">Review</h3>
+        <span class="nb-count">1<span class="sr-only"> jobs</span></span>
+      </header>
+      <div class="platform">
+        <article class="dep">
+          <p class="dep-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="dep-title" href="https://github.com/berenddeboer/ready-for-agent/issues/697"><span class="num">#697</span> E2E first-run settings save to blank slate</a>
+          <div class="dep-status">
+            <span class="tag">Reviewing</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="9a2c55e8">9a2c…55e8</span> ⧉</p>
+          <p class="dep-rt">WT worktree3</p>
+          <p class="via">Via Build — 14 min</p>
+          <div class="legs">
+            <span class="leg leg--run">▷ REVIEW · 6M</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- STOP 04 — PR -->
+    <section class="lane" style="--lane: var(--lane-pr); --on-lane: #ffffff" aria-labelledby="stop-pr">
+      <span class="roundel" aria-hidden="true">04</span>
+      <header class="nameboard">
+        <h3 id="stop-pr">PR</h3>
+        <span class="nb-count">2<span class="sr-only"> jobs</span></span>
+      </header>
+      <div class="platform">
+        <article class="dep">
+          <p class="dep-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="dep-title" href="https://github.com/acme/payments-api/issues/505"><span class="num">#505</span> Expose refund reasons in the API</a>
+          <div class="dep-status">
+            <span class="tag">Watching checks</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="e07b31c9">e07b…31c9</span> ⧉</p>
+          <p class="via">Via Build — 9 min</p>
+          <p class="via">Via Review — 3 min</p>
+          <div class="legs">
+            <span class="leg leg--done">✓ COMMIT · 2S</span>
+            <span class="leg leg--run">▷ CHECKS · 5M</span>
+            <span class="leg leg--next">○ MERGE</span>
+          </div>
+        </article>
+        <article class="dep">
+          <p class="dep-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="dep-title" href="https://github.com/berenddeboer/ready-for-agent/issues/684"><span class="num">#684</span> Triage label sync on reopen</a>
+          <div class="dep-status">
+            <span class="tag">Resolving conflict</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="f5d890b3">f5d8…90b3</span> ⧉</p>
+          <p class="dep-rt">WT worktree5</p>
+          <p class="via">Via Build — 11 min</p>
+          <div class="legs">
+            <span class="leg leg--run">▷ CONFLICT · 2M</span>
+            <span class="leg leg--next">○ CHECKS</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- STOP 05 — Attention -->
+    <section class="lane" style="--lane: var(--lane-attention); --on-lane: #151515" aria-labelledby="stop-attention">
+      <span class="roundel" aria-hidden="true">05</span>
+      <header class="nameboard">
+        <h3 id="stop-attention">Attention</h3>
+        <span class="nb-count">1<span class="sr-only"> jobs</span></span>
+      </header>
+      <div class="platform">
+        <article class="dep">
+          <p class="dep-repo" title="acme/web-storefront">acme/web-storefront</p>
+          <a class="dep-title" href="https://github.com/acme/web-storefront/issues/211"><span class="num">#211</span> Cart totals drift after currency switch</a>
+          <div class="dep-status">
+            <span class="tag tag--alarm">Needs human — review failed</span>
+            <span class="pause" title="Pause">❚❚</span>
+          </div>
+          <p class="dep-rt">OPENCODE — <span class="sess" title="2c6f14d7">2c6f…14d7</span> ⧉</p>
+          <p class="via">Via Build — 17 min</p>
+          <div class="legs">
+            <span class="leg leg--fail">✕ REVIEW · 3M</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- STOP 06 — Merged -->
+    <section class="lane lane--merged" style="--lane: var(--lane-merged); --on-lane: #ffffff" aria-labelledby="stop-merged">
+      <span class="roundel" aria-hidden="true">06</span>
+      <header class="nameboard">
+        <h3 id="stop-merged">Merged</h3>
+        <span class="nb-count">2<span class="sr-only"> jobs</span></span>
+      </header>
+      <div class="platform">
+        <article class="dep">
+          <p class="dep-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+          <a class="dep-title" href="https://github.com/berenddeboer/ready-for-agent/issues/697"><span class="num">#697</span> E2E first-run settings save to blank slate</a>
+          <p class="dep-meta">Started 3 h ago · Elapsed 23 m</p>
+          <a class="prbadge" href="https://github.com/berenddeboer/ready-for-agent/pull/698" aria-label="Open pull request #698">PR #698 ↗</a>
+        </article>
+        <article class="dep">
+          <p class="dep-repo" title="acme/payments-api">acme/payments-api</p>
+          <a class="dep-title" href="https://github.com/acme/payments-api/issues/501"><span class="num">#501</span> Void capture on duplicate authorisation</a>
+          <p class="dep-meta">Started 5 h ago · Elapsed 31 m</p>
+          <a class="prbadge" href="https://github.com/acme/payments-api/pull/506" aria-label="Open pull request #506">PR #506 ↗</a>
+        </article>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================= Network key ========================== -->
+  <footer class="key">
+    <span class="key-tag">Network key</span>
+    <ul class="key-list">
+      <li><i style="--c: var(--lane-queue)"></i><b>01 Queue</b><span>Intake hold</span></li>
+      <li><i style="--c: var(--lane-build)"></i><b>02 Build</b><span>Work in progress</span></li>
+      <li><i style="--c: var(--lane-review)"></i><b>03 Review</b><span>Peer pass</span></li>
+      <li><i style="--c: var(--lane-pr)"></i><b>04 PR</b><span>Merge track</span></li>
+      <li><i style="--c: var(--lane-attention)"></i><b>05 Attention</b><span>Service disruption</span></li>
+      <li><i style="--c: var(--lane-merged)"></i><b>06 Merged</b><span>Departed</span></li>
+    </ul>
+    <p class="proto-note">Prototype — direction D · throwaway · not for production</p>
+  </footer>
+
+</div>
+</body>
+</html>
