@@ -19,19 +19,18 @@ export const Route = createFileRoute("/completed")({
 function CompletedPage() {
   // Reading-width cap lives on the page body only — root chrome stays full-width.
   return (
-    <main className="mx-auto max-w-[88rem] pt-8 sm:pt-10">
-      <header className="mb-5">
-        <p className="m-0 font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
-          History
-        </p>
-        <h1 className="mt-1.5 font-serif text-[clamp(1.5rem,2.8vw,2rem)] font-semibold tracking-[-0.01em]">
-          Completed work items
-        </h1>
-        <p className="mt-1.5 max-w-2xl text-sm text-ink-soft">
-          Historical Complete and Abandoned Work Items across every repository,
-          newest first. The Kanban Completed tab still shows only the last
-          rolling window; this page is the full archive.
-        </p>
+    <main className="mx-auto max-w-[88rem]">
+      <header className="pagehead">
+        <div>
+          <span className="kicker-tag">History</span>
+          <h1>Completed work items</h1>
+          <p className="lede">
+            Complete and abandoned work across every repository, newest first.
+            The board&apos;s Completed tab shows the last rolling window; this
+            page is the full archive.
+          </p>
+        </div>
+        <p className="pagehead-note">Newest first · All repositories</p>
       </header>
       <Suspense fallback={<CompletedListSkeleton />}>
         <CompletedWorkItemsBoard />
@@ -42,17 +41,25 @@ function CompletedPage() {
 
 function CompletedListSkeleton() {
   return (
-    <article
-      className="border border-rule-2 bg-panel px-4 py-3 sm:px-5"
-      role="status"
-      aria-label="Loading completed work items"
-      aria-busy="true"
-    >
-      <div className="grid gap-2">
-        <span className="block h-12 animate-pulse bg-paper-2 motion-reduce:animate-none" />
-        <span className="block h-12 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+    <section className="archive" aria-label="Loading completed work items">
+      <div className="archive-line" aria-hidden="true">
+        <span className="roundel">06</span>
       </div>
-    </article>
+      <header className="nameboard">
+        <h2>Full archive</h2>
+        <span className="nb-sub">Complete + abandoned</span>
+        <span className="nb-count">…</span>
+      </header>
+      <div
+        className="archive-body"
+        role="status"
+        aria-label="Loading completed work items"
+        aria-busy="true"
+      >
+        <span className="block h-14 animate-pulse bg-[var(--line-ghost)] motion-reduce:animate-none" />
+        <span className="block h-14 animate-pulse bg-[var(--line-ghost)] motion-reduce:animate-none" />
+      </div>
+    </section>
   )
 }
 
@@ -167,63 +174,70 @@ function CompletedWorkItemsBoard() {
     completedQuery.isError && completedQuery.data !== undefined
 
   return (
-    <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
+    <>
       {live}
-      {refreshFailedWithData ? (
-        <Banner
-          className="mb-3"
-          tone="alarm"
-          tag="Refresh failed"
-          action={
-            <BannerActionButton
-              onClick={() => {
-                void completedQuery.refetch()
-              }}
-            >
-              Retry
-            </BannerActionButton>
-          }
-        >
-          Could not refresh completed work items. Showing last loaded page.
-        </Banner>
-      ) : null}
-      {resolvedTotalCount === 0 ? (
-        <p className="m-0 font-serif text-sm italic text-ink-soft">
-          No completed work items yet.
-        </p>
-      ) : items.length === 0 ? (
-        <p className="m-0 font-serif text-sm italic text-ink-soft">
-          No completed work items on this page.
-        </p>
-      ) : (
-        <ul
-          className="m-0 grid min-w-0 list-none gap-1 p-0"
-          aria-label="Completed work items"
-        >
-          {items.map((workItem) => (
-            <CompletedWorkItemRow
-              key={workItem.id}
-              workItem={workItem}
-              repository={repositoryById.get(workItem.repositoryId)}
-              issue={issueByRepoAndNumber.get(
-                `${workItem.repositoryId}:${workItem.issueNumber}`,
-              )}
-              onOpenSession={(workItemId, sessionId) => {
-                setSessionDialog({ workItemId, sessionId })
-              }}
-            />
-          ))}
-        </ul>
-      )}
+      <section className="archive" aria-label="Completed work items archive">
+        <div className="archive-line" aria-hidden="true">
+          <span className="roundel">06</span>
+        </div>
+        <header className="nameboard">
+          <h2>Full archive</h2>
+          <span className="nb-sub">Complete + abandoned</span>
+          <span className="nb-count">
+            {resolvedTotalCount}
+            <span className="sr-only"> completed work items</span>
+          </span>
+        </header>
 
-      <nav
-        className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-rule pt-3"
-        aria-label="Completed work items pagination"
-      >
-        <p
-          className="m-0 font-mono text-xs tracking-[0.08em] text-ink-faint uppercase"
-          aria-live="polite"
-        >
+        <div className="archive-body">
+          {refreshFailedWithData ? (
+            <Banner
+              tone="alarm"
+              tag="Refresh failed"
+              action={
+                <BannerActionButton
+                  onClick={() => {
+                    void completedQuery.refetch()
+                  }}
+                >
+                  Retry
+                </BannerActionButton>
+              }
+            >
+              Could not refresh completed work items. Showing last loaded page.
+            </Banner>
+          ) : null}
+
+          {resolvedTotalCount === 0 ? (
+            <p className="archive-empty" role="status">
+              No completed work items yet
+            </p>
+          ) : items.length === 0 ? (
+            <p className="archive-empty" role="status">
+              No completed work items on this page
+            </p>
+          ) : (
+            <ul className="archive-rows" aria-label="Completed work items">
+              {items.map((workItem) => (
+                <CompletedWorkItemRow
+                  key={workItem.id}
+                  workItem={workItem}
+                  repository={repositoryById.get(workItem.repositoryId)}
+                  issue={issueByRepoAndNumber.get(
+                    `${workItem.repositoryId}:${workItem.issueNumber}`,
+                  )}
+                  onOpenSession={(workItemId, sessionId) => {
+                    setSessionDialog({ workItemId, sessionId })
+                  }}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <nav className="pager" aria-label="Completed work items pagination">
+        <p className="pager-note" aria-live="polite">
           Page {currentPage} of {resolvedTotalPages}
           {resolvedTotalCount > 0 && items.length > 0
             ? ` · ${rangeStart}–${rangeEnd} of ${resolvedTotalCount}`
@@ -234,28 +248,30 @@ function CompletedWorkItemsBoard() {
             ? ` · ${resolvedPageSize} per page`
             : null}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="pager-btns">
           <button
             type="button"
-            className="border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-not-allowed disabled:opacity-50"
+            className="plate-mini"
             disabled={!hasPreviousPage || completedQuery.isFetching}
+            aria-busy={completedQuery.isFetching || undefined}
             aria-label="Previous page of completed work items"
             onClick={() => {
               setPage((current) => Math.max(1, current - 1))
             }}
           >
-            Previous
+            ← Prev
           </button>
           <button
             type="button"
-            className="border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-not-allowed disabled:opacity-50"
+            className="plate-mini"
             disabled={!hasNextPage || completedQuery.isFetching}
+            aria-busy={completedQuery.isFetching || undefined}
             aria-label="Next page of completed work items"
             onClick={() => {
               setPage((current) => current + 1)
             }}
           >
-            Next
+            Next →
           </button>
         </div>
       </nav>
@@ -268,6 +284,6 @@ function CompletedWorkItemsBoard() {
           setSessionDialog(null)
         }}
       />
-    </article>
+    </>
   )
 }

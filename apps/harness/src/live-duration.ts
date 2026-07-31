@@ -50,16 +50,54 @@ export function totalElapsedMs(
 
 /** Formats job start time as a relative phrase, e.g. "Started 15 min ago". */
 export function formatStartedAgo(iso: string, nowMs = Date.now()): string {
+  return formatRelativeAgo(iso, nowMs, "Started")
+}
+
+/**
+ * Relative age phrase for terminal archive rows, e.g. "Merged 38 min ago",
+ * "Withdrawn 2 d ago", "Finished yesterday".
+ */
+export function formatTerminalAgo(
+  iso: string,
+  verb: "Merged" | "Withdrawn" | "Finished",
+  nowMs = Date.now(),
+): string {
+  return formatRelativeAgo(iso, nowMs, verb)
+}
+
+function formatRelativeAgo(iso: string, nowMs: number, verb: string): string {
   const elapsedMs = Math.max(0, nowMs - new Date(iso).getTime())
   const seconds = Math.floor(elapsedMs / 1000)
-  if (seconds < 60) return "Started just now"
+  if (seconds < 60) return `${verb} just now`
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `Started ${minutes} min ago`
+  if (minutes < 60) return `${verb} ${minutes} min ago`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24)
-    return hours === 1 ? "Started 1 hour ago" : `Started ${hours} hours ago`
+  if (hours < 24) {
+    if (verb === "Started") {
+      return hours === 1 ? `${verb} 1 hour ago` : `${verb} ${hours} hours ago`
+    }
+    // Archive prototype prefers compact "2 h ago".
+    return hours === 1 ? `${verb} 1 h ago` : `${verb} ${hours} h ago`
+  }
   const days = Math.floor(hours / 24)
-  return days === 1 ? "Started 1 day ago" : `Started ${days} days ago`
+  if (verb !== "Started") {
+    return days === 1 ? `${verb} yesterday` : `${verb} ${days} d ago`
+  }
+  return days === 1 ? `${verb} 1 day ago` : `${verb} ${days} days ago`
+}
+
+/** Short session id for archive meta, e.g. "9a2c…55e8". */
+export function formatSessionShort(sessionId: string): string {
+  if (sessionId.length <= 10) return sessionId
+  return `${sessionId.slice(0, 4)}…${sessionId.slice(-4)}`
+}
+
+/** Worktree leaf name for archive meta, e.g. "worktree3". */
+export function worktreeLeafName(worktreePath: string): string {
+  const normalized = worktreePath.replace(/[/\\]+$/, "")
+  const parts = normalized.split(/[/\\]/)
+  const leaf = parts[parts.length - 1]
+  return leaf !== undefined && leaf !== "" ? leaf : worktreePath
 }
 
 /** Local wall-clock tick for animating live durations and relative ages. */

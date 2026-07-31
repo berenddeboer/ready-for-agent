@@ -470,8 +470,13 @@
   }
 
   .plate-mini:disabled {
-    cursor: wait;
+    cursor: not-allowed;
     opacity: 0.55;
+  }
+
+  /* Fetching (aria-busy) — wait cursor only while a request is in flight */
+  .plate-mini:disabled[aria-busy="true"] {
+    cursor: wait;
   }
 
   /* Compact banner (inline inside panels / dialogs) */
@@ -481,6 +486,384 @@
 
   .banner--compact .banner-body {
     font-size: 0.88rem;
+  }
+
+  /* ---------- Completed archive surface (§4.5 / #698 prototype) ---------- */
+
+  .pagehead {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.8rem 2rem;
+    margin-bottom: 1.7rem;
+  }
+
+  .kicker-tag {
+    display: inline-block;
+    background: var(--signal);
+    color: #151515;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+  }
+
+  .pagehead h1 {
+    margin: 0.6rem 0 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.7rem, 3.2vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-transform: uppercase;
+    line-height: 0.95;
+    color: var(--ink);
+  }
+
+  .lede {
+    margin: 0.6rem 0 0;
+    max-width: 44rem;
+    font-family: var(--font-display);
+    font-size: 0.98rem;
+    line-height: 1.45;
+    color: var(--ink-dim);
+  }
+
+  .pagehead-note {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+  }
+
+  .archive {
+    margin-top: 0.5rem;
+  }
+
+  /* Route-line fragment with the Merged (06) roundel riding it */
+  .archive-line {
+    position: relative;
+    height: 1.3rem;
+  }
+
+  .archive-line::before {
+    content: "";
+    position: absolute;
+    top: 0.55rem;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--ink);
+  }
+
+  .roundel {
+    position: absolute;
+    top: 0;
+    left: 2.2rem;
+    width: 2.1rem;
+    height: 2.1rem;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--lane-merged);
+    color: #ffffff;
+    border: 2px solid #ffffff;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+  }
+
+  /* Merged-black nameboard — halo via --merged-halo in dark mode */
+  .nameboard {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.5rem 0.8rem 0.55rem;
+    background: var(--lane-merged);
+    color: #ffffff;
+    border: 2px solid var(--ink);
+    box-shadow: 0 0 0 1px var(--merged-halo);
+  }
+
+  .nameboard h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 800;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .nb-sub {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgb(255 255 255 / 0.65);
+  }
+
+  .nb-count {
+    margin-left: auto;
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 800;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .archive-body {
+    border: 1.5px solid var(--ink);
+    border-top: 0;
+    background: var(--panel);
+    padding: 0.8rem;
+    display: grid;
+    gap: 0.6rem;
+    align-content: start;
+  }
+
+  .archive-body > .banner {
+    margin: 0;
+  }
+
+  .archive-rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.6rem;
+  }
+
+  .archive-row {
+    border: 1.5px solid var(--ink);
+    padding: 0.6rem 0.75rem 0.7rem 1rem;
+    display: grid;
+    gap: 0.38rem;
+    min-width: 0;
+  }
+
+  /* Complete: 6px Merged line bar; white halo hairline in dark via --merged-halo */
+  .archive-row--complete {
+    box-shadow:
+      inset 6px 0 0 var(--lane-merged),
+      inset 8px 0 0 var(--merged-halo);
+  }
+
+  /* Abandoned: dashed, ghosted — never reached the end of the line */
+  .archive-row--abandoned {
+    border-style: dashed;
+    border-color: var(--ink-faint);
+  }
+
+  .archive-row-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.3rem 0.8rem;
+  }
+
+  .archive-repo {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .archive-title {
+    margin: 0.15rem 0 0;
+    font-family: var(--font-display);
+    font-size: 1.06rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--ink);
+    text-decoration: none;
+    display: inline-block;
+    max-width: 100%;
+  }
+
+  a.archive-title:hover {
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    text-decoration-color: var(--signal);
+  }
+
+  .archive-title .num {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 400;
+    color: var(--ink-dim);
+  }
+
+  .archive-row--abandoned .archive-title {
+    color: var(--ink-dim);
+  }
+
+  /* Exception stamp only (ABANDONED) — Complete is unstamped on this page */
+  .archive-stamp {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    padding: 0.22rem 0.5rem;
+  }
+
+  .archive-stamp--abandoned {
+    background: transparent;
+    color: var(--ink-dim);
+    border: 1.5px dashed var(--ink-faint);
+  }
+
+  .archive-meta {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .archive-meta .sess {
+    color: var(--ink-dim);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+  }
+
+  .archive-meta .sess:hover {
+    color: var(--ink);
+  }
+
+  .archive-summary {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: var(--ink-dim);
+  }
+
+  .archive-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  /* Journey-leg chips — archive uses relaxed 0.62rem + lane colour for done */
+  .leg {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    border: 1.5px solid var(--ink);
+    color: var(--ink-dim);
+    padding: 0.2rem 0.44rem;
+    white-space: nowrap;
+  }
+
+  .leg--lane {
+    background: var(--leg-lane);
+    color: var(--leg-on-lane);
+    border-color: var(--leg-lane);
+    font-weight: 700;
+  }
+
+  .leg--skip {
+    border-style: dashed;
+    color: var(--ink-faint);
+    border-color: var(--line-soft);
+  }
+
+  .leg--fail {
+    background: var(--lane-attention);
+    color: var(--lane-attention-ink);
+    border-color: var(--lane-attention);
+    font-weight: 700;
+  }
+
+  .prbadge {
+    margin-left: auto;
+    background: var(--prbadge-bg);
+    color: var(--prbadge-ink);
+    border: 1.5px solid var(--prbadge-border);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 0.24rem 0.55rem;
+    text-decoration: none;
+  }
+
+  a.prbadge:hover {
+    background: var(--lane-pr);
+    color: #ffffff;
+    border-color: var(--lane-pr);
+  }
+
+  .nochange {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    border: 1.5px dashed var(--line-soft);
+    padding: 0.2rem 0.45rem;
+  }
+
+  .archive-empty {
+    margin: 0;
+    padding: 2.6rem 0.5rem;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.26em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .pager {
+    margin-top: 1.1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.7rem 1.2rem;
+  }
+
+  .pager-note {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .pager-btns {
+    display: flex;
+    gap: 0.5rem;
   }
 
   /* ---------- Legacy Ledger helpers (unmigrated surfaces) ---------- */
@@ -744,6 +1127,18 @@
 
   .page-shell {
     padding: 1.3rem 1.4rem 2.4rem;
+  }
+
+  .pagehead-note {
+    display: none;
+  }
+
+  .roundel {
+    left: 1rem;
+  }
+
+  .archive-row {
+    padding-left: 0.85rem;
   }
 
   .pipeline-controls {
