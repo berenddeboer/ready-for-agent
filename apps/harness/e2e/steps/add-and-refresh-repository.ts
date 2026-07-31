@@ -19,6 +19,7 @@ import {
   SENTINEL_EXPECT_TIMEOUT_MS,
   gitlabSentinelIssueNumber,
 } from "../support/constants.ts"
+import { dismissFirstRunSettingsIfPresent } from "../support/first-run-settings.ts"
 import { Given, Then, When, test } from "./fixtures.ts"
 
 const workspaceRoot = resolve(
@@ -163,11 +164,132 @@ const ensureNoConfiguredRepositories = async () => {
   }
 }
 
+/**
+ * Ensure no default build model so first-run Settings auto-opens on the next
+ * load. Same-backend updateConfig rejects an empty model; clear by switching
+ * Agent Backend with an empty model (first-run style), then switch back to the
+ * original backend still with an empty model so the shared e2e process keeps
+ * the prior default backend identity.
+ */
+const ensureFirstRunSettingsRequired = async () => {
+  const data = await graphqlRequest<{
+    config: {
+      selectedAgentBackend: string
+      defaultModel: string | null
+      maxConcurrentAgentTurns: number
+      maxConcurrentWorkItems: number
+    }
+    agentBackends: ReadonlyArray<{ id: string }>
+  }>(
+    `query {
+      config {
+        selectedAgentBackend
+        defaultModel
+        maxConcurrentAgentTurns
+        maxConcurrentWorkItems
+      }
+      agentBackends { id }
+    }`,
+  )
+  if (
+    data.config.defaultModel === null ||
+    data.config.defaultModel.length === 0
+  ) {
+    return
+  }
+
+  const originalBackend = data.config.selectedAgentBackend
+  const alternate = data.agentBackends.find(
+    (backend) => backend.id !== originalBackend,
+  )
+  if (alternate === undefined) {
+    throw new Error(
+      "Cannot restore first-run settings: default build model is set and no alternate Agent Backend is available to clear it",
+    )
+  }
+
+  const clearModelInput = (selectedAgentBackend: string) => ({
+    selectedAgentBackend,
+    defaultModel: null,
+    defaultThinkingLevel: null,
+    reviewModel: null,
+    reviewThinkingLevel: null,
+    maxConcurrentAgentTurns: data.config.maxConcurrentAgentTurns,
+    maxConcurrentWorkItems: data.config.maxConcurrentWorkItems,
+  })
+
+  // Backend change allows empty model; same-backend empty model is rejected.
+  const clearedOnAlternate = await graphqlRequest<{
+    updateConfig: {
+      defaultModel: string | null
+      selectedAgentBackend: string
+    }
+  }>(
+    `mutation UpdateConfig($input: UpdateConfigInput!) {
+      updateConfig(input: $input) {
+        defaultModel
+        selectedAgentBackend
+      }
+    }`,
+    { input: clearModelInput(alternate.id) },
+  )
+  if (
+    clearedOnAlternate.updateConfig.defaultModel !== null &&
+    clearedOnAlternate.updateConfig.defaultModel.length > 0
+  ) {
+    throw new Error(
+      `Expected empty defaultModel after switching to ${alternate.id}, got ${JSON.stringify(clearedOnAlternate.updateConfig.defaultModel)}`,
+    )
+  }
+  if (clearedOnAlternate.updateConfig.selectedAgentBackend !== alternate.id) {
+    throw new Error(
+      `Expected selectedAgentBackend ${alternate.id} after clear, got ${clearedOnAlternate.updateConfig.selectedAgentBackend}`,
+    )
+  }
+
+  // Return to the original backend while still unconfigured (first-run style).
+  const restored = await graphqlRequest<{
+    updateConfig: {
+      defaultModel: string | null
+      selectedAgentBackend: string
+    }
+  }>(
+    `mutation UpdateConfig($input: UpdateConfigInput!) {
+      updateConfig(input: $input) {
+        defaultModel
+        selectedAgentBackend
+      }
+    }`,
+    { input: clearModelInput(originalBackend) },
+  )
+  if (
+    restored.updateConfig.defaultModel !== null &&
+    restored.updateConfig.defaultModel.length > 0
+  ) {
+    throw new Error(
+      `Expected empty defaultModel after restoring ${originalBackend}, got ${JSON.stringify(restored.updateConfig.defaultModel)}`,
+    )
+  }
+  if (restored.updateConfig.selectedAgentBackend !== originalBackend) {
+    throw new Error(
+      `Expected selectedAgentBackend ${originalBackend} after restore, got ${restored.updateConfig.selectedAgentBackend}`,
+    )
+  }
+}
+
+Given("the Harness is empty with first-run settings required", async () => {
+  test.setTimeout(SCENARIO_TIMEOUT_MS)
+  await ensureNoConfiguredRepositories()
+  await ensureFirstRunSettingsRequired()
+})
+
 Given("the Harness has no configured Repositories", async ({ page }) => {
   test.setTimeout(SCENARIO_TIMEOUT_MS)
   await ensureNoConfiguredRepositories()
   // Zero repos: home shows the add-repo blank slate (not an empty kanban board).
+  // First-run Settings may auto-open; dismiss so blank-slate assertions resolve.
   await page.goto("/")
+  await dismissFirstRunSettingsIfPresent(page)
   await expect(
     page.getByRole("heading", { name: "No repositories configured" }),
   ).toBeVisible()
@@ -190,6 +312,7 @@ Given("the Harness has no configured Repositories", async ({ page }) => {
   ).toHaveCount(0)
 
   await page.goto("/repos")
+  await dismissFirstRunSettingsIfPresent(page)
   await expect(
     page.getByRole("heading", { name: "No repositories configured" }),
   ).toBeVisible()
@@ -298,6 +421,7 @@ Then("the Repository appears in the Harness", async ({ page, world }) => {
   const display = world.fixtureDisplayRepository ?? displayRepositoryFor(forge)
 
   await page.goto("/repos")
+  await dismissFirstRunSettingsIfPresent(page)
   await expect(
     page.getByRole("region", { name: "Configured repositories" }),
   ).toBeVisible({ timeout: 30_000 })

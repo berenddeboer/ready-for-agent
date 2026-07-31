@@ -1,4 +1,9 @@
 import { type Page, expect } from "@playwright/test"
+import {
+  completeAndSaveFirstRunSettings,
+  dismissFirstRunSettingsIfPresent,
+  settingsDialog,
+} from "../support/first-run-settings.ts"
 import { Then, When } from "./fixtures.ts"
 
 const PIPELINE_LANE_HEADERS = [
@@ -21,39 +26,35 @@ const COMMITTED_PULL_REQUEST_PERIODS = [
 const primaryNav = (page: Page) =>
   page.getByRole("navigation", { name: "Primary" })
 
-const dismissFirstRunSettings = async (page: Page) => {
-  // The isolated E2E database has no default build model, so first-run
-  // Settings opens automatically. Dismiss it to exercise the route beneath.
-  const settingsDialog = page.getByRole("dialog", {
-    name: "Harness settings",
-  })
-  await expect(settingsDialog).toBeVisible()
-  await settingsDialog.getByRole("button", { name: "Cancel" }).click()
-  await expect(settingsDialog).toBeHidden()
-}
-
 When("I navigate to the Kanban board", async ({ page }) => {
   await page.goto("/")
   await expect(page).toHaveURL(/\/$/)
-  await dismissFirstRunSettings(page)
+  await dismissFirstRunSettingsIfPresent(page)
 })
 
 When("I open the home page", async ({ page }) => {
   await page.goto("/")
   await expect(page).toHaveURL(/\/$/)
-  await dismissFirstRunSettings(page)
+})
+
+When("I complete and save Harness settings", async ({ page }) => {
+  await completeAndSaveFirstRunSettings(page)
+})
+
+When("I cancel the Harness settings dialog if present", async ({ page }) => {
+  await dismissFirstRunSettingsIfPresent(page)
 })
 
 When("I navigate to the legacy Kanban path", async ({ page }) => {
   await page.goto("/kanban")
   await expect(page).toHaveURL(/\/$/)
-  await dismissFirstRunSettings(page)
+  await dismissFirstRunSettingsIfPresent(page)
 })
 
 When("I open the Repos page", async ({ page }) => {
   await page.goto("/repos")
   await expect(page).toHaveURL(/\/repos$/)
-  await dismissFirstRunSettings(page)
+  await dismissFirstRunSettingsIfPresent(page)
 })
 
 When("I click the Home top nav control", async ({ page }) => {
@@ -180,6 +181,9 @@ Then("I am on the Repos page", async ({ page }) => {
 })
 
 Then("the add-repository blank slate is visible", async ({ page }) => {
+  // Pure visibility assert — do not Cancel here (would mask post-Save re-open).
+  // Callers that open under unconfigured first-run should cancel explicitly.
+  await expect(settingsDialog(page)).toBeHidden()
   await expect(
     page.getByRole("heading", { name: "No repositories configured" }),
   ).toBeVisible()
@@ -187,6 +191,46 @@ Then("the add-repository blank slate is visible", async ({ page }) => {
     page.getByRole("region", { name: "Add a repository" }),
   ).toBeVisible()
 })
+
+Then("the Harness settings dialog is visible", async ({ page }) => {
+  await expect(settingsDialog(page)).toBeVisible({ timeout: 30_000 })
+})
+
+Then("the Harness settings dialog is hidden", async ({ page }) => {
+  await expect(settingsDialog(page)).toBeHidden()
+})
+
+Then(
+  "the blank slate instructs me to add a repository first",
+  async ({ page }) => {
+    const guidance = page.getByRole("region", { name: "Add a repository" })
+    await expect(guidance).toBeVisible()
+    await expect(
+      page.getByRole("heading", { name: "No repositories configured" }),
+    ).toBeVisible()
+
+    const pathField = page.locator("#add-repository-path")
+    await expect(pathField).toBeVisible()
+    await expect(pathField).toHaveAttribute(
+      "placeholder",
+      "/path/to/local/repo",
+    )
+
+    await expect(
+      guidance.getByText(
+        "Add a local Git repository with the operator binary:",
+        { exact: true },
+      ),
+    ).toBeVisible()
+
+    // Dynamic CLI string from GraphQL — assert the visible command (do not
+    // hard-code npx vs binary).
+    const commandCode = guidance.locator("code")
+    await expect(commandCode).toBeVisible()
+    const commandText = (await commandCode.innerText()).trim()
+    expect(commandText).toMatch(/ready-for-agent add \/path\/to\/local\/repo$/)
+  },
+)
 
 Then("the kanban board is not rendered", async ({ page }) => {
   await expect(

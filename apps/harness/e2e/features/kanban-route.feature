@@ -2,9 +2,20 @@ Feature: View the work pipeline
   Operators use the home Kanban board to monitor delivery without
   repository management competing with the pipeline.
 
+  Scenario: First-run settings save leads to add-repo blank slate
+    Given the Harness is empty with first-run settings required
+    When I open the home page
+    Then the Harness settings dialog is visible
+    When I complete and save Harness settings
+    Then the Harness settings dialog is hidden
+    And the add-repository blank slate is visible
+    And the blank slate instructs me to add a repository first
+    And the kanban board is not rendered
+
   Scenario: Home shows add-repo blank slate when no repositories
     Given the Harness has no configured Repositories
     When I open the home page
+    And I cancel the Harness settings dialog if present
     Then the add-repository blank slate is visible
     And the kanban board is not rendered
 
