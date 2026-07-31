@@ -14,7 +14,13 @@ const reposSource = () =>
 const completedSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/completed.tsx"), "utf8")
 
-describe("primary Home / Repos / Completed navigation", () => {
+const themeSource = () =>
+  readFileSync(join(import.meta.dir, "../src/theme.ts"), "utf8")
+
+const bannerSource = () =>
+  readFileSync(join(import.meta.dir, "../src/banner.tsx"), "utf8")
+
+describe("primary Home / Repos / Completed navigation (Interchange masthead)", () => {
   test("root chrome exposes Home, Repos, and Completed Link controls", () => {
     const source = rootSource()
     expect(source).toContain('aria-label="Primary"')
@@ -24,120 +30,87 @@ describe("primary Home / Repos / Completed navigation", () => {
     expect(source).toMatch(/Home\s*<\/Link>/)
     expect(source).toMatch(/Repos\s*<\/Link>/)
     expect(source).toMatch(/Completed\s*<\/Link>/)
-    // Home replaces Kanban as the `/` nav label; board icon/label are gone.
     expect(source).not.toMatch(/Kanban\s*<\/Link>/)
     expect(source).not.toContain("function KanbanNavIcon()")
     expect(source).not.toContain("<KanbanNavIcon />")
     expect(source).toContain("function HomeNavIcon()")
     expect(source).toContain("<HomeNavIcon />")
-    // Home lives at `/` — no separate /kanban nav target.
-    const settingsBlock = source.slice(
-      source.indexOf("<SettingsButton"),
+    const navBlock = source.slice(
+      source.indexOf('aria-label="Primary"'),
       source.indexOf("</nav>"),
     )
-    expect(settingsBlock).not.toContain('to="/kanban"')
+    expect(navBlock).not.toContain('to="/kanban"')
   })
 
-  test("primary nav uses a full-width bold black divider on every route", () => {
-    // Issue #670: masthead 0.5rem rule moves under Clanker Harness nav (all routes).
+  test("masthead band + lane ribbon replace the old primary-nav rule", () => {
     const root = rootSource()
     const styles = stylesSource()
-    const navOpen = root.indexOf('aria-label="Primary"')
-    expect(navOpen).toBeGreaterThan(-1)
-    const navTag = root.slice(navOpen - 80, navOpen + 160)
-    expect(navTag).toContain("primary-nav")
-    // Thin Tailwind border is no longer the nav rule.
-    expect(navTag).not.toMatch(/border-b-2\s+border-ink/)
-    // Shared weight matches the former Kanban masthead separator.
-    const primaryNavBlock = styles.slice(
-      styles.indexOf(".primary-nav {"),
-      styles.indexOf("}", styles.indexOf(".primary-nav {")) + 1,
-    )
-    expect(primaryNavBlock).toContain(".primary-nav {")
-    expect(primaryNavBlock).toContain(
-      "border-bottom: 0.5rem solid var(--color-ink)",
-    )
-    // Divider lives in root layout above Outlet — every child route inherits it.
-    const rootComponent = root.slice(root.indexOf("function RootComponent("))
-    expect(rootComponent.indexOf("primary-nav")).toBeGreaterThan(-1)
-    expect(rootComponent.indexOf("primary-nav")).toBeLessThan(
-      rootComponent.indexOf("<Outlet />"),
+    expect(root).toContain('className="mast"')
+    expect(root).toContain('className="lane-ribbon"')
+    expect(root).toContain('aria-hidden="true"')
+    expect(root).not.toContain("primary-nav")
+    expect(styles).toContain(".mast {")
+    expect(styles).toContain("background: var(--mast-bg)")
+    expect(styles).toContain(".lane-ribbon {")
+    expect(styles).toContain("height: 0.4rem")
+    expect(styles).not.toContain(".primary-nav {")
+    // Ribbon sits above page content (Outlet).
+    const chrome = root.slice(root.indexOf("function SettingsChrome("))
+    expect(chrome.indexOf("lane-ribbon")).toBeGreaterThan(-1)
+    expect(chrome.indexOf("lane-ribbon")).toBeLessThan(
+      chrome.indexOf("<Outlet />"),
     )
   })
 
-  test("groups Home, Repos, Completed, and Settings in one right-aligned control cluster", () => {
+  test("groups Home, Repos, Completed, Settings, and theme toggle as mast plates", () => {
     const source = rootSource()
-    const clusterMarker =
-      'className="ml-auto flex items-center gap-2 self-center"'
-    expect(source).toContain(clusterMarker)
-    // ml-auto lives on the group, not only on Settings.
-    expect(source).not.toMatch(
-      /className="ml-auto inline-flex items-center gap-2 border/,
-    )
-
-    // Destinations are passed as leading into SettingsButton (same cluster).
-    const settingsBlock = source.slice(
-      source.indexOf("<SettingsButton"),
+    const navBlock = source.slice(
+      source.indexOf('aria-label="Primary"'),
       source.indexOf("</nav>"),
     )
-    expect(settingsBlock).toContain("leading={")
-    expect(settingsBlock).toContain('to="/"')
-    expect(settingsBlock).toContain('to="/repos"')
-    expect(settingsBlock).toContain('to="/completed"')
-    expect(settingsBlock).toContain("<HomeNavIcon />")
-    expect(settingsBlock).toContain("<ReposNavIcon />")
-    expect(settingsBlock).toContain("<CompletedNavIcon />")
-    // Order: Home | Repos | Completed
-    const homeIdx = settingsBlock.indexOf('to="/"')
-    const reposIdx = settingsBlock.indexOf('to="/repos"')
-    const completedIdx = settingsBlock.indexOf('to="/completed"')
+    expect(navBlock).toContain('to="/"')
+    expect(navBlock).toContain('to="/repos"')
+    expect(navBlock).toContain('to="/completed"')
+    expect(navBlock).toContain("<HomeNavIcon />")
+    expect(navBlock).toContain("<ReposNavIcon />")
+    expect(navBlock).toContain("<CompletedNavIcon />")
+    expect(navBlock).toContain("<SettingsNavIcon />")
+    expect(navBlock).toContain("Settings")
+    expect(navBlock).toContain("<ThemeTogglePlate />")
+    expect(navBlock).toContain("mastPlateClassName")
+    // Order: Home | Repos | Completed | Settings | theme
+    const homeIdx = navBlock.indexOf('to="/"')
+    const reposIdx = navBlock.indexOf('to="/repos"')
+    const completedIdx = navBlock.indexOf('to="/completed"')
+    const settingsIdx = navBlock.indexOf("Settings")
+    const themeIdx = navBlock.indexOf("<ThemeTogglePlate")
     expect(homeIdx).toBeGreaterThan(-1)
     expect(reposIdx).toBeGreaterThan(homeIdx)
     expect(completedIdx).toBeGreaterThan(reposIdx)
-
-    // Cluster wraps leading destinations and the Settings trigger.
-    const clusterStart = source.indexOf(
-      '<div className="ml-auto flex items-center gap-2 self-center">',
-    )
-    expect(clusterStart).toBeGreaterThan(-1)
-    const cluster = source.slice(
-      clusterStart,
-      source.indexOf("</div>", clusterStart),
-    )
-    expect(cluster).toContain("{leading}")
-    expect(cluster).toContain("Settings")
-    expect(cluster).toContain("primaryNavActionClassName")
-
-    // Brand title stays outside the action cluster (left side).
+    expect(settingsIdx).toBeGreaterThan(completedIdx)
+    expect(themeIdx).toBeGreaterThan(settingsIdx)
+    // Brand title stays outside the mast-nav cluster (left side).
     const brandIdx = source.indexOf("Clanker Harness")
     expect(brandIdx).toBeGreaterThan(-1)
-    expect(brandIdx).toBeLessThan(source.indexOf("<SettingsButton"))
+    expect(brandIdx).toBeLessThan(source.indexOf('aria-label="Primary"'))
   })
 
-  test("Home, Repos, and Completed use stroke icons matching Settings icon language", () => {
+  test("Home, Repos, Completed, and Settings use stroke icons", () => {
     const source = rootSource()
-    expect(source).toContain("function HomeNavIcon()")
-    expect(source).toContain("function ReposNavIcon()")
-    expect(source).toContain("function CompletedNavIcon()")
-    expect(source).toContain("<HomeNavIcon />")
-    expect(source).toContain("<ReposNavIcon />")
-    expect(source).toContain("<CompletedNavIcon />")
-    // Icons: aria-hidden, size-3.5, stroke currentColor (same as Settings gear).
     for (const iconFn of [
       "HomeNavIcon",
       "ReposNavIcon",
       "CompletedNavIcon",
+      "SettingsNavIcon",
     ] as const) {
       const start = source.indexOf(`function ${iconFn}(`)
       expect(start).toBeGreaterThan(-1)
       const body = source.slice(start, source.indexOf("\n}", start) + 2)
       expect(body).toContain('aria-hidden="true"')
-      expect(body).toContain('className="size-3.5"')
       expect(body).toContain('stroke="currentColor"')
       expect(body).toContain('strokeWidth="2"')
       expect(body).toContain('fill="none"')
     }
-    // Home uses a house path language (roof + walls), not the old board columns.
     const homeIcon = source.slice(
       source.indexOf("function HomeNavIcon("),
       source.indexOf("\n}", source.indexOf("function HomeNavIcon(")) + 2,
@@ -146,111 +119,157 @@ describe("primary Home / Repos / Completed navigation", () => {
     expect(homeIcon).not.toContain("<rect")
   })
 
-  test("uses TanStack Router Link with active route styling", () => {
+  test("uses TanStack Router Link with mast-plate active via aria-current", () => {
     const source = rootSource()
     expect(source).toContain('from "@tanstack/react-router"')
-    expect(source).toContain("primaryNavLinkClassName")
-    expect(source).toContain("primaryNavLinkInactiveClassName")
-    expect(source).toContain("primaryNavLinkActiveClassName")
-    expect(source).toContain(
-      "inactiveProps={{ className: primaryNavLinkInactiveClassName }}",
-    )
-    expect(source).toContain(
-      "activeProps={{ className: primaryNavLinkActiveClassName }}",
-    )
-    // Home nav control (not the brand title Link) must use exact matching.
-    // Slice the SettingsButton leading destinations through Repos.
-    const settingsBlock = source.slice(
-      source.indexOf("<SettingsButton"),
+    expect(source).toContain('const mastPlateClassName = "mast-plate"')
+    expect(source).toContain('activeProps={{ "aria-current": "page" }}')
+    expect(source).toContain("className={mastPlateClassName}")
+    // Home nav control must use exact matching.
+    const navBlock = source.slice(
+      source.indexOf('aria-label="Primary"'),
       source.indexOf("</nav>"),
     )
-    const homeSwitcherLink = settingsBlock.slice(
-      0,
-      settingsBlock.indexOf('to="/repos"'),
-    )
+    const homeSwitcherLink = navBlock.slice(0, navBlock.indexOf('to="/repos"'))
     expect(homeSwitcherLink).toContain('to="/"')
     expect(homeSwitcherLink).toContain("<HomeNavIcon />")
     expect(homeSwitcherLink).toContain("activeOptions={{ exact: true }}")
-    // Shared base must not carry exclusive active/inactive visual tokens —
-    // Router merges className with active/inactive props.
-    const sharedClassDecl = source.match(
-      /const primaryNavLinkClassName =\s*\n?\s*"([^"]+)"/,
-    )
-    expect(sharedClassDecl).not.toBeNull()
-    const sharedClasses = sharedClassDecl?.[1] ?? ""
-    for (const exclusive of [
-      "border-ink",
-      "bg-ink",
-      "text-paper",
-      "border-rule-2",
-      "bg-panel",
-      "text-ink-2",
-      "text-ink-faint",
-      "text-ink",
-      "bg-paper-2",
-      "hover:border-ink-soft",
-      "hover:bg-paper-2",
-      "hover:text-ink-2",
-    ]) {
-      expect(sharedClasses.split(/\s+/)).not.toContain(exclusive)
-    }
-    // Shared layout includes icon gap so label + icon share one baseline.
-    expect(sharedClasses.split(/\s+/)).toContain("gap-2")
-    expect(source).toContain(
-      'const primaryNavLinkInactiveClassName =\n  "border-rule-2 bg-panel text-ink-faint hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2"',
-    )
-    // Soft selected state — not the old solid black/ink filled pill.
-    expect(source).toContain(
-      'const primaryNavLinkActiveClassName = "border-ink bg-paper-2 text-ink"',
-    )
-    expect(source).not.toContain(
-      'const primaryNavLinkActiveClassName = "border-ink bg-ink text-paper"',
-    )
-    // Settings stays in the inactive-nav visual family (not a selected route).
-    expect(source).toContain("primaryNavActionClassName")
-    expect(source).toContain("className={primaryNavActionClassName}")
-    expect(source).toMatch(
-      /const primaryNavActionClassName =\s*\n?\s*"[^"]*text-ink-faint[^"]*"/,
-    )
     // Destinations are client Links, not raw <a href> only.
     expect(source).not.toMatch(/<a\s+href=["']\/repos["']/)
     expect(source).not.toMatch(/<a\s+href=["']\/completed["']/)
     expect(source).not.toMatch(/<a\s+href=["']\/["']/)
+    // Active plate styling lives in CSS via aria-current.
+    const styles = stylesSource()
+    expect(styles).toContain('.mast-plate[aria-current="page"]')
   })
 
-  test("shared nav lives in root layout so Home, Repos, and Completed inherit it", () => {
+  test("shared nav lives in root chrome so Home, Repos, and Completed inherit it", () => {
     const source = rootSource()
-    const rootComponent = source.slice(
-      source.indexOf("function RootComponent("),
-    )
-    expect(rootComponent).toContain('to="/repos"')
-    expect(rootComponent).toContain('to="/completed"')
-    expect(rootComponent).toMatch(/Home\s*<\/Link>/)
-    expect(rootComponent).toMatch(/Repos\s*<\/Link>/)
-    expect(rootComponent).toMatch(/Completed\s*<\/Link>/)
-    expect(rootComponent).not.toMatch(/Kanban\s*<\/Link>/)
-    expect(rootComponent).toContain("<Outlet />")
-    expect(rootComponent.indexOf("Home")).toBeLessThan(
-      rootComponent.indexOf("<Outlet />"),
-    )
+    const chrome = source.slice(source.indexOf("function SettingsChrome("))
+    expect(chrome).toContain('to="/repos"')
+    expect(chrome).toContain('to="/completed"')
+    expect(chrome).toMatch(/Home\s*<\/Link>/)
+    expect(chrome).toMatch(/Repos\s*<\/Link>/)
+    expect(chrome).toMatch(/Completed\s*<\/Link>/)
+    expect(chrome).not.toMatch(/Kanban\s*<\/Link>/)
+    expect(chrome).toContain("<Outlet />")
+    expect(chrome.indexOf("Home")).toBeLessThan(chrome.indexOf("<Outlet />"))
   })
 
   test("root shell is always full-width; Repos and Completed cap page body only", () => {
-    // Issue #686: no pathname-based shell max-w; chrome never jumps.
     const root = rootSource()
     const rootComponent = root.slice(root.indexOf("function RootComponent("))
-    expect(rootComponent).toContain(
-      'className="mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12"',
-    )
+    expect(rootComponent).toContain('className="min-h-screen w-full"')
     expect(rootComponent).not.toContain("useLocation")
     expect(rootComponent).not.toContain("isKanbanPage")
     expect(rootComponent).not.toContain("max-w-[88rem]")
     expect(rootComponent).not.toContain('pathname === "/"')
+    // Page content padding is shared; chrome is full-bleed.
+    expect(root).toContain('className="page-shell"')
+    expect(stylesSource()).toContain(".page-shell {")
 
-    // Reading-width cap is on Repos / Completed content, not the shared shell.
     expect(reposSource()).toContain("max-w-[88rem]")
     expect(completedSource()).toContain("max-w-[88rem]")
     expect(reposSource()).toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
     expect(completedSource()).toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
+  })
+
+  test("ships Interchange token layer with light and dark themes", () => {
+    const styles = stylesSource()
+    expect(styles).toContain("--lane-queue: #ffd21c")
+    expect(styles).toContain("--lane-build: #1976d2")
+    expect(styles).toContain("--lane-review: #7654b5")
+    expect(styles).toContain("--lane-pr: #168b62")
+    expect(styles).toContain("--lane-attention: #ff4d1c")
+    expect(styles).toContain("--lane-merged: #151515")
+    expect(styles).toContain("--font-display:")
+    expect(styles).toContain("Inter Tight")
+    expect(styles).toContain("JetBrains Mono")
+    expect(styles).toContain('[data-theme="light"]')
+    expect(styles).toContain('[data-theme="dark"]')
+    expect(styles).toContain("--mast-bg:")
+    expect(styles).toContain("--plate:")
+    expect(styles).toContain("--merged-halo:")
+  })
+
+  test("loads Inter Tight and JetBrains Mono from Google Fonts", () => {
+    const source = rootSource()
+    expect(source).toContain("fonts.googleapis.com")
+    expect(source).toContain("Inter+Tight")
+    expect(source).toContain("JetBrains+Mono")
+    expect(source).toContain("wght@400;500;600;700;800")
+    expect(source).toContain("wght@400;700")
+  })
+
+  test("theme plumbing: bootstrap script, prefers-color-scheme, ?theme= pin, toggle plate", () => {
+    const root = rootSource()
+    const theme = themeSource()
+    const styles = stylesSource()
+    expect(theme).toContain("THEME_BOOTSTRAP_SCRIPT")
+    expect(theme).toContain("prefers-color-scheme")
+    expect(theme).toContain('THEME_QUERY_PARAM = "theme"')
+    expect(theme).toContain("resolveThemeMode")
+    expect(theme).toContain("withThemePin")
+    expect(theme).toContain("parseThemeSearch")
+    expect(theme).not.toContain("function pinThemeInUrl")
+    expect(root).toContain("THEME_BOOTSTRAP_SCRIPT")
+    expect(root).toContain("dangerouslySetInnerHTML")
+    expect(root).toContain("function ThemeTogglePlate()")
+    expect(root).toContain("readDocumentTheme()")
+    expect(root).toContain("retainSearchParams")
+    expect(root).toContain('retainSearchParams(["theme"])')
+    expect(root).toContain("validateSearch")
+    expect(root).toContain("withThemePin(prev, next)")
+    // Theme pin must not re-root navigation at `/` (would leave Repos/Completed).
+    expect(root).not.toContain("useNavigate({ from: Route.fullPath })")
+    expect(root).toMatch(
+      /function ThemeTogglePlate\(\)[\s\S]*?to:\s*["']\.["']/,
+    )
+    expect(root).toContain("resetScroll: false")
+    // SSR-stable initial state — do not read document in useState (hydration).
+    expect(root).toMatch(
+      /function ThemeTogglePlate\(\)[\s\S]*?useState<ThemeMode>\("light"\)/,
+    )
+    expect(root).not.toMatch(
+      /useState<ThemeMode>\(\(\)\s*=>\s*[\s\S]*?readDocumentTheme/,
+    )
+    // Mount effect only syncs state — does not re-resolve/re-apply theme.
+    expect(root).not.toMatch(
+      /function ThemeTogglePlate\(\)[\s\S]*?useEffect\(\(\) => \{[\s\S]*?resolveThemeMode/,
+    )
+    expect(root).toMatch(/Switch to \$\{targetLabel\} theme/)
+    expect(root).toContain("aria-pressed")
+    expect(root).toContain("themeToggleLabel")
+    expect(root).toContain("suppressHydrationWarning")
+    expect(styles).toContain("color-scheme: light")
+    expect(styles).toContain("color-scheme: dark")
+    // Elevated surfaces + inverse CTA ink stay contrast-safe under both themes.
+    expect(styles).toContain("--paper-2:")
+    expect(styles).toContain("--color-paper-2: var(--paper-2)")
+    expect(styles).toContain("--on-solid:")
+    expect(styles).toContain("--color-on-solid: var(--on-solid)")
+    expect(root).toContain("text-on-solid")
+    expect(root).toContain("backdrop:bg-black/50")
+    expect(root).not.toContain("backdrop:bg-ink/45")
+  })
+
+  test("banner pattern is shared and used for nav-level guidance/alarm", () => {
+    const banner = bannerSource()
+    const root = rootSource()
+    const styles = stylesSource()
+    expect(banner).toContain("tone: BannerTone")
+    expect(banner).toContain('"alarm"')
+    expect(banner).toContain('"guidance"')
+    expect(banner).toContain("banner-tag")
+    expect(styles).toContain(".banner {")
+    expect(styles).toContain(".banner--alarm")
+    expect(styles).toContain(".banner--guidance")
+    expect(styles).toContain("var(--lane-attention)")
+    expect(styles).toContain("var(--signal)")
+    expect(root).toContain('tag="Backend"')
+    expect(root).toContain('tag="Setup"')
+    expect(root).toContain('tone="alarm"')
+    expect(root).toContain('tone="guidance"')
+    expect(root).toContain("Open Settings")
   })
 })

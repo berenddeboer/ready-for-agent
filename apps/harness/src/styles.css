@@ -1,17 +1,146 @@
 @import "tailwindcss";
 
+/* ==========================================================================
+   Interchange token layer (canonical) — docs/harness-design-system.md §2
+   Lane colors + fonts are theme-invariant. Neutrals / mast / plate / PR badge
+   flip under [data-theme="dark"]. Components consume these tokens only.
+   ========================================================================== */
+
+:root {
+  /* §2.1 Lane colors (fixed pipeline identity — theme-invariant) */
+  --lane-queue: #ffd21c;
+  --lane-build: #1976d2;
+  --lane-review: #7654b5;
+  --lane-pr: #168b62;
+  --lane-attention: #ff4d1c;
+  --lane-merged: #151515;
+  --lane-queue-ink: #151515;
+  --lane-build-ink: #ffffff;
+  --lane-review-ink: #ffffff;
+  --lane-pr-ink: #ffffff;
+  --lane-attention-ink: #151515;
+  --lane-merged-ink: #ffffff;
+
+  /* §2.6 Typography stacks (theme-invariant) */
+  --font-display: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  /* §2.2 Neutrals */
+  --paper: #ffffff;
+  --panel: #ffffff;
+  /* Elevated / inset surfaces used by unmigrated dialogs + chips */
+  --paper-2: #f0f1ef;
+  --paper-3: #e6e8e5;
+  --ink: #151515;
+  --ink-dim: #4a4a4a;
+  --ink-faint: #8b8b8b;
+  --line-soft: rgb(21 21 21 / 0.3);
+  --line-ghost: rgb(21 21 21 / 0.12);
+  --rule: #d8c9a8;
+  --rule-2: #cbbb96;
+  --rule-soft: #e7dcc2;
+  --signal: #ffd21c;
+  --merged-halo: transparent;
+  /* Inverse text on saturated fills (oxblood CTAs) — never theme-flips */
+  --on-solid: #ffffff;
+  /* Modal scrim — always dims, never inverts with ink */
+  --scrim: rgb(21 21 21 / 0.45);
+
+  /* §2.3 Masthead (dark supergraphic band in both themes) */
+  --mast-bg: #101314;
+  --mast-ink: #ffffff;
+  --mast-dim: #b9b9b9;
+  --mast-faint: #7c7c7c;
+  --mast-plate: #2b2f33;
+  --mast-plate-hover: #3a4046;
+  --mast-plate-ink: #d7dbd9;
+  --mast-plate-rivet: rgb(0 0 0 / 0.6);
+  --mast-plate-hi: rgb(255 255 255 / 0.14);
+  --mast-plate-active: #e8ece9;
+  --mast-plate-active-ink: #101314;
+  --mast-plate-active-rivet: rgb(16 19 18 / 0.5);
+
+  /* §2.4 Stamped plates on paper */
+  --plate: #dfe4e1;
+  --plate-hover: #cfd6d2;
+  --plate-ink: #23282b;
+  --plate-rivet: rgb(16 19 18 / 0.55);
+  --plate-hi: rgb(255 255 255 / 0.65);
+  --plate-lo: rgb(16 19 18 / 0.12);
+
+  /* §2.5 PR badge */
+  --prbadge-bg: #151515;
+  --prbadge-ink: #ffffff;
+  --prbadge-border: transparent;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #15181b;
+  --panel: #1c2024;
+  --paper-2: #23282c;
+  --paper-3: #2b3035;
+  --ink: #f2f3f1;
+  --ink-dim: #c6cac8;
+  --ink-faint: #7f8583;
+  --line-soft: rgb(242 243 241 / 0.32);
+  --line-ghost: rgb(242 243 241 / 0.14);
+  --rule: rgb(242 243 241 / 0.28);
+  --rule-2: rgb(242 243 241 / 0.22);
+  --rule-soft: rgb(242 243 241 / 0.14);
+  --signal: #ffd21c;
+  --merged-halo: rgb(242 243 241 / 0.85);
+  --on-solid: #ffffff;
+  --scrim: rgb(0 0 0 / 0.55);
+
+  --mast-bg: #000000;
+  --mast-ink: #ffffff;
+  --mast-dim: #b9b9b9;
+  --mast-faint: #7c7c7c;
+  --mast-plate: #232629;
+  --mast-plate-hover: #32373b;
+  --mast-plate-ink: #d7dbd9;
+  --mast-plate-rivet: rgb(0 0 0 / 0.65);
+  --mast-plate-hi: rgb(255 255 255 / 0.12);
+  --mast-plate-active: #e8ece9;
+  --mast-plate-active-ink: #101314;
+  --mast-plate-active-rivet: rgb(16 19 18 / 0.5);
+
+  --plate: #2b2f33;
+  --plate-hover: #3a4046;
+  --plate-ink: #d7dbd9;
+  --plate-rivet: rgb(0 0 0 / 0.6);
+  --plate-hi: rgb(255 255 255 / 0.14);
+  --plate-lo: rgb(0 0 0 / 0.35);
+
+  --prbadge-bg: #151515;
+  --prbadge-ink: #f2f3f1;
+  --prbadge-border: var(--merged-halo);
+}
+
+/*
+  Tailwind @theme aliases map Interchange tokens to utilities.
+  Oxblood/wash accents stay fixed (unmigrated dialogs); surfaces + ink flip.
+*/
 @theme {
-  --color-paper: #f4ecdb;
-  --color-paper-2: #efe5d0;
-  --color-paper-3: #e9dcc1;
-  --color-panel: #fbf6ea;
-  --color-ink: #1d160e;
-  --color-ink-2: #34291c;
-  --color-ink-soft: #5b4d3b;
-  --color-ink-faint: #6e5b43;
-  --color-rule: #d8c9a8;
-  --color-rule-2: #cbbb96;
-  --color-rule-soft: #e7dcc2;
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-paper-3: var(--paper-3);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-dim);
+  --color-ink-soft: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-rule: var(--rule);
+  --color-rule-2: var(--rule-2);
+  --color-rule-soft: var(--rule-soft);
+  --color-on-solid: var(--on-solid);
+  --color-scrim: var(--scrim);
   --color-oxblood: #7a1d2a;
   --color-oxblood-deep: #5c141f;
   --color-vermilion: #b8341b;
@@ -22,18 +151,23 @@
   --color-oxblood-wash: #f0ddd9;
   --color-vermilion-wash: #f4e1d8;
   --color-violet-wash: #e7dff0;
-  /* Waiting for blockers (Queue hold) — distinct from violet Worker Slot wait */
   --color-teal: #2f5d50;
   --color-teal-wash: #e2ebe7;
+  --color-signal: var(--signal);
+  --color-lane-queue: var(--lane-queue);
+  --color-lane-build: var(--lane-build);
+  --color-lane-review: var(--lane-review);
+  --color-lane-pr: var(--lane-pr);
+  --color-lane-attention: var(--lane-attention);
+  --color-lane-merged: var(--lane-merged);
+  /* Serif kept until phase 5 teardown when no surface references it. */
   --font-serif:
     "Iowan Old Style", "Palatino Linotype", "URW Palladio L", Palatino,
     "Book Antiqua", Georgia, "Times New Roman", serif;
-  --font-sans:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-sans: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono:
-    ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono",
-    "DejaVu Sans Mono", Menlo, Consolas, monospace;
+    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 @layer base {
@@ -43,34 +177,25 @@
   }
 
   body {
-    background-color: var(--color-paper);
-    background-image:
-      radial-gradient(
-        130% 90% at 50% -10%,
-        rgba(28, 22, 14, 0) 55%,
-        rgba(28, 22, 14, 0.045) 100%
-      ),
-      repeating-linear-gradient(
-        0deg,
-        rgba(28, 22, 14, 0.012) 0 1px,
-        rgba(28, 22, 14, 0) 1px 3px
-      );
-    background-attachment: fixed;
-    color: var(--color-ink);
-    font-family: var(--font-sans);
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-display);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
   }
 
   ::selection {
-    background-color: var(--color-oxblood);
-    color: var(--color-paper);
+    background-color: var(--signal);
+    color: #151515;
   }
 
   :focus-visible {
-    border-radius: 1px;
-    outline: 2px solid var(--color-oxblood);
+    outline: 2px solid var(--ink);
     outline-offset: 2px;
+  }
+
+  .mast :focus-visible {
+    outline-color: var(--signal);
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -86,6 +211,280 @@
 }
 
 @layer components {
+  /* ---------- Nav shell (§4.1) ---------- */
+
+  .mast {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.2rem 2.5rem;
+    padding: 1.5rem 2.2rem 1.35rem;
+    background: var(--mast-bg);
+    color: var(--mast-ink);
+  }
+
+  .brand-kicker {
+    margin: 0 0 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--mast-faint);
+  }
+
+  .brand-kicker b {
+    color: var(--mast-dim);
+    font-weight: 400;
+  }
+
+  .brand-wordmark {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 4.2vw, 3.1rem);
+    font-weight: 800;
+    line-height: 0.92;
+    letter-spacing: -0.015em;
+    text-transform: uppercase;
+  }
+
+  .brand-wordmark a {
+    color: var(--mast-ink);
+    text-decoration: none;
+  }
+
+  .brand-wordmark a:hover {
+    color: var(--signal);
+  }
+
+  .brand-sub {
+    margin: 0.55rem 0 0;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--mast-dim);
+  }
+
+  .brand-sub .ok {
+    color: var(--signal);
+  }
+
+  .mast-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  /* Stamped plates on the dark masthead band (§5.3 / §4.1) */
+  .mast-plate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 2px solid #000;
+    background-color: var(--mast-plate);
+    background-image:
+      radial-gradient(
+        circle 1.6px at 7px 7px,
+        var(--mast-plate-rivet) 1.6px,
+        transparent 2.1px
+      ),
+      radial-gradient(
+        circle 1.6px at calc(100% - 7px) 7px,
+        var(--mast-plate-rivet) 1.6px,
+        transparent 2.1px
+      );
+    box-shadow:
+      inset 0 1px 0 var(--mast-plate-hi),
+      inset 0 -2px 0 rgb(0 0 0 / 0.3);
+    padding: 0.55rem 0.95rem;
+    color: var(--mast-plate-ink);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .mast-plate:hover {
+    background-color: var(--mast-plate-hover);
+    color: var(--mast-ink);
+  }
+
+  .mast-plate[aria-current="page"] {
+    background-color: var(--mast-plate-active);
+    background-image:
+      radial-gradient(
+        circle 1.6px at 7px 7px,
+        var(--mast-plate-active-rivet) 1.6px,
+        transparent 2.1px
+      ),
+      radial-gradient(
+        circle 1.6px at calc(100% - 7px) 7px,
+        var(--mast-plate-active-rivet) 1.6px,
+        transparent 2.1px
+      );
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.65),
+      inset 0 -2px 0 rgb(16 19 18 / 0.12);
+    color: var(--mast-plate-active-ink);
+  }
+
+  .mast-plate svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex-shrink: 0;
+  }
+
+  /* Lane-colour ribbon under the masthead (visual motif only) */
+  .lane-ribbon {
+    display: flex;
+    height: 0.4rem;
+  }
+
+  .lane-ribbon > span {
+    flex: 1;
+  }
+
+  .lane-ribbon > span:nth-child(1) {
+    background: var(--lane-queue);
+  }
+  .lane-ribbon > span:nth-child(2) {
+    background: var(--lane-build);
+  }
+  .lane-ribbon > span:nth-child(3) {
+    background: var(--lane-review);
+  }
+  .lane-ribbon > span:nth-child(4) {
+    background: var(--lane-pr);
+  }
+  .lane-ribbon > span:nth-child(5) {
+    background: var(--lane-attention);
+  }
+  .lane-ribbon > span:nth-child(6) {
+    background: var(--lane-merged);
+  }
+
+  /* Page content under chrome — chrome is full-bleed; content is padded */
+  .page-shell {
+    padding: 1.6rem 2.2rem 3rem;
+  }
+
+  .page-shell > .banner {
+    margin-bottom: 1rem;
+  }
+
+  /* ---------- Banner pattern (§4.8) ---------- */
+
+  .banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem 0.9rem;
+    border: 2px solid var(--ink);
+    background: var(--panel);
+    padding: 0.5rem 0.7rem;
+    color: var(--ink);
+  }
+
+  .banner-tag {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.45rem;
+    white-space: nowrap;
+    color: #151515;
+  }
+
+  .banner--alarm .banner-tag {
+    background: var(--lane-attention);
+  }
+
+  .banner--guidance .banner-tag {
+    background: var(--signal);
+  }
+
+  .banner-body {
+    margin: 0;
+    flex: 1 1 12rem;
+    font-family: var(--font-display);
+    font-size: 0.92rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--ink);
+  }
+
+  .banner-body p {
+    margin: 0;
+  }
+
+  .banner-action {
+    margin-left: auto;
+  }
+
+  /* Mini stamped plate (banner actions, pagination — §5.3) */
+  .plate-mini {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 2px solid var(--ink);
+    background-color: var(--plate);
+    background-image:
+      radial-gradient(
+        circle 1.4px at 6px 6px,
+        var(--plate-rivet) 1.4px,
+        transparent 1.9px
+      ),
+      radial-gradient(
+        circle 1.4px at calc(100% - 6px) 6px,
+        var(--plate-rivet) 1.4px,
+        transparent 1.9px
+      );
+    box-shadow:
+      inset 0 1px 0 var(--plate-hi),
+      inset 0 -2px 0 var(--plate-lo);
+    padding: 0.46rem 0.85rem;
+    color: var(--plate-ink);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .plate-mini:hover {
+    background-color: var(--plate-hover);
+  }
+
+  .plate-mini:disabled {
+    cursor: wait;
+    opacity: 0.55;
+  }
+
+  /* Compact banner (inline inside panels / dialogs) */
+  .banner--compact {
+    padding: 0.45rem 0.6rem;
+  }
+
+  .banner--compact .banner-body {
+    font-size: 0.88rem;
+  }
+
+  /* ---------- Legacy Ledger helpers (unmigrated surfaces) ---------- */
+
   .stamp {
     display: inline-flex;
     align-items: center;
@@ -107,12 +506,6 @@
 
   .entry-rule {
     border-top: 1px solid var(--color-rule-soft);
-  }
-
-  /* Full-width bold rule under primary nav (shared across every route).
-     Visual weight matches the former Kanban board masthead separator. */
-  .primary-nav {
-    border-bottom: 0.5rem solid var(--color-ink);
   }
 
   .industrial-shell {
@@ -345,6 +738,14 @@
 }
 
 @media (max-width: 900px) {
+  .mast {
+    padding: 1.2rem 1.4rem 1.1rem;
+  }
+
+  .page-shell {
+    padding: 1.3rem 1.4rem 2.4rem;
+  }
+
   .pipeline-controls {
     display: grid;
     min-width: 0;

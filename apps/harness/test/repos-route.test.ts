@@ -33,25 +33,23 @@ describe("/repos route", () => {
 
   test("primary nav places Home before Repos before Completed", () => {
     const source = rootSource()
-    const settingsBlock = source.slice(
-      source.indexOf("<SettingsButton"),
+    const navBlock = source.slice(
+      source.indexOf('aria-label="Primary"'),
       source.indexOf("</nav>"),
     )
-    const homeIdx = settingsBlock.indexOf('to="/"')
-    const reposIdx = settingsBlock.indexOf('to="/repos"')
-    const completedIdx = settingsBlock.indexOf('to="/completed"')
+    const homeIdx = navBlock.indexOf('to="/"')
+    const reposIdx = navBlock.indexOf('to="/repos"')
+    const completedIdx = navBlock.indexOf('to="/completed"')
     expect(homeIdx).toBeGreaterThan(-1)
     expect(reposIdx).toBeGreaterThan(homeIdx)
     expect(completedIdx).toBeGreaterThan(reposIdx)
-    expect(settingsBlock).toMatch(/Home\s*<\/Link>/)
-    expect(settingsBlock).toMatch(/Repos\s*<\/Link>/)
-    expect(settingsBlock).not.toMatch(/Kanban\s*<\/Link>/)
+    expect(navBlock).toMatch(/Home\s*<\/Link>/)
+    expect(navBlock).toMatch(/Repos\s*<\/Link>/)
+    expect(navBlock).not.toMatch(/Kanban\s*<\/Link>/)
     // Active styling is shared with other primary destinations.
-    const reposLink = settingsBlock.slice(reposIdx, completedIdx)
-    expect(reposLink).toContain("primaryNavLinkClassName")
-    expect(reposLink).toContain(
-      "activeProps={{ className: primaryNavLinkActiveClassName }}",
-    )
+    const reposLink = navBlock.slice(reposIdx, completedIdx)
+    expect(reposLink).toContain("mastPlateClassName")
+    expect(reposLink).toContain('activeProps={{ "aria-current": "page" }}')
   })
 
   test("Repos page body keeps the reading-width cap", () => {

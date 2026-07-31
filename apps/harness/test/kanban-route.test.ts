@@ -403,10 +403,9 @@ describe("kanban home board", () => {
     const rootComponent = root.slice(root.indexOf("function RootComponent("))
     expect(rootComponent).not.toContain("useLocation")
     expect(rootComponent).not.toContain("isKanbanPage")
-    // Shared gutters apply on every route (single static class string).
-    expect(rootComponent).toContain(
-      'className="mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12"',
-    )
+    // Interchange chrome is full-bleed; page content uses shared page-shell padding.
+    expect(rootComponent).toContain('className="min-h-screen w-full"')
+    expect(root).toContain('className="page-shell"')
     // Shell must not pathname-gate or hardcode the reading-width cap.
     expect(rootComponent).not.toContain("max-w-[88rem]")
     expect(rootComponent).not.toContain('pathname === "/"')

@@ -12,6 +12,7 @@ import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
   JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
 } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
+import { Banner, BannerActionButton } from "../banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "../card-collapse.js"
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
 import {
@@ -615,12 +616,9 @@ function HomeRepositoryMembershipLive() {
     return null
   }
   return (
-    <p
-      className="mb-4 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep"
-      role="status"
-    >
+    <Banner className="mb-4" tone="alarm" tag="Live">
       {warningPresentation.message}
-    </p>
+    </Banner>
   )
 }
 
@@ -653,20 +651,22 @@ function HomeContent() {
   if (isError && repositories === undefined) {
     return (
       <main className="pt-8 sm:pt-10">
-        <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
-          <p className="m-0 text-sm text-oxblood-deep" role="alert">
-            Could not load repositories. Please try again.
-          </p>
-          <button
-            type="button"
-            className="mt-3 border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-            onClick={() => {
-              void refetch()
-            }}
-          >
-            Retry
-          </button>
-        </article>
+        <Banner
+          tone="alarm"
+          tag="Error"
+          role="alert"
+          action={
+            <BannerActionButton
+              onClick={() => {
+                void refetch()
+              }}
+            >
+              Retry
+            </BannerActionButton>
+          }
+        >
+          Could not load repositories. Please try again.
+        </Banner>
       </main>
     )
   }
@@ -792,11 +792,9 @@ export function CommittedPullRequestsDashboard() {
 
   if (failed) {
     return (
-      <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
-        <p className="m-0 text-sm text-oxblood-deep" role="alert">
-          Could not load committed pull requests. Please try again.
-        </p>
-      </article>
+      <Banner tone="alarm" tag="Error" role="alert">
+        Could not load committed pull requests. Please try again.
+      </Banner>
     )
   }
 
@@ -934,12 +932,9 @@ export function RepositoryCards() {
   )
   const warning =
     warningPresentation !== null ? (
-      <p
-        className="mb-4 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep"
-        role="status"
-      >
+      <Banner className="mb-4" tone="alarm" tag="Live">
         {warningPresentation.message}
-      </p>
+      </Banner>
     ) : null
 
   if (repositories.length === 0) {
@@ -1186,7 +1181,7 @@ function AddRepositoryGuidance({
             <button
               type="submit"
               disabled={busy}
-              className="bg-oxblood px-3 py-2 text-sm font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+              className="bg-oxblood px-3 py-2 text-sm font-semibold tracking-wide text-on-solid uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
             >
               {addLocalRepository.isPending
                 ? "Adding…"
@@ -2104,7 +2099,7 @@ function RepositoryCard({
       </div>
       <dialog
         ref={settingsDialogRef}
-        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-ink/45"
+        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-black/50"
         aria-labelledby={`repo-settings-title-${repository.id}`}
         onCancel={(event) => {
           if (updateSettings.isPending) event.preventDefault()
@@ -2495,7 +2490,7 @@ function RepositoryCard({
             </button>
             <button
               type="submit"
-              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-paper uppercase hover:bg-oxblood-deep disabled:cursor-wait disabled:opacity-60"
+              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-on-solid uppercase hover:bg-oxblood-deep disabled:cursor-wait disabled:opacity-60"
               disabled={
                 updateSettings.isPending ||
                 (backendChangeBlocked &&
@@ -2626,12 +2621,37 @@ function RepositoryCard({
           </dl>
           {!repository.credential.configured &&
             repository.forge === "github" && (
-              <div className="mt-5 grid gap-2 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep">
-                <strong className="font-serif text-base font-semibold">
-                  GitHub token required
-                </strong>
+              <Banner
+                className="mt-5"
+                tone="alarm"
+                tag="Attention"
+                role={addGitHubToken.isError ? "alert" : "status"}
+                action={
+                  githubTokenCreated ? (
+                    <BannerActionButton
+                      disabled={addGitHubToken.isPending}
+                      onClick={() => addGitHubToken.mutate()}
+                    >
+                      {addGitHubToken.isPending
+                        ? "Waiting for Keymaxxer"
+                        : "Store in Keymaxxer"}
+                    </BannerActionButton>
+                  ) : (
+                    <a
+                      className="plate-mini"
+                      href={repository.credential.githubTokenCreationUrl}
+                      onClick={() => setGithubTokenCreated(true)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Create GitHub token
+                    </a>
+                  )
+                }
+              >
+                <p className="m-0 font-semibold">GitHub token required</p>
                 {githubTokenCreated ? (
-                  <p className="m-0">
+                  <p className="m-0 mt-1">
                     Store the generated token as{" "}
                     <code className="font-bold">
                       {repository.credential.githubTokenSecretName}
@@ -2641,7 +2661,7 @@ function RepositoryCard({
                     then store the replacement.
                   </p>
                 ) : (
-                  <p className="m-0">
+                  <p className="m-0 mt-1">
                     Create a fine-grained token, choose{" "}
                     <strong>Only select repositories</strong>, select{" "}
                     <code className="font-bold">
@@ -2653,42 +2673,47 @@ function RepositoryCard({
                     them if Actions is still read-only.
                   </p>
                 )}
-                {githubTokenCreated ? (
-                  <button
-                    type="button"
-                    className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
-                    disabled={addGitHubToken.isPending}
-                    onClick={() => addGitHubToken.mutate()}
-                  >
-                    {addGitHubToken.isPending
-                      ? "Waiting for Keymaxxer"
-                      : "Store in Keymaxxer"}
-                  </button>
-                ) : (
-                  <a
-                    className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper no-underline uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-                    href={repository.credential.githubTokenCreationUrl}
-                    onClick={() => setGithubTokenCreated(true)}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    Create GitHub token
-                  </a>
-                )}
-                {addGitHubToken.isError && (
-                  <p className="m-0 text-oxblood-deep" role="alert">
+                {addGitHubToken.isError ? (
+                  <p className="m-0 mt-1">
                     Keymaxxer setup was cancelled or failed.
                   </p>
-                )}
-              </div>
+                ) : null}
+              </Banner>
             )}
           {!repository.credential.configured &&
             repository.forge === "gitlab" && (
-              <div className="mt-5 grid gap-2 border border-oxblood/40 bg-oxblood-wash px-4 py-3 text-sm text-oxblood-deep">
-                <strong className="font-serif text-base font-semibold">
+              <Banner
+                className="mt-5"
+                tone="alarm"
+                tag="Attention"
+                role={addGitLabToken.isError ? "alert" : "status"}
+                action={
+                  gitlabTokenCreated ? (
+                    <BannerActionButton
+                      disabled={addGitLabToken.isPending}
+                      onClick={() => addGitLabToken.mutate()}
+                    >
+                      {addGitLabToken.isPending
+                        ? "Waiting for Keymaxxer"
+                        : "Store in Keymaxxer"}
+                    </BannerActionButton>
+                  ) : (
+                    <a
+                      className="plate-mini"
+                      href={repository.credential.githubTokenCreationUrl}
+                      onClick={() => setGitlabTokenCreated(true)}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      Create GitLab token
+                    </a>
+                  )
+                }
+              >
+                <p className="m-0 font-semibold">
                   GitLab authentication required
-                </strong>
-                <p className="m-0">
+                </p>
+                <p className="m-0 mt-1">
                   {gitlabTokenCreated ? (
                     <>
                       Store the generated token as{" "}
@@ -2719,40 +2744,15 @@ function RepositoryCard({
                   </code>{" "}
                   before starting the Harness.
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {!gitlabTokenCreated && (
-                    <a
-                      className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper no-underline uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-                      href={repository.credential.githubTokenCreationUrl}
-                      onClick={() => setGitlabTokenCreated(true)}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      Create GitLab token
-                    </a>
-                  )}
-                  {gitlabTokenCreated && (
-                    <button
-                      type="button"
-                      className="w-fit bg-oxblood px-3 py-2 font-semibold tracking-wide text-paper uppercase transition hover:bg-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
-                      disabled={addGitLabToken.isPending}
-                      onClick={() => addGitLabToken.mutate()}
-                    >
-                      {addGitLabToken.isPending
-                        ? "Waiting for Keymaxxer"
-                        : "Store in Keymaxxer"}
-                    </button>
-                  )}
-                </div>
-                {addGitLabToken.isError && (
-                  <p className="m-0 text-oxblood-deep" role="alert">
+                {addGitLabToken.isError ? (
+                  <p className="m-0 mt-1">
                     Keymaxxer setup was cancelled or failed. Use ambient{" "}
                     <code className="font-bold">GITLAB_TOKEN</code> or{" "}
                     <code className="font-bold">glab auth login</code> and
                     restart the Harness if Keymaxxer is unavailable.
                   </p>
-                )}
-              </div>
+                ) : null}
+              </Banner>
             )}
           <div className="mt-5">
             <div className="mb-2 flex items-baseline justify-between gap-3">
@@ -3318,7 +3318,7 @@ export function SessionUsageDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-[min(92vw,28rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-ink/45"
+      className="m-auto w-[min(92vw,28rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-black/50"
       aria-labelledby="session-usage-title"
       onClose={onClose}
     >

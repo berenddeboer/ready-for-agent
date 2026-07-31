@@ -1,6 +1,7 @@
 import { useQueries, useQuery, useSuspenseQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { Suspense, useEffect, useState } from "react"
+import { Banner, BannerActionButton } from "../banner.js"
 import { CompletedWorkItemRow } from "../completed-work-item-row.js"
 import { WorkItemsLiveUpdates } from "../work-items-live-updates.js"
 import {
@@ -118,20 +119,22 @@ function CompletedWorkItemsBoard() {
     return (
       <>
         {live}
-        <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
-          <p className="m-0 text-sm text-oxblood-deep" role="alert">
-            Could not load completed work items. Please try again.
-          </p>
-          <button
-            type="button"
-            className="mt-3 border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-            onClick={() => {
-              void completedQuery.refetch()
-            }}
-          >
-            Retry
-          </button>
-        </article>
+        <Banner
+          tone="alarm"
+          tag="Error"
+          role="alert"
+          action={
+            <BannerActionButton
+              onClick={() => {
+                void completedQuery.refetch()
+              }}
+            >
+              Retry
+            </BannerActionButton>
+          }
+        >
+          Could not load completed work items. Please try again.
+        </Banner>
       </>
     )
   }
@@ -167,23 +170,22 @@ function CompletedWorkItemsBoard() {
     <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
       {live}
       {refreshFailedWithData ? (
-        <div
-          className="mb-3 flex flex-wrap items-center justify-between gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-2"
-          role="status"
+        <Banner
+          className="mb-3"
+          tone="alarm"
+          tag="Refresh failed"
+          action={
+            <BannerActionButton
+              onClick={() => {
+                void completedQuery.refetch()
+              }}
+            >
+              Retry
+            </BannerActionButton>
+          }
         >
-          <p className="m-0 text-sm text-oxblood-deep">
-            Could not refresh completed work items. Showing last loaded page.
-          </p>
-          <button
-            type="button"
-            className="border border-rule-2 bg-paper px-2 py-1 text-xs font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-            onClick={() => {
-              void completedQuery.refetch()
-            }}
-          >
-            Retry
-          </button>
-        </div>
+          Could not refresh completed work items. Showing last loaded page.
+        </Banner>
       ) : null}
       {resolvedTotalCount === 0 ? (
         <p className="m-0 font-serif text-sm italic text-ink-soft">
