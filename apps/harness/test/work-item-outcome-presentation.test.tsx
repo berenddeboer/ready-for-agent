@@ -48,14 +48,11 @@ describe("WorkItemOutcomePresentation", () => {
       />,
     )
 
-    expect(html).toContain("PR #17")
+    expect(html).toContain("PR #17 ↗")
     expect(html).toContain('href="https://github.com/acme/widgets/pull/17"')
     expect(html).toContain("Open pull request #17")
     expect(html).toContain("Complete")
     expect(html).toContain(prBadgeClassName)
-    expect(html).toContain("text-xs")
-    expect(html).not.toContain("0.65rem")
-    expect(html).not.toContain("0.6rem")
     expect(html).not.toContain("Issue closed without repository changes")
     expect(html).not.toContain('aria-label="Completion summary"')
   })

@@ -309,11 +309,19 @@ describe("Committed pull requests dashboard UI", () => {
     expect(source).toContain('aria-label="Loading committed pull requests"')
     expect(source).toContain('role="status"')
     expect(source).toContain('aria-busy="true"')
-    expect(source).toContain("grid-cols-5")
+    expect(source).toContain("merged-pr-stats-grid")
+    expect(source).toContain("merged-pr-stats-skeleton")
     expect(source).toContain(
       "Could not load committed pull requests. Please try again.",
     )
     expect(source).toContain('role="alert"')
+    // Failure banner sits inside the stats panel (§4.2).
+    const failedBranch = source.slice(
+      source.indexOf("if (failed)"),
+      source.indexOf("const today = todayQuery.data"),
+    )
+    expect(failedBranch).toContain('className="merged-pr-stats"')
+    expect(failedBranch).toContain("banner--compact")
     // Board mounts dashboard as a sibling of the pipeline (no Suspense around it).
     expect(board).toContain("<CommittedPullRequestsDashboard />")
     expect(board).toContain("<KanbanJobsBoard />")
@@ -352,6 +360,8 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("{thisWeek}")
     expect(dashboard).toContain("{lastWeek}")
     expect(dashboard).toContain("{twoWeeksAgo}")
+    expect(dashboard).toContain("Merged PR throughput")
+    expect(dashboard).toContain("merged-pr-stats")
   })
 
   test("board shows PR dashboard and pipeline; zero repos use blank slate", () => {

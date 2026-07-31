@@ -1,6 +1,6 @@
 import {
-  jobsProgressMinTextClassName,
   lifecycleStepChipClassName,
+  lifecycleStepChipClassNameForStatus,
   prBadgeClassName,
   statusBadgeBaseClassName,
   statusBadgeClassNameForStatus,
@@ -8,67 +8,79 @@ import {
 } from "../src/work-item-progress-chrome.js"
 import { describe, expect, test } from "bun:test"
 
-const forbiddenSubXsRem = ["0.6rem", "0.65rem", "0.7rem"] as const
-
-function assertMinTextXs(className: string) {
-  expect(className).toContain(jobsProgressMinTextClassName)
-  expect(className).toContain("text-xs")
-  for (const rem of forbiddenSubXsRem) {
-    expect(className).not.toContain(rem)
-  }
-}
-
 describe("work-item-progress-chrome", () => {
-  test("lifecycle step chips use shared text-xs minimum (no sub-xs rem)", () => {
-    assertMinTextXs(lifecycleStepChipClassName)
+  test("lifecycle step chips use Interchange leg classes (no radius)", () => {
+    expect(lifecycleStepChipClassName).toContain("leg")
     expect(lifecycleStepChipClassName).not.toContain("rounded")
-    expect(lifecycleStepChipClassName).toContain("border")
+    expect(lifecycleStepChipClassNameForStatus("SUCCEEDED")).toBe(
+      "leg leg--done",
+    )
+    expect(lifecycleStepChipClassNameForStatus("RUNNING")).toBe("leg leg--run")
+    expect(lifecycleStepChipClassNameForStatus("QUEUED")).toBe("leg leg--next")
+    expect(lifecycleStepChipClassNameForStatus("FAILED")).toBe("leg leg--fail")
+    // Needs-human shares Attention fill with failures — not lane-colored "run".
+    expect(lifecycleStepChipClassNameForStatus("NEEDS_HUMAN")).toBe(
+      "leg leg--fail",
+    )
+    expect(lifecycleStepChipClassNameForStatus("NEEDS_HUMAN_REVIEW")).toBe(
+      "leg leg--fail",
+    )
   })
 
-  test("status badge base and PR badge share text-xs minimum", () => {
-    assertMinTextXs(statusBadgeBaseClassName)
-    assertMinTextXs(prBadgeClassName)
+  test("status tags and PR badge use Interchange component classes", () => {
+    expect(statusBadgeBaseClassName).toBe("status-tag")
+    expect(prBadgeClassName).toBe("pr-badge")
     expect(statusBadgeBaseClassName).not.toContain("rounded")
     expect(prBadgeClassName).not.toContain("rounded")
-    expect(statusBadgeBaseClassName).toContain("border")
-    expect(prBadgeClassName).toContain("border")
     expect(statusBadgeClassNameForStatus("COMPLETE")).toContain(
       statusBadgeBaseClassName,
     )
-    assertMinTextXs(statusBadgeClassNameForStatus("COMPLETE"))
-    assertMinTextXs(statusBadgeClassNameForStatus("FAILED"))
-    assertMinTextXs(statusBadgeClassNameForStatus("RUNNING"))
+    expect(statusBadgeClassNameForStatus("COMPLETE")).toContain(
+      "status-tag--complete",
+    )
+    expect(statusBadgeClassNameForStatus("FAILED")).toContain(
+      "status-tag--alarm",
+    )
+    expect(statusBadgeClassNameForStatus("RUNNING")).toContain(
+      "status-tag--plain",
+    )
+    expect(statusBadgeClassNameForStatus("NEEDS_HUMAN")).toContain(
+      "status-tag--alarm",
+    )
+    expect(statusBadgeClassNameForStatus("NEEDS_HUMAN_REVIEW")).toContain(
+      "status-tag--alarm",
+    )
   })
 
-  test("Waiting for blockers badge tone is distinct from Worker Slot and Queued", () => {
+  test("Waiting for blockers and worker slot share hold treatment, distinct from Queued", () => {
     const blockers = statusBadgeClassNameForStatus("WAITING_FOR_BLOCKERS")
     const workerSlot = statusBadgeClassNameForStatus("WAITING_FOR_WORKER_SLOT")
     const queued = statusBadgeClassNameForStatus("QUEUED")
     const running = statusBadgeClassNameForStatus("RUNNING")
 
-    expect(blockers).toContain("bg-teal-wash")
-    expect(blockers).toContain("text-teal")
-    expect(workerSlot).toContain("bg-violet-wash")
-    expect(workerSlot).toContain("text-violet-800")
-    expect(queued).toContain("bg-oxblood-wash")
-    expect(queued).toContain("text-oxblood")
+    expect(blockers).toContain("status-tag--hold")
+    expect(workerSlot).toContain("status-tag--hold")
+    expect(queued).toContain("status-tag--plain")
+    expect(running).toContain("status-tag--plain")
 
-    expect(blockers).not.toBe(workerSlot)
+    expect(blockers).toBe(workerSlot)
     expect(blockers).not.toBe(queued)
     expect(blockers).not.toBe(running)
-    expect(workerSlot).not.toBe(queued)
-    assertMinTextXs(blockers)
-    assertMinTextXs(workerSlot)
   })
 
-  test("status message tone matches wait-hold badges", () => {
+  test("status message tone marks alarm statuses for ▲ prefix", () => {
     expect(statusMessageClassNameForStatus("WAITING_FOR_BLOCKERS")).toBe(
-      "text-teal",
+      "status-message",
     )
     expect(statusMessageClassNameForStatus("WAITING_FOR_WORKER_SLOT")).toBe(
-      "text-violet-800",
+      "status-message",
     )
-    expect(statusMessageClassNameForStatus("QUEUED")).toBe("text-oxblood-deep")
-    expect(statusMessageClassNameForStatus("FAILED")).toBe("text-oxblood-deep")
+    expect(statusMessageClassNameForStatus("QUEUED")).toBe("status-message")
+    expect(statusMessageClassNameForStatus("FAILED")).toBe(
+      "status-message status-message--alarm",
+    )
+    expect(statusMessageClassNameForStatus("NEEDS_HUMAN")).toBe(
+      "status-message status-message--alarm",
+    )
   })
 })

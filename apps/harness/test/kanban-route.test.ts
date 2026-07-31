@@ -131,7 +131,14 @@ describe("kanban home board", () => {
     expect(source).toContain('aria-label="Lifecycle pipeline"')
     expect(source).toContain("pipelineLaneFor(workItem)")
     expect(source).toContain("Lane clear")
+    // Mobile switcher + nameboard each render {lane.label}.
     expect(source.match(/\{lane\.label\}/g)).toHaveLength(2)
+    expect(source).toContain("lane-roundel")
+    expect(source).toContain("lane-platform")
+    expect(source).toContain("queue-hint")
+    expect(source).toContain("Feed the queue — work starts at your repos.")
+    expect(source).toContain("Manage repos →")
+    expect(source).toContain('to="/repos"')
   })
 
   test("retains accessible two-tab control, keyboard navigation, and repository filtering", () => {
@@ -385,16 +392,30 @@ describe("kanban home board", () => {
   })
 
   test("keeps the six-column board and sticky lane headers on desktop", () => {
-    const desktopStyles = stylesSource().split("@media (max-width: 900px)")[0]
+    // Strip the ≤1500px roundel fallback and the ≤900px mobile block.
+    const styles = stylesSource()
+    const desktopStyles = styles.split("@media (max-width: 1500px)")[0]
     expect(desktopStyles).toContain(".pipeline-board")
     expect(desktopStyles).toContain(
       "grid-template-columns: repeat(6, minmax(0, 1fr))",
     )
+    expect(desktopStyles).toContain(".pipeline-board::before")
+    expect(desktopStyles).toContain(".lane-roundel")
+    expect(desktopStyles).toContain(".lane-chrome")
+    expect(desktopStyles).toContain(".lane-platform")
     expect(desktopStyles).toContain(".lane-header")
     expect(desktopStyles).toContain("position: sticky")
     expect(desktopStyles).toContain(".job-ticket")
+    expect(desktopStyles).toContain("inset 6px 0 0")
     expect(desktopStyles).toContain(".lane-switcher")
     expect(desktopStyles).toContain("display: none")
+    expect(desktopStyles).toContain(".queue-hint")
+    expect(desktopStyles).not.toContain("--industrial-concrete")
+    // ≤1500px pins the nameboard stack (chrome), not a free-floating absolute roundel alone.
+    const midStyles = stylesSource().split("@media (max-width: 1500px)")[1]
+    expect(midStyles).toBeDefined()
+    expect(midStyles).toContain(".lane-chrome")
+    expect(midStyles).toContain("position: sticky")
   })
 
   test("uses full viewport chrome on every route; home board stays uncapped under header", () => {

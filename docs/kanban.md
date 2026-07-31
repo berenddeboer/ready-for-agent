@@ -65,9 +65,11 @@ The prototype uses an industrial control-board language:
   throughput and in-flight flow are visible together.
 - Repository management and intake live on `/repos`, not under the board.
 
-The visual treatment may be adapted to the active Harness design system. The
-essential design idea is the board structure, fixed lane identity, and compact
-operator-facing ticket, rather than the prototype's exact palette or fonts.
+The visual treatment follows the Interchange design system
+(`docs/harness-design-system.md` when present; otherwise the harness CSS
+token layer). The essential design idea is the board structure, fixed lane
+identity, open white platforms with lane-color nameboards, and compact
+operator-facing tickets — not the older Ledger concrete fills or serif stack.
 
 ## Interaction Model
 

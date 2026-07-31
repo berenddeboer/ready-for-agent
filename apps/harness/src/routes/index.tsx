@@ -6,7 +6,14 @@ import {
   useSuspenseQuery,
 } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
-import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
+import {
+  type CSSProperties,
+  type FormEvent,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
@@ -39,6 +46,7 @@ import {
   type LifecycleLabelChip,
   type LifecyclePipelineLaneId,
   lifecycleFocusLaneFor,
+  lifecycleLaneForPhase,
   planLifecycleChipPresentation,
 } from "../pipeline-lanes.js"
 import { followRepositoryIssuesLive } from "../refresh-issues-live.js"
@@ -60,7 +68,8 @@ import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { canShowWorkItemResetAction } from "../work-item-job-actions.js"
 import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
 import {
-  lifecycleStepChipClassName,
+  lifecycleLaneCssVars,
+  lifecycleStepChipClassNameForStatus,
   statusBadgeClassNameForStatus,
   statusMessageClassNameForStatus,
 } from "../work-item-progress-chrome.js"
@@ -774,17 +783,34 @@ export function CommittedPullRequestsDashboard() {
   if (loading) {
     return (
       <article
-        className="border border-rule-2 bg-panel px-4 py-4 sm:px-5"
+        className="merged-pr-stats"
         role="status"
         aria-label="Loading committed pull requests"
         aria-busy="true"
       >
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-10 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+        <header className="merged-pr-stats-head">
+          <span className="merged-pr-stats-tag">Merged</span>
+          <h2 className="merged-pr-stats-title">Merged PR throughput</h2>
+          <span className="merged-pr-stats-note">
+            Qty per period · local time
+          </span>
+        </header>
+        <div className="merged-pr-stats-grid">
+          <div className="merged-pr-stats-cell">
+            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+          </div>
+          <div className="merged-pr-stats-cell">
+            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+          </div>
+          <div className="merged-pr-stats-cell">
+            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+          </div>
+          <div className="merged-pr-stats-cell">
+            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+          </div>
+          <div className="merged-pr-stats-cell">
+            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+          </div>
         </div>
       </article>
     )
@@ -792,9 +818,22 @@ export function CommittedPullRequestsDashboard() {
 
   if (failed) {
     return (
-      <Banner tone="alarm" tag="Error" role="alert">
-        Could not load committed pull requests. Please try again.
-      </Banner>
+      <article className="merged-pr-stats">
+        <header className="merged-pr-stats-head">
+          <span className="merged-pr-stats-tag">Merged</span>
+          <h2 className="merged-pr-stats-title">Merged PR throughput</h2>
+        </header>
+        <div className="merged-pr-stats-body">
+          <Banner
+            tone="alarm"
+            tag="Error"
+            role="alert"
+            className="banner--compact"
+          >
+            Could not load committed pull requests. Please try again.
+          </Banner>
+        </div>
+      </article>
     )
   }
 
@@ -805,47 +844,34 @@ export function CommittedPullRequestsDashboard() {
   const twoWeeksAgo = twoWeeksAgoQuery.data ?? 0
 
   return (
-    <article className="border border-rule-2 bg-panel px-4 py-4 sm:px-5">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-        <div>
-          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-            Today
-          </p>
-          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
-            {today}
-          </p>
+    <article className="merged-pr-stats">
+      <header className="merged-pr-stats-head">
+        <span className="merged-pr-stats-tag">Merged</span>
+        <h2 className="merged-pr-stats-title">Merged PR throughput</h2>
+        <span className="merged-pr-stats-note">
+          Qty per period · local time
+        </span>
+      </header>
+      <div className="merged-pr-stats-grid">
+        <div className="merged-pr-stats-cell">
+          <span className="merged-pr-stats-num">{today}</span>
+          <span className="merged-pr-stats-label">Today</span>
         </div>
-        <div>
-          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-            Yesterday
-          </p>
-          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
-            {yesterday}
-          </p>
+        <div className="merged-pr-stats-cell">
+          <span className="merged-pr-stats-num">{yesterday}</span>
+          <span className="merged-pr-stats-label">Yesterday</span>
         </div>
-        <div>
-          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-            This week
-          </p>
-          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
-            {thisWeek}
-          </p>
+        <div className="merged-pr-stats-cell">
+          <span className="merged-pr-stats-num">{thisWeek}</span>
+          <span className="merged-pr-stats-label">This week</span>
         </div>
-        <div>
-          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-            Last week
-          </p>
-          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
-            {lastWeek}
-          </p>
+        <div className="merged-pr-stats-cell">
+          <span className="merged-pr-stats-num">{lastWeek}</span>
+          <span className="merged-pr-stats-label">Last week</span>
         </div>
-        <div>
-          <p className="m-0 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-            Two weeks ago
-          </p>
-          <p className="mt-1 mb-0 font-serif text-[clamp(1.4rem,2.2vw,2rem)] leading-none font-semibold text-ink tabular-nums">
-            {twoWeeksAgo}
-          </p>
+        <div className="merged-pr-stats-cell">
+          <span className="merged-pr-stats-num">{twoWeeksAgo}</span>
+          <span className="merged-pr-stats-label">Two weeks ago</span>
         </div>
       </div>
     </article>
@@ -3584,14 +3610,17 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   const pending = pause.isPending || start.isPending
   const failed = pause.isError || start.isError
   const label = workItem.paused ? "Start job" : "Pause job"
-  const buttonClass = workItem.paused
-    ? "border-oxblood/50 text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood"
-    : "border-sepia/50 text-sepia hover:bg-amber-wash focus-visible:outline-sepia"
+
+  const pauseClass = failed
+    ? "icon-btn icon-btn--armed"
+    : workItem.paused
+      ? "icon-btn icon-btn--paused"
+      : "icon-btn"
 
   return (
     <button
       type="button"
-      className={`inline-flex size-8 shrink-0 items-center justify-center border transition focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-wait disabled:opacity-50 ${failed ? "border-oxblood text-oxblood hover:bg-oxblood-wash focus-visible:outline-oxblood" : buttonClass}`}
+      className={pauseClass}
       disabled={pending}
       onClick={() => (workItem.paused ? start.mutate() : pause.mutate())}
       aria-label={pending ? `${label} in progress` : label}
@@ -3600,7 +3629,7 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
       {pending ? (
         <svg
           aria-hidden="true"
-          className="size-4 animate-spin motion-reduce:animate-none"
+          className="animate-spin motion-reduce:animate-none"
           viewBox="0 0 24 24"
           fill="none"
         >
@@ -3621,21 +3650,11 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
           />
         </svg>
       ) : workItem.paused ? (
-        <svg
-          aria-hidden="true"
-          className="size-4"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-        >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
           <path d="m8 5 11 7-11 7V5Z" />
         </svg>
       ) : (
-        <svg
-          aria-hidden="true"
-          className="size-4"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-        >
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor">
           <rect x="6" y="5" width="4" height="14" rx="1" />
           <rect x="14" y="5" width="4" height="14" rx="1" />
         </svg>
@@ -3771,10 +3790,21 @@ export function WorkItemLifecycleStatus({
       openPullRequestLabel !== null &&
       lifecycleLabel.phase === "DECIDE_PR_MERGE" &&
       lifecycleLabel.status === "NEEDS_HUMAN"
-    const chipClassName = lifecycleStepChipClassName
+    const chipClassName = lifecycleStepChipClassNameForStatus(
+      lifecycleLabel.status,
+    )
+    // Only RUNNING chips take current-lane fill; needs-human/fail use Attention.
+    const chipLane =
+      lifecycleLabel.status === "RUNNING"
+        ? lifecycleLaneForPhase(lifecycleLabel.phase)
+        : null
+    const chipStyle =
+      chipLane !== null
+        ? (lifecycleLaneCssVars(chipLane) as CSSProperties)
+        : undefined
     const duration = displayDurationMs !== null && (
-      <span className="ml-1 font-mono text-ink-faint">
-        {formatDuration(displayDurationMs)}
+      <span className="ml-1 opacity-90">
+        · {formatDuration(displayDurationMs)}
       </span>
     )
     return (
@@ -3786,12 +3816,13 @@ export function WorkItemLifecycleStatus({
             target="_blank"
             rel="noopener noreferrer"
             aria-label={`${openPullRequestLabel}: ${lifecycleLabel.label}`}
+            style={chipStyle}
           >
             {lifecycleLabel.label}
             {duration}
           </a>
         ) : (
-          <span className={chipClassName}>
+          <span className={chipClassName} style={chipStyle}>
             {lifecycleLabel.label}
             {duration}
           </span>
@@ -3821,7 +3852,7 @@ export function WorkItemLifecycleStatus({
   return (
     <div className={compact ? "mt-2" : "field-rule mt-2 ml-11 px-3 py-2"}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-mono text-xs tracking-[0.1em] text-ink-faint uppercase">
+        <span className="job-ticket-runtime-line uppercase tracking-[0.1em]">
           {formatStartedAgo(workItem.createdAt, nowMs)}
         </span>
         <WorkItemOutcomePresentation
@@ -3846,11 +3877,15 @@ export function WorkItemLifecycleStatus({
                   block.durationMs === null
                     ? null
                     : formatDuration(block.durationMs)
+                const summaryStyle = lifecycleLaneCssVars(
+                  block.lane,
+                ) as CSSProperties
                 return (
                   <div key={block.lane} className="min-w-0">
                     <button
                       type="button"
-                      className="inline-flex max-w-full items-center gap-2 border border-rule-2 bg-paper px-1.5 py-1 text-xs text-ink-2 transition hover:border-oxblood hover:text-oxblood focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+                      className="leg-summary"
+                      style={summaryStyle}
                       aria-expanded={block.expanded}
                       aria-controls={block.expanded ? chipsId : undefined}
                       onClick={() => toggleEarlierLane(block.lane)}
@@ -3859,11 +3894,7 @@ export function WorkItemLifecycleStatus({
                         {block.expanded ? "▾" : "▸"}
                       </span>
                       <span>{block.laneLabel}</span>
-                      {durationLabel !== null && (
-                        <span className="font-mono text-ink-faint">
-                          {durationLabel}
-                        </span>
-                      )}
+                      {durationLabel !== null && <span>· {durationLabel}</span>}
                     </button>
                     {block.expanded &&
                       renderChipList(block.chips, {
@@ -3891,7 +3922,12 @@ export function WorkItemLifecycleStatus({
           </div>
         ))}
       {workItem.statusMessage !== null && (
-        <p className={`mt-1.5 mb-0 text-xs ${statusMessageClassName}`}>
+        <p className={statusMessageClassName}>
+          {statusMessageClassName.includes("status-message--alarm") ? (
+            <span className="status-message-mark" aria-hidden="true">
+              ▲{" "}
+            </span>
+          ) : null}
           {workItem.statusMessage}
         </p>
       )}
@@ -3900,7 +3936,7 @@ export function WorkItemLifecycleStatus({
           {canReset && (
             <button
               type="button"
-              className="inline-flex size-7 items-center justify-center border border-rule-2 bg-panel text-oxblood transition hover:bg-oxblood-wash hover:text-oxblood-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood disabled:cursor-wait disabled:opacity-60"
+              className="icon-btn icon-btn--armed"
               disabled={actionsPending}
               onClick={() => reset.mutate()}
               aria-label={reset.isPending ? "Resetting job" : "Reset job"}
@@ -3909,7 +3945,7 @@ export function WorkItemLifecycleStatus({
               {reset.isPending ? (
                 <svg
                   aria-hidden="true"
-                  className="size-4 animate-spin motion-reduce:animate-none"
+                  className="animate-spin motion-reduce:animate-none"
                   viewBox="0 0 24 24"
                   fill="none"
                 >
@@ -3932,7 +3968,6 @@ export function WorkItemLifecycleStatus({
               ) : (
                 <svg
                   aria-hidden="true"
-                  className="size-4"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -3952,7 +3987,7 @@ export function WorkItemLifecycleStatus({
           {canRetry && (
             <button
               type="button"
-              className="border border-rule-2 bg-paper px-2.5 py-1 text-xs font-semibold text-ink-2 transition hover:border-oxblood hover:text-oxblood disabled:cursor-wait disabled:opacity-60"
+              className="plate-mini"
               disabled={actionsPending}
               onClick={() => retry.mutate()}
             >
