@@ -49,6 +49,16 @@ describe("/completed route", () => {
     expect(completedLink).toContain("Completed")
   })
 
+  test("Completed page body keeps the reading-width cap", () => {
+    // Issue #686: width cap is on content, not the shared root shell.
+    const source = completedSource()
+    expect(source).toContain("max-w-[88rem]")
+    expect(source).toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
+    const root = rootSource()
+    const rootComponent = root.slice(root.indexOf("function RootComponent("))
+    expect(rootComponent).not.toContain("max-w-[88rem]")
+  })
+
   test("queries the server-paginated completedWorkItems history API", () => {
     const index = indexSource()
     expect(index).toContain("completedWorkItemsHistoryQuery")

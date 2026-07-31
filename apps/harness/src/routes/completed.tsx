@@ -16,8 +16,9 @@ export const Route = createFileRoute("/completed")({
 })
 
 function CompletedPage() {
+  // Reading-width cap lives on the page body only — root chrome stays full-width.
   return (
-    <main className="pt-8 sm:pt-10">
+    <main className="mx-auto max-w-[88rem] pt-8 sm:pt-10">
       <header className="mb-5">
         <p className="m-0 font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
           History

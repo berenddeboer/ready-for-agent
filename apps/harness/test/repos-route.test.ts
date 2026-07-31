@@ -31,24 +31,33 @@ describe("/repos route", () => {
     expect(source).toContain("'/repos': typeof ReposRoute")
   })
 
-  test("primary nav places Repos before Kanban (home)", () => {
+  test("primary nav places Home before Repos before Completed", () => {
     const source = rootSource()
     const settingsBlock = source.slice(
       source.indexOf("<SettingsButton"),
       source.indexOf("</nav>"),
     )
+    const homeIdx = settingsBlock.indexOf('to="/"')
     const reposIdx = settingsBlock.indexOf('to="/repos"')
-    const kanbanIdx = settingsBlock.indexOf('to="/"')
-    expect(reposIdx).toBeGreaterThan(-1)
-    expect(kanbanIdx).toBeGreaterThan(reposIdx)
+    const completedIdx = settingsBlock.indexOf('to="/completed"')
+    expect(homeIdx).toBeGreaterThan(-1)
+    expect(reposIdx).toBeGreaterThan(homeIdx)
+    expect(completedIdx).toBeGreaterThan(reposIdx)
+    expect(settingsBlock).toMatch(/Home\s*<\/Link>/)
     expect(settingsBlock).toMatch(/Repos\s*<\/Link>/)
-    expect(settingsBlock).toMatch(/Kanban\s*<\/Link>/)
+    expect(settingsBlock).not.toMatch(/Kanban\s*<\/Link>/)
     // Active styling is shared with other primary destinations.
-    const reposLink = settingsBlock.slice(reposIdx, kanbanIdx)
+    const reposLink = settingsBlock.slice(reposIdx, completedIdx)
     expect(reposLink).toContain("primaryNavLinkClassName")
     expect(reposLink).toContain(
       "activeProps={{ className: primaryNavLinkActiveClassName }}",
     )
+  })
+
+  test("Repos page body keeps the reading-width cap", () => {
+    const source = reposSource()
+    expect(source).toContain("max-w-[88rem]")
+    expect(source).toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
   })
 
   test("home shows blank slate with zero repos and board with one or more", () => {
