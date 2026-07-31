@@ -44,7 +44,7 @@ export function WorkItemOutcomePresentation({
               rel="noopener noreferrer"
               aria-label={openPullRequestLabel ?? undefined}
             >
-              PR #{prNumber}
+              PR #{prNumber} ↗
             </a>
           )}
         {!isNoChangeComplete &&

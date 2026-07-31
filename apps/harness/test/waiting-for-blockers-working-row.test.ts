@@ -15,31 +15,26 @@ const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
 describe("Waiting for blockers Working-row polish", () => {
-  test("badge chrome uses teal for blockers, violet for worker slot, oxblood for Queued", () => {
+  test("badge chrome uses Interchange hold tags for blockers and worker slot", () => {
+    // Spec §5.1: both holds share dashed status-tag--hold; distinction is the label.
     const chrome = chromeSource()
     expect(chrome).toContain('status === "WAITING_FOR_WORKER_SLOT"')
     expect(chrome).toContain('status === "WAITING_FOR_BLOCKERS"')
-    expect(chrome).toContain("bg-teal-wash text-teal")
-    expect(chrome).toContain("bg-violet-wash text-violet-800")
-    expect(chrome).toContain("bg-oxblood-wash text-oxblood")
-    // Shared violet for both wait holds must not remain.
-    expect(chrome).not.toMatch(
-      /WAITING_FOR_WORKER_SLOT\s*\|\|\s*\n?\s*status === "WAITING_FOR_BLOCKERS"/,
-    )
-    expect(stylesSource()).toContain("--color-teal:")
-    expect(stylesSource()).toContain("--color-teal-wash:")
+    expect(chrome).toContain("status-tag--hold")
+    expect(chrome).toContain("status-tag--plain")
+    expect(chrome).toContain("status-tag--alarm")
+    expect(stylesSource()).toContain(".status-tag--hold")
+    expect(stylesSource()).toContain("border-style: dashed")
   })
 
-  test("status message uses distinct wait-hold tones via shared helper", () => {
+  test("status message uses shared helper with alarm prefix for failures", () => {
     const source = homeSource()
     expect(source).toContain("statusMessageClassNameForStatus")
     expect(source).toContain("statusMessageClassName")
     expect(chromeSource()).toContain(
       "export function statusMessageClassNameForStatus",
     )
-    expect(chromeSource()).toContain(
-      'if (status === "WAITING_FOR_BLOCKERS") return "text-teal"',
-    )
+    expect(chromeSource()).toContain("status-message--alarm")
   })
 
   test("Pause/Start control is omitted while Waiting for blockers", () => {

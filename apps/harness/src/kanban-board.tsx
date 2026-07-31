@@ -1,4 +1,5 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
@@ -32,7 +33,10 @@ import {
 } from "./routes/index.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
-import { prBadgeClassName } from "./work-item-progress-chrome.js"
+import {
+  prBadgeClassName,
+  statusBadgeClassNameForStatus,
+} from "./work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "./work-item-pull-request-url.js"
 
 type JobsTab = "pipeline" | "completed"
@@ -108,17 +112,16 @@ function PipelineCompleteSummary({
     prNumber === null ? null : `Open pull request #${prNumber}`
 
   return (
-    <div className="mt-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-mono text-xs tracking-[0.1em] text-ink-faint uppercase">
-          {formatStartedAgo(workItem.createdAt, nowMs)}
-        </span>
-        <span className="font-mono text-xs text-ink-faint">{elapsedLabel}</span>
-      </div>
+    <div className="mt-1 grid gap-1.5">
+      <p className="job-ticket-runtime-line">
+        {formatStartedAgo(workItem.createdAt, nowMs)}
+        {" · "}
+        {elapsedLabel}
+      </p>
       {pullRequestUrl !== null &&
         prNumber !== null &&
         openPullRequestLabel !== null && (
-          <div className="mt-1.5">
+          <div>
             <a
               className={prBadgeClassName}
               href={pullRequestUrl}
@@ -126,7 +129,7 @@ function PipelineCompleteSummary({
               rel="noopener noreferrer"
               aria-label={openPullRequestLabel}
             >
-              PR #{prNumber}
+              PR #{prNumber} ↗
             </a>
           </div>
         )}
@@ -179,6 +182,7 @@ function PipelineTicket({
   return (
     <li
       className="job-ticket"
+      data-lane={laneId}
       style={{ "--ticket-color": lane?.color ?? "#151515" } as CSSProperties}
     >
       <p className="job-ticket-repo" title={repositoryLabel}>
@@ -186,32 +190,34 @@ function PipelineTicket({
       </p>
       {issueUrl !== null && issueUrl !== "" ? (
         <a className="job-ticket-title" href={issueUrl}>
-          <span className="font-mono">#{workItem.issueNumber}</span>
+          <span className="job-ticket-num">#{workItem.issueNumber}</span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </a>
       ) : (
         <span className="job-ticket-title">
-          <span className="font-mono">#{workItem.issueNumber}</span>
+          <span className="job-ticket-num">#{workItem.issueNumber}</span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </span>
       )}
-      <div className="flex items-center justify-between gap-2">
-        <span className="job-ticket-state">{workItem.stateLabel}</span>
+      <div className="job-ticket-status">
+        <span
+          className={`job-ticket-state ${statusBadgeClassNameForStatus(workItem.status)}`}
+        >
+          {workItem.stateLabel}
+        </span>
         <WorkItemPauseButton workItem={workItem} />
       </div>
       <div className="job-ticket-runtime">
-        <div className="flex min-w-0 items-center gap-1">
-          <span className="shrink-0 font-mono text-xs text-ink-faint">
-            {workItem.agentBackend.label}
-          </span>
+        <div className="job-ticket-runtime-line flex min-w-0 items-center gap-1">
+          <span className="shrink-0">{workItem.agentBackend.label}</span>
           {sessionId !== null && (
             <>
-              <span className="shrink-0 font-mono text-xs text-ink-faint">
-                -
+              <span className="shrink-0" aria-hidden="true">
+                —
               </span>
               <button
                 type="button"
-                className="min-w-0 truncate font-mono text-xs text-ink-faint underline-offset-2 hover:text-oxblood hover:underline"
+                className="job-ticket-session min-w-0 truncate"
                 title={sessionId}
                 onClick={() => onOpenSession(workItem.id, sessionId)}
               >
@@ -225,7 +231,7 @@ function PipelineTicket({
           <Copy
             value={worktreePath}
             className="min-w-0 max-w-full"
-            textClassName="font-mono text-xs text-ink-faint"
+            textClassName="job-ticket-runtime-line"
           />
         )}
       </div>
@@ -431,7 +437,13 @@ function KanbanJobsBoard() {
                   aria-controls={`lane-panel-${lane.id}`}
                   key={lane.id}
                   onClick={() => setMobileLane(lane.id)}
+                  style={
+                    {
+                      "--lane-color": lane.color,
+                    } as CSSProperties
+                  }
                 >
+                  <span className="lane-switch-swatch" aria-hidden="true" />
                   {lane.label} {laneItems.get(lane.id)?.length ?? 0}
                 </button>
               ))}
@@ -439,61 +451,74 @@ function KanbanJobsBoard() {
             <section className="pipeline-board" aria-label="Lifecycle pipeline">
               {PIPELINE_LANES.map((lane, laneIndex) => {
                 const items = laneItems.get(lane.id) ?? []
+                const laneNumber = String(laneIndex + 1).padStart(2, "0")
                 return (
                   <section
                     className="pipeline-lane"
+                    data-lane={lane.id}
                     data-mobile-active={mobileLane === lane.id}
                     id={`lane-panel-${lane.id}`}
                     key={lane.id}
                     aria-labelledby={`lane-${lane.id}`}
+                    style={
+                      {
+                        "--lane-color": lane.color,
+                        "--lane-text": lane.text,
+                      } as CSSProperties
+                    }
                   >
-                    <header
-                      className="lane-header"
-                      style={
-                        {
-                          "--lane-color": lane.color,
-                          "--lane-text": lane.text,
-                        } as CSSProperties
-                      }
-                    >
-                      <div>
-                        <span className="lane-number">
-                          0{laneIndex + 1} / 06
-                        </span>
+                    <div className="lane-chrome">
+                      <span className="lane-roundel" aria-hidden="true">
+                        {laneNumber}
+                      </span>
+                      <header className="lane-header">
                         <h3 className="lane-title" id={`lane-${lane.id}`}>
                           {lane.label}
                         </h3>
-                      </div>
-                      <span className="lane-count">
-                        {items.length}
-                        <span className="sr-only"> jobs</span>
-                      </span>
-                    </header>
-                    {items.length === 0 ? (
-                      <p className="lane-empty">Lane clear</p>
-                    ) : (
-                      <ul className="lane-stack m-0 list-none">
-                        {items.map((workItem) => (
-                          <PipelineTicket
-                            key={workItem.id}
-                            workItem={workItem}
-                            repository={repositoryById.get(
-                              workItem.repositoryId,
-                            )}
-                            issue={issueByRepoAndNumber.get(
-                              repositoryIssueKey(
+                        <span className="lane-count">
+                          {items.length}
+                          <span className="sr-only"> jobs</span>
+                        </span>
+                      </header>
+                    </div>
+                    <div className="lane-platform">
+                      {items.length === 0 ? (
+                        <p className="lane-empty">Lane clear</p>
+                      ) : (
+                        <ul className="lane-stack">
+                          {items.map((workItem) => (
+                            <PipelineTicket
+                              key={workItem.id}
+                              workItem={workItem}
+                              repository={repositoryById.get(
                                 workItem.repositoryId,
-                                workItem.issueNumber,
-                              ),
-                            )}
-                            laneId={lane.id}
-                            onOpenSession={(workItemId, sessionId) =>
-                              setSessionDialog({ workItemId, sessionId })
-                            }
-                          />
-                        ))}
-                      </ul>
-                    )}
+                              )}
+                              issue={issueByRepoAndNumber.get(
+                                repositoryIssueKey(
+                                  workItem.repositoryId,
+                                  workItem.issueNumber,
+                                ),
+                              )}
+                              laneId={lane.id}
+                              onOpenSession={(workItemId, sessionId) =>
+                                setSessionDialog({ workItemId, sessionId })
+                              }
+                            />
+                          ))}
+                        </ul>
+                      )}
+                      {lane.id === "queue" && (
+                        <aside className="queue-hint">
+                          <span className="queue-hint-tag">Queue</span>
+                          <p className="queue-hint-text">
+                            Feed the queue — work starts at your repos.
+                          </p>
+                          <Link to="/repos" className="queue-hint-link">
+                            Manage repos →
+                          </Link>
+                        </aside>
+                      )}
+                    </div>
                   </section>
                 )
               })}

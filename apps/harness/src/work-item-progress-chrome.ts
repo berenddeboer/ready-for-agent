@@ -1,41 +1,94 @@
 /**
- * Shared Jobs card progress chrome: lifecycle chips, status badges, PR badges.
- * Minimum type size is Tailwind `text-xs` (0.75rem) — no sub-xs rem utilities.
+ * Shared Jobs progress chrome: lifecycle chips, status tags, PR badges.
+ * Interchange component classes (§5.1–5.2, §5.5). Board density floors at
+ * 0.56rem mono; prefer CSS classes over Tailwind rem utilities.
  */
-export const jobsProgressMinTextClassName = "text-xs"
+import type { LifecyclePipelineLaneId } from "./pipeline-lanes.js"
 
-export const lifecycleStepChipClassName = `border border-rule-2 bg-paper px-1.5 py-1 ${jobsProgressMinTextClassName} text-ink-2`
+export const lifecycleStepChipClassName = "leg leg--done"
 
-export const statusBadgeBaseClassName = `inline-flex items-center border px-2 py-0.5 ${jobsProgressMinTextClassName} font-bold tracking-wide uppercase`
+export const statusBadgeBaseClassName = "status-tag"
 
-export const prBadgeClassName = `stamp border-rule-2 ${jobsProgressMinTextClassName} text-ink-2 no-underline hover:border-oxblood hover:text-oxblood hover:underline`
+export const prBadgeClassName = "pr-badge"
+
+const LANE_STYLE: Record<
+  LifecyclePipelineLaneId,
+  { readonly lane: string; readonly on: string }
+> = {
+  build: { lane: "var(--lane-build)", on: "var(--lane-build-ink)" },
+  review: { lane: "var(--lane-review)", on: "var(--lane-review-ink)" },
+  pr: { lane: "var(--lane-pr)", on: "var(--lane-pr-ink)" },
+}
 
 /**
- * Badge tone by operator-visible status.
- * Waiting for blockers (Queue hold) is teal — distinct from violet Waiting for
- * Worker Slot and from bare Step Run / Agent Turn Queued (oxblood default).
+ * CSS custom properties for a lifecycle lane's chip / summary fill pair.
+ * Used for running journey legs and lane-colored collapsed summaries.
+ */
+export function lifecycleLaneCssVars(lane: LifecyclePipelineLaneId): {
+  readonly "--leg-lane": string
+  readonly "--leg-on": string
+} {
+  const style = LANE_STYLE[lane]
+  return { "--leg-lane": style.lane, "--leg-on": style.on }
+}
+
+/**
+ * Badge tone by operator-visible status (§5.1).
+ * Hold statuses share dashed treatment; alarms share Attention fill.
  */
 export function statusBadgeClassNameForStatus(status: string): string {
   const tone =
-    status === "FAILED" || status === "INTERRUPTED"
-      ? "border-oxblood/40 bg-oxblood-wash text-oxblood"
+    status === "FAILED" ||
+    status === "INTERRUPTED" ||
+    status === "NEEDS_HUMAN" ||
+    status === "NEEDS_HUMAN_REVIEW"
+      ? "status-tag--alarm"
       : status === "COMPLETE" || status === "SUCCEEDED"
-        ? "border-olive/40 bg-olive-wash text-olive"
+        ? "status-tag--complete"
         : status === "ABANDONED" || status === "CANCELLED"
-          ? "border-rule-2 bg-paper-2 text-ink-faint"
-          : status === "NEEDS_HUMAN" || status === "NEEDS_HUMAN_REVIEW"
-            ? "border-sepia/40 bg-amber-wash text-sepia"
-            : status === "WAITING_FOR_WORKER_SLOT"
-              ? "border-violet-300 bg-violet-wash text-violet-800"
-              : status === "WAITING_FOR_BLOCKERS"
-                ? "border-teal/40 bg-teal-wash text-teal"
-                : "border-oxblood/30 bg-oxblood-wash text-oxblood"
+          ? "status-tag--ghost"
+          : status === "WAITING_FOR_WORKER_SLOT" ||
+              status === "WAITING_FOR_BLOCKERS"
+            ? "status-tag--hold"
+            : "status-tag--plain"
   return `${statusBadgeBaseClassName} ${tone}`
 }
 
-/** Message line tone under the status badge (wait holds vs failure copy). */
+/**
+ * Journey-leg chip class for a step status (§5.2 board treatment).
+ * Running chips also need `lifecycleLaneCssVars` for current-lane fill.
+ * Needs-human steps share the Attention fill with failures (status tags
+ * already use alarm); they are not lane-colored "in progress" fills.
+ * DECIDE_PR_MERGE still links externally via call-site markup.
+ */
+export function lifecycleStepChipClassNameForStatus(status: string): string {
+  if (
+    status === "FAILED" ||
+    status === "INTERRUPTED" ||
+    status === "NEEDS_HUMAN" ||
+    status === "NEEDS_HUMAN_REVIEW"
+  ) {
+    return "leg leg--fail"
+  }
+  if (status === "RUNNING") {
+    return "leg leg--run"
+  }
+  if (status === "SUCCEEDED" || status === "COMPLETE") {
+    return "leg leg--done"
+  }
+  // QUEUED / unreached / other holds
+  return "leg leg--next"
+}
+
+/** Message line under the status tag (§5.1). Alarm statuses get ▲ via CSS. */
 export function statusMessageClassNameForStatus(status: string): string {
-  if (status === "WAITING_FOR_WORKER_SLOT") return "text-violet-800"
-  if (status === "WAITING_FOR_BLOCKERS") return "text-teal"
-  return "text-oxblood-deep"
+  if (
+    status === "FAILED" ||
+    status === "INTERRUPTED" ||
+    status === "NEEDS_HUMAN" ||
+    status === "NEEDS_HUMAN_REVIEW"
+  ) {
+    return "status-message status-message--alarm"
+  }
+  return "status-message"
 }
