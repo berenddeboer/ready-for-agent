@@ -75,9 +75,6 @@
 
     /* Merged = black #151515. On light paper it needs no halo. */
     --merged-halo: transparent;
-    --stamp-bg: #151515;
-    --stamp-ink: #ffffff;
-    --stamp-border: transparent;
     --prbadge-bg: #151515;
     --prbadge-ink: #ffffff;
     --prbadge-border: transparent;
@@ -115,9 +112,6 @@
 
     /* Merged black vanishes on dark paper: white halo, like D's roundel. */
     --merged-halo: rgb(242 243 241 / 0.85);
-    --stamp-bg: #151515;
-    --stamp-ink: #f2f3f1;
-    --stamp-border: var(--merged-halo);
     --prbadge-bg: #151515;
     --prbadge-ink: #f2f3f1;
     --prbadge-border: var(--merged-halo);
@@ -467,11 +461,7 @@
     text-transform: uppercase;
     padding: 0.22rem 0.5rem;
   }
-  .stamp--complete {
-    background: var(--stamp-bg);
-    color: var(--stamp-ink);
-    border: 1.5px solid var(--stamp-border);
-  }
+  /* Only exceptions are stamped — Complete is the page's default. */
   .stamp--abandoned {
     background: transparent;
     color: var(--ink-dim);
@@ -710,7 +700,6 @@
               <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
               <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/697"><span class="num">#697</span> · E2E first-run settings save to blank slate</a>
             </div>
-            <span class="stamp stamp--complete">Complete</span>
           </div>
           <p class="meta">OpenCode — <span class="sess" title="9a2c55e8b1d0">9a2c…55e8</span> ⧉ — WT worktree3 · Merged 38 min ago · Elapsed 23 m</p>
           <div class="row-foot">
@@ -728,7 +717,6 @@
               <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
               <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/684"><span class="num">#684</span> · Triage label sync on reopen</a>
             </div>
-            <span class="stamp stamp--complete">Complete</span>
           </div>
           <p class="meta">OpenCode — <span class="sess" title="f5d890b3c2e1">f5d8…90b3</span> ⧉ — WT worktree5 · Merged 2 h ago · Elapsed 31 m</p>
           <div class="row-foot">
@@ -746,7 +734,6 @@
               <p class="repo" title="acme/payments-api">acme/payments-api</p>
               <a class="t" href="https://github.com/acme/payments-api/issues/501"><span class="num">#501</span> · Void capture on duplicate authorisation</a>
             </div>
-            <span class="stamp stamp--complete">Complete</span>
           </div>
           <p class="meta">OpenCode — <span class="sess" title="e07b31c9a4d2">e07b…31c9</span> ⧉ — WT worktree2 · Merged yesterday · Elapsed 41 m</p>
           <div class="row-foot">
@@ -764,7 +751,6 @@
               <p class="repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
               <a class="t" href="https://github.com/berenddeboer/ready-for-agent/issues/671"><span class="num">#671</span> · Audit OpenCode session tokens per cohort</a>
             </div>
-            <span class="stamp stamp--complete">Complete</span>
           </div>
           <p class="meta">OpenCode — <span class="sess" title="b81d2f07e3a9">b81d…2f07</span> ⧉ — WT worktree4 · Finished yesterday · Elapsed 12 m</p>
           <p class="meta"><span class="summary">“Audit already covered by the token-report skill — no code change required.”</span></p>
@@ -813,7 +799,6 @@
               <p class="repo" title="acme/payments-api">acme/payments-api</p>
               <a class="t" href="https://github.com/acme/payments-api/issues/519"><span class="num">#519</span> · Add idempotency keys to POST /charges</a>
             </div>
-            <span class="stamp stamp--complete">Complete</span>
           </div>
           <p class="meta">OpenCode — <span class="sess" title="c4e077a1d6b0">c4e0…77a1</span> ⧉ — WT worktree1 · Merged 3 d ago · Elapsed 52 m</p>
           <div class="row-foot">
