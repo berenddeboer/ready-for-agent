@@ -33,19 +33,14 @@ describe("/completed route", () => {
     expect(tree).toContain("./routes/completed")
   })
 
-  test("marks Completed primary nav active via the shared Link active props", () => {
+  test("marks Completed primary nav active via aria-current on mast plate", () => {
     const source = rootSource()
     const completedLink = source.slice(
       source.indexOf('to="/completed"'),
       source.indexOf("</Link>", source.indexOf('to="/completed"')) + 7,
     )
-    expect(completedLink).toContain("primaryNavLinkClassName")
-    expect(completedLink).toContain(
-      "activeProps={{ className: primaryNavLinkActiveClassName }}",
-    )
-    expect(completedLink).toContain(
-      "inactiveProps={{ className: primaryNavLinkInactiveClassName }}",
-    )
+    expect(completedLink).toContain("mastPlateClassName")
+    expect(completedLink).toContain('activeProps={{ "aria-current": "page" }}')
     expect(completedLink).toContain("Completed")
   })
 

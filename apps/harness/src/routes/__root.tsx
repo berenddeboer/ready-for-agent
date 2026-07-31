@@ -11,6 +11,8 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
+  retainSearchParams,
+  useNavigate,
 } from "@tanstack/react-router"
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
 import {
@@ -21,8 +23,19 @@ import {
   useState,
 } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { Banner, BannerActionButton } from "../banner.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import appCss from "../styles.css?url"
+import {
+  THEME_BOOTSTRAP_SCRIPT,
+  type ThemeMode,
+  applyThemeMode,
+  oppositeTheme,
+  parseThemeSearch,
+  readDocumentTheme,
+  themeToggleLabel,
+  withThemePin,
+} from "../theme.js"
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -128,7 +141,16 @@ const isBuildModelConfigured = (
   config.defaultModel != null &&
   config.defaultModel.length > 0
 
+const FONT_STYLESHEET_HREF =
+  "https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
+
 export const Route = createRootRouteWithContext<RouterContext>()({
+  // Theme pin is a shareable root search param; retain it on all SPA navigations
+  // so bootstrap still sees `?theme=` after Home/Repos/Completed + full reload.
+  validateSearch: (raw: Record<string, unknown>) => parseThemeSearch(raw),
+  search: {
+    middlewares: [retainSearchParams(["theme"])],
+  },
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -138,7 +160,16 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
       { title: "Ready for Agent" },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      {
+        rel: "preconnect",
+        href: "https://fonts.gstatic.com",
+        crossOrigin: "anonymous",
+      },
+      { rel: "stylesheet", href: FONT_STYLESHEET_HREF },
+      { rel: "stylesheet", href: appCss },
+    ],
   }),
   component: RootComponent,
   shellComponent: RootDocument,
@@ -146,7 +177,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
     <div className="field-rule mx-auto mt-12 max-w-xl p-8 text-center">
       <p>Page not found.</p>
       <Link
-        className="mt-2 inline-block text-oxblood underline decoration-rule underline-offset-4 hover:text-oxblood-deep"
+        className="mt-2 inline-block text-ink underline decoration-signal underline-offset-4 hover:text-ink-dim"
         to="/"
       >
         Back home
@@ -157,11 +188,16 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          // Theme before paint: prefers-color-scheme default, ?theme= pin.
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: static bootstrap only
+          dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }}
+        />
       </head>
-      <body className="min-h-screen min-w-80 bg-paper font-sans text-ink antialiased [font-synthesis:none] [text-rendering:optimizeLegibility]">
+      <body className="min-h-screen min-w-80 bg-paper font-display text-ink antialiased [font-synthesis:none] [text-rendering:optimizeLegibility]">
         {children}
         <Scripts />
       </body>
@@ -169,27 +205,13 @@ function RootDocument({ children }: { children: ReactNode }) {
   )
 }
 
-// Shared layout only — Router merges className with active/inactive props, so
-// mutually exclusive visual utilities must not live on the base class string.
-const primaryNavLinkClassName =
-  "inline-flex items-center gap-2 border px-3 py-1.5 text-xs font-semibold tracking-[0.14em] uppercase transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
-
-// Inactive: muted gray-out; hover still reads as clickable.
-const primaryNavLinkInactiveClassName =
-  "border-rule-2 bg-panel text-ink-faint hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2"
-
-// Selected: restrained contrast (stronger border/text, light fill — not a solid ink pill).
-const primaryNavLinkActiveClassName = "border-ink bg-paper-2 text-ink"
-
-// Settings is a non-route action; keep it in the same family as inactive nav.
-const primaryNavActionClassName =
-  "inline-flex items-center gap-2 border border-rule-2 bg-panel px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-ink-faint uppercase transition hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+/** Stamped-plate base for primary nav Links (active via aria-current). */
+const mastPlateClassName = "mast-plate"
 
 function HomeNavIcon() {
   return (
     <svg
       aria-hidden="true"
-      className="size-3.5"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -206,7 +228,6 @@ function ReposNavIcon() {
   return (
     <svg
       aria-hidden="true"
-      className="size-3.5"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -223,7 +244,6 @@ function CompletedNavIcon() {
   return (
     <svg
       aria-hidden="true"
-      className="size-3.5"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -234,77 +254,89 @@ function CompletedNavIcon() {
   )
 }
 
-function RootComponent() {
-  // Chrome (title, version, primary nav, header rule) is always full-width so
-  // nav positions do not jump between routes. Repos/Completed apply their own
-  // reading-width cap on page body content only. Gutters stay on every route.
+function SettingsNavIcon() {
   return (
-    <div className="mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12">
-      <nav
-        aria-label="Primary"
-        className="primary-nav mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 pb-3"
-      >
-        <div className="grid gap-1">
-          <h1 className="m-0 font-serif text-[clamp(1.6rem,3.2vw,2.25rem)] leading-none font-semibold tracking-[-0.012em]">
-            <Link
-              to="/"
-              className="text-ink hover:text-oxblood"
-              activeProps={{ className: "text-ink" }}
-              activeOptions={{ exact: true }}
-            >
-              Clanker Harness
-            </Link>
-          </h1>
-          <span
-            className="font-mono text-xs tabular-nums tracking-[0.16em] text-ink-faint uppercase"
-            title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}
-          >
-            {READY_FOR_AGENT_VERSION_LABEL}
-          </span>
-        </div>
-        <SettingsButton
-          leading={
-            <>
-              <Link
-                to="/"
-                activeOptions={{ exact: true }}
-                className={primaryNavLinkClassName}
-                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-                activeProps={{ className: primaryNavLinkActiveClassName }}
-              >
-                <HomeNavIcon />
-                Home
-              </Link>
-              <Link
-                to="/repos"
-                className={primaryNavLinkClassName}
-                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-                activeProps={{ className: primaryNavLinkActiveClassName }}
-              >
-                <ReposNavIcon />
-                Repos
-              </Link>
-              <Link
-                to="/completed"
-                className={primaryNavLinkClassName}
-                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-                activeProps={{ className: primaryNavLinkActiveClassName }}
-              >
-                <CompletedNavIcon />
-                Completed
-              </Link>
-            </>
-          }
-        />
-      </nav>
-      <Outlet />
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+    </svg>
+  )
+}
+
+function RootComponent() {
+  // Chrome (masthead + lane ribbon) is full-bleed on every route so nav
+  // positions never jump. Repos/Completed cap reading width on page body only.
+  return (
+    <div className="min-h-screen w-full">
+      <SettingsChrome />
       <ReactQueryDevtools buttonPosition="bottom-left" />
       <TanStackRouterDevtools position="bottom-right" />
     </div>
   )
 }
 
-function SettingsButton({ leading }: { leading: ReactNode }) {
+function ThemeTogglePlate() {
+  // SSR-stable initial state: server and first client paint match ("light"
+  // control chrome). Page colors already follow bootstrap's data-theme; the
+  // mount effect below mirrors that onto the plate without a hydration mismatch.
+  const [theme, setTheme] = useState<ThemeMode>("light")
+  // No `from: Route.fullPath` — that roots relative nav at `/` and would send
+  // Repos/Completed operators home when only search should change.
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    // Sync only — do not re-resolve/re-apply (would race a pre-effect toggle).
+    setTheme(readDocumentTheme())
+  }, [])
+
+  const targetLabel = themeToggleLabel(theme)
+
+  return (
+    <button
+      type="button"
+      className={mastPlateClassName}
+      aria-label={`Switch to ${targetLabel} theme`}
+      aria-pressed={theme === "dark"}
+      onClick={() => {
+        const next = oppositeTheme(readDocumentTheme())
+        applyThemeMode(next)
+        // Stay on the current leaf route; only pin ?theme= for bootstrap/retain.
+        void navigate({
+          to: ".",
+          search: (prev) => withThemePin(prev, next),
+          replace: true,
+          resetScroll: false,
+        })
+        setTheme(next)
+      }}
+    >
+      <ThemeMoonIcon />
+      <span>{targetLabel}</span>
+    </button>
+  )
+}
+
+function ThemeMoonIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+    </svg>
+  )
+}
+
+function SettingsChrome() {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -717,64 +749,103 @@ function SettingsButton({ leading }: { leading: ReactNode }) {
 
   return (
     <>
-      {showBackendBanner && !dialogOpen && (
-        <div
-          className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
-          role="status"
-        >
-          <span>{bannerUnavailableReason}</span>
+      <header className="mast">
+        <div className="brand">
+          <p className="brand-kicker">
+            Ready for Agent · Operator board ·{" "}
+            <b title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}>
+              RFA {READY_FOR_AGENT_VERSION_LABEL}
+            </b>
+          </p>
+          <h1 className="brand-wordmark">
+            <Link to="/" activeOptions={{ exact: true }}>
+              Clanker Harness
+            </Link>
+          </h1>
+          <p className="brand-sub">
+            <span className="ok">All lanes live</span>
+          </p>
+        </div>
+        <nav className="mast-nav" aria-label="Primary">
+          <Link
+            to="/"
+            activeOptions={{ exact: true }}
+            className={mastPlateClassName}
+            activeProps={{ "aria-current": "page" }}
+          >
+            <HomeNavIcon />
+            Home
+          </Link>
+          <Link
+            to="/repos"
+            className={mastPlateClassName}
+            activeProps={{ "aria-current": "page" }}
+          >
+            <ReposNavIcon />
+            Repos
+          </Link>
+          <Link
+            to="/completed"
+            className={mastPlateClassName}
+            activeProps={{ "aria-current": "page" }}
+          >
+            <CompletedNavIcon />
+            Completed
+          </Link>
           <button
             type="button"
-            className="border border-oxblood/50 bg-paper px-2 py-0.5 text-xs font-semibold text-oxblood underline-offset-2 hover:bg-oxblood hover:text-paper"
+            className={mastPlateClassName}
             onClick={openSettings}
+            aria-haspopup="dialog"
           >
-            Open Settings
+            <SettingsNavIcon />
+            Settings
           </button>
-        </div>
-      )}
-      {showUnconfiguredGuidance && !dialogOpen && !showBackendBanner && (
-        <div
-          className="mr-auto flex flex-wrap items-center gap-2 border border-oxblood/40 bg-oxblood-wash px-3 py-1.5 text-xs text-oxblood-deep sm:text-sm"
-          role="status"
-        >
-          <span>Select a default build model first</span>
-          <button
-            type="button"
-            className="border border-oxblood/50 bg-paper px-2 py-0.5 text-xs font-semibold text-oxblood underline-offset-2 hover:bg-oxblood hover:text-paper"
-            onClick={openSettings}
+          <ThemeTogglePlate />
+        </nav>
+      </header>
+      <div className="lane-ribbon" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+        <span />
+      </div>
+
+      <div className="page-shell">
+        {showBackendBanner && !dialogOpen && (
+          <Banner
+            tone="alarm"
+            tag="Backend"
+            action={
+              <BannerActionButton onClick={openSettings}>
+                Open Settings
+              </BannerActionButton>
+            }
           >
-            Open Settings
-          </button>
-        </div>
-      )}
-      {/* Home / Repos / Completed / Settings share one right-aligned control cluster.
-          Status banners above stay nav-level siblings (outside the cluster). */}
-      <div className="ml-auto flex items-center gap-2 self-center">
-        {leading}
-        <button
-          type="button"
-          className={primaryNavActionClassName}
-          onClick={openSettings}
-          aria-haspopup="dialog"
-        >
-          <svg
-            aria-hidden="true"
-            className="size-3.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
+            {bannerUnavailableReason}
+          </Banner>
+        )}
+        {showUnconfiguredGuidance && !dialogOpen && !showBackendBanner && (
+          <Banner
+            tone="guidance"
+            tag="Setup"
+            action={
+              <BannerActionButton onClick={openSettings}>
+                Open Settings
+              </BannerActionButton>
+            }
           >
-            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" />
-          </svg>
-          Settings
-        </button>
+            Select a default build model first
+          </Banner>
+        )}
+        <Outlet />
       </div>
 
       <dialog
         ref={dialogRef}
-        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-ink/45"
+        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-black/50"
         aria-labelledby="settings-title"
         onCancel={(event) => {
           if (updateConfig.isPending) event.preventDefault()
@@ -1202,7 +1273,7 @@ function SettingsButton({ leading }: { leading: ReactNode }) {
             </button>
             <button
               type="submit"
-              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-paper uppercase hover:bg-oxblood-deep disabled:cursor-not-allowed disabled:opacity-50"
+              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-on-solid uppercase hover:bg-oxblood-deep disabled:cursor-not-allowed disabled:opacity-50"
               disabled={
                 config.isPending ||
                 config.isError ||

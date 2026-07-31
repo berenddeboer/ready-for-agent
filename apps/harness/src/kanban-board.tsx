@@ -1,5 +1,6 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
 import { type CSSProperties, Suspense, useState } from "react"
+import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
 import { KanbanLiveUpdates } from "./kanban-live.js"
 import {
@@ -346,11 +347,9 @@ function KanbanJobsBoard() {
     return (
       <>
         <KanbanLiveUpdates repositoryIds={repositoryIds} />
-        <article className="border-2 border-oxblood bg-oxblood-wash px-4 py-3">
-          <p className="m-0 text-sm text-oxblood-deep" role="alert">
-            Could not load jobs. Please try again.
-          </p>
-        </article>
+        <Banner tone="alarm" tag="Error" role="alert">
+          Could not load jobs. Please try again.
+        </Banner>
       </>
     )
   }
