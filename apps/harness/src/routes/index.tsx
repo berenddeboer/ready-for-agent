@@ -1,30 +1,24 @@
 import {
   keepPreviousData,
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
   useSuspenseQuery,
 } from "@tanstack/react-query"
-import { Link, createFileRoute } from "@tanstack/react-router"
+import { createFileRoute } from "@tanstack/react-router"
 import { type FormEvent, Suspense, useEffect, useRef, useState } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
   JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
 } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
-import {
-  jobsCardCollapseId,
-  repositoryCardCollapseId,
-  useCardCollapsed,
-} from "../card-collapse.js"
+import { repositoryCardCollapseId, useCardCollapsed } from "../card-collapse.js"
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
-import { CompletedWorkItemRow } from "../completed-work-item-row.js"
-import { Copy } from "../copy.js"
 import {
   type GraphqlWorkItemState,
   issueActionEligibility,
 } from "../issue-action-eligibility.js"
+import { KanbanBoard } from "../kanban-board.js"
 import {
   formatDuration,
   formatStartedAgo,
@@ -61,7 +55,6 @@ import {
   completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
-import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { canShowWorkItemResetAction } from "../work-item-job-actions.js"
 import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
@@ -579,29 +572,30 @@ export const Route = createFileRoute("/")({
   component: HomePage,
 })
 
+/**
+ * Home is the kanban board when repositories exist; otherwise the same
+ * add-repo blank slate as `/repos` (no empty pipeline).
+ *
+ * Membership SSE stays mounted on both paths so CLI add/remove refreshes the
+ * blank-slate ↔ board gate without navigating away (issue #684 review).
+ */
 function HomePage() {
   return (
-    <main className="pt-8 sm:pt-10">
-      <HomeBody />
-    </main>
+    <>
+      <HomeRepositoryMembershipLive />
+      <HomeContent />
+    </>
   )
 }
 
 /**
- * Live invalidation for Home's Jobs list and committed-PR dashboard.
- * Repository management owns its own subscriptions on `/repos`.
- *
- * Uses non-suspense queries so a repositories failure cannot unmount the
- * dashboard. Jobs soft-fails repositories the same way (see JobsCard).
- * Surfaces membership SSE transport-health so operators on Home still see
- * when live updates are unavailable.
+ * Transport-health membership subscription for `/`. Board issues/work-items
+ * live updates stay on `KanbanLiveUpdates`; `/repos` owns its own copy via
+ * `RepositoryCards`.
  */
-function HomeLiveUpdates() {
+function HomeRepositoryMembershipLive() {
   const queryClient = useQueryClient()
-  const { data: repositories } = useQuery(repositoriesQuery)
   const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
-  const repositoryIdsRef = useRef((repositories ?? []).map(({ id }) => id))
-  repositoryIdsRef.current = (repositories ?? []).map(({ id }) => id)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -610,34 +604,6 @@ function HomeLiveUpdates() {
       repositoriesQuery,
       signal: controller.signal,
       onLiveUpdatesUnavailable: setLiveUpdatesUnavailable,
-    })
-    return () => controller.abort()
-  }, [queryClient])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    void followRepositoryIssuesLive({
-      getRepositoryIds: () => repositoryIdsRef.current,
-      queryClient,
-      queries: {
-        repositories: repositoriesQuery,
-        issues: issuesQuery,
-        workItems: workItemsQuery,
-      },
-      signal: controller.signal,
-    })
-    return () => controller.abort()
-  }, [queryClient])
-
-  useEffect(() => {
-    const controller = new AbortController()
-    void followRepositoryWorkItemsLive({
-      getRepositoryIds: () => repositoryIdsRef.current,
-      queryClient,
-      queries: {
-        workItems: workItemsQuery,
-      },
-      signal: controller.signal,
     })
     return () => controller.abort()
   }, [queryClient])
@@ -658,36 +624,87 @@ function HomeLiveUpdates() {
   )
 }
 
-function HomeBody() {
-  const { collapsed: jobsCollapsed, toggleCollapsed: toggleJobsCollapsed } =
-    useCardCollapsed(jobsCardCollapseId())
-  const jobsBodyId = "jobs-card-body"
+function HomeContent() {
+  // Soft-fail repositories so a load error cannot unmount home chrome
+  // (Suspense only catches promises; there is no route ErrorBoundary).
+  const {
+    data: repositories,
+    isPending,
+    isError,
+    refetch,
+  } = useQuery(repositoriesQuery)
 
-  return (
-    <>
-      <HomeLiveUpdates />
-      <section aria-label="Committed pull requests" className="mb-10">
-        <CommittedPullRequestsDashboard />
-      </section>
-      <section aria-label="Jobs" className="border-t-2 border-ink pt-6">
-        <div className="mb-4 flex items-baseline justify-between gap-3">
-          <h2 className="m-0 font-serif text-xl font-semibold tracking-[-0.01em] text-ink">
-            Jobs
-          </h2>
-          <CardCollapseToggle
-            collapsed={jobsCollapsed}
-            onToggle={toggleJobsCollapsed}
-            controlsId={jobsBodyId}
-            label="Jobs"
-          />
+  if (isPending && repositories === undefined) {
+    return (
+      <main className="pt-8 sm:pt-10">
+        <div
+          className="grid gap-3"
+          role="status"
+          aria-label="Loading home"
+          aria-busy="true"
+        >
+          <span className="block h-10 w-[40%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="block h-24 animate-pulse bg-paper-2 motion-reduce:animate-none" />
         </div>
-        {!jobsCollapsed && (
-          <div id={jobsBodyId}>
-            <JobsCard />
-          </div>
-        )}
-      </section>
-    </>
+      </main>
+    )
+  }
+
+  if (isError && repositories === undefined) {
+    return (
+      <main className="pt-8 sm:pt-10">
+        <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
+          <p className="m-0 text-sm text-oxblood-deep" role="alert">
+            Could not load repositories. Please try again.
+          </p>
+          <button
+            type="button"
+            className="mt-3 border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+            onClick={() => {
+              void refetch()
+            }}
+          >
+            Retry
+          </button>
+        </article>
+      </main>
+    )
+  }
+
+  if ((repositories ?? []).length === 0) {
+    return (
+      <main className="pt-8 sm:pt-10">
+        <Suspense
+          fallback={
+            <div
+              className="grid gap-3"
+              role="status"
+              aria-label="Loading add repository guidance"
+              aria-busy="true"
+            >
+              <span className="block h-10 w-[50%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+              <span className="block h-32 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+            </div>
+          }
+        >
+          <EmptyRepositoriesBlankSlate />
+        </Suspense>
+      </main>
+    )
+  }
+  return <KanbanBoard />
+}
+
+/** Shared zero-repo blank slate used by `/` and `/repos`. */
+export function EmptyRepositoriesBlankSlate() {
+  const { data: addRepositoryCommand } = useSuspenseQuery(
+    addRepositoryCommandQuery,
+  )
+  return (
+    <AddRepositoryGuidance
+      command={addRepositoryCommand}
+      heading="No repositories configured"
+    />
   )
 }
 
@@ -843,6 +860,7 @@ export function RepositoryCards() {
   const { data: addRepositoryCommand } = useSuspenseQuery(
     addRepositoryCommandQuery,
   )
+  // Populated footer only; empty state uses EmptyRepositoriesBlankSlate.
   const [liveUpdatesUnavailable, setLiveUpdatesUnavailable] = useState(false)
   const [issuesChangeCounts, setIssuesChangeCounts] = useState<
     Readonly<Record<string, number>>
@@ -928,10 +946,7 @@ export function RepositoryCards() {
     return (
       <>
         {warning}
-        <AddRepositoryGuidance
-          command={addRepositoryCommand}
-          heading="No repositories configured"
-        />
+        <EmptyRepositoriesBlankSlate />
       </>
     )
   }
@@ -3270,28 +3285,6 @@ function RepositoryIssueRow({
   )
 }
 
-type JobsTab = "working" | "failed" | "completed"
-
-const JOBS_COMPLETED_TAB_LABEL = `Completed last ${JOBS_COMPLETED_WINDOW_HOURS} h`
-
-const JOBS_TABS = [
-  { id: "working", label: "Working" },
-  { id: "failed", label: "Failed" },
-  { id: "completed", label: JOBS_COMPLETED_TAB_LABEL },
-] as const satisfies readonly { id: JobsTab; label: string }[]
-
-const jobsTabEmptyMessage = (tab: JobsTab): string => {
-  if (tab === "working") return "No working jobs."
-  if (tab === "failed") return "No failed jobs."
-  return `No jobs completed in the last ${JOBS_COMPLETED_WINDOW_HOURS} h.`
-}
-
-const jobsTabListAriaLabel = (tab: JobsTab): string => {
-  if (tab === "working") return "Working jobs"
-  if (tab === "failed") return "Failed jobs"
-  return JOBS_COMPLETED_TAB_LABEL
-}
-
 export function SessionUsageDialog({
   workItemId,
   sessionId,
@@ -3534,334 +3527,6 @@ export function SessionUsageDialog({
   )
 }
 
-function JobsCard() {
-  const [selectedTab, setSelectedTab] = useState<JobsTab>("working")
-  const [sessionDialog, setSessionDialog] = useState<{
-    workItemId: string
-    sessionId: string
-  } | null>(null)
-  // Soft-fail repositories so a load error cannot unmount Home's dashboard
-  // (Suspense only catches promises; there is no ErrorBoundary on HomeBody).
-  const {
-    data: repositories = [],
-    isPending: repositoriesPending,
-    isError: repositoriesFailed,
-  } = useQuery(repositoriesQuery)
-  const workingQueries = useQueries({
-    queries: repositories.map((repository) =>
-      jobsWorkingWorkItemsQuery(repository.id),
-    ),
-  })
-  const failedQueries = useQueries({
-    queries: repositories.map((repository) =>
-      jobsFailedWorkItemsQuery(repository.id),
-    ),
-  })
-  const completedQueries = useQueries({
-    queries: repositories.map((repository) =>
-      jobsCompletedWorkItemsQuery(repository.id),
-    ),
-  })
-  const issueQueries = useQueries({
-    queries: repositories.map((repository) => issuesQuery(repository.id)),
-  })
-
-  const repositoryById = new Map(
-    repositories.map((repository) => [repository.id, repository] as const),
-  )
-  const issueByRepoAndNumber = new Map<string, { title: string; url: string }>()
-  for (const query of issueQueries) {
-    for (const issue of query.data ?? []) {
-      issueByRepoAndNumber.set(`${issue.repositoryId}:${issue.issueNumber}`, {
-        title: issue.title,
-        url: issue.url,
-      })
-    }
-  }
-  const sortNewestFirst = (items: readonly WorkItem[]) =>
-    items
-      .slice()
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-  const sortCompletedNewestFirst = (items: readonly WorkItem[]) =>
-    items
-      .slice()
-      .sort((left, right) =>
-        right.stateReadyAt.localeCompare(left.stateReadyAt),
-      )
-  const workingItems = sortNewestFirst(
-    workingQueries.flatMap((query) => query.data ?? []),
-  )
-  const failedItems = sortNewestFirst(
-    failedQueries.flatMap((query) => query.data ?? []),
-  ).slice(0, JOBS_FAILED_LIMIT)
-  const completedItems = sortCompletedNewestFirst(
-    completedQueries.flatMap((query) => query.data ?? []),
-  )
-  const activeItems =
-    selectedTab === "working"
-      ? workingItems
-      : selectedTab === "failed"
-        ? failedItems
-        : completedItems
-  const activeQueries =
-    selectedTab === "working"
-      ? workingQueries
-      : selectedTab === "failed"
-        ? failedQueries
-        : completedQueries
-  const loading =
-    repositoriesPending || activeQueries.some((query) => query.isLoading)
-  const failed =
-    repositoriesFailed || activeQueries.some((query) => query.isError)
-  const emptyMessage = jobsTabEmptyMessage(selectedTab)
-  const listAriaLabel = jobsTabListAriaLabel(selectedTab)
-
-  if (repositoriesPending && repositories.length === 0) {
-    return <JobsCardSkeleton />
-  }
-
-  if (repositoriesFailed) {
-    return (
-      <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
-        <p className="m-0 text-sm text-oxblood-deep" role="alert">
-          Could not load jobs. Please try again.
-        </p>
-      </article>
-    )
-  }
-
-  if (repositories.length === 0) {
-    return (
-      <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
-        <p className="m-0 font-serif text-sm italic text-ink-soft">
-          <Link
-            to="/repos"
-            className="text-oxblood underline decoration-rule underline-offset-4 hover:text-oxblood-deep"
-          >
-            Add a repository
-          </Link>{" "}
-          to see jobs.
-        </p>
-      </article>
-    )
-  }
-
-  if (loading && activeItems.length === 0) {
-    return <JobsCardSkeleton />
-  }
-
-  if (failed) {
-    return (
-      <article className="border border-oxblood/40 bg-oxblood-wash px-4 py-3 sm:px-5">
-        <p className="m-0 text-sm text-oxblood-deep" role="alert">
-          Could not load jobs. Please try again.
-        </p>
-      </article>
-    )
-  }
-
-  return (
-    <article className="border border-rule-2 bg-panel px-4 py-3 sm:px-5">
-      <div
-        className="mb-3 flex gap-1 overflow-x-auto border-b border-rule"
-        role="tablist"
-        aria-label="Jobs"
-      >
-        {JOBS_TABS.map((tab, tabIndex) => {
-          const selected = selectedTab === tab.id
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              id={`jobs-tab-${tab.id}`}
-              aria-selected={selected}
-              aria-controls={`jobs-panel-${tab.id}`}
-              tabIndex={selected ? 0 : -1}
-              className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-semibold tracking-wide whitespace-nowrap transition ${
-                selected
-                  ? "border-oxblood text-oxblood"
-                  : "border-transparent text-ink-faint hover:text-ink"
-              }`}
-              onClick={() => setSelectedTab(tab.id)}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-                  event.preventDefault()
-                  const delta = event.key === "ArrowRight" ? 1 : -1
-                  const nextIndex =
-                    (tabIndex + delta + JOBS_TABS.length) % JOBS_TABS.length
-                  const nextTab = JOBS_TABS[nextIndex]
-                  if (nextTab === undefined) return
-                  setSelectedTab(nextTab.id)
-                  document.getElementById(`jobs-tab-${nextTab.id}`)?.focus()
-                }
-              }}
-            >
-              {tab.label}
-              {tab.id === "working" && ` (${workingItems.length})`}
-              {tab.id === "failed" && ` (${failedItems.length})`}
-            </button>
-          )
-        })}
-      </div>
-      <div
-        role="tabpanel"
-        id={`jobs-panel-${selectedTab}`}
-        aria-labelledby={`jobs-tab-${selectedTab}`}
-      >
-        {activeItems.length === 0 ? (
-          <p className="m-0 font-serif text-sm italic text-ink-soft">
-            {emptyMessage}
-          </p>
-        ) : (
-          <ul
-            className="m-0 grid min-w-0 list-none gap-1 p-0"
-            aria-label={listAriaLabel}
-          >
-            {activeItems.map((workItem) => {
-              const repository = repositoryById.get(workItem.repositoryId)
-              const issue = issueByRepoAndNumber.get(
-                `${workItem.repositoryId}:${workItem.issueNumber}`,
-              )
-              if (selectedTab === "completed") {
-                return (
-                  <CompletedWorkItemRow
-                    key={workItem.id}
-                    workItem={workItem}
-                    repository={repository}
-                    issue={issue}
-                    onOpenSession={(workItemId, sessionId) => {
-                      setSessionDialog({ workItemId, sessionId })
-                    }}
-                  />
-                )
-              }
-              const repositoryLabel =
-                repository === undefined
-                  ? workItem.repositoryId
-                  : `${repository.projectPath}`
-              const issueTitle =
-                issue?.title ?? workItem.issueTitle ?? undefined
-              const issueUrl =
-                issue?.url !== undefined && issue.url !== ""
-                  ? issue.url
-                  : repository === undefined
-                    ? null
-                    : workItemIssueUrl(
-                        repository.forge,
-                        repository.forgeHost,
-                        repository.projectPath,
-                        workItem.issueNumber,
-                      )
-              const issueIdentity =
-                issueTitle === undefined
-                  ? `#${workItem.issueNumber}`
-                  : `#${workItem.issueNumber} · ${issueTitle}`
-              const issueIdentityContent = (
-                <>
-                  <span className="font-mono">#{workItem.issueNumber}</span>
-                  {issueTitle !== undefined && (
-                    <span className="font-serif"> · {issueTitle}</span>
-                  )}
-                </>
-              )
-              const { sessionId, worktreePath } = sessionWorktreeParts(
-                workItem.sessionId,
-                workItem.worktreePath,
-              )
-              return (
-                <li className="entry-rule min-w-0 px-1 py-2" key={workItem.id}>
-                  <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
-                    <div className="min-w-0">
-                      <p className="m-0 truncate font-mono text-xs font-semibold tracking-[0.12em] text-ink-faint uppercase">
-                        {repositoryLabel}
-                      </p>
-                      {issueUrl !== null && issueUrl !== "" ? (
-                        <a
-                          className="m-0 mt-0.5 block truncate text-sm font-semibold text-oxblood hover:underline"
-                          href={issueUrl}
-                          title={issueIdentity}
-                        >
-                          {issueIdentityContent}
-                        </a>
-                      ) : (
-                        <p
-                          className="m-0 mt-0.5 truncate text-sm font-semibold text-oxblood"
-                          title={issueIdentity}
-                        >
-                          {issueIdentityContent}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <span className="stamp border-rule-2 text-ink-2">
-                        {workItem.stateLabel}
-                      </span>
-                      <WorkItemPauseButton workItem={workItem} />
-                    </div>
-                  </div>
-                  <p className="mt-1 mb-0 flex min-w-0 flex-wrap items-center gap-1">
-                    <span className="shrink-0 font-mono text-xs text-ink-faint">
-                      {workItem.agentBackend.label}
-                    </span>
-                    {(sessionId !== null || worktreePath !== null) && (
-                      <span className="shrink-0 font-mono text-xs text-ink-faint">
-                        -
-                      </span>
-                    )}
-                    {sessionId !== null && (
-                      <Copy
-                        value={sessionId}
-                        className="min-w-0 max-w-full"
-                        textClassName="font-mono text-xs text-ink-faint"
-                      />
-                    )}
-                    {sessionId !== null && worktreePath !== null && (
-                      <span className="shrink-0 font-mono text-xs text-ink-faint">
-                        -
-                      </span>
-                    )}
-                    {worktreePath !== null && (
-                      <Copy
-                        value={worktreePath}
-                        className="min-w-0 max-w-full"
-                        textClassName="font-mono text-xs text-ink-faint"
-                      />
-                    )}
-                  </p>
-                  <WorkItemLifecycleStatus
-                    workItem={workItem}
-                    compact
-                    issueUrl={issueUrl}
-                    pullRequestUrl={
-                      repository === undefined
-                        ? null
-                        : workItemPullRequestUrl(
-                            repository.forge,
-                            repository.forgeHost,
-                            repository.projectPath,
-                            workItem.pullRequestNumber,
-                          )
-                    }
-                  />
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </div>
-      <SessionUsageDialog
-        workItemId={sessionDialog?.workItemId ?? null}
-        sessionId={sessionDialog?.sessionId ?? null}
-        open={sessionDialog !== null}
-        onClose={() => {
-          setSessionDialog(null)
-        }}
-      />
-    </article>
-  )
-}
-
 export function JobsCardSkeleton() {
   return (
     <article
@@ -3984,7 +3649,7 @@ export function WorkItemLifecycleStatus({
   compact = false,
   /**
    * Kanban-only: collapse earlier Build/Review/PR lane chips into summary
-   * rows. Home Jobs and other surfaces leave this off for the full list.
+   * rows. Other surfaces leave this off for the full list.
    */
   collapseEarlierLanes = false,
   pullRequestUrl = null,

@@ -31,19 +31,18 @@ describe("/repos route", () => {
     expect(source).toContain("'/repos': typeof ReposRoute")
   })
 
-  test("primary nav places Repos immediately after Home and before Kanban", () => {
+  test("primary nav places Repos before Kanban (home)", () => {
     const source = rootSource()
     const settingsBlock = source.slice(
       source.indexOf("<SettingsButton"),
       source.indexOf("</nav>"),
     )
-    const homeIdx = settingsBlock.indexOf('to="/"')
     const reposIdx = settingsBlock.indexOf('to="/repos"')
-    const kanbanIdx = settingsBlock.indexOf('to="/kanban"')
-    expect(homeIdx).toBeGreaterThan(-1)
-    expect(reposIdx).toBeGreaterThan(homeIdx)
+    const kanbanIdx = settingsBlock.indexOf('to="/"')
+    expect(reposIdx).toBeGreaterThan(-1)
     expect(kanbanIdx).toBeGreaterThan(reposIdx)
     expect(settingsBlock).toMatch(/Repos\s*<\/Link>/)
+    expect(settingsBlock).toMatch(/Kanban\s*<\/Link>/)
     // Active styling is shared with other primary destinations.
     const reposLink = settingsBlock.slice(reposIdx, kanbanIdx)
     expect(reposLink).toContain("primaryNavLinkClassName")
@@ -52,73 +51,40 @@ describe("/repos route", () => {
     )
   })
 
-  test("Home no longer renders repository cards or add-repository guidance", () => {
+  test("home shows blank slate with zero repos and board with one or more", () => {
     const source = homeSource()
-    const homeBody = source.slice(
-      source.indexOf("function HomeBody()"),
-      source.indexOf("function CommittedPullRequestsDashboard()"),
+    const homeContent = source.slice(
+      source.indexOf("function HomeContent()"),
+      source.indexOf("export function EmptyRepositoriesBlankSlate()"),
     )
-    expect(homeBody).toContain("<CommittedPullRequestsDashboard />")
-    expect(homeBody).toContain("<JobsCard />")
-    expect(homeBody).not.toContain("<RepositoryCards")
-    expect(homeBody).not.toContain("AddRepositoryGuidance")
-    expect(homeBody).not.toContain('aria-label="Configured repositories"')
-    // Empty-repo early return that replaced the dashboard is gone.
-    expect(homeBody).not.toContain("repositories.length === 0")
-    expect(homeBody).not.toContain("return <RepositoryCards />")
+    expect(homeContent).toContain("(repositories ?? []).length === 0")
+    expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")
+    expect(homeContent).toContain("<KanbanBoard />")
+    // Soft-fail repositories so a load error cannot unmount home.
+    expect(homeContent).toContain("useQuery(repositoriesQuery)")
+    expect(homeContent).not.toContain("useSuspenseQuery(repositoriesQuery)")
+    // Membership SSE stays on home for blank-slate ↔ board live gate.
+    expect(source).toContain("function HomeRepositoryMembershipLive()")
+    expect(source).toContain("<HomeRepositoryMembershipLive />")
+    expect(source).toContain("followRepositoryMembershipLive")
+    // Old home Jobs surface is gone.
+    expect(source).not.toContain("function JobsCard()")
+    expect(source).not.toContain("function HomeBody()")
+    expect(source).not.toContain("function HomeLiveUpdates()")
   })
 
-  test("Home keeps Jobs and dashboard live updates without repository management", () => {
+  test("repos empty state reuses EmptyRepositoriesBlankSlate", () => {
     const source = homeSource()
-    expect(source).toContain("function HomeLiveUpdates()")
-    expect(source).toContain("<HomeLiveUpdates />")
-    const homeLive = source.slice(
-      source.indexOf("function HomeLiveUpdates()"),
-      source.indexOf("function HomeBody()"),
+    expect(source).toContain("export function EmptyRepositoriesBlankSlate()")
+    const cards = source.slice(
+      source.indexOf("export function RepositoryCards()"),
+      source.indexOf("function AddRepositoryGuidance("),
     )
-    // Soft-fail: do not suspense-throw repositories errors over the dashboard.
-    expect(homeLive).toContain("useQuery(repositoriesQuery)")
-    expect(homeLive).not.toContain("useSuspenseQuery(repositoriesQuery)")
-    expect(homeLive).toContain("followRepositoryMembershipLive")
-    expect(homeLive).toContain("onLiveUpdatesUnavailable")
-    expect(homeLive).toContain("liveUpdatesWarningPresentation")
-    expect(homeLive).toContain("followRepositoryIssuesLive")
-    expect(homeLive).toContain("followRepositoryWorkItemsLive")
-    // Open PR header counts are repository-card chrome only.
-    expect(homeLive).not.toContain("followOpenPullRequestCountLive")
-  })
-
-  test("JobsCard soft-fails repositories so Home dashboard stays mounted", () => {
-    const source = homeSource()
-    const jobsCard = source.slice(
-      source.indexOf("function JobsCard()"),
-      source.indexOf("function JobsCardSkeleton()"),
-    )
-    expect(jobsCard).toContain("useQuery(repositoriesQuery)")
-    expect(jobsCard).not.toContain("useSuspenseQuery(repositoriesQuery)")
-    expect(jobsCard).toContain("repositoriesFailed")
-    expect(jobsCard).toContain("Could not load jobs. Please try again.")
-    // No Suspense wrapper around Jobs on Home (no suspense boundary needed).
-    const homeBody = source.slice(
-      source.indexOf("function HomeBody()"),
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-    )
-    expect(homeBody).toContain("<JobsCard />")
-    expect(homeBody).not.toContain("Suspense fallback={<JobsCardSkeleton />}")
-  })
-
-  test("empty Jobs card links to /repos for add-repository discoverability", () => {
-    const source = homeSource()
-    const jobsCard = source.slice(
-      source.indexOf("function JobsCard()"),
-      source.indexOf("function JobsCardSkeleton()"),
-    )
-    const emptyBranch = jobsCard.slice(
-      jobsCard.indexOf("repositories.length === 0"),
-      jobsCard.indexOf("if (loading && activeItems.length === 0)"),
-    )
-    expect(emptyBranch).toContain('to="/repos"')
-    expect(emptyBranch).toContain("Add a repository")
-    expect(emptyBranch).toContain("to see jobs.")
+    const emptyStart = cards.indexOf("if (repositories.length === 0)")
+    const emptyReturn = cards.indexOf("return (", emptyStart)
+    const populatedReturn = cards.indexOf("return (", emptyReturn + 1)
+    const emptyBranch = cards.slice(emptyStart, populatedReturn)
+    expect(emptyBranch).toContain("<EmptyRepositoriesBlankSlate />")
+    expect(emptyBranch).not.toContain("<AddRepositoryGuidance")
   })
 })

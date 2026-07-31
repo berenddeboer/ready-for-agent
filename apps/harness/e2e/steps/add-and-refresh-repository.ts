@@ -166,13 +166,20 @@ const ensureNoConfiguredRepositories = async () => {
 Given("the Harness has no configured Repositories", async ({ page }) => {
   test.setTimeout(SCENARIO_TIMEOUT_MS)
   await ensureNoConfiguredRepositories()
-  // Home keeps the dashboard and Jobs; empty-state guidance lives on /repos.
-  // Prefer collapse-independent landmarks (Jobs body may be collapsed).
+  // Zero repos: home shows the add-repo blank slate (not an empty kanban board).
   await page.goto("/")
   await expect(
-    page.getByRole("region", { name: "Committed pull requests" }),
+    page.getByRole("heading", { name: "No repositories configured" }),
   ).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Add a repository" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Lifecycle pipeline" }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole("region", { name: "Committed pull requests" }),
+  ).toHaveCount(0)
   await expect(
     page
       .getByRole("navigation", { name: "Primary" })
@@ -180,9 +187,6 @@ Given("the Harness has no configured Repositories", async ({ page }) => {
   ).toBeVisible()
   await expect(
     page.getByRole("region", { name: "Configured repositories" }),
-  ).toHaveCount(0)
-  await expect(
-    page.getByRole("heading", { name: "No repositories configured" }),
   ).toHaveCount(0)
 
   await page.goto("/repos")

@@ -24,7 +24,7 @@ const sliceBetweenMarkers = (
 const repositoryCardsSource = () =>
   sliceBetweenMarkers(
     homeSource(),
-    "function RepositoryCards()",
+    "export function RepositoryCards()",
     "function AddRepositoryGuidance(",
   )
 
@@ -33,6 +33,13 @@ const addRepositoryGuidanceSource = () =>
     homeSource(),
     "function AddRepositoryGuidance(",
     "function RepositoryCard(",
+  )
+
+const emptyBlankSlateSource = () =>
+  sliceBetweenMarkers(
+    homeSource(),
+    "export function EmptyRepositoriesBlankSlate()",
+    "export function CommittedPullRequestsDashboard()",
   )
 
 describe("blank-slate add repository command", () => {
@@ -46,15 +53,31 @@ describe("blank-slate add repository command", () => {
     )
   })
 
-  test("shows add-repository guidance in the empty state via shared section", () => {
+  test("home zero-repo gate reuses EmptyRepositoriesBlankSlate", () => {
+    const home = homeSource()
+    const homeContent = home.slice(
+      home.indexOf("function HomeContent()"),
+      home.indexOf("export function EmptyRepositoriesBlankSlate()"),
+    )
+    expect(homeContent).toContain("(repositories ?? []).length === 0")
+    expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")
+    expect(homeContent).toContain("<KanbanBoard />")
+  })
+
+  test("EmptyRepositoriesBlankSlate wraps shared guidance with empty heading", () => {
+    const blank = emptyBlankSlateSource()
+    expect(blank).toContain("<AddRepositoryGuidance")
+    expect(blank).toContain("command={addRepositoryCommand}")
+    expect(blank).toContain('heading="No repositories configured"')
+  })
+
+  test("shows add-repository guidance in the empty state via shared blank slate", () => {
     const cards = repositoryCardsSource()
     const emptyStart = cards.indexOf("if (repositories.length === 0)")
     const emptyReturn = cards.indexOf("return (", emptyStart)
     const populatedReturn = cards.indexOf("return (", emptyReturn + 1)
     const emptyBranch = cards.slice(emptyStart, populatedReturn)
-    expect(emptyBranch).toContain("<AddRepositoryGuidance")
-    expect(emptyBranch).toContain("command={addRepositoryCommand}")
-    expect(emptyBranch).toContain('heading="No repositories configured"')
+    expect(emptyBranch).toContain("<EmptyRepositoriesBlankSlate />")
   })
 
   test("repeats add-repository guidance below configured repositories", () => {

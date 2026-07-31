@@ -114,19 +114,24 @@ describe("Jobs Reset button wiring", () => {
     )
   })
 
-  test("Jobs Completed tab still renders compact lifecycle status", () => {
+  test("kanban completed tickets still render compact lifecycle outside Merged lane", () => {
     const source = homeSource()
+    const board = readFileSync(
+      join(import.meta.dir, "../src/kanban-board.tsx"),
+      "utf8",
+    )
     expect(source).toContain('listKind: "COMPLETED"')
     expect(source).toContain("JOBS_COMPLETED_WINDOW_HOURS")
     expect(source).not.toContain("JOBS_COMPLETED_LIMIT")
-    const jobsCard = source.slice(
-      source.indexOf("function JobsCard("),
-      source.indexOf("function WorkItemPauseButton("),
+    // Non-Merged pipeline tickets keep compact lifecycle + Reset wiring.
+    const ticket = board.slice(
+      board.indexOf("function PipelineTicket("),
+      board.indexOf("function KanbanJobsBoard()"),
     )
-    expect(jobsCard).toContain("<WorkItemLifecycleStatus")
-    expect(jobsCard).toContain("compact")
-    // Homepage isolation: Kanban Merged-lane summary must not leak here.
-    expect(jobsCard).not.toContain("PipelineCompleteSummary")
-    expect(jobsCard).not.toContain("totalElapsedMs")
+    expect(ticket).toContain("<WorkItemLifecycleStatus")
+    expect(ticket).toContain("compact")
+    // Merged lane uses the start/elapsed summary instead.
+    expect(board).toContain("function PipelineCompleteSummary(")
+    expect(board).toContain("totalElapsedMs")
   })
 })

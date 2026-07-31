@@ -186,23 +186,6 @@ const primaryNavLinkActiveClassName = "border-ink bg-paper-2 text-ink"
 const primaryNavActionClassName =
   "inline-flex items-center gap-2 border border-rule-2 bg-panel px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-ink-faint uppercase transition hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
 
-function HomeNavIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="size-3.5"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M3 10.5 12 3l9 7.5" />
-      <path d="M5 9.5V21h14V9.5" />
-      <path d="M9 21v-6h6v6" />
-    </svg>
-  )
-}
-
 function ReposNavIcon() {
   return (
     <svg
@@ -253,10 +236,10 @@ function CompletedNavIcon() {
 }
 
 function RootComponent() {
-  // Kanban needs the full viewport for six pipeline lanes; other routes keep
-  // the shared 88rem reading-width cap. Gutters stay on every route.
+  // Home (kanban board) needs the full viewport for six pipeline lanes; other
+  // routes keep the shared 88rem reading-width cap. Gutters stay on every route.
   const pathname = useLocation({ select: (location) => location.pathname })
-  const isKanbanPage = pathname === "/kanban"
+  const isKanbanPage = pathname === "/"
   const shellClassName = [
     "mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12",
     isKanbanPage ? undefined : "max-w-[88rem]",
@@ -292,16 +275,6 @@ function RootComponent() {
           leading={
             <>
               <Link
-                to="/"
-                activeOptions={{ exact: true }}
-                className={primaryNavLinkClassName}
-                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-                activeProps={{ className: primaryNavLinkActiveClassName }}
-              >
-                <HomeNavIcon />
-                Home
-              </Link>
-              <Link
                 to="/repos"
                 className={primaryNavLinkClassName}
                 inactiveProps={{ className: primaryNavLinkInactiveClassName }}
@@ -311,7 +284,8 @@ function RootComponent() {
                 Repos
               </Link>
               <Link
-                to="/kanban"
+                to="/"
+                activeOptions={{ exact: true }}
                 className={primaryNavLinkClassName}
                 inactiveProps={{ className: primaryNavLinkInactiveClassName }}
                 activeProps={{ className: primaryNavLinkActiveClassName }}
@@ -782,7 +756,7 @@ function SettingsButton({ leading }: { leading: ReactNode }) {
           </button>
         </div>
       )}
-      {/* Home / Repos / Kanban / Settings share one right-aligned control cluster.
+      {/* Repos / Kanban / Completed / Settings share one right-aligned control cluster.
           Status banners above stay nav-level siblings (outside the cluster). */}
       <div className="ml-auto flex items-center gap-2 self-center">
         {leading}
