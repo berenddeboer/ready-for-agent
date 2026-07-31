@@ -69,14 +69,11 @@ export function ParentIssueActionsMenu({
           </svg>
         </button>
         {menuOpen && (
-          <div
-            role="menu"
-            className="absolute top-full right-0 z-10 mt-1 min-w-56 border-2 border-ink bg-panel py-1"
-          >
+          <div role="menu" className="menu-panel min-w-56">
             <button
               type="button"
               role="menuitem"
-              className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
+              className="menu-item"
               disabled={pending}
               onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 event.stopPropagation()

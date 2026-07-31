@@ -650,8 +650,8 @@ function HomeContent() {
           aria-label="Loading home"
           aria-busy="true"
         >
-          <span className="block h-10 w-[40%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-24 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="skeleton h-10 w-[40%]" />
+          <span className="skeleton h-24" />
         </div>
       </main>
     )
@@ -691,8 +691,8 @@ function HomeContent() {
               aria-label="Loading add repository guidance"
               aria-busy="true"
             >
-              <span className="block h-10 w-[50%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
-              <span className="block h-32 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+              <span className="skeleton h-10 w-[50%]" />
+              <span className="skeleton h-32" />
             </div>
           }
         >
@@ -797,19 +797,19 @@ export function CommittedPullRequestsDashboard() {
         </header>
         <div className="merged-pr-stats-grid">
           <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+            <span className="merged-pr-stats-skeleton" />
           </div>
           <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+            <span className="merged-pr-stats-skeleton" />
           </div>
           <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+            <span className="merged-pr-stats-skeleton" />
           </div>
           <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+            <span className="merged-pr-stats-skeleton" />
           </div>
           <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton animate-pulse motion-reduce:animate-none" />
+            <span className="merged-pr-stats-skeleton" />
           </div>
         </div>
       </article>
@@ -1203,7 +1203,12 @@ function AddRepositoryGuidance({
                 {pickDirectory.isPending ? "Browsing…" : "Browse…"}
               </button>
             ) : null}
-            <button type="submit" disabled={busy} className="plate-primary">
+            <button
+              type="submit"
+              disabled={busy}
+              className="plate-primary"
+              aria-busy={busy || undefined}
+            >
               {addLocalRepository.isPending
                 ? "Adding…"
                 : inspectLocalRepository.isPending
@@ -2069,14 +2074,11 @@ function RepositoryCard({
               </svg>
             </button>
             {menuOpen && (
-              <div
-                role="menu"
-                className="absolute top-full right-0 z-10 mt-1 min-w-40 border-2 border-ink bg-panel py-1"
-              >
+              <div role="menu" className="menu-panel min-w-40">
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
+                  className="menu-item"
                   onClick={() => {
                     setMenuOpen(false)
                     openSettings()
@@ -2084,11 +2086,11 @@ function RepositoryCard({
                 >
                   Settings
                 </button>
-                <hr className="my-1 border-t border-[var(--line-ghost)]" />
+                <hr className="menu-sep" />
                 <button
                   type="button"
                   role="menuitem"
-                  className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink uppercase hover:bg-[var(--lane-attention)] hover:text-[#151515] disabled:cursor-wait disabled:opacity-50"
+                  className="menu-item menu-item--destructive"
                   disabled={removeRepository.isPending}
                   onClick={() => {
                     setMenuOpen(false)
@@ -2104,7 +2106,7 @@ function RepositoryCard({
       </div>
       <dialog
         ref={settingsDialogRef}
-        className="m-auto w-[min(92vw,32rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-black/50"
+        className="dialog-panel"
         aria-labelledby={`repo-settings-title-${repository.id}`}
         onCancel={(event) => {
           if (updateSettings.isPending) event.preventDefault()
@@ -2112,31 +2114,27 @@ function RepositoryCard({
         onClose={() => setSettingsOpen(false)}
       >
         <form onSubmit={saveSettings}>
-          <div className="border-b border-rule px-6 py-5">
-            <p className="font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
-              Repository settings
-            </p>
+          <div className="dialog-header">
+            <p className="dialog-kicker">Repository settings</p>
             <h2
               id={`repo-settings-title-${repository.id}`}
-              className="mt-1.5 font-serif text-2xl font-semibold tracking-[-0.01em]"
+              className="dialog-title dialog-title--path"
             >
               {repository.projectPath}
             </h2>
-            <p className="mt-1.5 text-sm text-ink-soft">
+            <p className="dialog-lede">
               Overrides apply on the next Agent Turn. Empty model fields use
               harness defaults for this Repository&apos;s effective Agent
               Backend.
             </p>
           </div>
-          <div className="grid gap-5 px-6 py-5">
-            <fieldset className="grid gap-3 border border-rule p-4">
-              <legend className="px-1 font-mono text-xs font-semibold tracking-[0.16em] text-ink-faint uppercase">
-                Forge identity
-              </legend>
-              <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+          <div className="dialog-body">
+            <fieldset className="dialog-fieldset">
+              <legend>Forge identity</legend>
+              <label className="dialog-field">
                 Forge
                 <select
-                  className="w-full border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                  className="dialog-input"
                   value={forge}
                   onChange={(event) =>
                     setForge(event.target.value as "github" | "gitlab")
@@ -2146,72 +2144,72 @@ function RepositoryCard({
                   <option value="gitlab">GitLab</option>
                 </select>
               </label>
-              <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+              <label className="dialog-field">
                 Forge host
                 <input
-                  className="w-full border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                  className="dialog-input dialog-input--mono"
                   required
                   value={forgeHost}
                   onChange={(event) => setForgeHost(event.target.value)}
                 />
               </label>
-              <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+              <label className="dialog-field">
                 Project path
                 <input
-                  className="w-full border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15"
+                  className="dialog-input dialog-input--mono"
                   required
                   value={projectPath}
                   onChange={(event) => setProjectPath(event.target.value)}
                 />
               </label>
-              <span className="text-xs text-ink-faint">
+              <span className="dialog-field-hint">
                 GitLab identities are verified before Save. Identity changes are
                 blocked after this Repository has any Work Item.
               </span>
             </fieldset>
-            <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
+            <label className="dialog-check">
               <input
                 type="checkbox"
-                className="size-4 accent-oxblood"
+                className="size-4"
                 checked={paused}
                 onChange={(event) => setPaused(event.target.checked)}
               />
               Paused
-              <span className="font-normal text-ink-faint">
+              <span className="dialog-field-hint">
                 Skip autonomous work selection
               </span>
             </label>
-            <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
+            <label className="dialog-check">
               <input
                 type="checkbox"
-                className="size-4 accent-oxblood"
+                className="size-4"
                 checked={autoMerge}
                 onChange={(event) => setAutoMerge(event.target.checked)}
               />
               Auto-merge
-              <span className="font-normal text-ink-faint">
+              <span className="dialog-field-hint">
                 Allow clanker merge when risk is low
               </span>
             </label>
-            <label className="flex items-center gap-3 text-sm font-semibold text-ink-2">
+            <label className="dialog-check">
               <input
                 type="checkbox"
-                className="size-4 accent-oxblood"
+                className="size-4"
                 checked={includeAllIssueAuthors}
                 onChange={(event) =>
                   setIncludeAllIssueAuthors(event.target.checked)
                 }
               />
               Include all Issue Authors
-              <span className="font-normal text-ink-faint">
+              <span className="dialog-field-hint">
                 Relevant Issues from every author after Refresh
               </span>
             </label>
-            <label className="grid gap-1.5 text-sm font-semibold text-ink-2">
+            <label className="dialog-field">
               <span className="flex items-center gap-3">
                 <input
                   type="checkbox"
-                  className="size-4 accent-oxblood"
+                  className="size-4"
                   checked={waitForReadyForReviewChecks}
                   onChange={(event) =>
                     setWaitForReadyForReviewChecks(event.target.checked)
@@ -2219,17 +2217,17 @@ function RepositoryCard({
                 />
                 Wait for checks to start after ready for review
               </span>
-              <span className="font-normal text-ink-faint">
+              <span className="dialog-field-hint">
                 Wait up to 90 seconds for workflows that start after a PR is
                 marked ready for review. If this repository has no such
                 workflows, turn off this setting to skip the wait.
               </span>
             </label>
 
-            <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+            <label className="dialog-field">
               Agent Backend
               <select
-                className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
+                className="dialog-input"
                 name="selectedAgentBackend"
                 value={selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE}
                 disabled={
@@ -2258,7 +2256,7 @@ function RepositoryCard({
                   </option>
                 ))}
               </select>
-              <span className="text-xs font-normal text-ink-faint">
+              <span className="dialog-field-hint">
                 {backendChangeBlocked
                   ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
                       repository.blockingUnfinishedWorkItemCount === 1
@@ -2270,34 +2268,49 @@ function RepositoryCard({
             </label>
 
             {agentBackends.isError && (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 Agent Backends list could not be loaded. You can still inherit
                 the harness default; override options may be incomplete.
-              </p>
+              </Banner>
             )}
 
             {usesPreviewCatalog && previewError !== null && (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 Preview failed: {previewError}. Model fields stay disabled until
                 preview succeeds.
                 {backendDraftChanging
                   ? " Changing the effective backend cannot be saved until preview succeeds."
                   : " Non-model settings can still be saved."}
-              </p>
+              </Banner>
             )}
 
             {modelsLoading ? (
-              <p className="text-sm text-ink-soft">Loading models...</p>
+              <p className="dialog-loading">Loading models...</p>
             ) : !usesPreviewCatalog && models.isError ? (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 Models could not be loaded.
-              </p>
+              </Banner>
             ) : (
               <>
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field">
                   Build model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="dialog-input dialog-input--mono"
                     value={defaultModel}
                     disabled={modelsDisabled}
                     onChange={(event) => {
@@ -2345,23 +2358,28 @@ function RepositoryCard({
                 </label>
                 {buildVariantSourceModel.length > 0 &&
                 buildVariantSourceUnavailable ? (
-                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                  <Banner
+                    className="banner--compact"
+                    tone="alarm"
+                    tag="Error"
+                    role="alert"
+                  >
                     Build effort (thinking) override is unavailable — the
                     selected model is not in the Agent Model catalog. Use
                     harness default or pick another model.
-                  </p>
+                  </Banner>
                 ) : buildVariantSourceModel.length > 0 &&
                   buildVariants.length === 0 ? (
-                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
+                  <p className="dialog-note">
                     Build effort (thinking) override is unavailable — this model
                     has no effort (thinking) options. Use harness default or
                     pick another model.
                   </p>
                 ) : (
-                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  <label className="dialog-field">
                     Build effort (thinking)
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="dialog-input"
                       value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
@@ -2388,10 +2406,10 @@ function RepositoryCard({
                     </select>
                   </label>
                 )}
-                <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                <label className="dialog-field">
                   Review model
                   <select
-                    className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 font-mono text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="dialog-input dialog-input--mono"
                     value={reviewModel}
                     disabled={modelsDisabled}
                     onChange={(event) => {
@@ -2430,23 +2448,28 @@ function RepositoryCard({
                 </label>
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 reviewThinkingLevelSourceUnavailable ? (
-                  <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+                  <Banner
+                    className="banner--compact"
+                    tone="alarm"
+                    tag="Error"
+                    role="alert"
+                  >
                     Review effort (thinking) override is unavailable — the
                     selected model is not in the Agent Model catalog. Use
                     harness default or pick another model.
-                  </p>
+                  </Banner>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
-                  <p className="bg-paper-2 p-3 text-sm text-ink-soft">
+                  <p className="dialog-note">
                     Review effort (thinking) override is unavailable — this
                     model has no effort (thinking) options. Use harness default
                     or pick another model.
                   </p>
                 ) : (
-                  <label className="grid min-w-0 gap-1.5 text-sm font-semibold">
+                  <label className="dialog-field">
                     Review effort (thinking)
                     <select
-                      className="w-full min-w-0 border border-rule-2 bg-paper px-3 py-2 text-sm font-normal outline-none focus:border-oxblood focus:ring-2 focus:ring-oxblood/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="dialog-input"
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
@@ -2474,17 +2497,22 @@ function RepositoryCard({
               </>
             )}
             {updateSettings.isError && (
-              <p className="border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep">
+              <Banner
+                className="banner--compact"
+                tone="alarm"
+                tag="Error"
+                role="alert"
+              >
                 {updateSettings.error instanceof Error
                   ? updateSettings.error.message
                   : "Settings could not be saved. Try again."}
-              </p>
+              </Banner>
             )}
           </div>
-          <div className="flex justify-end gap-3 border-t border-rule bg-paper-2 px-6 py-4">
+          <div className="dialog-footer">
             <button
               type="button"
-              className="border border-rule-2 px-4 py-2 text-sm font-semibold text-ink-soft hover:bg-paper"
+              className="plate-mini"
               onClick={() => {
                 settingsDialogRef.current?.close()
                 setSettingsOpen(false)
@@ -2495,7 +2523,8 @@ function RepositoryCard({
             </button>
             <button
               type="submit"
-              className="bg-oxblood px-4 py-2 text-sm font-semibold tracking-wide text-on-solid uppercase hover:bg-oxblood-deep disabled:cursor-wait disabled:opacity-60"
+              className="plate-primary"
+              aria-busy={updateSettings.isPending || undefined}
               disabled={
                 updateSettings.isPending ||
                 (backendChangeBlocked &&
@@ -2510,7 +2539,7 @@ function RepositoryCard({
                 blockSaveForUnavailableBuildModel
               }
             >
-              {updateSettings.isPending ? "Saving..." : "Save"}
+              {updateSettings.isPending ? "Saving…" : "Save"}
             </button>
           </div>
         </form>
@@ -2612,6 +2641,7 @@ function RepositoryCard({
                       type="button"
                       className="plate-primary"
                       disabled={addGitHubToken.isPending}
+                      aria-busy={addGitHubToken.isPending || undefined}
                       onClick={() => addGitHubToken.mutate()}
                     >
                       {addGitHubToken.isPending
@@ -2675,6 +2705,7 @@ function RepositoryCard({
                       type="button"
                       className="plate-primary"
                       disabled={addGitLabToken.isPending}
+                      aria-busy={addGitLabToken.isPending || undefined}
                       onClick={() => addGitLabToken.mutate()}
                     >
                       {addGitLabToken.isPending
@@ -3152,16 +3183,13 @@ function RepositoryIssueRow({
                 </svg>
               </button>
               {menuOpen && (
-                <div
-                  role="menu"
-                  className="absolute top-full right-0 z-10 mt-1 min-w-44 border-2 border-ink bg-panel py-1"
-                >
+                <div role="menu" className="menu-panel min-w-44">
                   {canImplement && (
                     <>
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
+                        className="menu-item"
                         disabled={implementPending}
                         onClick={() => {
                           setMenuOpen(false)
@@ -3177,7 +3205,7 @@ function RepositoryIssueRow({
                       <button
                         type="button"
                         role="menuitem"
-                        className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
+                        className="menu-item"
                         disabled={implementPending}
                         onClick={() => {
                           setMenuOpen(false)
@@ -3196,7 +3224,7 @@ function RepositoryIssueRow({
                     <button
                       type="button"
                       role="menuitem"
-                      className="block w-full px-3 py-2 text-left font-mono text-[0.68rem] font-medium tracking-[0.08em] text-ink-2 uppercase hover:bg-[var(--plate-hover)]"
+                      className="menu-item"
                       disabled={implementPending}
                       onClick={() => {
                         setMenuOpen(false)
@@ -3297,18 +3325,13 @@ export function SessionUsageDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="m-auto w-[min(92vw,28rem)] border border-rule-2 bg-panel p-0 text-ink shadow-[0_18px_50px_rgb(28_22_14_/_18%)] backdrop:bg-black/50"
+      className="dialog-panel dialog-panel--narrow"
       aria-labelledby="session-usage-title"
       onClose={onClose}
     >
-      <div className="border-b border-rule px-5 py-4">
-        <p className="font-mono text-xs font-semibold tracking-[0.22em] text-oxblood uppercase">
-          Session usage
-        </p>
-        <h2
-          id="session-usage-title"
-          className="mt-1.5 font-serif text-lg font-semibold"
-        >
+      <div className="dialog-header dialog-header--compact">
+        <p className="dialog-kicker">Session usage</p>
+        <h2 id="session-usage-title" className="dialog-title dialog-title--sm">
           {backendLabel ? `${backendLabel} Session` : "Session"}
         </h2>
         {sessionId !== null && (
@@ -3320,50 +3343,60 @@ export function SessionUsageDialog({
           </p>
         )}
       </div>
-      <div className="px-5 py-4">
+      <div className="dialog-body dialog-body--compact">
         {!enabled ? null : session.isPending ? (
-          <p className="m-0 text-sm text-ink-soft">Loading usage…</p>
+          <p className="dialog-loading">Loading usage…</p>
         ) : session.isError ? (
-          <p
-            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+          <Banner
+            className="banner--compact"
+            tone="alarm"
+            tag="Error"
             role="alert"
           >
             Could not load Session usage. Close and try again.
-          </p>
+          </Banner>
         ) : session.data === null || session.data === undefined ? (
-          <p
-            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+          <Banner
+            className="banner--compact"
+            tone="guidance"
+            tag="Session"
             role="status"
           >
             Work Item not found.
-          </p>
+          </Banner>
         ) : session.data.availability === "UNSUPPORTED" ? (
-          <p
-            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+          <Banner
+            className="banner--compact"
+            tone="guidance"
+            tag="Session"
             role="status"
           >
             {session.data.backend.label} does not provide Session Telemetry.
-          </p>
+          </Banner>
         ) : session.data.availability === "MISSING" ? (
-          <p
-            className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+          <Banner
+            className="banner--compact"
+            tone="guidance"
+            tag="Session"
             role="status"
           >
             {session.data.backend.label} no longer has this Session locally.
             Usage cannot be loaded.
-          </p>
+          </Banner>
         ) : session.data.availability === "UNAVAILABLE" ? (
           <div className="grid gap-3">
-            <p
-              className="m-0 border border-oxblood/40 bg-oxblood-wash p-3 text-sm text-oxblood-deep"
+            <Banner
+              className="banner--compact"
+              tone="guidance"
+              tag="Session"
               role="status"
             >
               {session.data.backend.label} Session Telemetry is temporarily
               unavailable. Retry in a moment.
-            </p>
+            </Banner>
             <button
               type="button"
-              className="justify-self-start border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+              className="plate-mini justify-self-start"
               onClick={() => {
                 void session.refetch()
               }}
@@ -3372,16 +3405,11 @@ export function SessionUsageDialog({
             </button>
           </div>
         ) : (
-          <table className="w-full border-collapse text-left text-sm">
+          <table className="dialog-table">
             <tbody>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Model
-                </th>
-                <td className="py-1.5 font-mono text-ink-2">
+              <tr>
+                <th scope="row">Model</th>
+                <td>
                   {session.data.model === null ||
                   session.data.model === undefined
                     ? "—"
@@ -3397,104 +3425,52 @@ export function SessionUsageDialog({
                         .join(" / ")}
                 </td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Input tokens
-                </th>
-                <td className="py-1.5 tabular-nums text-ink-2">
-                  {formatTokenCount(session.data.tokens?.input ?? 0)}
-                </td>
+              <tr>
+                <th scope="row">Input tokens</th>
+                <td>{formatTokenCount(session.data.tokens?.input ?? 0)}</td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Output tokens
-                </th>
-                <td className="py-1.5 tabular-nums text-ink-2">
-                  {formatTokenCount(session.data.tokens?.output ?? 0)}
-                </td>
+              <tr>
+                <th scope="row">Output tokens</th>
+                <td>{formatTokenCount(session.data.tokens?.output ?? 0)}</td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Reasoning tokens
-                </th>
-                <td className="py-1.5 tabular-nums text-ink-2">
-                  {formatTokenCount(session.data.tokens?.reasoning ?? 0)}
-                </td>
+              <tr>
+                <th scope="row">Reasoning tokens</th>
+                <td>{formatTokenCount(session.data.tokens?.reasoning ?? 0)}</td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Cache read
-                </th>
-                <td className="py-1.5 tabular-nums text-ink-2">
-                  {formatTokenCount(session.data.tokens?.cacheRead ?? 0)}
-                </td>
+              <tr>
+                <th scope="row">Cache read</th>
+                <td>{formatTokenCount(session.data.tokens?.cacheRead ?? 0)}</td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Cache write
-                </th>
-                <td className="py-1.5 tabular-nums text-ink-2">
+              <tr>
+                <th scope="row">Cache write</th>
+                <td>
                   {formatTokenCount(session.data.tokens?.cacheWrite ?? 0)}
                 </td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Cost
-                </th>
-                <td className="py-1.5 tabular-nums text-ink-2">
+              <tr>
+                <th scope="row">Cost</th>
+                <td>
                   {session.data.cost === null || session.data.cost === undefined
                     ? "—"
                     : formatSessionCost(session.data.cost)}
                 </td>
               </tr>
-              <tr className="border-b border-rule-soft">
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Created
-                </th>
-                <td className="py-1.5 text-ink-2">
-                  {formatSessionInstant(session.data.createdAt)}
-                </td>
+              <tr>
+                <th scope="row">Created</th>
+                <td>{formatSessionInstant(session.data.createdAt)}</td>
               </tr>
               <tr>
-                <th
-                  className="py-1.5 pr-3 font-semibold text-ink-soft"
-                  scope="row"
-                >
-                  Updated
-                </th>
-                <td className="py-1.5 text-ink-2">
-                  {formatSessionInstant(session.data.updatedAt)}
-                </td>
+                <th scope="row">Updated</th>
+                <td>{formatSessionInstant(session.data.updatedAt)}</td>
               </tr>
             </tbody>
           </table>
         )}
       </div>
-      <div className="flex justify-end border-t border-rule px-5 py-3">
+      <div className="dialog-footer dialog-footer--compact">
         <button
           type="button"
-          className="border border-rule-2 bg-paper px-3 py-1.5 text-sm font-semibold text-ink-2 transition hover:bg-paper-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
+          className="plate-mini"
           onClick={() => {
             dialogRef.current?.close()
           }}
@@ -3509,14 +3485,14 @@ export function SessionUsageDialog({
 export function JobsCardSkeleton() {
   return (
     <article
-      className="border border-rule-2 bg-panel px-4 py-3 sm:px-5"
+      className="border border-line-ghost bg-panel px-4 py-3 sm:px-5"
       role="status"
       aria-label="Loading jobs"
       aria-busy="true"
     >
       <div className="grid gap-2">
-        <span className="block h-12 animate-pulse bg-paper-2 motion-reduce:animate-none" />
-        <span className="block h-12 animate-pulse bg-paper-2 motion-reduce:animate-none" />
+        <span className="skeleton h-12" />
+        <span className="skeleton h-12" />
       </div>
     </article>
   )
@@ -3956,16 +3932,26 @@ export function WorkItemLifecycleStatus({
         </div>
       )}
       {reset.isError && (
-        <p className="mt-1.5 mb-0 text-xs text-oxblood-deep" role="alert">
+        <Banner
+          className="banner--compact mt-1.5"
+          tone="alarm"
+          tag="Error"
+          role="alert"
+        >
           Could not reset this job.
-        </p>
+        </Banner>
       )}
       {retry.isError && (
-        <p className="mt-1.5 mb-0 text-xs text-oxblood-deep" role="alert">
+        <Banner
+          className="banner--compact mt-1.5"
+          tone="alarm"
+          tag="Error"
+          role="alert"
+        >
           {retriesStatusChecks
             ? "Could not retry these checks."
             : "Could not retry this job."}
-        </p>
+        </Banner>
       )}
     </div>
   )
@@ -3979,8 +3965,8 @@ function RepositoryIssuesSkeleton() {
       aria-label="Loading issues"
       aria-busy="true"
     >
-      <span className="block h-4 w-[85%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
-      <span className="block h-4 w-[65%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+      <span className="skeleton h-4 w-[85%]" />
+      <span className="skeleton h-4 w-[65%]" />
     </div>
   )
 }
@@ -3994,9 +3980,9 @@ export function RepositoryCardsSkeleton() {
     >
       {[0, 1].map((item) => (
         <div className="repo-card-skeleton" key={item}>
-          <span className="block h-[0.85rem] w-[35%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-[1.6rem] w-[65%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
-          <span className="block h-[0.85rem] w-[90%] animate-pulse bg-paper-2 motion-reduce:animate-none" />
+          <span className="skeleton h-[0.85rem] w-[35%]" />
+          <span className="skeleton h-[1.6rem] w-[65%]" />
+          <span className="skeleton h-[0.85rem] w-[90%]" />
         </div>
       ))}
     </section>

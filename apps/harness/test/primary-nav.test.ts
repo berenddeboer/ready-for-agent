@@ -243,14 +243,15 @@ describe("primary Home / Repos / Completed navigation (Interchange masthead)", (
     expect(root).toContain("suppressHydrationWarning")
     expect(styles).toContain("color-scheme: light")
     expect(styles).toContain("color-scheme: dark")
-    // Elevated surfaces + inverse CTA ink stay contrast-safe under both themes.
-    expect(styles).toContain("--paper-2:")
-    expect(styles).toContain("--color-paper-2: var(--paper-2)")
-    expect(styles).toContain("--on-solid:")
-    expect(styles).toContain("--color-on-solid: var(--on-solid)")
-    expect(root).toContain("text-on-solid")
-    expect(root).toContain("backdrop:bg-black/50")
-    expect(root).not.toContain("backdrop:bg-ink/45")
+    // Dialog scrim token (phase 5) — theme-invariant dimming, not ink-derived.
+    expect(styles).toContain("--scrim:")
+    expect(styles).toContain(".dialog-panel::backdrop")
+    expect(styles).toContain("background: var(--scrim)")
+    expect(root).toContain('className="dialog-panel"')
+    // Ledger oxblood / elevated paper-2 palette is gone after phase 5 teardown.
+    expect(styles).not.toContain("--paper-2:")
+    expect(styles).not.toContain("--color-oxblood")
+    expect(styles).not.toContain("--font-serif")
   })
 
   test("banner pattern is shared and used for nav-level guidance/alarm", () => {

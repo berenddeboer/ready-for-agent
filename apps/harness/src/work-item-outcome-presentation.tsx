@@ -67,7 +67,7 @@ export function WorkItemOutcomePresentation({
         <div className="mt-1.5 w-full basis-full">
           {issueUrl !== null && issueUrl !== "" ? (
             <a
-              className="m-0 text-xs font-semibold tracking-wide text-ink-2 uppercase underline decoration-rule underline-offset-4 hover:text-oxblood"
+              className="m-0 font-mono text-xs font-semibold tracking-wide text-ink-2 uppercase underline decoration-signal underline-offset-4 hover:text-ink"
               href={issueUrl}
               target="_blank"
               rel="noopener noreferrer"
@@ -75,18 +75,16 @@ export function WorkItemOutcomePresentation({
               Issue closed without repository changes
             </a>
           ) : (
-            <p className="m-0 text-xs font-semibold tracking-wide text-ink-2 uppercase">
+            <p className="m-0 font-mono text-xs font-semibold tracking-wide text-ink-2 uppercase">
               Issue closed without repository changes
             </p>
           )}
           {summary !== "" && (
             <section
-              className="field-rule mt-1.5 px-2 py-1.5"
+              className="completion-summary"
               aria-label="Completion summary"
             >
-              <p className="m-0 whitespace-pre-wrap font-serif text-sm text-ink-soft">
-                {summary}
-              </p>
+              <p>{summary}</p>
             </section>
           )}
         </div>

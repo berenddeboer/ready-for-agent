@@ -66,10 +66,10 @@ The prototype uses an industrial control-board language:
 - Repository management and intake live on `/repos`, not under the board.
 
 The visual treatment follows the Interchange design system
-(`docs/harness-design-system.md` when present; otherwise the harness CSS
-token layer). The essential design idea is the board structure, fixed lane
-identity, open white platforms with lane-color nameboards, and compact
-operator-facing tickets — not the older Ledger concrete fills or serif stack.
+(`docs/harness-design-system.md`). The essential design idea is the board
+structure, fixed lane identity, open white platforms with lane-color
+nameboards, and compact operator-facing tickets — not the older Ledger
+concrete fills or serif stack.
 
 ## Interaction Model
 

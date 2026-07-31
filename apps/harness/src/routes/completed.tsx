@@ -56,8 +56,8 @@ function CompletedListSkeleton() {
         aria-label="Loading completed work items"
         aria-busy="true"
       >
-        <span className="block h-14 animate-pulse bg-[var(--line-ghost)] motion-reduce:animate-none" />
-        <span className="block h-14 animate-pulse bg-[var(--line-ghost)] motion-reduce:animate-none" />
+        <span className="skeleton h-14" />
+        <span className="skeleton h-14" />
       </div>
     </section>
   )
