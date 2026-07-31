@@ -38,7 +38,7 @@ const addRepositoryGuidanceSource = () =>
 const emptyBlankSlateSource = () =>
   sliceBetweenMarkers(
     homeSource(),
-    "export function EmptyRepositoriesBlankSlate()",
+    "function EmptyRepositoriesBlankSlate()",
     "export function CommittedPullRequestsDashboard()",
   )
 
@@ -57,7 +57,7 @@ describe("blank-slate add repository command", () => {
     const home = homeSource()
     const homeContent = home.slice(
       home.indexOf("function HomeContent()"),
-      home.indexOf("export function EmptyRepositoriesBlankSlate()"),
+      home.indexOf("function EmptyRepositoriesBlankSlate()"),
     )
     expect(homeContent).toContain("(repositories ?? []).length === 0")
     expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")

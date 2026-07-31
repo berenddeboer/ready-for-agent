@@ -55,7 +55,7 @@ describe("/repos route", () => {
     const source = homeSource()
     const homeContent = source.slice(
       source.indexOf("function HomeContent()"),
-      source.indexOf("export function EmptyRepositoriesBlankSlate()"),
+      source.indexOf("function EmptyRepositoriesBlankSlate()"),
     )
     expect(homeContent).toContain("(repositories ?? []).length === 0")
     expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")
@@ -75,7 +75,7 @@ describe("/repos route", () => {
 
   test("repos empty state reuses EmptyRepositoriesBlankSlate", () => {
     const source = homeSource()
-    expect(source).toContain("export function EmptyRepositoriesBlankSlate()")
+    expect(source).toContain("function EmptyRepositoriesBlankSlate()")
     const cards = source.slice(
       source.indexOf("export function RepositoryCards()"),
       source.indexOf("function AddRepositoryGuidance("),

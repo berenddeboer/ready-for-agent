@@ -368,7 +368,7 @@ describe("Committed pull requests dashboard UI", () => {
     // Zero-repo gate lives on home; board assumes repositories exist.
     const homeContent = home.slice(
       home.indexOf("function HomeContent()"),
-      home.indexOf("export function EmptyRepositoriesBlankSlate()"),
+      home.indexOf("function EmptyRepositoriesBlankSlate()"),
     )
     expect(homeContent).toContain("(repositories ?? []).length === 0")
     expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")

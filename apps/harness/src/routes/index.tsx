@@ -696,7 +696,7 @@ function HomeContent() {
 }
 
 /** Shared zero-repo blank slate used by `/` and `/repos`. */
-export function EmptyRepositoriesBlankSlate() {
+function EmptyRepositoriesBlankSlate() {
   const { data: addRepositoryCommand } = useSuspenseQuery(
     addRepositoryCommandQuery,
   )
