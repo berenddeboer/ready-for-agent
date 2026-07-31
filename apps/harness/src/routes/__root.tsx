@@ -11,7 +11,6 @@ import {
   Outlet,
   Scripts,
   createRootRouteWithContext,
-  useLocation,
 } from "@tanstack/react-router"
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
 import {
@@ -186,6 +185,23 @@ const primaryNavLinkActiveClassName = "border-ink bg-paper-2 text-ink"
 const primaryNavActionClassName =
   "inline-flex items-center gap-2 border border-rule-2 bg-panel px-3 py-1.5 text-xs font-semibold tracking-[0.14em] text-ink-faint uppercase transition hover:border-ink-soft hover:bg-paper-2 hover:text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-oxblood"
 
+function HomeNavIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-3.5"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5.5 9.5V20h13V9.5" />
+      <path d="M10 20v-6h4v6" />
+    </svg>
+  )
+}
+
 function ReposNavIcon() {
   return (
     <svg
@@ -199,23 +215,6 @@ function ReposNavIcon() {
       <path d="M4 7.5c0-1.5 3.6-2.5 8-2.5s8 1 8 2.5v9c0 1.5-3.6 2.5-8 2.5s-8-1-8-2.5v-9Z" />
       <path d="M4 7.5c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5" />
       <path d="M4 12c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5" />
-    </svg>
-  )
-}
-
-function KanbanNavIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="size-3.5"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <rect x="3.5" y="4" width="4.5" height="16" rx="0.5" />
-      <rect x="9.75" y="4" width="4.5" height="10" rx="0.5" />
-      <rect x="16" y="4" width="4.5" height="13" rx="0.5" />
     </svg>
   )
 }
@@ -236,19 +235,11 @@ function CompletedNavIcon() {
 }
 
 function RootComponent() {
-  // Home (kanban board) needs the full viewport for six pipeline lanes; other
-  // routes keep the shared 88rem reading-width cap. Gutters stay on every route.
-  const pathname = useLocation({ select: (location) => location.pathname })
-  const isKanbanPage = pathname === "/"
-  const shellClassName = [
-    "mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12",
-    isKanbanPage ? undefined : "max-w-[88rem]",
-  ]
-    .filter((part): part is string => part !== undefined)
-    .join(" ")
-
+  // Chrome (title, version, primary nav, header rule) is always full-width so
+  // nav positions do not jump between routes. Repos/Completed apply their own
+  // reading-width cap on page body content only. Gutters stay on every route.
   return (
-    <div className={shellClassName}>
+    <div className="mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12">
       <nav
         aria-label="Primary"
         className="primary-nav mb-2 flex flex-wrap items-start gap-x-5 gap-y-3 pb-3"
@@ -275,6 +266,16 @@ function RootComponent() {
           leading={
             <>
               <Link
+                to="/"
+                activeOptions={{ exact: true }}
+                className={primaryNavLinkClassName}
+                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
+                activeProps={{ className: primaryNavLinkActiveClassName }}
+              >
+                <HomeNavIcon />
+                Home
+              </Link>
+              <Link
                 to="/repos"
                 className={primaryNavLinkClassName}
                 inactiveProps={{ className: primaryNavLinkInactiveClassName }}
@@ -282,16 +283,6 @@ function RootComponent() {
               >
                 <ReposNavIcon />
                 Repos
-              </Link>
-              <Link
-                to="/"
-                activeOptions={{ exact: true }}
-                className={primaryNavLinkClassName}
-                inactiveProps={{ className: primaryNavLinkInactiveClassName }}
-                activeProps={{ className: primaryNavLinkActiveClassName }}
-              >
-                <KanbanNavIcon />
-                Kanban
               </Link>
               <Link
                 to="/completed"
@@ -756,7 +747,7 @@ function SettingsButton({ leading }: { leading: ReactNode }) {
           </button>
         </div>
       )}
-      {/* Repos / Kanban / Completed / Settings share one right-aligned control cluster.
+      {/* Home / Repos / Completed / Settings share one right-aligned control cluster.
           Status banners above stay nav-level siblings (outside the cluster). */}
       <div className="ml-auto flex items-center gap-2 self-center">
         {leading}

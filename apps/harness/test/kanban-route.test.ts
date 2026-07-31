@@ -397,25 +397,21 @@ describe("kanban home board", () => {
     expect(desktopStyles).toContain("display: none")
   })
 
-  test("uses full viewport width only on home board while other routes keep 88rem", () => {
-    // Root shell is route-aware: drop max-w-[88rem] for `/` only; gutters stay.
+  test("uses full viewport chrome on every route; home board stays uncapped under header", () => {
+    // Issue #686: root shell never takes max-w-[88rem]; Repos/Completed cap body.
     const root = rootSource()
     const rootComponent = root.slice(root.indexOf("function RootComponent("))
-    expect(rootComponent).toContain("useLocation")
-    expect(rootComponent).toContain('pathname === "/"')
-    // Shared gutters apply on every route (single base string, not duplicated).
+    expect(rootComponent).not.toContain("useLocation")
+    expect(rootComponent).not.toContain("isKanbanPage")
+    // Shared gutters apply on every route (single static class string).
     expect(rootComponent).toContain(
-      "mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12",
+      'className="mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12"',
     )
-    // 88rem remains available for non-Kanban routes, gated by the home check.
-    expect(rootComponent).toContain("max-w-[88rem]")
-    expect(rootComponent).toMatch(
-      /(?:isKanbanPage|pathname === "\/")[\s\S]{0,200}max-w-\[88rem\]|max-w-\[88rem\][\s\S]{0,200}(?:isKanbanPage|pathname === "\/")/,
-    )
-    // Cap is not a static always-on className on the wrapper.
-    expect(rootComponent).not.toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
+    // Shell must not pathname-gate or hardcode the reading-width cap.
+    expect(rootComponent).not.toContain("max-w-[88rem]")
+    expect(rootComponent).not.toContain('pathname === "/"')
 
-    // industrial-shell must not re-impose a second width cap under Kanban.
+    // industrial-shell must not re-impose a second width cap under home board.
     const styles = stylesSource()
     const shellBlock = styles.slice(
       styles.indexOf(".industrial-shell {"),

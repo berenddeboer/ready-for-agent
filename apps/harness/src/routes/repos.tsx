@@ -7,8 +7,9 @@ export const Route = createFileRoute("/repos")({
 })
 
 function ReposPage() {
+  // Reading-width cap lives on the page body only — root chrome stays full-width.
   return (
-    <main className="pt-8 sm:pt-10">
+    <main className="mx-auto max-w-[88rem] pt-8 sm:pt-10">
       <Suspense fallback={<RepositoryCardsSkeleton />}>
         <RepositoryCards />
       </Suspense>

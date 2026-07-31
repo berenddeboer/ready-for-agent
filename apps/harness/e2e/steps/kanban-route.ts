@@ -56,9 +56,9 @@ When("I open the Repos page", async ({ page }) => {
   await dismissFirstRunSettings(page)
 })
 
-When("I click the Kanban top nav control", async ({ page }) => {
+When("I click the Home top nav control", async ({ page }) => {
   await primaryNav(page)
-    .getByRole("link", { name: "Kanban", exact: true })
+    .getByRole("link", { name: "Home", exact: true })
     .click()
 })
 
@@ -134,13 +134,13 @@ Then("the Repos top nav control is active", async ({ page }) => {
   await expect(repos).toHaveAttribute("aria-current", "page")
 })
 
-Then("the Kanban top nav control is active", async ({ page }) => {
-  const kanban = primaryNav(page).getByRole("link", {
-    name: "Kanban",
+Then("the Home top nav control is active", async ({ page }) => {
+  const home = primaryNav(page).getByRole("link", {
+    name: "Home",
     exact: true,
   })
-  await expect(kanban).toBeVisible()
-  await expect(kanban).toHaveAttribute("aria-current", "page")
+  await expect(home).toBeVisible()
+  await expect(home).toHaveAttribute("aria-current", "page")
 })
 
 Then("the Repos top nav control is not active", async ({ page }) => {
@@ -152,13 +152,13 @@ Then("the Repos top nav control is not active", async ({ page }) => {
   await expect(repos).not.toHaveAttribute("aria-current", "page")
 })
 
-Then("the Kanban top nav control is not active", async ({ page }) => {
-  const kanban = primaryNav(page).getByRole("link", {
-    name: "Kanban",
+Then("the Home top nav control is not active", async ({ page }) => {
+  const home = primaryNav(page).getByRole("link", {
+    name: "Home",
     exact: true,
   })
-  await expect(kanban).toBeVisible()
-  await expect(kanban).not.toHaveAttribute("aria-current", "page")
+  await expect(home).toBeVisible()
+  await expect(home).not.toHaveAttribute("aria-current", "page")
 })
 
 Then("I am on the Kanban board", async ({ page }) => {

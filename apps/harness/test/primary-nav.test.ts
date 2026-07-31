@@ -8,21 +8,29 @@ const rootSource = () =>
 const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
-describe("primary Repos / Kanban / Completed navigation", () => {
-  test("root chrome exposes Repos, Kanban, and Completed Link controls without Home", () => {
+const reposSource = () =>
+  readFileSync(join(import.meta.dir, "../src/routes/repos.tsx"), "utf8")
+
+const completedSource = () =>
+  readFileSync(join(import.meta.dir, "../src/routes/completed.tsx"), "utf8")
+
+describe("primary Home / Repos / Completed navigation", () => {
+  test("root chrome exposes Home, Repos, and Completed Link controls", () => {
     const source = rootSource()
     expect(source).toContain('aria-label="Primary"')
     expect(source).toContain('to="/"')
     expect(source).toContain('to="/repos"')
     expect(source).toContain('to="/completed"')
+    expect(source).toMatch(/Home\s*<\/Link>/)
     expect(source).toMatch(/Repos\s*<\/Link>/)
-    expect(source).toMatch(/Kanban\s*<\/Link>/)
     expect(source).toMatch(/Completed\s*<\/Link>/)
-    // Distinct Home tab is gone; logo and Kanban both target `/`.
-    expect(source).not.toMatch(/Home\s*<\/Link>/)
-    expect(source).not.toContain("function HomeNavIcon()")
-    expect(source).not.toContain("<HomeNavIcon />")
-    // Kanban lives at home — no separate /kanban nav target.
+    // Home replaces Kanban as the `/` nav label; board icon/label are gone.
+    expect(source).not.toMatch(/Kanban\s*<\/Link>/)
+    expect(source).not.toContain("function KanbanNavIcon()")
+    expect(source).not.toContain("<KanbanNavIcon />")
+    expect(source).toContain("function HomeNavIcon()")
+    expect(source).toContain("<HomeNavIcon />")
+    // Home lives at `/` — no separate /kanban nav target.
     const settingsBlock = source.slice(
       source.indexOf("<SettingsButton"),
       source.indexOf("</nav>"),
@@ -57,7 +65,7 @@ describe("primary Repos / Kanban / Completed navigation", () => {
     )
   })
 
-  test("groups Repos, Kanban, Completed, and Settings in one right-aligned control cluster", () => {
+  test("groups Home, Repos, Completed, and Settings in one right-aligned control cluster", () => {
     const source = rootSource()
     const clusterMarker =
       'className="ml-auto flex items-center gap-2 self-center"'
@@ -73,19 +81,19 @@ describe("primary Repos / Kanban / Completed navigation", () => {
       source.indexOf("</nav>"),
     )
     expect(settingsBlock).toContain("leading={")
-    expect(settingsBlock).toContain('to="/repos"')
     expect(settingsBlock).toContain('to="/"')
+    expect(settingsBlock).toContain('to="/repos"')
     expect(settingsBlock).toContain('to="/completed"')
+    expect(settingsBlock).toContain("<HomeNavIcon />")
     expect(settingsBlock).toContain("<ReposNavIcon />")
-    expect(settingsBlock).toContain("<KanbanNavIcon />")
     expect(settingsBlock).toContain("<CompletedNavIcon />")
+    // Order: Home | Repos | Completed
+    const homeIdx = settingsBlock.indexOf('to="/"')
     const reposIdx = settingsBlock.indexOf('to="/repos"')
-    const kanbanIdx = settingsBlock.indexOf('to="/"')
     const completedIdx = settingsBlock.indexOf('to="/completed"')
-    expect(reposIdx).toBeGreaterThan(-1)
-    expect(kanbanIdx).toBeGreaterThan(reposIdx)
-    // Completed sits after Kanban (and after Repos).
-    expect(completedIdx).toBeGreaterThan(kanbanIdx)
+    expect(homeIdx).toBeGreaterThan(-1)
+    expect(reposIdx).toBeGreaterThan(homeIdx)
+    expect(completedIdx).toBeGreaterThan(reposIdx)
 
     // Cluster wraps leading destinations and the Settings trigger.
     const clusterStart = source.indexOf(
@@ -106,18 +114,18 @@ describe("primary Repos / Kanban / Completed navigation", () => {
     expect(brandIdx).toBeLessThan(source.indexOf("<SettingsButton"))
   })
 
-  test("Repos, Kanban, and Completed use stroke icons matching Settings icon language", () => {
+  test("Home, Repos, and Completed use stroke icons matching Settings icon language", () => {
     const source = rootSource()
+    expect(source).toContain("function HomeNavIcon()")
     expect(source).toContain("function ReposNavIcon()")
-    expect(source).toContain("function KanbanNavIcon()")
     expect(source).toContain("function CompletedNavIcon()")
+    expect(source).toContain("<HomeNavIcon />")
     expect(source).toContain("<ReposNavIcon />")
-    expect(source).toContain("<KanbanNavIcon />")
     expect(source).toContain("<CompletedNavIcon />")
     // Icons: aria-hidden, size-3.5, stroke currentColor (same as Settings gear).
     for (const iconFn of [
+      "HomeNavIcon",
       "ReposNavIcon",
-      "KanbanNavIcon",
       "CompletedNavIcon",
     ] as const) {
       const start = source.indexOf(`function ${iconFn}(`)
@@ -129,6 +137,13 @@ describe("primary Repos / Kanban / Completed navigation", () => {
       expect(body).toContain('strokeWidth="2"')
       expect(body).toContain('fill="none"')
     }
+    // Home uses a house path language (roof + walls), not the old board columns.
+    const homeIcon = source.slice(
+      source.indexOf("function HomeNavIcon("),
+      source.indexOf("\n}", source.indexOf("function HomeNavIcon(")) + 2,
+    )
+    expect(homeIcon).toContain("M3 10.5")
+    expect(homeIcon).not.toContain("<rect")
   })
 
   test("uses TanStack Router Link with active route styling", () => {
@@ -143,15 +158,19 @@ describe("primary Repos / Kanban / Completed navigation", () => {
     expect(source).toContain(
       "activeProps={{ className: primaryNavLinkActiveClassName }}",
     )
-    // Kanban nav control (not the brand title Link) must use exact matching.
-    // Slice from the Repos link through Completed so the Kanban `to="/"` is included.
-    const kanbanSwitcherLink = source.slice(
-      source.indexOf('to="/repos"'),
-      source.indexOf('to="/completed"'),
+    // Home nav control (not the brand title Link) must use exact matching.
+    // Slice the SettingsButton leading destinations through Repos.
+    const settingsBlock = source.slice(
+      source.indexOf("<SettingsButton"),
+      source.indexOf("</nav>"),
     )
-    expect(kanbanSwitcherLink).toContain('to="/"')
-    expect(kanbanSwitcherLink).toContain("<KanbanNavIcon />")
-    expect(kanbanSwitcherLink).toContain("activeOptions={{ exact: true }}")
+    const homeSwitcherLink = settingsBlock.slice(
+      0,
+      settingsBlock.indexOf('to="/repos"'),
+    )
+    expect(homeSwitcherLink).toContain('to="/"')
+    expect(homeSwitcherLink).toContain("<HomeNavIcon />")
+    expect(homeSwitcherLink).toContain("activeOptions={{ exact: true }}")
     // Shared base must not carry exclusive active/inactive visual tokens —
     // Router merges className with active/inactive props.
     const sharedClassDecl = source.match(
@@ -199,20 +218,39 @@ describe("primary Repos / Kanban / Completed navigation", () => {
     expect(source).not.toMatch(/<a\s+href=["']\/["']/)
   })
 
-  test("shared nav lives in root layout so Repos, Kanban, and Completed inherit it", () => {
+  test("shared nav lives in root layout so Home, Repos, and Completed inherit it", () => {
     const source = rootSource()
     const rootComponent = source.slice(
       source.indexOf("function RootComponent("),
     )
     expect(rootComponent).toContain('to="/repos"')
     expect(rootComponent).toContain('to="/completed"')
+    expect(rootComponent).toMatch(/Home\s*<\/Link>/)
     expect(rootComponent).toMatch(/Repos\s*<\/Link>/)
-    expect(rootComponent).toMatch(/Kanban\s*<\/Link>/)
     expect(rootComponent).toMatch(/Completed\s*<\/Link>/)
-    expect(rootComponent).not.toMatch(/Home\s*<\/Link>/)
+    expect(rootComponent).not.toMatch(/Kanban\s*<\/Link>/)
     expect(rootComponent).toContain("<Outlet />")
-    expect(rootComponent.indexOf("Repos")).toBeLessThan(
+    expect(rootComponent.indexOf("Home")).toBeLessThan(
       rootComponent.indexOf("<Outlet />"),
     )
+  })
+
+  test("root shell is always full-width; Repos and Completed cap page body only", () => {
+    // Issue #686: no pathname-based shell max-w; chrome never jumps.
+    const root = rootSource()
+    const rootComponent = root.slice(root.indexOf("function RootComponent("))
+    expect(rootComponent).toContain(
+      'className="mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12"',
+    )
+    expect(rootComponent).not.toContain("useLocation")
+    expect(rootComponent).not.toContain("isKanbanPage")
+    expect(rootComponent).not.toContain("max-w-[88rem]")
+    expect(rootComponent).not.toContain('pathname === "/"')
+
+    // Reading-width cap is on Repos / Completed content, not the shared shell.
+    expect(reposSource()).toContain("max-w-[88rem]")
+    expect(completedSource()).toContain("max-w-[88rem]")
+    expect(reposSource()).toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
+    expect(completedSource()).toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)
   })
 })
