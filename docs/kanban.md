@@ -6,17 +6,17 @@ The Kanban Pipeline is an alternate Harness work view for an operator who
 needs to understand flow at a glance: what is waiting, being built, under
 review, in the PR path, blocked, or merged.
 
-It was prototyped in the `redesign/kanban-pipeline` branch. The prototype
-demonstrates the interaction model and visual direction; it is not currently
-part of the main Harness route tree.
+The board is the home page (`/`). Legacy `/kanban` bookmarks redirect to `/`.
+With zero repositories configured, `/` shows the add-repo blank slate instead of
+an empty pipeline.
 
 The board is a projection of existing Work Items. It does not introduce a
-second workflow, mutate lifecycle state, or replace the existing dashboard.
+second workflow or mutate lifecycle state.
 
 ## Operator Question
 
-The standard dashboard answers questions about repositories, settings, and
-individual Jobs. The board should make this question fast to answer:
+Repository management lives on `/repos`. The board should make this question
+fast to answer:
 
 > Where is work accumulating, and which work needs intervention now?
 
@@ -63,7 +63,7 @@ The prototype uses an industrial control-board language:
   information rather than unused space.
 - The regular committed-pull-request totals remain above the board, so delivery
   throughput and in-flight flow are visible together.
-- Repositories remain below the board as source and intake context.
+- Repository management and intake live on `/repos`, not under the board.
 
 The visual treatment may be adapted to the active Harness design system. The
 essential design idea is the board structure, fixed lane identity, and compact
@@ -77,14 +77,12 @@ The Jobs area has two tabs:
 2. Completed last 24 h shows every work item completed in the rolling previous
    24 hours (no fixed item limit).
 
-Working and Failed list tabs remain on the Home Jobs card only; Kanban does not
-duplicate those lists. Pipeline still assembles tickets from the existing
-working, failed, and completed Work Item queries.
+There are no separate Working or Failed list tabs. Pipeline still assembles
+tickets from the existing working, failed, and completed Work Item queries.
 
-The existing arrow-key tab behavior, selected-tab ARIA semantics, Jobs collapse
-control, retry/reset/start/pause actions, Session usage dialog, issue links,
-and pull-request links remain available. Pipeline is an additional
-presentation, not a reduced-action overview.
+The existing arrow-key tab behavior, selected-tab ARIA semantics,
+retry/reset/start/pause actions, Session usage dialog, issue links, and
+pull-request links remain available.
 
 Repository filters sit above the board:
 
@@ -101,7 +99,8 @@ destroying the flow grouping supplied by the board.
 
 Kanban tickets reuse the Work Item lifecycle chip row, but **collapse earlier
 lanes by default** so the card focuses on steps for the lane the ticket is in.
-This is **Kanban-only**; Home Jobs and other surfaces keep the full chip list.
+This is **Kanban-only**; other surfaces (e.g. completed rows) leave collapse off
+and keep the full chip list.
 
 ### Focus lane
 
@@ -183,28 +182,21 @@ Keep the lane classifier close to the board module and cover it with focused
 tests. It is a presentation policy that will need deliberate updates if the
 lifecycle gains new states.
 
-## Proposed Route Seam
+## Route Seam
 
-When adopted, introduce a dedicated `/kanban` route rather than changing the
-current dashboard route by default.
+Home (`/`) is a thin composition layer:
 
-The route should be a thin composition layer:
+1. With zero repositories, render the shared add-repo blank slate.
+2. With one or more repositories, render the committed pull-request totals and
+   `KanbanJobsBoard` (pipeline lanes + Completed last 24 h).
+3. Primary nav: product title → `/`; tabs are Repos, Kanban (`/`), Completed.
+4. `/kanban` redirects to `/`. Repository management stays on `/repos`.
 
-1. Render the existing application shell and settings control.
-2. Render the committed pull-request totals.
-3. Render a reusable `KanbanJobsBoard` over existing Work Item queries and
-   actions.
-4. Render existing repository cards below the board.
-
-Extract reusable pieces rather than copying the current index route:
+Shared pieces:
 
 - `pipelineLaneFor(workItem)` and lane definitions.
-- The board controls and responsive lane selector.
-- A ticket component that composes existing Work Item actions and status UI.
-
-The current dashboard and `/kanban` should share query functions and mutation
-behavior, but may intentionally use different information hierarchy and visual
-systems.
+- Board controls and responsive lane selector in `kanban-board.tsx`.
+- Ticket component that composes existing Work Item actions and status UI.
 
 ## Acceptance Criteria
 
@@ -214,9 +206,9 @@ systems.
 - Queued status-check polls and other queued later steps stay in their
   lifecycle lane; only blockers / worker-slot holds appear in Queue.
 - Every ticket preserves access to its existing operational actions.
-- Pipeline and Completed remain available and keyboard accessible; Working and
-  Failed lists stay on Home only.
+- Pipeline and Completed remain available and keyboard accessible.
 - Repository filtering applies consistently to both board and Completed list.
+- Zero repositories → blank slate on `/`; one or more → board on `/`.
 - Desktop shows all six lanes; mobile shows a selected lane without horizontal
   page overflow.
 - No new polling or GraphQL contract is introduced.

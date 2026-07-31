@@ -10,9 +10,8 @@ import { WorkItemsLiveUpdates } from "./work-items-live-updates.js"
 
 /**
  * Mounts the Harness's existing live invalidation subscriptions for the
- * board-only route. Repository cards own these subscriptions on `/repos`, and
- * Home mounts its own for Jobs, so /kanban mounts them without rendering
- * repository management.
+ * kanban board on `/`. Repository cards own these subscriptions on `/repos`;
+ * the board mounts them without rendering repository management.
  */
 export function KanbanLiveUpdates({
   repositoryIds,

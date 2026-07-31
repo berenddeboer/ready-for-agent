@@ -229,12 +229,14 @@ describe("localCommittedPullRequestDayBounds", () => {
 })
 
 describe("Committed pull requests dashboard UI", () => {
-  test("renders above the Jobs card with Today, Yesterday, This week, Last week, and Two weeks ago labels", () => {
+  test("renders above the pipeline board with Today, Yesterday, This week, Last week, and Two weeks ago labels", () => {
     const source = homeSource()
-    const dashboardIndex = source.indexOf(
-      'aria-label="Committed pull requests"',
+    const board = readFileSync(
+      join(import.meta.dir, "../src/kanban-board.tsx"),
+      "utf8",
     )
-    const jobsIndex = source.indexOf('aria-label="Jobs"')
+    const dashboardIndex = board.indexOf('aria-label="Committed pull requests"')
+    const jobsIndex = board.indexOf('aria-label="Jobs"')
     expect(dashboardIndex).toBeGreaterThan(-1)
     expect(jobsIndex).toBeGreaterThan(dashboardIndex)
     expect(source).toContain("Today")
@@ -298,8 +300,12 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("setBounds")
   })
 
-  test("shows loading and error states without blocking Jobs", () => {
+  test("shows loading and error states without blocking the board", () => {
     const source = homeSource()
+    const board = readFileSync(
+      join(import.meta.dir, "../src/kanban-board.tsx"),
+      "utf8",
+    )
     expect(source).toContain('aria-label="Loading committed pull requests"')
     expect(source).toContain('role="status"')
     expect(source).toContain('aria-busy="true"')
@@ -308,13 +314,10 @@ describe("Committed pull requests dashboard UI", () => {
       "Could not load committed pull requests. Please try again.",
     )
     expect(source).toContain('role="alert"')
-    const homeBody = source.slice(
-      source.indexOf("function HomeBody()"),
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-    )
-    expect(homeBody).toContain("<CommittedPullRequestsDashboard />")
-    expect(homeBody).toContain("<JobsCard />")
-    expect(homeBody).not.toContain("Suspense fallback={<Committed")
+    // Board mounts dashboard as a sibling of the pipeline (no Suspense around it).
+    expect(board).toContain("<CommittedPullRequestsDashboard />")
+    expect(board).toContain("<KanbanJobsBoard />")
+    expect(board).not.toContain("Suspense fallback={<Committed")
   })
 
   test("waits for all five counts before leaving the loading state", () => {
@@ -351,19 +354,24 @@ describe("Committed pull requests dashboard UI", () => {
     expect(dashboard).toContain("{twoWeeksAgo}")
   })
 
-  test("always shows PR dashboard and Jobs; repository management lives on /repos", () => {
-    const source = homeSource()
-    const homeBody = source.slice(
-      source.indexOf("function HomeBody()"),
-      source.indexOf("function CommittedPullRequestsDashboard()"),
+  test("board shows PR dashboard and pipeline; zero repos use blank slate", () => {
+    const home = homeSource()
+    const board = readFileSync(
+      join(import.meta.dir, "../src/kanban-board.tsx"),
+      "utf8",
     )
-    expect(homeBody).toContain("<CommittedPullRequestsDashboard />")
-    expect(homeBody).toContain("<JobsCard />")
-    expect(homeBody).toContain('aria-label="Committed pull requests"')
-    expect(homeBody).toContain('aria-label="Jobs"')
-    // Repository cards / empty-state guidance moved off Home.
-    expect(homeBody).not.toContain("<RepositoryCards")
-    expect(homeBody).not.toContain("return <RepositoryCards />")
-    expect(homeBody).not.toContain("repositories.length === 0")
+    expect(board).toContain("<CommittedPullRequestsDashboard />")
+    expect(board).toContain('aria-label="Committed pull requests"')
+    expect(board).toContain('aria-label="Jobs"')
+    expect(board).toContain("<KanbanJobsBoard />")
+    expect(board).not.toContain("RepositoryCards")
+    // Zero-repo gate lives on home; board assumes repositories exist.
+    const homeContent = home.slice(
+      home.indexOf("function HomeContent()"),
+      home.indexOf("function EmptyRepositoriesBlankSlate()"),
+    )
+    expect(homeContent).toContain("(repositories ?? []).length === 0")
+    expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")
+    expect(homeContent).toContain("<KanbanBoard />")
   })
 })

@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
-const kanbanSource = () =>
+const boardSource = () =>
+  readFileSync(join(import.meta.dir, "../src/kanban-board.tsx"), "utf8")
+
+const homeSource = () =>
+  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+
+const kanbanRedirectSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/kanban.tsx"), "utf8")
 
 const rootSource = () =>
@@ -11,10 +17,35 @@ const rootSource = () =>
 const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
-describe("/kanban route", () => {
-  test("is a dedicated TanStack file route with Pipeline selected by default", () => {
-    const source = kanbanSource()
+describe("kanban home board", () => {
+  test("home route renders the board when repositories exist", () => {
+    const home = homeSource()
+    expect(home).toContain('createFileRoute("/")')
+    expect(home).toContain("function HomeContent()")
+    expect(home).toContain("(repositories ?? []).length === 0")
+    expect(home).toContain("<EmptyRepositoriesBlankSlate />")
+    expect(home).toContain("<KanbanBoard />")
+    expect(home).toContain('from "../kanban-board.js"')
+    // Membership SSE covers both blank slate and board without `/repos`.
+    expect(home).toContain("function HomeRepositoryMembershipLive()")
+    expect(home).toContain("followRepositoryMembershipLive")
+    expect(home).toContain("liveUpdatesWarningPresentation")
+  })
+
+  test("/kanban redirects to home", () => {
+    const source = kanbanRedirectSource()
     expect(source).toContain('createFileRoute("/kanban")')
+    expect(source).toContain("redirect")
+    expect(source).toContain('to: "/"')
+    expect(source).toContain("replace: true")
+    expect(source).toContain("beforeLoad")
+    expect(source).not.toContain("KanbanJobsBoard")
+    expect(source).not.toContain("KanbanBoard")
+  })
+
+  test("board defaults Pipeline tab and mounts committed PR dashboard", () => {
+    const source = boardSource()
+    expect(source).toContain("export function KanbanBoard()")
     expect(source).toContain('useState<JobsTab>("pipeline")')
     expect(source).toContain("<CommittedPullRequestsDashboard />")
     expect(source).toContain("<KanbanJobsBoard />")
@@ -22,7 +53,7 @@ describe("/kanban route", () => {
 
   test("does not render the former board masthead (title, deck, or separator)", () => {
     // Issue #670: decorative masthead is removed; content starts under primary nav.
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).not.toContain("board-masthead")
     expect(source).not.toContain("board-kicker")
     expect(source).not.toContain("board-title")
@@ -45,7 +76,7 @@ describe("/kanban route", () => {
   test("does not render the Jobs section header band (eyebrow, title, LIVE, collapse)", () => {
     // Issue #681: header band is gone; board mounts unconditionally. Tab/source
     // filter chrome stays inside KanbanJobsBoard (see tabs/filtering test).
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).not.toContain("section-rail")
     expect(source).not.toContain("section-index")
     expect(source).not.toContain("section-title")
@@ -60,9 +91,9 @@ describe("/kanban route", () => {
     expect(source).toContain("<KanbanJobsBoard />")
     expect(source).not.toContain("!jobsCollapsed &&")
 
-    // KanbanPage itself has no title/eyebrow chrome above the board.
+    // KanbanBoard itself has no title/eyebrow chrome above the board.
     const page = source.slice(
-      source.indexOf("function KanbanPage("),
+      source.indexOf("export function KanbanBoard("),
       source.indexOf("function PipelineCompleteSummary"),
     )
     expect(page).not.toContain("section-rail")
@@ -96,7 +127,7 @@ describe("/kanban route", () => {
   })
 
   test("renders all six lifecycle lanes as an accessible pipeline", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).toContain('aria-label="Lifecycle pipeline"')
     expect(source).toContain("pipelineLaneFor(workItem)")
     expect(source).toContain("Lane clear")
@@ -104,9 +135,9 @@ describe("/kanban route", () => {
   })
 
   test("retains accessible two-tab control, keyboard navigation, and repository filtering", () => {
-    // Issue #675: Working and Failed tabs are Home-only; Kanban keeps Pipeline
+    // Working and Failed tabs were Home-only Jobs; board keeps Pipeline
     // (default) and Completed last 24 h.
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).toContain('type JobsTab = "pipeline" | "completed"')
     expect(source).toContain('{ id: "pipeline", label: "Pipeline" }')
     expect(source).toContain(
@@ -162,8 +193,8 @@ describe("/kanban route", () => {
     )
   })
 
-  test("retains board controls and excludes repository management", () => {
-    const source = kanbanSource()
+  test("retains board controls and excludes repository management on the board", () => {
+    const source = boardSource()
     // Section collapse absence is covered by the #681 header-band test above.
     expect(source).toContain("<SessionUsageDialog")
     expect(source).toContain("<WorkItemPauseButton")
@@ -174,7 +205,7 @@ describe("/kanban route", () => {
   })
 
   test("opens Session usage from tickets in every lane while retaining copy", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
       source.indexOf("function KanbanJobsBoard()"),
@@ -191,7 +222,7 @@ describe("/kanban route", () => {
   })
 
   test("Merged-lane tickets show start time and total duration without lifecycle steps", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).toContain("function PipelineCompleteSummary(")
     const summary = source.slice(
       source.indexOf("function PipelineCompleteSummary("),
@@ -225,8 +256,8 @@ describe("/kanban route", () => {
   })
 
   test("Kanban tickets opt into earlier-lane lifecycle chip collapse", () => {
-    // Issue #679: Kanban-only presentation; Home Jobs leaves collapseEarlierLanes off.
-    const source = kanbanSource()
+    // Issue #679: Kanban-only presentation; other surfaces leave collapse off.
+    const source = boardSource()
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
       source.indexOf("function KanbanJobsBoard()"),
@@ -240,10 +271,7 @@ describe("/kanban route", () => {
     expect(lifecycleCall).toContain("collapseEarlierLanes")
     expect(lifecycleCall).toContain("compact")
 
-    const home = readFileSync(
-      join(import.meta.dir, "../src/routes/index.tsx"),
-      "utf8",
-    )
+    const home = homeSource()
     const completedRow = readFileSync(
       join(import.meta.dir, "../src/completed-work-item-row.tsx"),
       "utf8",
@@ -268,9 +296,8 @@ describe("/kanban route", () => {
 
   test("Kanban list tabs share Merged-lane compact summary via pipelineLaneFor", () => {
     // Gate is lane identity, not Pipeline vs Completed tab. Completed-tab rows
-    // that classify as complete intentionally reuse PipelineCompleteSummary;
-    // homepage Jobs Completed isolation is separate (index.tsx JobsCard).
-    const source = kanbanSource()
+    // that classify as complete intentionally reuse PipelineCompleteSummary.
+    const source = boardSource()
     const board = source.slice(source.indexOf("function KanbanJobsBoard("))
     expect(board).toContain("laneId={pipelineLaneFor(workItem)}")
     expect(board).toContain("<PipelineTicket")
@@ -283,7 +310,7 @@ describe("/kanban route", () => {
   })
 
   test("shows agent backend label inline before session id on pipeline tickets", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
       source.indexOf("function KanbanJobsBoard()"),
@@ -305,7 +332,7 @@ describe("/kanban route", () => {
   test("reuses existing queries and live invalidation without polling", () => {
     // Working/Failed list queries still feed the Pipeline board merge; they are
     // not tab panels. Completed tab still uses jobsCompletedWorkItemsQuery.
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).toContain("jobsWorkingWorkItemsQuery")
     expect(source).toContain("jobsFailedWorkItemsQuery")
     expect(source).toContain("jobsCompletedWorkItemsQuery")
@@ -324,7 +351,7 @@ describe("/kanban route", () => {
   })
 
   test("Pipeline preserves Completed stateReadyAt order instead of re-sorting by createdAt", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     const board = source.slice(source.indexOf("function KanbanJobsBoard("))
     expect(board).toContain("sortCompletedNewestFirst")
     expect(board).toContain("const pipelineItems = Array.from(")
@@ -332,7 +359,7 @@ describe("/kanban route", () => {
   })
 
   test("starts live invalidation after the initial board queries settle", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     const loadingBranch = source.slice(
       source.indexOf("if (loading && activeItems.length === 0)"),
       source.indexOf("if (failed)"),
@@ -347,7 +374,7 @@ describe("/kanban route", () => {
   })
 
   test("renders an accessible mobile lane selector controlling one selected lane", () => {
-    const source = kanbanSource()
+    const source = boardSource()
     expect(source).toContain('useState<PipelineLaneId>("queue")')
     expect(source).toContain('<fieldset className="lane-switcher">')
     expect(source).toContain("aria-pressed={mobileLane === lane.id}")
@@ -370,20 +397,20 @@ describe("/kanban route", () => {
     expect(desktopStyles).toContain("display: none")
   })
 
-  test("uses full viewport width only on /kanban while other routes keep 88rem", () => {
-    // Root shell is route-aware: drop max-w-[88rem] for Kanban only; gutters stay.
+  test("uses full viewport width only on home board while other routes keep 88rem", () => {
+    // Root shell is route-aware: drop max-w-[88rem] for `/` only; gutters stay.
     const root = rootSource()
     const rootComponent = root.slice(root.indexOf("function RootComponent("))
     expect(rootComponent).toContain("useLocation")
-    expect(rootComponent).toContain('pathname === "/kanban"')
+    expect(rootComponent).toContain('pathname === "/"')
     // Shared gutters apply on every route (single base string, not duplicated).
     expect(rootComponent).toContain(
       "mx-auto min-h-screen w-full px-5 py-6 sm:px-8 lg:px-12",
     )
-    // 88rem remains available for non-Kanban routes, gated by the Kanban check.
+    // 88rem remains available for non-Kanban routes, gated by the home check.
     expect(rootComponent).toContain("max-w-[88rem]")
     expect(rootComponent).toMatch(
-      /(?:isKanbanPage|pathname === "\/kanban")[\s\S]{0,200}max-w-\[88rem\]|max-w-\[88rem\][\s\S]{0,200}(?:isKanbanPage|pathname === "\/kanban")/,
+      /(?:isKanbanPage|pathname === "\/")[\s\S]{0,200}max-w-\[88rem\]|max-w-\[88rem\][\s\S]{0,200}(?:isKanbanPage|pathname === "\/")/,
     )
     // Cap is not a static always-on className on the wrapper.
     expect(rootComponent).not.toMatch(/className="[^"]*max-w-\[88rem\][^"]*"/)

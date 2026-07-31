@@ -33,14 +33,26 @@ const dismissFirstRunSettings = async (page: Page) => {
 }
 
 When("I navigate to the Kanban board", async ({ page }) => {
-  await page.goto("/kanban")
-  await expect(page).toHaveURL(/\/kanban$/)
+  await page.goto("/")
+  await expect(page).toHaveURL(/\/$/)
   await dismissFirstRunSettings(page)
 })
 
-When("I open the Home dashboard", async ({ page }) => {
+When("I open the home page", async ({ page }) => {
   await page.goto("/")
   await expect(page).toHaveURL(/\/$/)
+  await dismissFirstRunSettings(page)
+})
+
+When("I navigate to the legacy Kanban path", async ({ page }) => {
+  await page.goto("/kanban")
+  await expect(page).toHaveURL(/\/$/)
+  await dismissFirstRunSettings(page)
+})
+
+When("I open the Repos page", async ({ page }) => {
+  await page.goto("/repos")
+  await expect(page).toHaveURL(/\/repos$/)
   await dismissFirstRunSettings(page)
 })
 
@@ -50,9 +62,9 @@ When("I click the Kanban top nav control", async ({ page }) => {
     .click()
 })
 
-When("I click the Home top nav control", async ({ page }) => {
+When("I click the Repos top nav control", async ({ page }) => {
   await primaryNav(page)
-    .getByRole("link", { name: "Home", exact: true })
+    .getByRole("link", { name: "Repos", exact: true })
     .click()
 })
 
@@ -113,10 +125,13 @@ Then(
   },
 )
 
-Then("the Home top nav control is active", async ({ page }) => {
-  const home = primaryNav(page).getByRole("link", { name: "Home", exact: true })
-  await expect(home).toBeVisible()
-  await expect(home).toHaveAttribute("aria-current", "page")
+Then("the Repos top nav control is active", async ({ page }) => {
+  const repos = primaryNav(page).getByRole("link", {
+    name: "Repos",
+    exact: true,
+  })
+  await expect(repos).toBeVisible()
+  await expect(repos).toHaveAttribute("aria-current", "page")
 })
 
 Then("the Kanban top nav control is active", async ({ page }) => {
@@ -128,10 +143,13 @@ Then("the Kanban top nav control is active", async ({ page }) => {
   await expect(kanban).toHaveAttribute("aria-current", "page")
 })
 
-Then("the Home top nav control is not active", async ({ page }) => {
-  const home = primaryNav(page).getByRole("link", { name: "Home", exact: true })
-  await expect(home).toBeVisible()
-  await expect(home).not.toHaveAttribute("aria-current", "page")
+Then("the Repos top nav control is not active", async ({ page }) => {
+  const repos = primaryNav(page).getByRole("link", {
+    name: "Repos",
+    exact: true,
+  })
+  await expect(repos).toBeVisible()
+  await expect(repos).not.toHaveAttribute("aria-current", "page")
 })
 
 Then("the Kanban top nav control is not active", async ({ page }) => {
@@ -144,23 +162,37 @@ Then("the Kanban top nav control is not active", async ({ page }) => {
 })
 
 Then("I am on the Kanban board", async ({ page }) => {
-  await expect(page).toHaveURL(/\/kanban$/)
+  await expect(page).toHaveURL(/\/$/)
   await expect(
     page.getByRole("region", { name: "Lifecycle pipeline" }),
   ).toBeVisible()
 })
 
-Then("I am on the Home dashboard", async ({ page }) => {
-  await expect(page).toHaveURL(/\/$/)
-  // Home keeps the dashboard + Jobs; repository management lives on /repos.
-  await expect(
-    page.getByRole("region", { name: "Committed pull requests" }),
-  ).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible()
+Then("I am on the Repos page", async ({ page }) => {
+  await expect(page).toHaveURL(/\/repos$/)
+  // With repos, the configured list is the landmark (not the pipeline board).
   await expect(
     page.getByRole("region", { name: "Lifecycle pipeline" }),
   ).toHaveCount(0)
   await expect(
     page.getByRole("region", { name: "Configured repositories" }),
+  ).toBeVisible()
+})
+
+Then("the add-repository blank slate is visible", async ({ page }) => {
+  await expect(
+    page.getByRole("heading", { name: "No repositories configured" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Add a repository" }),
+  ).toBeVisible()
+})
+
+Then("the kanban board is not rendered", async ({ page }) => {
+  await expect(
+    page.getByRole("region", { name: "Lifecycle pipeline" }),
+  ).toHaveCount(0)
+  await expect(
+    page.getByRole("region", { name: "Committed pull requests" }),
   ).toHaveCount(0)
 })

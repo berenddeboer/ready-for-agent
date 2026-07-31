@@ -27,8 +27,8 @@ function CompletedPage() {
         </h1>
         <p className="mt-1.5 max-w-2xl text-sm text-ink-soft">
           Historical Complete and Abandoned Work Items across every repository,
-          newest first. The Jobs Completed tab still shows only the last rolling
-          window; this page is the full archive.
+          newest first. The Kanban Completed tab still shows only the last
+          rolling window; this page is the full archive.
         </p>
       </header>
       <Suspense fallback={<CompletedListSkeleton />}>

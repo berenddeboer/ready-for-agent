@@ -64,14 +64,10 @@ describe("/completed route", () => {
     expect(source).toContain("COMPLETED_WORK_ITEMS_PAGE_SIZE")
   })
 
-  test("reuses CompletedWorkItemRow for the same card presentation as Jobs Completed", () => {
+  test("reuses CompletedWorkItemRow for historical completed cards", () => {
     const source = completedSource()
     expect(source).toContain("<CompletedWorkItemRow")
     expect(source).toContain('from "../completed-work-item-row.js"')
-
-    const index = indexSource()
-    expect(index).toContain("<CompletedWorkItemRow")
-    expect(index).toContain('selectedTab === "completed"')
 
     const row = rowSource()
     expect(row).toContain("export function CompletedWorkItemRow(")

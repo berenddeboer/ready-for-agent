@@ -8,17 +8,14 @@ const homeSource = () =>
 const toggleSource = () =>
   readFileSync(join(import.meta.dir, "../src/card-collapse-toggle.tsx"), "utf8")
 
-describe("collapsible jobs and repository cards", () => {
-  test("jobs section has expand/collapse control and hides body when collapsed", () => {
+describe("collapsible repository cards", () => {
+  test("home no longer collapses a Jobs section", () => {
     const source = homeSource()
-    expect(source).toContain('from "../card-collapse.js"')
-    expect(source).toContain('from "../card-collapse-toggle.js"')
-    expect(source).toContain("jobsCardCollapseId()")
-    expect(source).toContain("useCardCollapsed(jobsCardCollapseId())")
-    expect(source).toContain('label="Jobs"')
-    expect(source).toContain("jobs-card-body")
-    expect(source).toContain("!jobsCollapsed &&")
-    expect(source).toContain("toggleJobsCollapsed")
+    expect(source).not.toContain("jobsCardCollapseId()")
+    expect(source).not.toContain("useCardCollapsed(jobsCardCollapseId())")
+    expect(source).not.toContain("jobs-card-body")
+    expect(source).not.toContain("toggleJobsCollapsed")
+    expect(source).not.toContain("function JobsCard()")
   })
 
   test("repository cards collapse body while keeping header controls", () => {

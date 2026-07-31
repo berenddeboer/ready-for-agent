@@ -41,6 +41,16 @@ describe("Repository settings Agent Backend override", () => {
   test("work item detail continues to show captured backend provenance", () => {
     const source = indexSource()
     expect(source).toContain("agentBackend: { id: true, label: true }")
-    expect(source).toContain("{workItem.agentBackend.label}")
+    // Presentation lives on kanban tickets and completed rows (not home Jobs).
+    const board = readFileSync(
+      join(import.meta.dir, "../src/kanban-board.tsx"),
+      "utf8",
+    )
+    const completedRow = readFileSync(
+      join(import.meta.dir, "../src/completed-work-item-row.tsx"),
+      "utf8",
+    )
+    expect(board).toContain("{workItem.agentBackend.label}")
+    expect(completedRow).toContain("{workItem.agentBackend.label}")
   })
 })
