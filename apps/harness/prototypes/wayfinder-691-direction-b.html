@@ -1,0 +1,1111 @@
+<!doctype html>
+<!--
+  PROTOTYPE — throwaway, not for production.
+  Wayfinder ticket #691 ("Prototype: clanker direction B", map #689).
+
+  Plan: one full-page Harness homepage (nav + committed-PR stats + Kanban
+  board) in a single standalone HTML file. Direction B's angle: the
+  "factory floor" — a bright production hall. The board is epoxy flooring,
+  lanes are work cells marked by painted color boundary stripes (no grey
+  concrete, no warm paper, no serif), headers are stenciled safety-sign
+  plates, stats are painted on the wall like a production scoreboard,
+  tickets are printed work-order forms. Queue carries a chevron walkway
+  intake hint pointing to Repos.
+
+  Run: open this file in a browser (no build, no server needed).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direction B · Factory floor — Clanker Harness prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=Barlow:wght@400;500;600;700&family=Roboto+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------------
+     Direction B tokens — cool epoxy floor + painted cell markings.
+     Lane colors are the fixed pipeline identity (unchanged):
+       Queue #ffd21c · Build #1976d2 · Review #7654b5
+       PR #168b62 · Attention #ff4d1c · Merged #151515
+  ------------------------------------------------------------------ */
+  :root {
+    --floor: #e9edeb;
+    --cell: #f6f8f7;
+    --card: #ffffff;
+    --plate: #dfe4e1;
+    --ink: #101312;
+    --ink-2: #3c4341;
+    --ink-soft: #6a726f;
+    --rule: #c4cac7;
+
+    --lane-queue: #ffd21c;
+    --lane-build: #1976d2;
+    --lane-review: #7654b5;
+    --lane-pr: #168b62;
+    --lane-attention: #ff4d1c;
+    --lane-merged: #151515;
+
+    --ok: #147a4a;
+    --bad: #c22c1e;
+    --warn: #b36400;
+    --teal: #0f6e63;
+    --violet: #6a3fb5;
+
+    --font-display: "Saira Stencil One", "Arial Black", "Helvetica Neue", sans-serif;
+    --font-sans: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "Roboto Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    min-width: 20rem;
+    min-height: 100vh;
+    background-color: var(--floor);
+    /* painted floor grid — cool epoxy hall, not warm paper */
+    background-image:
+      linear-gradient(rgb(16 19 18 / 0.05) 1px, rgb(16 19 18 / 0) 1px),
+      linear-gradient(90deg, rgb(16 19 18 / 0.05) 1px, rgb(16 19 18 / 0) 1px);
+    background-size: 56px 56px;
+    background-attachment: fixed;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection { background: var(--ink); color: var(--lane-queue); }
+
+  a { color: inherit; }
+
+  .page {
+    margin-inline: auto;
+    width: 100%;
+    padding: 1.5rem 2rem 4rem;
+  }
+
+  .sr-only {
+    position: absolute;
+    left: -9999px;
+  }
+
+  /* ============================ Masthead ============================ */
+
+  .mast {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem 1.5rem;
+    padding-bottom: 1rem;
+  }
+
+  .brand h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: clamp(1.8rem, 3.6vw, 2.6rem);
+    font-weight: 400;
+    line-height: 0.95;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+  }
+
+  .brand h1 a { color: var(--ink); text-decoration: none; }
+  .brand h1 a:hover { color: var(--lane-build); }
+
+  /* stamped plate for the version */
+  .brand .ver {
+    display: inline-block;
+    margin-top: 0.5rem;
+    border: 1.5px solid var(--ink);
+    background: var(--plate);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65), inset 0 -2px 0 rgb(16 19 18 / 0.12);
+    padding: 0.18rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  .nav {
+    margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+  }
+
+  /* Stamped aluminium plates, flush-mounted (no offset shadow). */
+  .plate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border: 2px solid var(--ink);
+    background-color: var(--plate);
+    background-image:
+      radial-gradient(circle 1.6px at 7px 7px, rgb(16 19 18 / 0.55) 1.6px, rgb(16 19 18 / 0) 2.1px),
+      radial-gradient(circle 1.6px at calc(100% - 7px) 7px, rgb(16 19 18 / 0.55) 1.6px, rgb(16 19 18 / 0) 2.1px);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.65), inset 0 -2px 0 rgb(16 19 18 / 0.12);
+    padding: 0.55rem 0.95rem;
+    color: var(--ink-2);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+
+  .plate:hover { background-color: #cfd6d2; color: var(--ink); }
+
+  .plate[aria-current="page"] {
+    background-color: var(--ink);
+    background-image: none;
+    box-shadow: none;
+    color: var(--floor);
+  }
+
+  .plate svg { width: 0.9rem; height: 0.9rem; }
+
+  /* Floor aisle line under the masthead: black band, dashed centre. */
+  .aisle {
+    height: 12px;
+    background: var(--ink);
+    position: relative;
+  }
+
+  .aisle::after {
+    content: "";
+    position: absolute;
+    inset: 50% 0 auto;
+    border-top: 2px dashed rgb(233 237 235 / 0.8);
+  }
+
+  /* ================= Production scoreboard (stats) ================== */
+
+  .scoreboard { margin-top: 1.5rem; }
+
+  /* reversed stencil band, like a painted wall sign */
+  .scoreboard-band {
+    background: var(--ink);
+    padding: 0.45rem 0.85rem 0.4rem;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .scoreboard-band p {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--floor);
+  }
+
+  .scoreboard-band p:last-child {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    color: rgb(233 237 235 / 0.6);
+  }
+
+  /* digits painted straight on the floor — no boxes, no windows */
+  .scoreboard-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border-inline: 1px solid var(--rule);
+  }
+
+  .stat {
+    background: var(--floor);
+    padding: 0.75rem 0.85rem 0.6rem;
+  }
+
+  .stat .s-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .stat .s-value {
+    display: block;
+    margin-top: 0.15rem;
+    font-family: var(--font-display);
+    font-size: clamp(1.9rem, 3vw, 2.7rem);
+    line-height: 1;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ============================ Jobs ================================ */
+
+  .jobs { margin-top: 1.6rem; }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+
+  .control-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+
+  .control-caption {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .selector {
+    border: 1.5px solid var(--ink);
+    background: transparent;
+    padding: 0.45rem 0.7rem;
+    color: var(--ink-2);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .selector:hover { background: var(--plate); color: var(--ink); }
+
+  .selector[aria-selected="true"], .selector[aria-pressed="true"] {
+    background: var(--ink);
+    color: var(--floor);
+  }
+
+  /* ============== Board: six cells, painted floor markings ========== */
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    border: 3px solid var(--ink);
+    background: var(--cell);
+  }
+
+  .lane {
+    min-width: 0;
+    min-height: 26rem;
+    background: var(--cell);
+    /* painted cell boundary: lane color marks the floor, no grey fill */
+    border-inline: 6px solid var(--lc);
+  }
+
+  /* Safety-sign header plate: saturated lane color, stencil type. */
+  .lane-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-height: 5.2rem;
+    margin-inline: -6px; /* plate spans the painted stripes */
+    padding: 0.65rem 0.75rem;
+    background: var(--lc);
+    color: var(--lt, #fff);
+    border-bottom: 3px solid var(--ink);
+    /* sign keyline */
+    box-shadow: inset 0 0 0 2px rgb(16 19 18 / 0.35);
+  }
+
+  .lane-cell {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  .lane-title {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 400;
+    line-height: 0.9;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .lane-count {
+    text-align: right;
+    font-family: var(--font-display);
+    font-size: 2rem;
+    line-height: 0.8;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .lane-count small {
+    display: block;
+    margin-top: 0.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.55rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  .lane-stack {
+    display: grid;
+    align-content: start;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 0.7rem 0.6rem;
+    list-style: none;
+  }
+
+  .lane-empty {
+    margin: 0.55rem 0.6rem;
+    padding-top: 0.9rem;
+    border-top: 1px dashed var(--ink-soft);
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: 1.5;
+    text-transform: uppercase;
+  }
+
+  /* ===================== Tickets: work orders ======================= */
+
+  .ticket {
+    min-width: 0;
+    border: 1.5px solid var(--ink);
+    border-left: 6px solid var(--tc, var(--ink)); /* routing stripe */
+    background: var(--card);
+  }
+
+  /* form header strip */
+  .t-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-bottom: 1.5px solid var(--ink);
+    background: var(--cell);
+    padding: 0.28rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .t-head .wo { color: var(--ink); }
+
+  .t-body { padding: 0.55rem 0.6rem 0.6rem; }
+
+  .t-repo {
+    margin: 0 0 0.35rem;
+    overflow: hidden;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .t-title {
+    display: block;
+    color: var(--ink);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+  }
+
+  .t-title:hover { color: var(--lane-build); text-decoration: underline; text-decoration-thickness: 2px; }
+
+  .t-title .num { font-family: var(--font-mono); font-weight: 600; color: var(--ink-2); }
+
+  .t-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
+  }
+
+  /* rubber-stamp status chips */
+  .stamp {
+    display: inline-block;
+    border: 2px solid currentColor;
+    padding: 0.22rem 0.42rem;
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transform: rotate(-0.8deg);
+  }
+
+  .stamp-state  { color: var(--ink-2);  background: rgb(16 19 18 / 0.04); }
+  .stamp-ok     { color: var(--ok);     background: rgb(20 122 74 / 0.08); }
+  .stamp-bad    { color: var(--bad);    background: rgb(194 44 30 / 0.07); }
+  .stamp-warn   { color: var(--warn);   background: rgb(179 100 0 / 0.08); }
+  .stamp-teal   { color: var(--teal);   background: rgb(15 110 99 / 0.08); }
+  .stamp-violet { color: var(--violet); background: rgb(106 63 181 / 0.08); }
+
+  .icon-btn {
+    flex: none;
+    border: 1.5px solid var(--ink);
+    background: var(--plate);
+    width: 1.5rem;
+    height: 1.5rem;
+    color: var(--ink-2);
+    font-size: 0.7rem;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .icon-btn:hover { background: var(--ink); color: var(--floor); }
+
+  .t-runtime {
+    display: grid;
+    gap: 0.25rem;
+    margin-top: 0.55rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  .t-meta {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.3rem;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    color: var(--ink-soft);
+  }
+
+  .t-meta .session {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-2);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
+  .t-meta .session:hover { color: var(--lane-build); }
+
+  /* checklist steps: printed form checkboxes */
+  .t-steps {
+    display: grid;
+    gap: 0.22rem;
+    margin-top: 0.55rem;
+  }
+
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--ink-soft);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .step .box {
+    flex: none;
+    width: 0.6rem;
+    height: 0.6rem;
+    border: 1.5px solid var(--ink-2);
+    background: var(--card);
+  }
+
+  .step.done { color: var(--ink-2); }
+  .step.done .box {
+    background: var(--ink);
+    box-shadow: inset 0 0 0 1.5px var(--card);
+  }
+  .step.live { color: var(--ink); }
+  .step.live .box {
+    border-color: var(--lc, var(--lane-build));
+    background: linear-gradient(90deg, var(--lc, var(--lane-build)) 50%, var(--card) 50%);
+  }
+  .step.fail { color: var(--bad); }
+  .step.fail .box { border-color: var(--bad); background: var(--bad); box-shadow: inset 0 0 0 1.5px var(--card); }
+  .step .dur { color: var(--ink-soft); font-weight: 500; margin-left: auto; }
+
+  .lane-summary {
+    display: block;
+    width: 100%;
+    margin-top: 0.55rem;
+    border: 0;
+    border-top: 1px dashed var(--ink-soft);
+    background: transparent;
+    padding: 0.35rem 0.1rem 0;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-align: left;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .lane-summary:hover { color: var(--ink); }
+
+  .status-msg {
+    margin: 0.5rem 0 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--bad);
+  }
+
+  /* Merged-lane compact form rows. */
+  .t-merged {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    color: var(--ink-soft);
+  }
+
+  .pr-badge {
+    display: inline-flex;
+    margin-top: 0.55rem;
+    border: 1.5px solid var(--ink);
+    padding: 0.24rem 0.45rem;
+    color: var(--ink-2);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-decoration: none;
+    text-transform: uppercase;
+  }
+
+  .pr-badge:hover { background: var(--lane-pr); border-color: var(--ink); color: #fff; }
+
+  /* ============== Queue walkway intake hint → Repos ================= */
+
+  .walkway {
+    display: block;
+    margin: 0.2rem 0.6rem 0.7rem;
+    border: 2px solid var(--ink);
+    background: var(--lane-queue);
+    color: var(--ink);
+    text-decoration: none;
+  }
+
+  /* chevron guide strip — floor walkway arrows */
+  .walkway::before {
+    content: "";
+    display: block;
+    height: 14px;
+    border-bottom: 2px solid var(--ink);
+    background-color: var(--lane-queue);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='14'%3E%3Cpath d='M3 2l5 5-5 5M12 2l5 5-5 5' fill='none' stroke='%23101312' stroke-width='2.4'/%3E%3C/svg%3E");
+    background-repeat: repeat-x;
+    background-position: 6px 0;
+  }
+
+  .walkway-body { padding: 0.6rem 0.7rem 0.7rem; }
+
+  .walkway-tag {
+    display: inline-block;
+    background: var(--ink);
+    padding: 0.18rem 0.45rem;
+    color: var(--lane-queue);
+    font-family: var(--font-display);
+    font-size: 0.62rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .walkway-text {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .walkway-cta {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .walkway:hover .walkway-cta { text-decoration: underline; text-decoration-thickness: 2px; }
+
+  /* ============================ Footer ============================== */
+
+  .proto-note {
+    margin-top: 2.5rem;
+    border-top: 1px solid var(--rule);
+    padding-top: 0.9rem;
+    color: var(--ink-soft);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    line-height: 1.6;
+    text-transform: uppercase;
+  }
+
+  /* ========================== Responsive ============================ */
+
+  @media (max-width: 1100px) {
+    .board { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .lane { min-height: 14rem; }
+    .lane:nth-child(-n+3) { border-bottom: 3px solid var(--ink); }
+  }
+
+  @media (max-width: 720px) {
+    .page { padding: 1rem 0.9rem 3rem; }
+    .board { display: block; }
+    .lane { min-height: 0; border-bottom: 3px solid var(--ink); }
+    .lane:last-child { border-bottom: 0; }
+    .lane-header { position: static; min-height: 0; }
+    .scoreboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .nav { margin-left: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ============================ Nav shell ============================ -->
+  <header class="mast">
+    <div class="brand">
+      <h1><a href="/">Clanker Harness</a></h1>
+      <span class="ver" title="Ready for Agent v0.0.0">v0.0.0</span>
+    </div>
+    <nav class="nav" aria-label="Primary">
+      <a class="plate" href="/" aria-current="page">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-6h4v6"/></svg>
+        Home
+      </a>
+      <a class="plate" href="/repos">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7.5c0-1.5 3.6-2.5 8-2.5s8 1 8 2.5v9c0 1.5-3.6 2.5-8 2.5s-8-1-8-2.5v-9Z"/><path d="M4 7.5c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5"/><path d="M4 12c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5"/></svg>
+        Repos
+      </a>
+      <a class="plate" href="/completed">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
+        Completed
+      </a>
+      <button class="plate" type="button">
+        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+        Settings
+      </button>
+    </nav>
+  </header>
+  <div class="aisle" aria-hidden="true"></div>
+
+  <main>
+    <!-- ===================== Production scoreboard ===================== -->
+    <section class="scoreboard" aria-label="Committed pull requests">
+      <div class="scoreboard-band">
+        <p>Committed pull requests</p>
+        <p aria-hidden="true">Production log</p>
+      </div>
+      <div class="scoreboard-grid">
+        <div class="stat">
+          <span class="s-label">Today</span>
+          <span class="s-value">4</span>
+        </div>
+        <div class="stat">
+          <span class="s-label">Yesterday</span>
+          <span class="s-value">6</span>
+        </div>
+        <div class="stat">
+          <span class="s-label">This week</span>
+          <span class="s-value">23</span>
+        </div>
+        <div class="stat">
+          <span class="s-label">Last week</span>
+          <span class="s-value">19</span>
+        </div>
+        <div class="stat">
+          <span class="s-label">Two weeks ago</span>
+          <span class="s-value">31</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================ Jobs ============================== -->
+    <section class="jobs" aria-label="Jobs">
+      <div class="controls">
+        <div class="control-group" role="tablist" aria-label="Jobs">
+          <span class="control-caption" aria-hidden="true">Feed:</span>
+          <button class="selector" type="button" role="tab" aria-selected="true">Pipeline</button>
+          <button class="selector" type="button" role="tab" aria-selected="false" tabindex="-1">Completed last 24 h (5)</button>
+        </div>
+        <fieldset class="control-group">
+          <legend class="sr-only">Filter jobs by repository</legend>
+          <span class="control-caption" aria-hidden="true">Source:</span>
+          <button class="selector" type="button" aria-pressed="true">All sources</button>
+          <button class="selector" type="button" aria-pressed="false">berenddeboer/ready-for-agent</button>
+          <button class="selector" type="button" aria-pressed="false">berenddeboer/agentsview</button>
+        </fieldset>
+      </div>
+
+      <section class="board" aria-label="Lifecycle pipeline">
+
+        <!-- ============ Cell 01 · Queue ============ -->
+        <section class="lane" style="--lc:#ffd21c" aria-labelledby="lane-queue">
+          <header class="lane-header" style="--lt:#151515">
+            <div>
+              <span class="lane-cell">Cell 01 / 06</span>
+              <h3 class="lane-title" id="lane-queue">Queue</h3>
+            </div>
+            <div class="lane-count">2<small>Jobs</small></div>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#ffd21c">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #694</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/694"><span class="num">#694</span> Prototype: clanker direction E</a>
+                <div class="t-row">
+                  <span class="stamp stamp-violet">Waiting for worker slot</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>opencode</span><span>·</span><span>queued 4m ago</span></div>
+                </div>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#ffd21c">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #512</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/agentsview">berenddeboer/agentsview</p>
+                <a class="t-title" href="https://github.com/berenddeboer/agentsview/issues/512"><span class="num">#512</span> Migrate legacy blocked-by links to native dependencies</a>
+                <div class="t-row">
+                  <span class="stamp stamp-teal">Waiting for blockers</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>blocked by</span><a class="session" href="https://github.com/berenddeboer/agentsview/issues/508">#508</a><span>and</span><a class="session" href="https://github.com/berenddeboer/agentsview/issues/511">#511</a></div>
+                </div>
+              </div>
+            </li>
+          </ul>
+          <!-- Queue discoverability hint → Repos -->
+          <a class="walkway" id="intake" href="/repos">
+            <div class="walkway-body">
+              <span class="walkway-tag">Intake</span>
+              <span class="walkway-text">Feed the queue — work starts at your sources.</span>
+              <span class="walkway-cta">Manage repos &raquo;</span>
+            </div>
+          </a>
+        </section>
+
+        <!-- ============ Cell 02 · Build ============ -->
+        <section class="lane" style="--lc:#1976d2" aria-labelledby="lane-build">
+          <header class="lane-header" style="--lt:#ffffff">
+            <div>
+              <span class="lane-cell">Cell 02 / 06</span>
+              <h3 class="lane-title" id="lane-build">Build</h3>
+            </div>
+            <div class="lane-count">3<small>Jobs</small></div>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#1976d2">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #688</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/688"><span class="num">#688</span> Surface per-session token usage in the Harness UI</a>
+                <div class="t-row">
+                  <span class="stamp stamp-state">Implement</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_9f24c1a7</span><span title="Copy">⧉</span></div>
+                  <div class="t-meta">~/src/ready-for-agent/worktree2</div>
+                </div>
+                <div class="t-steps">
+                  <span class="step done"><span class="box"></span>Create worktree <span class="dur">8s</span></span>
+                  <span class="step done"><span class="box"></span>Install deps <span class="dur">41s</span></span>
+                  <span class="step live" style="--lc:#1976d2"><span class="box"></span>Implement <span class="dur">6m 12s</span></span>
+                </div>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#1976d2">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #676</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/676"><span class="num">#676</span> Add blocked-by edges to the to-tickets flow</a>
+                <div class="t-row">
+                  <span class="stamp stamp-state">Pre-commit</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_71bd03e2</span><span title="Copy">⧉</span></div>
+                  <div class="t-meta">~/src/ready-for-agent/worktree4</div>
+                </div>
+                <div class="t-steps">
+                  <span class="step done"><span class="box"></span>Create worktree <span class="dur">6s</span></span>
+                  <span class="step done"><span class="box"></span>Install deps <span class="dur">38s</span></span>
+                  <span class="step done"><span class="box"></span>Implement <span class="dur">11m 03s</span></span>
+                  <span class="step done"><span class="box"></span>Assess changes <span class="dur">52s</span></span>
+                  <span class="step live" style="--lc:#1976d2"><span class="box"></span>Pre-commit <span class="dur">19s</span></span>
+                </div>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#1976d2">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #118</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/agentsview">berenddeboer/agentsview</p>
+                <a class="t-title" href="https://github.com/berenddeboer/agentsview/issues/118"><span class="num">#118</span> Recover off-screen Hyprland windows into view</a>
+                <div class="t-row">
+                  <span class="stamp stamp-state">Install deps</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>claude</span><span>-</span><span class="session">c9d2f1aa</span><span title="Copy">⧉</span></div>
+                  <div class="t-meta">~/src/agentsview/wt-118</div>
+                </div>
+                <div class="t-steps">
+                  <span class="step done"><span class="box"></span>Create worktree <span class="dur">5s</span></span>
+                  <span class="step live" style="--lc:#1976d2"><span class="box"></span>Install deps <span class="dur">33s</span></span>
+                  <span class="step"><span class="box"></span>Implement</span>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ Cell 03 · Review ============ -->
+        <section class="lane" style="--lc:#7654b5" aria-labelledby="lane-review">
+          <header class="lane-header" style="--lt:#ffffff">
+            <div>
+              <span class="lane-cell">Cell 03 / 06</span>
+              <h3 class="lane-title" id="lane-review">Review</h3>
+            </div>
+            <div class="lane-count">1<small>Jobs</small></div>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#7654b5">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #681</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/681"><span class="num">#681</span> Grill-first triage for external pull requests</a>
+                <div class="t-row">
+                  <span class="stamp stamp-state">Review</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_33aa90d1</span><span title="Copy">⧉</span></div>
+                  <div class="t-meta">~/src/ready-for-agent/worktree5</div>
+                </div>
+                <button class="lane-summary" type="button">▸ Build · 18m 44s</button>
+                <div class="t-steps">
+                  <span class="step live" style="--lc:#7654b5"><span class="box"></span>Review <span class="dur">2m 41s</span></span>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ Cell 04 · PR ============ -->
+        <section class="lane" style="--lc:#168b62" aria-labelledby="lane-pr">
+          <header class="lane-header" style="--lt:#ffffff">
+            <div>
+              <span class="lane-cell">Cell 04 / 06</span>
+              <h3 class="lane-title" id="lane-pr">PR</h3>
+            </div>
+            <div class="lane-count">2<small>Jobs</small></div>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#168b62">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #677</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/677"><span class="num">#677</span> fix: clean worktree slot branch after abandon</a>
+                <div class="t-row">
+                  <span class="stamp stamp-state">Watch status checks</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_5e77b2c0</span><span title="Copy">⧉</span></div>
+                </div>
+                <button class="lane-summary" type="button">▸ Build · 12m 10s</button>
+                <button class="lane-summary" type="button">▸ Review · 3m 02s</button>
+                <div class="t-steps">
+                  <span class="step done"><span class="box"></span>Commit <span class="dur">9s</span></span>
+                  <span class="step done"><span class="box"></span>Create PR <span class="dur">14s</span></span>
+                  <span class="step live" style="--lc:#168b62"><span class="box"></span>Status checks <span class="dur">1m 20s</span></span>
+                </div>
+                <a class="pr-badge" href="https://github.com/berenddeboer/ready-for-agent/pull/678">PR #678</a>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#168b62">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #660</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/660"><span class="num">#660</span> Document the Harness operator runbook</a>
+                <div class="t-row">
+                  <span class="stamp stamp-state">Decide PR merge</span>
+                  <button class="icon-btn" type="button" title="Pause" aria-label="Pause">❚❚</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>queued</span><span>·</span><span>poll cycle</span></div>
+                </div>
+                <button class="lane-summary" type="button">▸ Build · 9m 31s</button>
+                <button class="lane-summary" type="button">▸ Review · 1m 48s</button>
+                <div class="t-steps">
+                  <span class="step done"><span class="box"></span>Status checks <span class="dur">3m 12s</span></span>
+                  <span class="step"><span class="box"></span>Decide merge</span>
+                </div>
+                <a class="pr-badge" href="https://github.com/berenddeboer/ready-for-agent/pull/661">PR #661</a>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ Cell 05 · Attention ============ -->
+        <section class="lane" style="--lc:#ff4d1c" aria-labelledby="lane-attention">
+          <header class="lane-header" style="--lt:#151515">
+            <div>
+              <span class="lane-cell">Cell 05 / 06</span>
+              <h3 class="lane-title" id="lane-attention">Attention</h3>
+            </div>
+            <div class="lane-count">1<small>Jobs</small></div>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#ff4d1c">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #655</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/655"><span class="num">#655</span> Session usage dialog overflows on narrow screens</a>
+                <div class="t-row">
+                  <span class="stamp stamp-warn">Needs human</span>
+                  <button class="icon-btn" type="button" title="Resume" aria-label="Resume">▶</button>
+                </div>
+                <div class="t-runtime">
+                  <div class="t-meta"><span>opencode</span><span>-</span><span class="session">ses_08cf41b9</span><span title="Copy">⧉</span></div>
+                  <div class="t-meta">~/src/ready-for-agent/worktree6</div>
+                </div>
+                <p class="status-msg">Pre-commit failed: biome check — 2 errors in session-usage-dialog.tsx</p>
+                <button class="lane-summary" type="button">▸ Build · 7m 19s</button>
+                <div class="t-steps">
+                  <span class="step fail"><span class="box"></span>Pre-commit <span class="dur">21s</span></span>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <!-- ============ Cell 06 · Merged ============ -->
+        <section class="lane" style="--lc:#151515" aria-labelledby="lane-merged">
+          <header class="lane-header" style="--lt:#ffffff">
+            <div>
+              <span class="lane-cell">Cell 06 / 06</span>
+              <h3 class="lane-title" id="lane-merged">Merged</h3>
+            </div>
+            <div class="lane-count">2<small>Jobs</small></div>
+          </header>
+          <ul class="lane-stack">
+            <li class="ticket" style="--tc:#151515">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #648</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/ready-for-agent">berenddeboer/ready-for-agent</p>
+                <a class="t-title" href="https://github.com/berenddeboer/ready-for-agent/issues/648"><span class="num">#648</span> Add Queue discoverability copy to kanban docs</a>
+                <div class="t-merged">
+                  <span>Started 2h ago</span>
+                  <span>Elapsed 24m</span>
+                </div>
+                <a class="pr-badge" href="https://github.com/berenddeboer/ready-for-agent/pull/649">PR #649</a>
+              </div>
+            </li>
+            <li class="ticket" style="--tc:#151515">
+              <div class="t-head"><span>Work order</span><span class="wo">WO #97</span></div>
+              <div class="t-body">
+                <p class="t-repo" title="berenddeboer/agentsview">berenddeboer/agentsview</p>
+                <a class="t-title" href="https://github.com/berenddeboer/agentsview/issues/97"><span class="num">#97</span> Persist project renames across full resync</a>
+                <div class="t-merged">
+                  <span>Started 5h ago</span>
+                  <span>Elapsed 1h 12m</span>
+                </div>
+                <a class="pr-badge" href="https://github.com/berenddeboer/agentsview/pull/98">PR #98</a>
+              </div>
+            </li>
+          </ul>
+          <p class="lane-empty">Lane keeps the last 24 h — older rows on Completed</p>
+        </section>
+
+      </section>
+    </section>
+  </main>
+
+  <p class="proto-note">
+    Prototype — wayfinder #691 · clanker direction B “factory floor” · throwaway artifact · no build required
+  </p>
+
+</div>
+</body>
+</html>
