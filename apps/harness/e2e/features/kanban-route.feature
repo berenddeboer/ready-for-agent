@@ -29,30 +29,30 @@ Feature: View the work pipeline
     And repository management is not rendered
     And the committed pull request totals are visible above the board
 
-  Scenario: Switch from Repos to Home via top nav
+  Scenario: Switch from Repos to Pipeline via top nav
     Given the Harness has no configured Repositories
     And the End-to-End Fixture Repository is checked out
     When I add the Repository with the CLI
     And I open the Repos page
     Then the Repos top nav control is active
-    And the Home top nav control is not active
-    When I click the Home top nav control
+    And the Pipeline top nav control is not active
+    When I click the Pipeline top nav control
     Then I am on the Kanban board
     And all six pipeline lane headers are visible
-    And the Home top nav control is active
+    And the Pipeline top nav control is active
     And the Repos top nav control is not active
 
-  Scenario: Switch from Home to Repos via top nav
+  Scenario: Switch from Pipeline to Repos via top nav
     Given the Harness has no configured Repositories
     And the End-to-End Fixture Repository is checked out
     When I add the Repository with the CLI
     And I navigate to the Kanban board
-    Then the Home top nav control is active
+    Then the Pipeline top nav control is active
     And the Repos top nav control is not active
     When I click the Repos top nav control
     Then I am on the Repos page
     And the Repos top nav control is active
-    And the Home top nav control is not active
+    And the Pipeline top nav control is not active
 
   Scenario: Legacy /kanban path lands on the home board
     Given the Harness has no configured Repositories
@@ -60,4 +60,4 @@ Feature: View the work pipeline
     When I add the Repository with the CLI
     And I navigate to the legacy Kanban path
     Then I am on the Kanban board
-    And the Home top nav control is active
+    And the Pipeline top nav control is active

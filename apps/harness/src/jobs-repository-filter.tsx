@@ -11,8 +11,7 @@ import {
   useMemo,
   useState,
 } from "react"
-import type { Repository } from "./routes/index.js"
-import { repositoriesQuery } from "./routes/index.js"
+import { type Repository, repositoriesQuery } from "./repositories-query.js"
 import { cx, ui } from "./ui.js"
 
 type JobsRepositoryFilterValue = {

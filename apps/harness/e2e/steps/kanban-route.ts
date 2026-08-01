@@ -23,8 +23,8 @@ const COMMITTED_PULL_REQUEST_PERIODS = [
   "Two weeks ago",
 ] as const
 
-const primaryNav = (page: Page) =>
-  page.getByRole("navigation", { name: "Primary" })
+/** Sticky Jobs destinations: Pipeline | Repos | Completed (not mast Primary). */
+const jobsNav = (page: Page) => page.getByRole("navigation", { name: "Jobs" })
 
 When("I navigate to the Kanban board", async ({ page }) => {
   await page.goto("/")
@@ -57,16 +57,14 @@ When("I open the Repos page", async ({ page }) => {
   await dismissFirstRunSettingsIfPresent(page)
 })
 
-When("I click the Home top nav control", async ({ page }) => {
-  await primaryNav(page)
-    .getByRole("link", { name: "Home", exact: true })
+When("I click the Pipeline top nav control", async ({ page }) => {
+  await jobsNav(page)
+    .getByRole("link", { name: "Pipeline", exact: true })
     .click()
 })
 
 When("I click the Repos top nav control", async ({ page }) => {
-  await primaryNav(page)
-    .getByRole("link", { name: "Repos", exact: true })
-    .click()
+  await jobsNav(page).getByRole("link", { name: "Repos", exact: true }).click()
 })
 
 Then("all six pipeline lane headers are visible", async ({ page }) => {
@@ -131,7 +129,7 @@ Then(
 )
 
 Then("the Repos top nav control is active", async ({ page }) => {
-  const repos = primaryNav(page).getByRole("link", {
+  const repos = jobsNav(page).getByRole("link", {
     name: "Repos",
     exact: true,
   })
@@ -139,17 +137,17 @@ Then("the Repos top nav control is active", async ({ page }) => {
   await expect(repos).toHaveAttribute("aria-current", "page")
 })
 
-Then("the Home top nav control is active", async ({ page }) => {
-  const home = primaryNav(page).getByRole("link", {
-    name: "Home",
+Then("the Pipeline top nav control is active", async ({ page }) => {
+  const pipeline = jobsNav(page).getByRole("link", {
+    name: "Pipeline",
     exact: true,
   })
-  await expect(home).toBeVisible()
-  await expect(home).toHaveAttribute("aria-current", "page")
+  await expect(pipeline).toBeVisible()
+  await expect(pipeline).toHaveAttribute("aria-current", "page")
 })
 
 Then("the Repos top nav control is not active", async ({ page }) => {
-  const repos = primaryNav(page).getByRole("link", {
+  const repos = jobsNav(page).getByRole("link", {
     name: "Repos",
     exact: true,
   })
@@ -157,13 +155,13 @@ Then("the Repos top nav control is not active", async ({ page }) => {
   await expect(repos).not.toHaveAttribute("aria-current", "page")
 })
 
-Then("the Home top nav control is not active", async ({ page }) => {
-  const home = primaryNav(page).getByRole("link", {
-    name: "Home",
+Then("the Pipeline top nav control is not active", async ({ page }) => {
+  const pipeline = jobsNav(page).getByRole("link", {
+    name: "Pipeline",
     exact: true,
   })
-  await expect(home).toBeVisible()
-  await expect(home).not.toHaveAttribute("aria-current", "page")
+  await expect(pipeline).toBeVisible()
+  await expect(pipeline).not.toHaveAttribute("aria-current", "page")
 })
 
 Then("I am on the Kanban board", async ({ page }) => {

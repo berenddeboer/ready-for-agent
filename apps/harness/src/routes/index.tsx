@@ -60,6 +60,7 @@ import {
   completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
+import { type Repository, repositoriesQuery } from "../repositories-query.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { cx, ui } from "../ui.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
@@ -73,6 +74,10 @@ import {
   statusMessageClassNameForStatus,
 } from "../work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
+
+// Re-export for callers that still import from the home route module.
+export type { Repository } from "../repositories-query.js"
+export { repositoriesQuery } from "../repositories-query.js"
 
 const graphql = createClient({ url: "/graphql", batch: true })
 // Long-lived host folder dialog must not pin co-batched GraphQL operations.
@@ -209,53 +214,6 @@ const reconcileVariantForModel = (
 ): string =>
   variant.length > 0 && modelVariants.includes(variant) ? variant : ""
 
-export const repositoriesQuery = {
-  queryKey: ["repositories"],
-  queryFn: async () => {
-    // Intentionally omits pullRequestCount: GitHub-authoritative open non-draft
-    // PR counting is a dedicated projection (openPullRequestCountsQuery) so
-    // Keymaxxer-backed count latency cannot delay Configured Repositories,
-    // credentials, Issues, Work Items, or controls.
-    const result = await graphql.query({
-      repositories: {
-        id: true,
-        forge: true,
-        forgeHost: true,
-        projectPath: true,
-        localPath: true,
-        isBare: true,
-        paused: true,
-        selectedAgentBackend: true,
-        effectiveAgentBackend: true,
-        defaultModel: true,
-        defaultThinkingLevel: true,
-        reviewModel: true,
-        reviewThinkingLevel: true,
-        autoMerge: true,
-        includeAllIssueAuthors: true,
-        waitForReadyForReviewChecks: true,
-        issuesReconciledAt: true,
-        blockingUnfinishedWorkItemCount: true,
-      },
-      repositoryCredentials: {
-        repositoryId: true,
-        configured: true,
-        githubTokenSecretName: true,
-        githubTokenCreationUrl: true,
-      },
-    })
-    return result.repositories.map((repository) => {
-      const credential = result.repositoryCredentials.find(
-        ({ repositoryId }) => repositoryId === repository.id,
-      )
-      if (credential === undefined) {
-        throw new Error(`Missing credential status for ${repository.id}`)
-      }
-      return { ...repository, credential }
-    })
-  },
-}
-
 /**
  * Dedicated cache identity for GitHub open non-draft Pull Request counts.
  * Independent of {@link repositoriesQuery}: a slow or failed count must not
@@ -326,35 +284,6 @@ export const issuesQuery = (repositoryId: string) => ({
     return result.issues
   },
 })
-
-export type Repository = {
-  id: string
-  forge: string
-  forgeHost: string
-  projectPath: string
-  localPath: string
-  isBare: boolean
-  paused: boolean
-  selectedAgentBackend: string | null
-  effectiveAgentBackend: string
-  defaultModel: string | null
-  defaultThinkingLevel: string | null
-  reviewModel: string | null
-  reviewThinkingLevel: string | null
-  autoMerge: boolean
-  includeAllIssueAuthors: boolean
-  waitForReadyForReviewChecks: boolean
-  issuesReconciledAt: string | null
-  blockingUnfinishedWorkItemCount: number
-  credential: RepositoryCredential
-}
-
-type RepositoryCredential = {
-  repositoryId: string
-  configured: boolean
-  githubTokenSecretName: string
-  githubTokenCreationUrl: string
-}
 
 type RepositoryIssue = {
   id: string
