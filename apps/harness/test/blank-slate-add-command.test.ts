@@ -39,7 +39,7 @@ const emptyBlankSlateSource = () =>
   sliceBetweenMarkers(
     homeSource(),
     "function EmptyRepositoriesBlankSlate()",
-    "export function CommittedPullRequestsDashboard()",
+    "export function RepositoryCards()",
   )
 
 describe("blank-slate add repository command", () => {
@@ -73,16 +73,16 @@ describe("blank-slate add repository command", () => {
 
   test("blank slate uses Interchange §4.7 Setup kicker, dashed panel, primary plate", () => {
     const guidance = addRepositoryGuidanceSource()
-    expect(guidance).toContain('className="blank-slate"')
-    expect(guidance).toContain('className="kicker-tag"')
+    expect(guidance).toContain("className={ui.blankSlate}")
+    expect(guidance).toContain("ui.kickerTag")
     expect(guidance).toContain("Setup")
-    expect(guidance).toContain("blank-slate-title")
-    expect(guidance).toContain("blank-slate-input")
-    expect(guidance).toContain("plate-mini")
-    expect(guidance).toContain("plate-primary")
-    expect(guidance).toContain("blank-slate-fieldset")
+    expect(guidance).toContain("ui.blankSlateTitle")
+    expect(guidance).toContain("ui.blankSlateInput")
+    expect(guidance).toContain("ui.plateMini")
+    expect(guidance).toContain("ui.platePrimary")
+    expect(guidance).toContain("ui.blankSlateFieldset")
     expect(guidance).toContain("Confirm forge identity")
-    expect(guidance).toContain("guidance-code")
+    expect(guidance).toContain("ui.guidanceCode")
     expect(guidance).toContain('tone="alarm"')
     expect(guidance).toContain('role="alert"')
     // Ledger serif / oxblood CTA language is gone from this surface.
@@ -121,7 +121,9 @@ describe("blank-slate add repository command", () => {
       "Add a local Git repository with the operator binary:",
     )
     expect(guidance).toContain('aria-label="Add a repository"')
-    expect(guidance).toContain("max-w-full overflow-x-auto")
+    expect(guidance).toContain(
+      'cx(ui.guidanceCode, "max-w-full", "overflow-x-auto")',
+    )
     expect(guidance).not.toContain("ready-for-agent add /path/to/local/repo")
   })
 
@@ -138,7 +140,7 @@ describe("blank-slate add repository command", () => {
     // Host folder dialog is long-lived; must not share the batched client.
     expect(guidance).toContain("graphqlUnbatched.mutation")
     expect(guidance).toContain("Browse…")
-    expect(guidance).toContain("blank-slate-divider")
+    expect(guidance).toContain("ui.blankSlateDivider")
     expect(guidance).toContain(">or</")
     expect(guidance).toContain('id="add-repository-path"')
     expect(guidance).toContain('placeholder="/path/to/local/repo"')
@@ -149,7 +151,7 @@ describe("blank-slate add repository command", () => {
     expect(guidance).toContain("pickToAddBridging")
     expect(guidance).toContain("setPickToAddBridging(true)")
 
-    const separatorAt = guidance.indexOf("blank-slate-divider")
+    const separatorAt = guidance.indexOf("ui.blankSlateDivider")
     const cliCopyAt = guidance.indexOf(
       "Add a local Git repository with the operator binary:",
     )

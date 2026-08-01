@@ -27,8 +27,10 @@ renders; this spec wins for everything else (the prototypes cover only the
 homepage and the completed page).
 
 **Scope.** Visual treatment only. No board structure or behavior changes, no
-new features beyond the Queue discoverability hint. Implementation is a
-separate effort; this document is its contract.
+new features beyond the Queue discoverability hint. This document is the
+visual contract; **implementation is Tailwind-first** (`ARCHITECTURE.md`,
+§9) — shared recipes in `apps/harness/src/ui.ts`, tokens in
+`apps/harness/src/styles.css`.
 
 ---
 
@@ -87,8 +89,8 @@ Dark (`[data-theme="dark"]`):
 
 | Token | Value |
 | --- | --- |
-| `--paper` | `#15181b` |
-| `--panel` | `#1c2024` |
+| `--paper` | `#3a3f44` |
+| `--panel` | `#2a2f34` |
 | `--ink` | `#f2f3f1` |
 | `--ink-dim` | `#c6cac8` |
 | `--ink-faint` | `#7f8583` |
@@ -102,6 +104,10 @@ every Merged-black element — roundel, nameboard edge, ticket line bar, stamp,
 PR badge — gains a white hairline halo in dark mode (`--merged-halo`). In
 light mode the halo token is transparent. This is the one per-theme
 compensation; everything else is a straight token swap.
+
+**Lane bed is theme-invariant.** `--lane-bed: #dedbd2` (warm grey column fill
+under the colored nameboards) is the same in light and dark — the Kanban
+keeps the light-mode platform grey rather than going lights-out.
 
 ### 2.3 Masthead (dark supergraphic band in **both** themes)
 
@@ -170,11 +176,16 @@ board's density per #698):
 | Stats numeral | `clamp(2.1rem, 3vw, 2.9rem)` / 700, tabular | merged-PR stats |
 | Lane nameboard / count | 1.05rem / 800 uppercase · 1.5rem / 800 | board + archive slab |
 | Card title (board) | 0.9rem / 500 | job tickets |
-| Card title (relaxed) | 1.06rem / 600 | archive rows, repos cards |
-| Body / lede | 0.92–0.98rem / 400–500 | banners, descriptions |
-| Meta (relaxed) | 0.7rem mono uppercase | archive meta |
+| Card title (relaxed) | 1.06rem / 600, ls −0.01em | archive rows, repos cards |
+| Issue title (repos list) | 0.95rem / 500 | relevant-issue rows |
+| Issue number (relaxed) | 0.72rem mono / 600 | archive + repos issue # |
+| Body / lede | 0.92–0.98rem / 400–500 | banners, descriptions, archive summary |
+| Meta (relaxed) | 0.78rem mono, normal-case | archive session/timing line |
+| Meta labels (repos) | 0.75rem mono / 700 uppercase | repo meta dt |
+| Meta values (repos) | 0.9rem mono / 400 | repo meta dd |
+| Kicker (relaxed) | 0.62rem mono / 700, ls 0.22em | archive repo path, “Relevant issues” |
 | Meta (board) | 0.58–0.62rem mono uppercase | repo lines, runtime, via |
-| Chips / legs (relaxed) | 0.62rem mono | archive legs |
+| Chips / legs (relaxed) | 0.85rem mono / 700 | archive BUILD/REVIEW/PR legs |
 | Chips / legs (board) | 0.56rem mono | board legs, tags |
 
 **Type floor.** The Ledger-era "no sub-`text-xs` sizes" rule is superseded:
@@ -205,8 +216,8 @@ Named slots (rem), transcribed from the prototypes:
 
 | Slot | Value | Where |
 | --- | --- | --- |
-| page padding | 1.6–1.8 / 2.2 (y/x); 1.2–1.3 / 1.4 ≤900px | `.page` |
-| masthead padding | 1.5 / 2.2; 1.2 / 1.4 ≤900px | `.mast` |
+| page padding | 1.6–1.8 / 2.2 (y/x); 1.2–1.3 / 1.4 ≤900px | page shell (`ui.pageShell`) |
+| masthead padding | 1.5 / 2.2; 1.2 / 1.4 ≤900px | masthead (`ui.mast`) |
 | lane gap | 0.9 | network grid |
 | platform padding / gap | 0.65 | lane body |
 | card gap | 0.6 | archive body, rows |
@@ -230,8 +241,8 @@ Named slots (rem), transcribed from the prototypes:
   masthead nav flips light/dark (moon icon, label = target theme,
   `aria-pressed`). `?theme=light|dark` may pin a theme for sharing.
 - The masthead band stays dark in both themes (§2.3).
-- Dark-mode stats slab keeps the black departure-board treatment; light mode
-  gets the lighter treatment (§4.2) — per #695.
+- Merged-PR stats use paper fill in both themes (§4.2) — no pitch-black
+  departure slab in dark.
 
 ## 4. Surfaces
 
@@ -257,16 +268,12 @@ brand left and nav right, items baseline-aligned.
 Old-dashboard simplicity: what we merged, front and center. Five quantities
 (Today / Yesterday / This week / Last week / Two weeks ago).
 
-- **Light theme — lighter treatment** (per #695): `--paper` panel, 2px ink
-  border, header row with signal-yellow tag + "Merged PR throughput" + mono
-  note; five cells divided by `--line-ghost` hairlines; ink tabular
-  numerals, `--ink-faint` mono labels.
-- **Dark theme — departure-board slab**: `--mast-bg` black panel with the
-  same 2px `--ink` border (a light hairline frame in dark mode), same
-  signal-tag header in `--mast-ink`; cells divided by white hairlines
-  (`rgb(255 255 255 / 0.14)`); white tabular numerals, `--mast-dim` labels.
-- Loading = five skeleton bars in panel tones; load failure = inline banner
-  (§4.8) inside the panel.
+- **Both themes**: `--paper` fill, 2px ink border, no title/tag header —
+  five cells only, divided by `--line-ghost` hairlines; mono period labels
+  (`--ink-dim`) above ink tabular numerals. Dark mode uses the same soft
+  charcoal paper as the page (not a black departure-board slab).
+- Loading = five skeleton bars in line-ghost tones; load failure = inline
+  banner (§4.8) inside the panel.
 
 ### 4.3 Kanban board (home)
 
@@ -319,21 +326,23 @@ Anatomy (top to bottom):
 3. **Title link**: display 0.9rem/500 ink; `#nn` prefix in mono dim. Hover:
    2px underline, offset 3px, `--signal` underline color.
 4. **Status row**: status tag (§5.1) + pause/start icon button (§5.4).
-5. **Runtime lines**: mono 0.6rem `--ink-faint` — backend label, session id
-   as an underlined dim button (opens Session usage dialog), copy control,
-   worktree line.
+5. **Runtime lines**: mono 0.8rem `--ink-faint` — each on its own line:
+   backend label; session id (underlined button + copy); worktree when set.
+   (Title stays at relaxed card size; only meta under the title is larger.)
 6. **Via lines**: mono uppercase faint, 2px `--line-soft` left border,
    padding-left ("Via Build — 14 min").
 7. **Journey legs** (§5.2): with the Kanban-only earlier-lane collapse —
    collapsed summary rows are **consistently lane-colored** (per #695): in
    the Review lane the Build summary is a Build-blue chip with white text
-   ("▸ BUILD · 14M"); likewise everywhere, name + summed duration only.
+   ("▸ BUILD · 14m"); likewise everywhere, name + summed duration only.
    Expansion replaces the summary with that lane's chips; ephemeral local
    state (behavior per `docs/kanban.md`, unchanged).
-8. **Merged-lane variant**: no legs; mono meta line ("Started 3 h ago ·
-   Elapsed 23 m") + PR badge (§5.5).
+8. **Merged-lane variant**: no legs; warm parchment `--ticket-merged`
+   (`#f4f1e8` / rgb(244, 241, 232) light; soft charcoal lift dark); mono
+   lines for **Started** and **Elapsed** separately; PR badge (§5.5).
 
-Card frame: 1.5px ink border, white/`--panel` fill, no radius, no shadow.
+Card frame: 1.5px ink border, `--panel` fill (Merged uses `--ticket-merged`),
+no radius, no offset shadow.
 
 ### 4.5 Completed page (archive) — per #698 prototype
 
@@ -345,20 +354,33 @@ Card frame: 1.5px ink border, white/`--panel` fill, no radius, no shadow.
   extends to this single-column surface; no lane columns here.
 - **Archive body**: `--panel`, 1.5px ink border (no top), 0.8rem padding,
   0.6rem row gap.
-- **Rows**: hard-bordered cards.
+- **Rows**: hard-bordered cards sharing the **repos** type + shell language
+  (1.1rem padding, brushed-metal light fill / `--panel` dark).
   - *Complete* — 6px Merged line bar (`inset`, halo in dark). **No COMPLETE
     stamp** — Complete is the page's default; only exceptions are stamped.
   - *Abandoned* — dashed `--ink-faint` border, ghosted title (`--ink-dim`),
     dashed ABANDONED stamp.
-- **Row anatomy**: repo line → title (1.06rem/600) with optional stamp →
-  mono meta (backend — session ⧉ — worktree · merged/withdrawn timing ·
-  elapsed; optional summary sentence in quotes, `--ink-dim`, sentence case)
-  → footer: journey legs + PR badge or dashed "No change" tag.
+- **Row anatomy** (repos-aligned type):
+  - repo path = mono kicker (0.62rem / 700, tracking 0.22em uppercase, faint)
+  - title = display 1.06rem / 600, ls −0.01em; `#n` = mono 0.72rem / 600
+    (same as relevant-issue numbers); signal underline on hover
+  - meta = mono 0.78rem normal-case (backend — **full session id** ⧉ —
+    worktree · merged/withdrawn timing · elapsed; wraps, never truncates id)
+  - optional summary quote = display 0.92rem / 500, sentence case
+  - footer journey legs; forge badge (`PR #n` / `MR #n`) **top-right** with
+    Abandoned stamp when both apply; dashed "No change" in the footer
+- **Card grid**: `auto-fill` with a **34rem** minimum column (~3 cards on a
+  wide row, not 4).
 - **Archive legs**: done steps carry **their lane color** (BUILD blue,
-  REVIEW violet, CHECKS + MERGE PR green — CHECKS and MERGE are separate
-  PR-green chips); unreached steps are dashed `--line-soft` with `--ink-faint`
-  text ("○ REVIEW"). Retryable failures never appear here — they stay on the
-  board; the archive is terminal Complete/Abandoned only.
+  REVIEW violet, **one** PR-green chip labelled **PR** on GitHub or **MR** on
+  GitLab — create/checks/merge are summed into that single leg so the footer
+  is not two lookalike green controls next to the black open-on-forge badge).
+  Legs with underlying step history are **expandable** (▸ / ▾, same pattern as
+  Kanban earlier-lane summaries): expand replaces the condensed duration with
+  the fine-grained lifecycle chips for that lane; expand state is ephemeral
+  per card. Unreached steps are dashed `--line-soft` with `--ink-faint` text
+  ("○ REVIEW") and are not expandable. Retryable failures never appear here —
+  they stay on the board; the archive is terminal Complete/Abandoned only.
   - **Failed-then-abandoned** (decided here, left open by #698): a step that
     failed before the withdrawal renders as an Attention-orange ✕ leg
     (`leg--fail`, §5.2) in its chronological position, followed by dashed
@@ -374,9 +396,11 @@ Card frame: 1.5px ink border, white/`--panel` fill, no radius, no shadow.
 Repo cards and issue rows adopt the ticket language — the page has no
 prototype, so this spec governs:
 
-- **Repo card**: 1.5px ink-bordered white card. Header: display-600
-  projectPath link (hover signal-underline) + mono open-PR count; controls:
-  collapse chevron, pause/start icon button, kebab menu (§5.6).
+- **Repo card**: 1.5px ink-bordered card. Light mode: slight brushed-metal
+  fill (soft plate gradient, not flat white on paper). Dark mode: `--panel`.
+  Header: display-600 projectPath link (hover signal-underline) + mono
+  open-PR count; controls: collapse chevron, pause/start icon button, kebab
+  menu (§5.6).
 - **Meta table**: hairline top/bottom borders, two columns — mono uppercase
   dt labels, mono values with inherit annotations ("Harness default (x)").
 - **Credential banners**: standard banner pattern (§4.8), attention tag —
@@ -490,15 +514,16 @@ fill color, never small text on white — body-text contrast stays ≥ 4.5:1).
 
 ### 5.2 Journey-leg chips
 
-Mono 0.56–0.62rem, 1.5px ink border, 0.16–0.2rem/0.38–0.44rem padding,
-whitespace-nowrap. Five states:
+Mono 0.56rem (board) / 0.85rem (archive), 1.5px ink border; board padding
+0.16–0.2rem/0.38–0.44rem, archive legs 0.4rem/0.7rem. Whitespace-nowrap.
+Five states:
 
 | State | Treatment | Example |
 | --- | --- | --- |
 | Done (board) | solid `--ink` fill, `--paper` text | `✓ DEPS · 41S` |
-| Done (archive) | lane-color fill, on-lane text (`leg--lane`) | `✓ BUILD · 14M` |
+| Done (archive) | exact lane fill (`--leg-lane`), on-lane text (`--leg-on`) | `BUILD · 14m` |
 | Running | current-lane fill, on-lane text | `▷ IMPLEMENT · 12M` |
-| Next / queued / unreached | dashed border, `--ink-faint` text | `○ MERGE` |
+| Next / queued / unreached | dashed border, `--ink-faint` text | `○ PR` / `○ MR` |
 | Failed | `--lane-attention` fill, `#151515` text, 700 | `✕ REVIEW · 3M` |
 
 The DECIDE_PR_MERGE needs-human chip keeps its external-link behavior (hover
@@ -520,18 +545,19 @@ underline).
 
 ### 5.4 Icon buttons (pause/start, reset, refresh, collapse, copy)
 
-- Ghost square, 1px `--line-ghost` border, mono glyph or inline SVG; hover =
-  ink border + ink glyph.
+- Square, 1px `--ink` border + `--ink` glyph (full contrast so kebabs stay
+  legible on metallic repo cards / mid-tone panels); hover = plate wash.
 - Destructive/armed states (reset trash, pause-when-error): 1.5px
   `--lane-attention` border + glyph; hover = attention fill, `#151515` glyph.
 - Pending = inline SVG spinner. `title` tooltips carry the verb.
 
 ### 5.5 PR badge
 
-Mono 0.62–0.68rem/700, `--prbadge-bg` fill, `--prbadge-ink` text,
-`--prbadge-border` border (halo in dark), 0.2–0.24rem/0.5–0.55rem padding,
-"PR #n ↗". Hover: `--lane-pr` fill. When the PR URL exists, the status tag
-links to the PR (existing behavior).
+Mono 0.62–0.68rem/700 (archive uses `archiveLeg` size), **outline**: 1.5px
+ink border, transparent fill, ink text — quieter than a solid black stamp.
+0.2–0.24rem/0.5–0.55rem padding, "PR #n ↗". Hover: `--lane-pr` fill + white
+text. When the PR URL exists, the status tag links to the PR (existing
+behavior).
 
 ### 5.6 Stamps
 
@@ -571,44 +597,39 @@ The metaphor stays visual; the words are plain. Banned vocabulary (from
 #695): "Transfer / change here", "system map", "Network key", "Departed",
 "Six-stop work network — all lines running", "Service board". Plain
 replacements: "Feed the queue — work starts at your repos", "Merged PR
-throughput", "All lanes live" (masthead status), "Full archive". Roundels,
+throughput", "Clanker Harness" (masthead status under “Ready for Agent”),
+"Full archive". Roundels,
 route lines, and lane numbers (01–06) stay as pure graphics with
 `aria-hidden` where decorative.
 
-## 9. Migration notes (Ledger → Interchange)
+## 9. Implementation policy (Tailwind + tokens)
 
-**Yes: the design system is its own token/CSS layer** (resolving the map's
-open fog). Concretely:
+**Styling is Tailwind-first** (also `ARCHITECTURE.md`). Treatments in this
+document describe *look* — implement them with Tailwind utilities on
+elements, not a parallel component stylesheet.
 
-1. **Token layer first.** Add the §2 token set as one CSS module
-   (lane/fonts un-themed + `:root`/light + `[data-theme="dark"]` overrides)
-   alongside the Ledger `@theme`. Components then consume tokens only — no
-   raw hex outside the layer. Tailwind `@theme` aliases may map tokens to
-   utilities, but the custom-property layer is canonical.
-2. **Fonts.** Load Inter Tight (400–800) + JetBrains Mono (400, 700); the
-   serif stack and its `font-serif` utility are deleted once no surface
-   references them. (Self-host vs. CDN is an implementation choice.)
-3. **Theme plumbing.** Add `data-theme` on `<html>` +
-   `prefers-color-scheme` default + the masthead toggle plate. Both themes
-   ship from the **first migrated surface** — no retrofit (per #695).
-4. **Suggested surface order** (each independently shippable):
-   nav shell + banners → board (stats, controls, network, tickets, queue
-   hint) → completed page → repos page → dialogs/menus/chrome. The board is
-   where the motif lives, so migrating it early forces the token layer to
-   settle; dialogs last because they're self-contained.
-5. **What dies at the end**: Ledger `@theme` palette (paper/sepia/oxblood/
-   olive/teal washes), the serif stack, textured paper background, offset
-   block shadows, grey concrete lane fills, `.stamp`/`.field-rule`/
-   `.entry-rule` Ledger component classes, and the old `statusBadge` tone
-   table (replaced by §5.1). `docs/kanban.md`'s "adapted to the active
-   design system" note now points here.
-6. **Behavior is out of scope for migration**: lane classification, chip
-   collapse logic, tab keyboard behavior, filtering, dialogs' show/hide —
-   all untouched.
+1. **Surfaces in utilities.** Put layout and chrome in `className` as
+   Tailwind classes. Shared multi-class recipes live in
+   `apps/harness/src/ui.ts` (static strings so Tailwind can scan them).
+   Compose with `cx()` when needed.
+2. **Token layer.** §2 lives as CSS custom properties (`:root` /
+   `[data-theme="light|dark"]`) plus Tailwind `@theme` aliases so utilities
+   work (`bg-paper`, `text-ink`, `bg-lane-build`, …). No raw hex in
+   components except one-off illustrations.
+3. **`styles.css` is residual only:** tokens, `@theme`, base (`body`,
+   selection, focus-visible, reduced-motion), keyframes, and rare cases
+   utilities cannot express cleanly (e.g. `dialog::backdrop`). Never grow
+   named component rules for UI chrome.
+4. **Fonts.** Inter Tight (400–800) + JetBrains Mono (400, 700) via
+   `--font-display` / `--font-mono` and Tailwind `font-display` /
+   `font-mono`.
+5. **Theme plumbing.** `data-theme` on `<html>`, `prefers-color-scheme`
+   default, masthead toggle, optional `?theme=light|dark` pin.
+6. **Behavior** (lane classification, expand/collapse, filtering, dialogs)
+   is out of scope for this visual contract.
 
 ## 10. Out of scope (restating the map)
 
-- Implementing this system (separate effort, its own tickets/map).
 - Changing Kanban board structure or behavior; new features beyond the Queue
   hint.
 - A component-library refactor (the spec describes treatments, not module

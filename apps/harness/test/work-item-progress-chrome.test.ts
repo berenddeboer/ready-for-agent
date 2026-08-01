@@ -1,4 +1,6 @@
+import { cx, ui } from "../src/ui.js"
 import {
+  isStatusMessageAlarm,
   lifecycleStepChipClassName,
   lifecycleStepChipClassNameForStatus,
   prBadgeClassName,
@@ -10,45 +12,51 @@ import { describe, expect, test } from "bun:test"
 
 describe("work-item-progress-chrome", () => {
   test("lifecycle step chips use Interchange leg classes (no radius)", () => {
-    expect(lifecycleStepChipClassName).toContain("leg")
+    expect(lifecycleStepChipClassName).toBe(cx(ui.leg, ui.legDone))
     expect(lifecycleStepChipClassName).not.toContain("rounded")
     expect(lifecycleStepChipClassNameForStatus("SUCCEEDED")).toBe(
-      "leg leg--done",
+      cx(ui.leg, ui.legDone),
     )
-    expect(lifecycleStepChipClassNameForStatus("RUNNING")).toBe("leg leg--run")
-    expect(lifecycleStepChipClassNameForStatus("QUEUED")).toBe("leg leg--next")
-    expect(lifecycleStepChipClassNameForStatus("FAILED")).toBe("leg leg--fail")
+    expect(lifecycleStepChipClassNameForStatus("RUNNING")).toBe(
+      cx(ui.leg, ui.legRun),
+    )
+    expect(lifecycleStepChipClassNameForStatus("QUEUED")).toBe(
+      cx(ui.leg, ui.legNext),
+    )
+    expect(lifecycleStepChipClassNameForStatus("FAILED")).toBe(
+      cx(ui.leg, ui.legFail),
+    )
     // Needs-human shares Attention fill with failures — not lane-colored "run".
     expect(lifecycleStepChipClassNameForStatus("NEEDS_HUMAN")).toBe(
-      "leg leg--fail",
+      cx(ui.leg, ui.legFail),
     )
     expect(lifecycleStepChipClassNameForStatus("NEEDS_HUMAN_REVIEW")).toBe(
-      "leg leg--fail",
+      cx(ui.leg, ui.legFail),
     )
   })
 
-  test("status tags and PR badge use Interchange component classes", () => {
-    expect(statusBadgeBaseClassName).toBe("status-tag")
-    expect(prBadgeClassName).toBe("pr-badge")
+  test("status tags and PR badge use Interchange ui recipes", () => {
+    expect(statusBadgeBaseClassName).toBe(ui.statusTag)
+    expect(prBadgeClassName).toBe(ui.prBadge)
     expect(statusBadgeBaseClassName).not.toContain("rounded")
     expect(prBadgeClassName).not.toContain("rounded")
     expect(statusBadgeClassNameForStatus("COMPLETE")).toContain(
       statusBadgeBaseClassName,
     )
-    expect(statusBadgeClassNameForStatus("COMPLETE")).toContain(
-      "status-tag--complete",
+    expect(statusBadgeClassNameForStatus("COMPLETE")).toBe(
+      cx(ui.statusTag, ui.statusTagComplete),
     )
-    expect(statusBadgeClassNameForStatus("FAILED")).toContain(
-      "status-tag--alarm",
+    expect(statusBadgeClassNameForStatus("FAILED")).toBe(
+      cx(ui.statusTag, ui.statusTagAlarm),
     )
-    expect(statusBadgeClassNameForStatus("RUNNING")).toContain(
-      "status-tag--plain",
+    expect(statusBadgeClassNameForStatus("RUNNING")).toBe(
+      cx(ui.statusTag, ui.statusTagPlain),
     )
-    expect(statusBadgeClassNameForStatus("NEEDS_HUMAN")).toContain(
-      "status-tag--alarm",
+    expect(statusBadgeClassNameForStatus("NEEDS_HUMAN")).toBe(
+      cx(ui.statusTag, ui.statusTagAlarm),
     )
-    expect(statusBadgeClassNameForStatus("NEEDS_HUMAN_REVIEW")).toContain(
-      "status-tag--alarm",
+    expect(statusBadgeClassNameForStatus("NEEDS_HUMAN_REVIEW")).toBe(
+      cx(ui.statusTag, ui.statusTagAlarm),
     )
   })
 
@@ -58,10 +66,10 @@ describe("work-item-progress-chrome", () => {
     const queued = statusBadgeClassNameForStatus("QUEUED")
     const running = statusBadgeClassNameForStatus("RUNNING")
 
-    expect(blockers).toContain("status-tag--hold")
-    expect(workerSlot).toContain("status-tag--hold")
-    expect(queued).toContain("status-tag--plain")
-    expect(running).toContain("status-tag--plain")
+    expect(blockers).toBe(cx(ui.statusTag, ui.statusTagHold))
+    expect(workerSlot).toBe(cx(ui.statusTag, ui.statusTagHold))
+    expect(queued).toBe(cx(ui.statusTag, ui.statusTagPlain))
+    expect(running).toBe(cx(ui.statusTag, ui.statusTagPlain))
 
     expect(blockers).toBe(workerSlot)
     expect(blockers).not.toBe(queued)
@@ -70,17 +78,23 @@ describe("work-item-progress-chrome", () => {
 
   test("status message tone marks alarm statuses for ▲ prefix", () => {
     expect(statusMessageClassNameForStatus("WAITING_FOR_BLOCKERS")).toBe(
-      "status-message",
+      ui.statusMessage,
     )
     expect(statusMessageClassNameForStatus("WAITING_FOR_WORKER_SLOT")).toBe(
-      "status-message",
+      ui.statusMessage,
     )
-    expect(statusMessageClassNameForStatus("QUEUED")).toBe("status-message")
+    expect(statusMessageClassNameForStatus("QUEUED")).toBe(ui.statusMessage)
     expect(statusMessageClassNameForStatus("FAILED")).toBe(
-      "status-message status-message--alarm",
+      cx(ui.statusMessage, ui.statusMessageAlarm),
     )
     expect(statusMessageClassNameForStatus("NEEDS_HUMAN")).toBe(
-      "status-message status-message--alarm",
+      cx(ui.statusMessage, ui.statusMessageAlarm),
     )
+    expect(isStatusMessageAlarm("FAILED")).toBe(true)
+    expect(isStatusMessageAlarm("INTERRUPTED")).toBe(true)
+    expect(isStatusMessageAlarm("NEEDS_HUMAN")).toBe(true)
+    expect(isStatusMessageAlarm("NEEDS_HUMAN_REVIEW")).toBe(true)
+    expect(isStatusMessageAlarm("QUEUED")).toBe(false)
+    expect(isStatusMessageAlarm("RUNNING")).toBe(false)
   })
 })

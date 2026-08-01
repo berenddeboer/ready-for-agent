@@ -5,8 +5,8 @@ import { describe, expect, test } from "bun:test"
 const homeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
 
-const stylesSource = () =>
-  readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
+const uiSource = () =>
+  readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")
 
 const sliceBetweenMarkers = (
   source: string,
@@ -32,69 +32,70 @@ describe("Interchange phase 4: repos page + blank slate", () => {
   test("repo cards use 1.5px ticket shell, display title, mono PR count, icon controls", () => {
     const source = homeSource()
     // Card chrome only (settings dialog stays on Ledger until phase 5).
-    const head = sliceBetweenMarkers(source, 'className="repo-card"', "<dialog")
-    expect(head).toContain("repo-card-title")
-    expect(head).toContain("repo-card-link")
-    expect(head).toContain("repo-card-pr-count")
-    expect(head).toContain("repo-card-controls")
-    expect(head).toContain("icon-btn")
+    const head = sliceBetweenMarkers(
+      source,
+      "className={ui.repoCard}",
+      "<dialog",
+    )
+    expect(head).toContain("ui.repoCardTitle")
+    expect(head).toContain("ui.repoCardLink")
+    expect(head).toContain("ui.repoCardPrCount")
+    expect(head).toContain("ui.repoCardControls")
+    expect(head).toContain("ui.iconBtn")
     expect(head).not.toContain("font-serif")
     expect(head).not.toContain("border-t-2 border-ink-soft")
     // Pause/armed classes are composed above the JSX return.
-    expect(source).toContain("icon-btn--paused")
-    expect(source).toContain("icon-btn--armed")
+    expect(source).toContain("ui.iconBtnPaused")
+    expect(source).toContain("ui.iconBtnArmed")
     expect(source).toContain("pauseButtonClassName")
-    expect(source).toContain('className="repo-card"')
+    expect(source).toContain("className={ui.repoCard}")
 
-    const styles = stylesSource()
-    expect(styles).toContain(".repo-card {")
-    expect(styles).toContain("border: 1.5px solid var(--ink)")
-    expect(styles).toContain(".repo-card-title")
-    expect(styles).toContain("font-size: 1.06rem")
-    expect(styles).toContain("text-decoration-color: var(--signal)")
+    const ui = uiSource()
+    expect(ui).toContain("repoCard:")
+    expect(ui).toMatch(/repoCard:[\s\S]*?border-\[1\.5px\]/)
+    expect(ui).toMatch(/repoCard:[\s\S]*?border-ink/)
+    expect(ui).toContain("repoCardTitle:")
+    expect(ui).toMatch(/repoCardTitle:[\s\S]*?text-\[1\.06rem\]/)
+    expect(ui).toMatch(/repoCardLink:[\s\S]*?hover:decoration-signal/)
   })
 
   test("meta table is hairline two-column mono dt/dd with harness-default annotations", () => {
     const body = sliceBetweenMarkers(
       homeSource(),
-      'className="repo-meta"',
+      "className={ui.repoMeta}",
       "function RepositoryIssues(",
     )
-    expect(body).toContain("repo-meta-row")
+    expect(body).toContain("ui.repoMetaRow")
     expect(body).toContain("Harness default (")
     expect(body).toContain("<dt>Path</dt>")
     expect(body).toContain("<dt>Agent Backend</dt>")
 
-    const styles = stylesSource()
-    expect(styles).toContain(".repo-meta {")
-    expect(styles).toContain("border-top: 1px solid var(--line-ghost)")
-    expect(styles).toContain("border-bottom: 1px solid var(--line-ghost)")
-    expect(styles).toContain("grid-template-columns: repeat(2, minmax(0, 1fr))")
+    const ui = uiSource()
+    expect(ui).toContain("repoMeta:")
+    expect(ui).toMatch(/repoMeta:[\s\S]*?border-y/)
+    expect(ui).toMatch(/repoMeta:[\s\S]*?border-line-ghost/)
+    expect(ui).toMatch(/repoMeta:[\s\S]*?sm:grid-cols-2/)
   })
 
   test("credential banners use Attention tag, primary-plate CTAs, guidance-code chips", () => {
     const body = sliceBetweenMarkers(
       homeSource(),
-      'className="repo-meta"',
+      "className={ui.repoMeta}",
       "function RepositoryIssues(",
     )
     expect(body).toContain('tag="Attention"')
     expect(body).toContain("GitHub token required")
     expect(body).toContain("GitLab authentication required")
-    expect(body).toContain('className="plate-primary"')
+    expect(body).toContain("ui.platePrimary")
     expect(body).toContain("Create GitHub token")
     expect(body).toContain("Store in Keymaxxer")
-    expect(body).toContain('className="guidance-code"')
+    expect(body).toContain("ui.guidanceCode")
 
-    const styles = stylesSource()
-    expect(styles).toContain(".plate-primary")
-    expect(styles).toContain(".guidance-code")
-    expect(styles).toMatch(
-      /\.plate-primary\s*\{[^}]*background:\s*var\(--ink\)/s,
-    )
-    expect(styles).toMatch(
-      /\.plate-primary:hover\s*\{[^}]*background:\s*var\(--signal\)/s,
-    )
+    const ui = uiSource()
+    expect(ui).toContain("platePrimary:")
+    expect(ui).toContain("guidanceCode:")
+    expect(ui).toMatch(/platePrimary:[\s\S]*?bg-ink/)
+    expect(ui).toMatch(/platePrimary:[\s\S]*?hover:bg-signal/)
   })
 
   test("relevant issues use ticket rows; Closed dashed stamp; Blocked Queue-yellow without wash", () => {
@@ -103,15 +104,16 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssueRow(",
       "export function SessionUsageDialog(",
     )
-    expect(issues).toContain('className="repo-issue"')
-    expect(issues).toContain("repo-issue-num")
-    expect(issues).toContain("repo-issue-title")
-    expect(issues).toContain("repo-issue-author")
-    expect(issues).toContain('className="stamp stamp--closed"')
+    expect(issues).toContain("ui.repoIssue")
+    expect(issues).toContain("ui.repoIssueNum")
+    expect(issues).toContain("ui.repoIssueTitle")
+    expect(issues).toContain("ui.repoIssueAuthor")
+    expect(issues).toContain("ui.stamp")
+    expect(issues).toContain("ui.stampClosed")
     expect(issues).toContain("Closed")
-    expect(issues).toContain('className="stamp stamp--blocked"')
+    expect(issues).toContain("ui.stampBlocked")
     expect(issues).toContain("Blocked")
-    expect(issues).toContain("repo-issue-blocked-by")
+    expect(issues).toContain("ui.repoIssueBlockedBy")
     expect(issues).toContain("Blocked by")
     // Old amber row-wash language is dropped.
     expect(issues).not.toContain("bg-amber-wash")
@@ -119,11 +121,11 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(issues).not.toContain("text-sepia")
     expect(issues).not.toContain("font-serif")
 
-    const styles = stylesSource()
-    expect(styles).toContain(".stamp--closed")
-    expect(styles).toContain(".stamp--blocked")
-    expect(styles).toContain("border-style: dashed")
-    expect(styles).toContain("background: var(--lane-queue)")
+    const ui = uiSource()
+    expect(ui).toContain("stampClosed:")
+    expect(ui).toContain("stampBlocked:")
+    expect(ui).toMatch(/stampClosed:[\s\S]*?border-dashed/)
+    expect(ui).toMatch(/stampBlocked:[\s\S]*?bg-lane-queue/)
   })
 
   test("latest work item lifecycle chrome sits in 1.5px inset panel", () => {
@@ -132,13 +134,12 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "export function WorkItemLifecycleStatus(",
       "function RepositoryIssuesSkeleton(",
     )
-    expect(lifecycle).toContain('compact ? "mt-2" : "lifecycle-inset"')
+    expect(lifecycle).toContain('compact ? "mt-2" : ui.lifecycleInset')
 
-    const styles = stylesSource()
-    expect(styles).toContain(".lifecycle-inset")
-    expect(styles).toMatch(
-      /\.lifecycle-inset\s*\{[^}]*border:\s*1\.5px solid var\(--ink\)/s,
-    )
+    const ui = uiSource()
+    expect(ui).toContain("lifecycleInset:")
+    expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-\[1\.5px\]/)
+    expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-ink/)
   })
 
   test("parent issue groups use details card and 2px line-soft child rule", () => {
@@ -147,24 +148,26 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function ParentIssueGroup(",
       "function RepositoryIssueRow(",
     )
-    expect(parent).toContain('className="parent-issue"')
-    expect(parent).toContain("parent-issue-children")
-    expect(parent).toContain("parent-issue-closed-count")
-    expect(parent).toContain("repo-issue-title")
+    expect(parent).toContain("ui.parentIssue")
+    expect(parent).toContain("ui.parentIssueChildren")
+    expect(parent).toContain("ui.parentIssueClosedCount")
+    expect(parent).toContain("ui.repoIssueTitle")
     expect(parent).not.toContain("font-serif")
     // Implement-all failure is in-flow under the summary (not absolute on kebab).
-    expect(parent).toContain("parent-issue-error")
+    expect(parent).toContain("ui.parentIssueError")
     expect(parent).toContain("implementAll.isError")
     expect(parent).toContain('tone="alarm"')
     expect(parent).toContain("Could not start Implement all with auto-merge")
     expect(parent).toContain("errorMessage={null}")
 
-    const styles = stylesSource()
-    expect(styles).toContain(".parent-issue {")
-    expect(styles).toContain(".parent-issue-children::before")
-    expect(styles).toContain("width: 2px")
-    expect(styles).toContain("background: var(--line-soft)")
-    expect(styles).toContain(".parent-issue-error")
+    const ui = uiSource()
+    expect(ui).toContain("parentIssue:")
+    expect(ui).toContain("parentIssueChildren:")
+    // Child rule is a before: pseudo on the children recipe.
+    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:/)
+    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:w-0\.5/)
+    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:bg-line-soft/)
+    expect(ui).toContain("parentIssueError:")
   })
 
   test("repos surface locks alarm Banner weighting for leaf/refresh/remove failures", () => {
@@ -175,7 +178,8 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssueRow(",
       "export function SessionUsageDialog(",
     )
-    expect(leaf).toContain("banner--compact repo-issue-error")
+    expect(leaf).toContain("ui.bannerCompact")
+    expect(leaf).toContain("ui.repoIssueError")
     expect(leaf).toContain('tone="alarm"')
     expect(leaf).toContain('tag="Error"')
     expect(leaf).toContain("Could not queue issue")
@@ -184,23 +188,25 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     // Refresh + remove failures live on the card body (after settings dialog).
     const cardBody = sliceBetweenMarkers(
       source,
-      'className="repo-meta"',
+      "className={ui.repoMeta}",
       "function RepositoryIssues(",
     )
     expect(cardBody).toContain("Failed to refresh issues.")
     expect(cardBody).toContain("Could not remove repository. Please try again.")
-    expect(cardBody).toContain('className="banner--compact mb-2"')
-    expect(cardBody).toContain('className="banner--compact mt-3"')
+    expect(cardBody).toContain('className={cx(ui.bannerCompact, "mb-2")}')
+    expect(cardBody).toContain('className={cx(ui.bannerCompact, "mt-3")}')
     expect(cardBody).toContain('tone="alarm"')
   })
 
   test("blank slate and plate-primary styles exist for shared zero-repo surface", () => {
-    const styles = stylesSource()
-    expect(styles).toContain(".blank-slate {")
-    expect(styles).toContain("border: 2px dashed var(--ink)")
-    expect(styles).toContain(".blank-slate-title")
-    expect(styles).toContain(".blank-slate-fieldset")
-    expect(styles).toContain(".blank-slate-divider")
-    expect(styles).toContain(".plate-primary")
+    const ui = uiSource()
+    expect(ui).toContain("blankSlate:")
+    expect(ui).toMatch(/blankSlate:[\s\S]*?border-2/)
+    expect(ui).toMatch(/blankSlate:[\s\S]*?border-dashed/)
+    expect(ui).toMatch(/blankSlate:[\s\S]*?border-ink/)
+    expect(ui).toContain("blankSlateTitle:")
+    expect(ui).toContain("blankSlateFieldset:")
+    expect(ui).toContain("blankSlateDivider:")
+    expect(ui).toContain("platePrimary:")
   })
 })

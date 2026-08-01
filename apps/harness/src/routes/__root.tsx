@@ -24,7 +24,10 @@ import {
 } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import { Banner, BannerActionButton } from "../banner.js"
+import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
+import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
+import { JobsViewSwitcher } from "../jobs-view-switcher.js"
 import appCss from "../styles.css?url"
 import {
   THEME_BOOTSTRAP_SCRIPT,
@@ -36,6 +39,7 @@ import {
   themeToggleLabel,
   withThemePin,
 } from "../theme.js"
+import { cx, ui } from "../ui.js"
 
 export interface RouterContext {
   queryClient: QueryClient
@@ -174,7 +178,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
   shellComponent: RootDocument,
   notFoundComponent: () => (
-    <div className="not-found-panel">
+    <div className={ui.notFoundPanel}>
       <p>Page not found.</p>
       <Link
         className="mt-2 inline-block text-ink underline decoration-signal underline-offset-4 hover:text-ink-dim"
@@ -205,54 +209,8 @@ function RootDocument({ children }: { children: ReactNode }) {
   )
 }
 
-/** Stamped-plate base for primary nav Links (active via aria-current). */
-const mastPlateClassName = "mast-plate"
-
-function HomeNavIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M3 10.5 12 3l9 7.5" />
-      <path d="M5.5 9.5V20h13V9.5" />
-      <path d="M10 20v-6h4v6" />
-    </svg>
-  )
-}
-
-function ReposNavIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M4 7.5c0-1.5 3.6-2.5 8-2.5s8 1 8 2.5v9c0 1.5-3.6 2.5-8 2.5s-8-1-8-2.5v-9Z" />
-      <path d="M4 7.5c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5" />
-      <path d="M4 12c0 1.5 3.6 2.5 8 2.5s8-1 8-2.5" />
-    </svg>
-  )
-}
-
-function CompletedNavIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  )
-}
+/** Stamped-plate base for primary nav controls (active via aria-current). */
+const mastPlateClassName = ui.mastPlate
 
 function SettingsNavIcon() {
   return (
@@ -270,8 +228,9 @@ function SettingsNavIcon() {
 }
 
 function RootComponent() {
-  // Chrome (masthead + lane ribbon) is full-bleed on every route so nav
-  // positions never jump. Repos/Completed cap reading width on page body only.
+  // Chrome (masthead + lane ribbon + merged-PR dashboard) is full-bleed and
+  // sticky on every route so nav and throughput never jump. Repos caps reading
+  // width on page body only.
   return (
     <div className="min-h-screen w-full">
       <SettingsChrome />
@@ -748,72 +707,63 @@ function SettingsChrome() {
     recheckingBackendId !== null
 
   return (
-    <>
-      <header className="mast">
-        <div className="brand">
-          <p className="brand-kicker">
-            Ready for Agent · Operator board ·{" "}
-            <b title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}>
-              RFA {READY_FOR_AGENT_VERSION_LABEL}
-            </b>
-          </p>
-          <h1 className="brand-wordmark">
-            <Link to="/" activeOptions={{ exact: true }}>
-              Clanker Harness
-            </Link>
-          </h1>
-          <p className="brand-sub">
-            <span className="ok">All lanes live</span>
-          </p>
+    <JobsRepositoryFilterProvider>
+      <div className={ui.appChrome}>
+        <header className={ui.mast}>
+          <div>
+            <p className={ui.brandKicker}>
+              Ready for Agent · Operator board ·{" "}
+              <b
+                className={ui.brandKickerB}
+                title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}
+              >
+                RFA {READY_FOR_AGENT_VERSION_LABEL}
+              </b>
+            </p>
+            <h1 className={ui.brandWordmark}>
+              <Link
+                to="/"
+                activeOptions={{ exact: true }}
+                className={ui.brandWordmarkLink}
+              >
+                Ready for Agent
+              </Link>
+            </h1>
+            <p className={ui.brandSub}>
+              <span className={ui.brandSubOk}>Clanker Harness</span>
+            </p>
+          </div>
+          <nav className={ui.mastNav} aria-label="Primary">
+            <ThemeTogglePlate />
+            <button
+              type="button"
+              className={mastPlateClassName}
+              onClick={openSettings}
+              aria-haspopup="dialog"
+            >
+              <SettingsNavIcon />
+              Settings
+            </button>
+          </nav>
+        </header>
+        <div className={ui.laneRibbon} aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
         </div>
-        <nav className="mast-nav" aria-label="Primary">
-          <Link
-            to="/"
-            activeOptions={{ exact: true }}
-            className={mastPlateClassName}
-            activeProps={{ "aria-current": "page" }}
-          >
-            <HomeNavIcon />
-            Home
-          </Link>
-          <Link
-            to="/repos"
-            className={mastPlateClassName}
-            activeProps={{ "aria-current": "page" }}
-          >
-            <ReposNavIcon />
-            Repos
-          </Link>
-          <Link
-            to="/completed"
-            className={mastPlateClassName}
-            activeProps={{ "aria-current": "page" }}
-          >
-            <CompletedNavIcon />
-            Completed
-          </Link>
-          <button
-            type="button"
-            className={mastPlateClassName}
-            onClick={openSettings}
-            aria-haspopup="dialog"
-          >
-            <SettingsNavIcon />
-            Settings
-          </button>
-          <ThemeTogglePlate />
-        </nav>
-      </header>
-      <div className="lane-ribbon" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-        <span />
-        <span />
-        <span />
+        <section
+          className={ui.mergedPrStatsBand}
+          aria-label="Committed pull requests"
+        >
+          <CommittedPullRequestsDashboard />
+        </section>
+        <JobsViewSwitcher />
       </div>
 
-      <div className="page-shell">
+      <div className={ui.pageShell}>
         {showBackendBanner && !dialogOpen && (
           <Banner
             tone="alarm"
@@ -845,7 +795,7 @@ function SettingsChrome() {
 
       <dialog
         ref={dialogRef}
-        className="dialog-panel"
+        className={ui.dialogPanel}
         aria-labelledby="settings-title"
         onCancel={(event) => {
           if (updateConfig.isPending) event.preventDefault()
@@ -853,17 +803,17 @@ function SettingsChrome() {
         onClose={() => setDialogOpen(false)}
       >
         <form onSubmit={saveSettings}>
-          <div className="dialog-header">
-            <p className="dialog-kicker">Harness defaults</p>
-            <h2 id="settings-title" className="dialog-title">
+          <div className={ui.dialogHeader}>
+            <p className={ui.dialogKicker}>Harness defaults</p>
+            <h2 id="settings-title" className={ui.dialogTitle}>
               Harness settings
             </h2>
-            <p className="dialog-lede">
+            <p className={ui.dialogLede}>
               Defaults for agent sessions and Agent Turn concurrency.
             </p>
             {showUnconfiguredGuidance && (
               <Banner
-                className="banner--compact mt-3"
+                className={cx(ui.bannerCompact, "mt-3")}
                 tone="guidance"
                 tag="Setup"
               >
@@ -885,7 +835,7 @@ function SettingsChrome() {
                   ).map((row) => (
                     <Banner
                       key={row.backend.id}
-                      className="banner--compact"
+                      className={ui.bannerCompact}
                       tone="alarm"
                       tag="Backend"
                       role="alert"
@@ -899,14 +849,14 @@ function SettingsChrome() {
               )}
           </div>
 
-          <div className="dialog-body">
+          <div className={ui.dialogBody}>
             {config.isPending || modelsLoading ? (
-              <p className="dialog-loading">Loading settings...</p>
+              <p className={ui.dialogLoading}>Loading settings...</p>
             ) : config.isError ||
               (!backendChanging &&
                 (models.isError || backendStatus.isError)) ? (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -915,7 +865,7 @@ function SettingsChrome() {
               </Banner>
             ) : (
               <>
-                <label className="dialog-field">
+                <label className={ui.dialogField}>
                   Default Agent Backend
                   <select
                     name="selectedAgentBackend"
@@ -933,7 +883,7 @@ function SettingsChrome() {
                       ),
                     )}
                   </select>
-                  <span className="dialog-field-hint">
+                  <span className={ui.dialogFieldHint}>
                     {backendChangeBlocked
                       ? `${blockingUnfinishedWorkItemCount} unfinished Work Item${
                           blockingUnfinishedWorkItemCount === 1 ? "" : "s"
@@ -947,12 +897,14 @@ function SettingsChrome() {
                   </span>
                 </label>
 
-                <div className="dialog-status-block">
-                  <div className="dialog-status-head">
-                    <p className="dialog-status-label">Active Agent Backends</p>
+                <div className={ui.dialogStatusBlock}>
+                  <div className={ui.dialogStatusHead}>
+                    <p className={ui.dialogStatusLabel}>
+                      Active Agent Backends
+                    </p>
                     <button
                       type="button"
-                      className="plate-mini"
+                      className={ui.plateMini}
                       disabled={recheckBusy || backendChanging}
                       onClick={() => {
                         void recheckAllBackends()
@@ -970,7 +922,7 @@ function SettingsChrome() {
                     const isDefault = row.backend.id === savedAgentBackend
                     const rowRechecking = recheckingBackendId === row.backend.id
                     return (
-                      <div key={row.backend.id} className="dialog-status-row">
+                      <div key={row.backend.id} className={ui.dialogStatusRow}>
                         <p className="m-0">
                           <strong>{row.backend.label}</strong>
                           {isDefault ? " · Default" : null}
@@ -985,7 +937,7 @@ function SettingsChrome() {
                         </p>
                         <button
                           type="button"
-                          className="plate-mini"
+                          className={ui.plateMini}
                           disabled={recheckBusy || backendChanging}
                           onClick={() => {
                             setRecheckAllFailures([])
@@ -1000,7 +952,7 @@ function SettingsChrome() {
                     )
                   })}
                   {statuses.length === 0 && defaultStatus === undefined && (
-                    <p className="dialog-loading">
+                    <p className={ui.dialogLoading}>
                       No Active Agent Backend status yet.
                     </p>
                   )}
@@ -1008,7 +960,7 @@ function SettingsChrome() {
 
                 {backendChanging && previewError !== null && (
                   <Banner
-                    className="banner--compact"
+                    className={ui.bannerCompact}
                     tone="alarm"
                     tag="Preview"
                     role="alert"
@@ -1019,7 +971,7 @@ function SettingsChrome() {
                   </Banner>
                 )}
 
-                <label className="dialog-field dialog-field-mono">
+                <label className={cx(ui.dialogField, ui.dialogFieldMono)}>
                   Build model
                   <select
                     name="defaultModel"
@@ -1061,14 +1013,14 @@ function SettingsChrome() {
                       </option>
                     ))}
                   </select>
-                  <span className="dialog-field-hint">
+                  <span className={ui.dialogFieldHint}>
                     Used for implement and other build steps.
                   </span>
                 </label>
 
                 {defaultModel.length > 0 && hasUnavailableBuildModel ? (
                   <Banner
-                    className="banner--compact"
+                    className={ui.bannerCompact}
                     tone="alarm"
                     tag="Model"
                     role="alert"
@@ -1078,12 +1030,12 @@ function SettingsChrome() {
                     model.
                   </Banner>
                 ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
-                  <p className="dialog-note">
+                  <p className={ui.dialogNote}>
                     Build effort (thinking) is unavailable — this model has no
                     effort (thinking) options.
                   </p>
                 ) : (
-                  <label className="dialog-field">
+                  <label className={ui.dialogField}>
                     Build effort (thinking)
                     <select
                       name="defaultThinkingLevel"
@@ -1109,14 +1061,14 @@ function SettingsChrome() {
                         </option>
                       ))}
                     </select>
-                    <span className="dialog-field-hint">
+                    <span className={ui.dialogFieldHint}>
                       Optional effort (thinking) for this model. Options come
                       from the selected model.
                     </span>
                   </label>
                 )}
 
-                <label className="dialog-field dialog-field-mono">
+                <label className={cx(ui.dialogField, ui.dialogFieldMono)}>
                   Review model
                   <select
                     name="reviewModel"
@@ -1146,7 +1098,7 @@ function SettingsChrome() {
                       </option>
                     ))}
                   </select>
-                  <span className="dialog-field-hint">
+                  <span className={ui.dialogFieldHint}>
                     Used only for the review step. Empty uses the build model.
                   </span>
                 </label>
@@ -1155,7 +1107,7 @@ function SettingsChrome() {
                 ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
                   (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
                   <Banner
-                    className="banner--compact"
+                    className={ui.bannerCompact}
                     tone="alarm"
                     tag="Model"
                     role="alert"
@@ -1166,12 +1118,12 @@ function SettingsChrome() {
                   </Banner>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
-                  <p className="dialog-note">
+                  <p className={ui.dialogNote}>
                     Review effort (thinking) is unavailable — this model has no
                     effort (thinking) options.
                   </p>
                 ) : (
-                  <label className="dialog-field">
+                  <label className={ui.dialogField}>
                     Review effort (thinking)
                     <select
                       name="reviewThinkingLevel"
@@ -1198,7 +1150,7 @@ function SettingsChrome() {
                   </label>
                 )}
 
-                <label className="dialog-field">
+                <label className={ui.dialogField}>
                   Max concurrent Agent Turns
                   <input
                     name="maxConcurrentAgentTurns"
@@ -1211,13 +1163,13 @@ function SettingsChrome() {
                       setMaxConcurrentOpencodeSessions(event.target.value)
                     }
                   />
-                  <span className="dialog-field-hint">
+                  <span className={ui.dialogFieldHint}>
                     Caps how many Agent Turn CLI processes run at once (default
                     2). Agent-free steps and model listing are not counted.
                   </span>
                 </label>
 
-                <label className="dialog-field">
+                <label className={ui.dialogField}>
                   Max concurrent Work Items
                   <input
                     name="maxConcurrentWorkItems"
@@ -1230,7 +1182,7 @@ function SettingsChrome() {
                       setMaxConcurrentWorkItems(event.target.value)
                     }
                   />
-                  <span className="dialog-field-hint">
+                  <span className={ui.dialogFieldHint}>
                     Caps how many Work Items may be Admitted at once (Worker
                     Slots, default 5). Extra Implement requests wait for a free
                     slot.
@@ -1241,7 +1193,7 @@ function SettingsChrome() {
 
             {updateConfig.isError && (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -1253,7 +1205,7 @@ function SettingsChrome() {
             )}
             {recheckAllFailures.length > 0 && (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Recheck"
                 role="alert"
@@ -1268,7 +1220,7 @@ function SettingsChrome() {
             )}
             {recheckAllFailures.length === 0 && recheckBackend.isError && (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Recheck"
                 role="alert"
@@ -1282,10 +1234,10 @@ function SettingsChrome() {
             )}
           </div>
 
-          <div className="dialog-footer">
+          <div className={ui.dialogFooter}>
             <button
               type="button"
-              className="plate-mini"
+              className={ui.plateMini}
               onClick={() => {
                 dialogRef.current?.close()
                 setDialogOpen(false)
@@ -1296,7 +1248,7 @@ function SettingsChrome() {
             </button>
             <button
               type="submit"
-              className="plate-primary"
+              className={ui.platePrimary}
               aria-busy={updateConfig.isPending || undefined}
               disabled={
                 config.isPending ||
@@ -1316,6 +1268,6 @@ function SettingsChrome() {
           </div>
         </form>
       </dialog>
-    </>
+    </JobsRepositoryFilterProvider>
   )
 }

@@ -31,25 +31,33 @@ describe("/repos route", () => {
     expect(source).toContain("'/repos': typeof ReposRoute")
   })
 
-  test("primary nav places Home before Repos before Completed", () => {
-    const source = rootSource()
-    const navBlock = source.slice(
-      source.indexOf('aria-label="Primary"'),
-      source.indexOf("</nav>"),
+  test("Repos sits between Pipeline and Completed in the Jobs switcher", () => {
+    const root = rootSource()
+    const switcher = readFileSync(
+      join(import.meta.dir, "../src/jobs-view-switcher.tsx"),
+      "utf8",
     )
-    const homeIdx = navBlock.indexOf('to="/"')
-    const reposIdx = navBlock.indexOf('to="/repos"')
-    const completedIdx = navBlock.indexOf('to="/completed"')
-    expect(homeIdx).toBeGreaterThan(-1)
-    expect(reposIdx).toBeGreaterThan(homeIdx)
+    // Mast no longer carries a Repos plate.
+    const navBlock = root.slice(
+      root.indexOf('aria-label="Primary"'),
+      root.indexOf("</nav>"),
+    )
+    expect(navBlock).not.toContain('to="/repos"')
+    expect(navBlock).not.toMatch(/Repos\s*<\/Link>/)
+    expect(navBlock).toContain("Settings")
+
+    const tabs = switcher.slice(
+      switcher.indexOf('aria-label="Jobs"'),
+      switcher.indexOf("<JobsRepositoryFilters"),
+    )
+    const pipelineIdx = tabs.indexOf('to="/"')
+    const reposIdx = tabs.indexOf('to="/repos"')
+    const completedIdx = tabs.indexOf('to="/completed"')
+    expect(pipelineIdx).toBeGreaterThan(-1)
+    expect(reposIdx).toBeGreaterThan(pipelineIdx)
     expect(completedIdx).toBeGreaterThan(reposIdx)
-    expect(navBlock).toMatch(/Home\s*<\/Link>/)
-    expect(navBlock).toMatch(/Repos\s*<\/Link>/)
-    expect(navBlock).not.toMatch(/Kanban\s*<\/Link>/)
-    // Active styling is shared with other primary destinations.
-    const reposLink = navBlock.slice(reposIdx, completedIdx)
-    expect(reposLink).toContain("mastPlateClassName")
-    expect(reposLink).toContain('activeProps={{ "aria-current": "page" }}')
+    expect(tabs).toContain("<ReposTabIcon")
+    expect(tabs).toMatch(/Repos\s*<\/Link>/)
   })
 
   test("Repos page body keeps the reading-width cap", () => {

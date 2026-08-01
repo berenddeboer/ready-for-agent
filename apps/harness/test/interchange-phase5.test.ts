@@ -8,6 +8,9 @@ const rootSource = () =>
 const homeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
 
+const uiSource = () =>
+  readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")
+
 const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
@@ -38,23 +41,24 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
   test("settings dialog uses shared Interchange shell (panel, kicker, plates)", () => {
     const root = rootSource()
     const dialog = sliceBetween(root, "<dialog", "</dialog>")
-    expect(dialog).toContain('className="dialog-panel"')
-    expect(dialog).toContain("dialog-header")
-    expect(dialog).toContain("dialog-kicker")
-    expect(dialog).toContain("dialog-title")
-    expect(dialog).toContain("dialog-lede")
-    expect(dialog).toContain("dialog-body")
-    expect(dialog).toContain("dialog-footer")
-    expect(dialog).toContain("dialog-field")
-    expect(dialog).toContain("dialog-status-row")
-    expect(dialog).toContain('className="plate-mini"')
-    expect(dialog).toContain('className="plate-primary"')
+    expect(dialog).toContain("ui.dialogPanel")
+    expect(dialog).toContain("ui.dialogHeader")
+    expect(dialog).toContain("ui.dialogKicker")
+    expect(dialog).toContain("ui.dialogTitle")
+    expect(dialog).toContain("ui.dialogLede")
+    expect(dialog).toContain("ui.dialogBody")
+    expect(dialog).toContain("ui.dialogFooter")
+    expect(dialog).toContain("ui.dialogField")
+    expect(dialog).toContain("ui.dialogStatusRow")
+    expect(dialog).toContain("ui.plateMini")
+    expect(dialog).toContain("ui.platePrimary")
     expect(dialog).toContain("Save settings")
     expect(dialog).toContain("Cancel")
     // Compact banners replace oxblood wash callouts.
-    expect(dialog).toContain("banner--compact")
+    expect(dialog).toContain("ui.bannerCompact")
     expect(dialog).not.toContain("font-serif")
     expect(dialog).not.toContain("oxblood")
+    // No raw shadow utilities on the dialog markup (recipe owns shadow-none).
     expect(dialog).not.toContain("shadow-[")
     expect(dialog).not.toContain("backdrop:bg-")
   })
@@ -62,21 +66,22 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
   test("repository settings dialog matches the same shell contract", () => {
     const home = homeSource()
     const dialog = sliceBetween(home, "ref={settingsDialogRef}", "</dialog>")
-    expect(dialog).toContain('className="dialog-panel"')
-    expect(dialog).toContain("dialog-header")
-    expect(dialog).toContain("dialog-kicker")
-    expect(dialog).toContain("dialog-title")
-    expect(dialog).toContain("dialog-fieldset")
-    expect(dialog).toContain("dialog-check")
-    expect(dialog).toContain("dialog-input")
-    expect(dialog).toContain('className="plate-primary"')
-    expect(dialog).toContain('className="plate-mini"')
+    expect(dialog).toContain("ui.dialogPanel")
+    expect(dialog).toContain("ui.dialogHeader")
+    expect(dialog).toContain("ui.dialogKicker")
+    expect(dialog).toContain("ui.dialogTitle")
+    expect(dialog).toContain("ui.dialogFieldset")
+    expect(dialog).toContain("ui.dialogCheck")
+    expect(dialog).toContain("ui.dialogInput")
+    expect(dialog).toContain("ui.platePrimary")
+    expect(dialog).toContain("ui.plateMini")
     expect(dialog).not.toContain("font-serif")
     expect(dialog).not.toContain("oxblood")
     expect(dialog).not.toContain("shadow-[")
-    const styles = stylesSource()
-    expect(styles).toContain('.dialog-check input[type="checkbox"]')
-    expect(styles).toContain("accent-color: var(--signal)")
+    const ui = uiSource()
+    expect(ui).toContain("dialogCheck:")
+    expect(ui).toContain("dialogCheckInput:")
+    expect(ui).toMatch(/dialogCheckInput:[\s\S]*?accent-signal/)
   })
 
   test("session usage dialog is narrow shell with table and telemetry banners", () => {
@@ -86,13 +91,14 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
       "export function SessionUsageDialog",
       "export function JobsCardSkeleton",
     )
-    expect(dialog).toContain("dialog-panel dialog-panel--narrow")
-    expect(dialog).toContain("dialog-kicker")
-    expect(dialog).toContain("dialog-title")
-    expect(dialog).toContain("dialog-table")
-    expect(dialog).toContain("banner--compact")
+    expect(dialog).toContain("ui.dialogPanel")
+    expect(dialog).toContain("ui.dialogPanelNarrow")
+    expect(dialog).toContain("ui.dialogKicker")
+    expect(dialog).toContain("ui.dialogTitle")
+    expect(dialog).toContain("ui.dialogTable")
+    expect(dialog).toContain("ui.bannerCompact")
     expect(dialog).toContain('tag="Session"')
-    expect(dialog).toContain('className="plate-mini"')
+    expect(dialog).toContain("ui.plateMini")
     expect(dialog).not.toContain("font-serif")
     expect(dialog).not.toContain("oxblood")
     expect(dialog).not.toContain("shadow-[")
@@ -100,64 +106,62 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
 
   test("menus use flush menu-panel (no drop shadow) and destructive Attention hover/focus", () => {
     const home = homeSource()
-    const styles = stylesSource()
-    expect(home).toContain('className="menu-panel min-w-40"')
-    expect(home).toContain("menu-item menu-item--destructive")
-    expect(home).toContain('className="menu-sep"')
-    expect(styles).toContain(".menu-panel")
-    expect(styles).toContain("box-shadow: none")
-    expect(styles).toContain(
-      ".menu-item--destructive:is(:hover, :focus-visible)",
+    const ui = uiSource()
+    expect(home).toContain('className={cx(ui.menuPanel, "min-w-40")}')
+    expect(home).toContain("ui.menuItem, ui.menuItemDestructive")
+    expect(home).toContain("ui.menuSep")
+    expect(ui).toContain("menuPanel:")
+    expect(ui).toMatch(/menuPanel:[\s\S]*?shadow-none/)
+    expect(ui).toContain("menuItemDestructive:")
+    expect(ui).toMatch(/menuItemDestructive:[\s\S]*?hover:bg-lane-attention/)
+    expect(ui).toMatch(
+      /menuItemDestructive:[\s\S]*?focus-visible:bg-lane-attention/,
     )
-    expect(styles).toMatch(
-      /\.menu-item--destructive:is\(:hover, :focus-visible\)\s*\{[^}]*background:\s*var\(--lane-attention\)/s,
-    )
+    // Component source must not reintroduce raw drop shadows.
     expect(home).not.toContain("shadow-[")
   })
 
   test("chrome: skeletons use line-ghost bars; copy keeps PR-green success glyph", () => {
     const home = homeSource()
+    const ui = uiSource()
     const styles = stylesSource()
     const copy = copySource()
-    const completed = readFileSync(
-      join(import.meta.dir, "../src/routes/completed.tsx"),
+    const dashboard = readFileSync(
+      join(import.meta.dir, "../src/committed-pr-dashboard.tsx"),
       "utf8",
     )
-    expect(home).toContain('className="skeleton')
-    expect(completed).toContain('className="skeleton h-14"')
-    expect(home).toContain('className="merged-pr-stats-skeleton"')
-    expect(home).not.toContain("merged-pr-stats-skeleton animate-pulse")
-    expect(styles).toContain(".skeleton")
-    expect(styles).toContain("background: var(--line-ghost)")
-    expect(styles).toMatch(
-      /\.merged-pr-stats-skeleton\s*\{[^}]*animation:\s*skeleton-pulse/s,
-    )
-    expect(copy).toContain("icon-btn--copied")
+    expect(home).toContain("ui.skeleton")
+    expect(dashboard).toContain("ui.mergedPrStatsSkeleton")
+    expect(dashboard).not.toContain("merged-pr-stats-skeleton animate-pulse")
+    expect(ui).toContain("skeleton:")
+    expect(ui).toMatch(/skeleton:[\s\S]*?bg-line-ghost/)
+    expect(ui).toMatch(/mergedPrStatsSkeleton:[\s\S]*?animate-\[skeleton-pulse/)
+    // Keyframes stay in the tokens stylesheet.
+    expect(styles).toContain("@keyframes skeleton-pulse")
+    expect(copy).toContain("ui.iconBtnCopied")
     expect(copy).toContain("1_500")
-    expect(styles).toContain(".icon-btn--copied")
-    expect(styles).toMatch(
-      /\.icon-btn--copied\s*\{[^}]*color:\s*var\(--lane-pr\)/s,
-    )
+    expect(ui).toContain("iconBtnCopied:")
+    expect(ui).toMatch(/iconBtnCopied:[\s\S]*?text-lane-pr/)
   })
 
   test("dialog fields keep focus-visible outline; primary plate wait only when busy", () => {
-    const styles = stylesSource()
-    expect(styles).not.toMatch(/\.dialog-input\s*\{[^}]*outline:\s*none/s)
-    expect(styles).toContain(".dialog-field > select:focus-visible")
-    expect(styles).toContain("outline: 2px solid var(--ink)")
-    expect(styles).toContain('.plate-primary:disabled[aria-busy="true"]')
-    expect(styles).toMatch(
-      /\.plate-primary:disabled\s*\{[^}]*cursor:\s*not-allowed/s,
-    )
+    const ui = uiSource()
+    // Default dialog input must not force outline-none; focus-visible ring stays.
+    expect(ui).not.toMatch(/dialogInput:[\s\S]*?outline-none/)
+    expect(ui).toMatch(/dialogInput:[\s\S]*?focus-visible:outline/)
+    expect(ui).toMatch(/dialogInput:[\s\S]*?focus-visible:outline-ink/)
+    expect(ui).toMatch(/platePrimary:[\s\S]*?disabled:aria-busy:cursor-wait/)
+    expect(ui).toMatch(/platePrimary:[\s\S]*?disabled:cursor-not-allowed/)
     const root = rootSource()
     const home = homeSource()
     expect(root).toContain("aria-busy={updateConfig.isPending || undefined}")
     expect(home).toContain("aria-busy={updateSettings.isPending || undefined}")
-    expect(home).toContain("dialog-title dialog-title--path")
+    expect(home).toContain("ui.dialogTitlePath")
   })
 
   test("Ledger teardown: no serif/oxblood/washes/field-rule; stamps stay Interchange", () => {
     const styles = stylesSource()
+    const ui = uiSource()
     const root = rootSource()
     const home = homeSource()
     const outcome = outcomeSource()
@@ -169,22 +173,24 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
       join(import.meta.dir, "../src/parent-issue-actions-menu.tsx"),
       "utf8",
     )
-    const all = `${styles}\n${root}\n${home}\n${outcome}\n${completed}\n${parentMenu}`
+    // Component sources (not ui recipes — those legitimately use shadow-[inset…]).
+    const components = `${styles}\n${root}\n${home}\n${outcome}\n${completed}\n${parentMenu}`
 
-    expect(all).not.toContain("font-serif")
-    expect(all).not.toContain("oxblood")
-    expect(all).not.toContain("field-rule")
-    expect(all).not.toContain("entry-rule")
-    expect(all).not.toContain("--color-sepia")
-    expect(all).not.toContain("--color-olive")
-    expect(all).not.toContain("--color-teal")
-    expect(all).not.toContain("--font-serif")
-    expect(all).not.toContain("--paper-2")
-    expect(all).not.toContain("shadow-[")
-    // Interchange exception stamps remain (§5.6).
-    expect(styles).toContain(".stamp--closed")
-    expect(styles).toContain(".stamp--blocked")
-    expect(outcome).toContain("completion-summary")
+    expect(components).not.toContain("font-serif")
+    expect(components).not.toContain("oxblood")
+    expect(components).not.toContain("field-rule")
+    expect(components).not.toContain("entry-rule")
+    expect(components).not.toContain("--color-sepia")
+    expect(components).not.toContain("--color-olive")
+    expect(components).not.toContain("--color-teal")
+    expect(components).not.toContain("--font-serif")
+    expect(components).not.toContain("--paper-2")
+    // Component markup must not reintroduce raw shadow utilities.
+    expect(components).not.toContain("shadow-[")
+    // Interchange exception stamps remain as recipes (§5.6).
+    expect(ui).toContain("stampClosed:")
+    expect(ui).toContain("stampBlocked:")
+    expect(outcome).toContain("ui.completionSummary")
   })
 
   test("kanban.md points at harness-design-system.md", () => {

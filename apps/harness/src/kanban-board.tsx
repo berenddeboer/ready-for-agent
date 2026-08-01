@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
+import { useJobsRepositoryFilter } from "./jobs-repository-filter.js"
 import { KanbanLiveUpdates } from "./kanban-live.js"
 import {
   formatDuration,
@@ -16,8 +17,6 @@ import {
   pipelineLaneFor,
 } from "./pipeline-lanes.js"
 import {
-  CommittedPullRequestsDashboard,
-  JOBS_COMPLETED_WINDOW_HOURS,
   JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
   type Repository,
@@ -32,23 +31,13 @@ import {
   repositoriesQuery,
 } from "./routes/index.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
+import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
 import {
   prBadgeClassName,
   statusBadgeClassNameForStatus,
 } from "./work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "./work-item-pull-request-url.js"
-
-type JobsTab = "pipeline" | "completed"
-
-const JOBS_COMPLETED_TAB_LABEL = `Completed last ${JOBS_COMPLETED_WINDOW_HOURS} h`
-
-const JOBS_TABS = [
-  { id: "pipeline", label: "Pipeline" },
-  { id: "completed", label: JOBS_COMPLETED_TAB_LABEL },
-] as const satisfies readonly { id: JobsTab; label: string }[]
-
-const JOBS_COMPLETED_EMPTY_MESSAGE = `No jobs completed in the last ${JOBS_COMPLETED_WINDOW_HOURS} h.`
 
 const sortNewestFirst = (items: readonly WorkItem[]): readonly WorkItem[] =>
   items
@@ -72,12 +61,11 @@ const repositoryIssueKey = (
  * is configured. Zero-repo empty slate is handled by the route.
  */
 export function KanbanBoard() {
+  // Merged-PR throughput lives in sticky root chrome (every route).
+  // data-kanban-surface: board stays light tokens in dark theme (styles.css).
   return (
-    <main className="industrial-shell pt-6 sm:pt-8">
-      <section aria-label="Committed pull requests" className="mb-5">
-        <CommittedPullRequestsDashboard />
-      </section>
-      <section aria-label="Jobs" className="pipeline-section">
+    <main className={ui.industrialShell} data-kanban-surface="">
+      <section aria-label="Jobs" className="mt-0">
         <Suspense fallback={<JobsCardSkeleton />}>
           <KanbanJobsBoard />
         </Suspense>
@@ -90,9 +78,8 @@ export function KanbanBoard() {
  * Merged-lane tickets omit per-step lifecycle chrome. Show only start time
  * and total elapsed duration, plus a PR link when one exists.
  *
- * Gated by assigned lane (`laneId === "complete"`), not by which Jobs tab
- * hosts the ticket — so Pipeline Merged-lane cards and Kanban Completed-tab
- * rows that classify as complete share this compact view.
+ * Gated by assigned lane (`laneId === "complete"`). Pipeline Merged-lane cards
+ * use this compact view; the Completed surface uses archive cards instead.
  *
  * No-change completion-summary chrome is intentionally omitted: issue #630
  * limits Merged-lane status to start + total duration (and PR identity).
@@ -112,16 +99,15 @@ function PipelineCompleteSummary({
     prNumber === null ? null : `Open pull request #${prNumber}`
 
   return (
-    <div className="mt-1 grid gap-1.5">
-      <p className="job-ticket-runtime-line">
+    <div className="mt-1 grid gap-1">
+      <p className={ui.jobTicketRuntimeLine}>
         {formatStartedAgo(workItem.createdAt, nowMs)}
-        {" · "}
-        {elapsedLabel}
       </p>
+      <p className={ui.jobTicketRuntimeLine}>{elapsedLabel}</p>
       {pullRequestUrl !== null &&
         prNumber !== null &&
         openPullRequestLabel !== null && (
-          <div>
+          <div className="mt-0.5">
             <a
               className={prBadgeClassName}
               href={pullRequestUrl}
@@ -181,59 +167,68 @@ function PipelineTicket({
 
   return (
     <li
-      className="job-ticket"
+      className={ui.jobTicket}
       data-lane={laneId}
       style={{ "--ticket-color": lane?.color ?? "#151515" } as CSSProperties}
     >
-      <p className="job-ticket-repo" title={repositoryLabel}>
+      <p className={ui.jobTicketRepo} title={repositoryLabel}>
         {repositoryLabel}
       </p>
       {issueUrl !== null && issueUrl !== "" ? (
-        <a className="job-ticket-title" href={issueUrl}>
-          <span className="job-ticket-num">#{workItem.issueNumber}</span>
+        <a
+          className={cx(ui.jobTicketTitle, ui.jobTicketTitleLink)}
+          href={issueUrl}
+        >
+          <span className={ui.jobTicketNum}>#{workItem.issueNumber}</span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </a>
       ) : (
-        <span className="job-ticket-title">
-          <span className="job-ticket-num">#{workItem.issueNumber}</span>
+        <span className={ui.jobTicketTitle}>
+          <span className={ui.jobTicketNum}>#{workItem.issueNumber}</span>
           {issueTitle === undefined ? null : ` ${issueTitle}`}
         </span>
       )}
-      <div className="job-ticket-status">
-        <span
-          className={`job-ticket-state ${statusBadgeClassNameForStatus(workItem.status)}`}
-        >
-          {workItem.stateLabel}
-        </span>
-        <WorkItemPauseButton workItem={workItem} />
-      </div>
-      <div className="job-ticket-runtime">
-        <div className="job-ticket-runtime-line flex min-w-0 items-center gap-1">
-          <span className="shrink-0">{workItem.agentBackend.label}</span>
-          {sessionId !== null && (
-            <>
-              <span className="shrink-0" aria-hidden="true">
-                —
-              </span>
-              <button
-                type="button"
-                className="job-ticket-session min-w-0 truncate"
-                title={sessionId}
-                onClick={() => onOpenSession(workItem.id, sessionId)}
-              >
-                {sessionId}
-              </button>
-              <Copy value={sessionId} showValue={false} className="shrink-0" />
-            </>
-          )}
+      {/* Merged-lane: status is the lane itself — no COMPLETE tag or pause. */}
+      {isCompleteLane ? null : (
+        <div className={ui.jobTicketStatus}>
+          <span
+            className={cx(
+              ui.jobTicketState,
+              statusBadgeClassNameForStatus(workItem.status),
+            )}
+          >
+            {workItem.stateLabel}
+          </span>
+          <WorkItemPauseButton workItem={workItem} />
         </div>
-        {worktreePath !== null && (
+      )}
+      <div className={ui.jobTicketRuntime}>
+        <p className={ui.jobTicketRuntimeLine}>{workItem.agentBackend.label}</p>
+        {sessionId !== null ? (
+          <div
+            className={cx(
+              ui.jobTicketRuntimeLine,
+              "flex min-w-0 items-center gap-1",
+            )}
+          >
+            <button
+              type="button"
+              className={cx(ui.jobTicketSession, "min-w-0 truncate")}
+              title={sessionId}
+              onClick={() => onOpenSession(workItem.id, sessionId)}
+            >
+              {sessionId}
+            </button>
+            <Copy value={sessionId} showValue={false} className="shrink-0" />
+          </div>
+        ) : null}
+        {worktreePath !== null ? (
           <Copy
             value={worktreePath}
             className="min-w-0 max-w-full"
-            textClassName="job-ticket-runtime-line"
+            textClassName={ui.jobTicketRuntimeLine}
           />
-        )}
+        ) : null}
       </div>
       {isCompleteLane ? (
         <PipelineCompleteSummary
@@ -254,10 +249,7 @@ function PipelineTicket({
 }
 
 function KanbanJobsBoard() {
-  const [selectedTab, setSelectedTab] = useState<JobsTab>("pipeline")
-  const [selectedRepositoryId, setSelectedRepositoryId] = useState<
-    string | null
-  >(null)
+  const { selectedRepositoryId } = useJobsRepositoryFilter()
   const [mobileLane, setMobileLane] = useState<PipelineLaneId>("queue")
   const [sessionDialog, setSessionDialog] = useState<{
     readonly workItemId: string
@@ -311,7 +303,7 @@ function KanbanJobsBoard() {
   )
   // Preserve per-list recency: Working/Failed by createdAt, Completed by
   // stateReadyAt. Do not re-sort the merge by createdAt or Merged-lane order
-  // drifts from the Completed tab.
+  // drifts from completed history.
   const pipelineItems = Array.from(
     new Map(
       [...workingItems, ...failedItems, ...completedItems].map((item) => [
@@ -320,22 +312,19 @@ function KanbanJobsBoard() {
       ]),
     ).values(),
   )
-  const repositoryFilteredItems = (items: readonly WorkItem[]) =>
-    selectedRepositoryId === null
-      ? items
-      : items.filter((item) => item.repositoryId === selectedRepositoryId)
-  const activeItems =
-    selectedTab === "pipeline" ? pipelineItems : completedItems
-  // Working/Failed list queries still feed the Pipeline board merge; Completed
-  // tab uses completed queries only. There are no Working/Failed tabs on Kanban.
-  const activeQueries =
-    selectedTab === "pipeline"
-      ? [...workingQueries, ...failedQueries, ...completedQueries]
-      : completedQueries
+  const activeQueries = [
+    ...workingQueries,
+    ...failedQueries,
+    ...completedQueries,
+  ]
   const loading = activeQueries.some((query) => query.isLoading)
   const failed = activeQueries.some((query) => query.isError)
-  const visibleItems = repositoryFilteredItems(activeItems)
-  const visiblePipelineItems = repositoryFilteredItems(pipelineItems)
+  const visiblePipelineItems =
+    selectedRepositoryId === null
+      ? pipelineItems
+      : pipelineItems.filter(
+          (item) => item.repositoryId === selectedRepositoryId,
+        )
   const laneItems = new Map(
     PIPELINE_LANES.map((lane) => [
       lane.id,
@@ -345,7 +334,7 @@ function KanbanJobsBoard() {
     ]),
   )
 
-  if (loading && activeItems.length === 0) {
+  if (loading && pipelineItems.length === 0) {
     return <JobsCardSkeleton />
   }
 
@@ -363,194 +352,119 @@ function KanbanJobsBoard() {
   return (
     <article>
       <KanbanLiveUpdates repositoryIds={repositoryIds} />
-      <div className="pipeline-controls">
-        <div className="pipeline-tabs" role="tablist" aria-label="Jobs">
-          {JOBS_TABS.map((tab, tabIndex) => {
-            const selected = selectedTab === tab.id
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                id={`jobs-tab-${tab.id}`}
-                aria-selected={selected}
-                aria-controls={`jobs-panel-${tab.id}`}
-                tabIndex={selected ? 0 : -1}
-                className="pipeline-tab"
-                onClick={() => setSelectedTab(tab.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-                    event.preventDefault()
-                    const delta = event.key === "ArrowRight" ? 1 : -1
-                    const nextIndex =
-                      (tabIndex + delta + JOBS_TABS.length) % JOBS_TABS.length
-                    const nextTab = JOBS_TABS[nextIndex]
-                    if (nextTab === undefined) return
-                    setSelectedTab(nextTab.id)
-                    document.getElementById(`jobs-tab-${nextTab.id}`)?.focus()
-                  }
-                }}
-              >
-                {tab.label}
-                {tab.id === "completed" && ` (${completedItems.length})`}
-              </button>
-            )
-          })}
-        </div>
-        <fieldset className="repository-filters">
-          <legend className="sr-only">Filter jobs by repository</legend>
-          <button
-            type="button"
-            className="repository-filter"
-            aria-pressed={selectedRepositoryId === null}
-            onClick={() => setSelectedRepositoryId(null)}
-          >
-            All sources
-          </button>
-          {repositories.map((repository) => (
+      {/* Switcher + filters live in sticky root chrome (JobsViewSwitcher). */}
+      <div id="jobs-panel-pipeline">
+        <fieldset className={ui.laneSwitcher}>
+          <legend className="sr-only">Pipeline lane</legend>
+          {PIPELINE_LANES.map((lane) => (
             <button
               type="button"
-              className="repository-filter"
-              aria-pressed={selectedRepositoryId === repository.id}
-              key={repository.id}
-              onClick={() => setSelectedRepositoryId(repository.id)}
+              className={ui.laneSwitch}
+              aria-pressed={mobileLane === lane.id}
+              aria-controls={`lane-panel-${lane.id}`}
+              key={lane.id}
+              onClick={() => setMobileLane(lane.id)}
+              style={
+                {
+                  "--lane-color": lane.color,
+                } as CSSProperties
+              }
             >
-              {repository.projectPath}
+              <span className={ui.laneSwitchSwatch} aria-hidden="true" />
+              {lane.label} {laneItems.get(lane.id)?.length ?? 0}
             </button>
           ))}
         </fieldset>
-      </div>
-      <div
-        role="tabpanel"
-        id={`jobs-panel-${selectedTab}`}
-        aria-labelledby={`jobs-tab-${selectedTab}`}
-      >
-        {selectedTab === "pipeline" ? (
-          <>
-            <fieldset className="lane-switcher">
-              <legend className="sr-only">Pipeline lane</legend>
-              {PIPELINE_LANES.map((lane) => (
-                <button
-                  type="button"
-                  className="lane-switch"
-                  aria-pressed={mobileLane === lane.id}
-                  aria-controls={`lane-panel-${lane.id}`}
+        <section className={ui.pipelineBoard} aria-label="Lifecycle pipeline">
+          <div className={ui.pipelineRoute}>
+            {PIPELINE_LANES.map((lane) => {
+              const count = laneItems.get(lane.id)?.length ?? 0
+              return (
+                <span
+                  className={ui.laneRoundel}
+                  data-lane={lane.id}
                   key={lane.id}
-                  onClick={() => setMobileLane(lane.id)}
+                  role="img"
+                  aria-label={`${count} jobs in ${lane.label}`}
                   style={
                     {
                       "--lane-color": lane.color,
+                      "--lane-text": lane.text,
                     } as CSSProperties
                   }
                 >
-                  <span className="lane-switch-swatch" aria-hidden="true" />
-                  {lane.label} {laneItems.get(lane.id)?.length ?? 0}
-                </button>
-              ))}
-            </fieldset>
-            <section className="pipeline-board" aria-label="Lifecycle pipeline">
-              {PIPELINE_LANES.map((lane, laneIndex) => {
-                const items = laneItems.get(lane.id) ?? []
-                const laneNumber = String(laneIndex + 1).padStart(2, "0")
-                return (
-                  <section
-                    className="pipeline-lane"
-                    data-lane={lane.id}
-                    data-mobile-active={mobileLane === lane.id}
-                    id={`lane-panel-${lane.id}`}
-                    key={lane.id}
-                    aria-labelledby={`lane-${lane.id}`}
-                    style={
-                      {
-                        "--lane-color": lane.color,
-                        "--lane-text": lane.text,
-                      } as CSSProperties
-                    }
-                  >
-                    <div className="lane-chrome">
-                      <span className="lane-roundel" aria-hidden="true">
-                        {laneNumber}
-                      </span>
-                      <header className="lane-header">
-                        <h3 className="lane-title" id={`lane-${lane.id}`}>
-                          {lane.label}
-                        </h3>
-                        <span className="lane-count">
-                          {items.length}
-                          <span className="sr-only"> jobs</span>
-                        </span>
-                      </header>
-                    </div>
-                    <div className="lane-platform">
-                      {items.length === 0 ? (
-                        <p className="lane-empty">Lane clear</p>
-                      ) : (
-                        <ul className="lane-stack">
-                          {items.map((workItem) => (
-                            <PipelineTicket
-                              key={workItem.id}
-                              workItem={workItem}
-                              repository={repositoryById.get(
-                                workItem.repositoryId,
-                              )}
-                              issue={issueByRepoAndNumber.get(
-                                repositoryIssueKey(
-                                  workItem.repositoryId,
-                                  workItem.issueNumber,
-                                ),
-                              )}
-                              laneId={lane.id}
-                              onOpenSession={(workItemId, sessionId) =>
-                                setSessionDialog({ workItemId, sessionId })
-                              }
-                            />
-                          ))}
-                        </ul>
-                      )}
-                      {lane.id === "queue" && (
-                        <aside className="queue-hint">
-                          <span className="queue-hint-tag">Queue</span>
-                          <p className="queue-hint-text">
-                            Feed the queue — work starts at your repos.
-                          </p>
-                          <Link to="/repos" className="queue-hint-link">
-                            Manage repos →
-                          </Link>
-                        </aside>
-                      )}
-                    </div>
-                  </section>
-                )
-              })}
-            </section>
-          </>
-        ) : visibleItems.length === 0 ? (
-          <p className="pipeline-list-empty">{JOBS_COMPLETED_EMPTY_MESSAGE}</p>
-        ) : (
-          <ul
-            className="pipeline-list m-0 grid list-none gap-2"
-            aria-label={JOBS_COMPLETED_TAB_LABEL}
-          >
-            {visibleItems.map((workItem) => {
-              const repository = repositoryById.get(workItem.repositoryId)
-              const issue = issueByRepoAndNumber.get(
-                repositoryIssueKey(workItem.repositoryId, workItem.issueNumber),
-              )
-              return (
-                <PipelineTicket
-                  key={workItem.id}
-                  workItem={workItem}
-                  repository={repository}
-                  issue={issue}
-                  laneId={pipelineLaneFor(workItem)}
-                  onOpenSession={(workItemId, sessionId) =>
-                    setSessionDialog({ workItemId, sessionId })
-                  }
-                />
+                  {count}
+                </span>
               )
             })}
-          </ul>
-        )}
+          </div>
+          <div className={ui.pipelineLanes}>
+            {PIPELINE_LANES.map((lane) => {
+              const items = laneItems.get(lane.id) ?? []
+              return (
+                <section
+                  className={ui.pipelineLane}
+                  data-lane={lane.id}
+                  data-mobile-active={mobileLane === lane.id}
+                  id={`lane-panel-${lane.id}`}
+                  key={lane.id}
+                  aria-labelledby={`lane-${lane.id}`}
+                  style={
+                    {
+                      "--lane-color": lane.color,
+                      "--lane-text": lane.text,
+                    } as CSSProperties
+                  }
+                >
+                  <header
+                    className={cx(
+                      ui.laneHeader,
+                      lane.id === "complete" && ui.laneHeaderComplete,
+                    )}
+                  >
+                    <h3 className={ui.laneTitle} id={`lane-${lane.id}`}>
+                      {lane.label}
+                    </h3>
+                  </header>
+                  {items.length === 0 ? (
+                    <p className={ui.laneEmpty}>Lane clear</p>
+                  ) : (
+                    <ul className={ui.laneStack}>
+                      {items.map((workItem) => (
+                        <PipelineTicket
+                          key={workItem.id}
+                          workItem={workItem}
+                          repository={repositoryById.get(workItem.repositoryId)}
+                          issue={issueByRepoAndNumber.get(
+                            repositoryIssueKey(
+                              workItem.repositoryId,
+                              workItem.issueNumber,
+                            ),
+                          )}
+                          laneId={lane.id}
+                          onOpenSession={(workItemId, sessionId) =>
+                            setSessionDialog({ workItemId, sessionId })
+                          }
+                        />
+                      ))}
+                    </ul>
+                  )}
+                  {lane.id === "queue" && (
+                    <aside className={ui.queueHint}>
+                      <span className={ui.queueHintTag}>Queue</span>
+                      <p className={ui.queueHintText}>
+                        Feed the queue — work starts at your repos.
+                      </p>
+                      <Link to="/repos" className={ui.queueHintLink}>
+                        Manage repos →
+                      </Link>
+                    </aside>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        </section>
       </div>
       <SessionUsageDialog
         workItemId={sessionDialog?.workItemId ?? null}

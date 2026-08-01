@@ -1,6 +1,7 @@
 import { type MouseEvent, type ReactNode, useEffect, useState } from "react"
 import { evaluateLeafIssue } from "@ready-for-agent/lifecycle-model"
 import { Banner } from "./banner.js"
+import { cx, ui } from "./ui.js"
 
 export type ParentIssueActionsMenuProps = {
   readonly parentIssueNumber: number
@@ -51,7 +52,7 @@ export function ParentIssueActionsMenu({
       <span className="relative" data-parent-issue-menu={menuId}>
         <button
           type="button"
-          className="icon-btn"
+          className={ui.iconBtn}
           aria-label={`Actions for parent issue #${parentIssueNumber}`}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
@@ -69,11 +70,11 @@ export function ParentIssueActionsMenu({
           </svg>
         </button>
         {menuOpen && (
-          <div role="menu" className="menu-panel min-w-56">
+          <div role="menu" className={cx(ui.menuPanel, "min-w-56")}>
             <button
               type="button"
               role="menuitem"
-              className="menu-item"
+              className={ui.menuItem}
               disabled={pending}
               onClick={(event: MouseEvent<HTMLButtonElement>) => {
                 event.stopPropagation()
@@ -88,7 +89,7 @@ export function ParentIssueActionsMenu({
       </span>
       {errorMessage !== null && (
         <Banner
-          className="banner--compact parent-issue-error"
+          className={cx(ui.bannerCompact, ui.parentIssueError)}
           tone="alarm"
           tag="Error"
           role="alert"

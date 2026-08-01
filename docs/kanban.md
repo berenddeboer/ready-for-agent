@@ -66,18 +66,26 @@ The prototype uses an industrial control-board language:
 - Repository management and intake live on `/repos`, not under the board.
 
 The visual treatment follows the Interchange design system
-(`docs/harness-design-system.md`). The essential design idea is the board
-structure, fixed lane identity, open white platforms with lane-color
-nameboards, and compact operator-facing tickets — not the older Ledger
-concrete fills or serif stack.
+(`docs/harness-design-system.md`) for tokens and type, implemented
+**Tailwind-first** (`apps/harness/src/ui.ts` recipes; tokens in
+`styles.css`). The board is a dense industrial control surface: a route line
+of lane-colored roundels showing each lane’s work-item count, above flush
+six-column lanes on a grey bed with ink gutters, full-width colored headers
+(title only, same header height as before), and tickets sized to the
+Completed archive type floor.
 
 ## Interaction Model
 
-The Jobs area has two tabs:
+Sticky chrome under Merged-PR throughput always shows the primary Jobs
+switcher:
 
-1. Pipeline is the default and renders the six lanes.
-2. Completed last 24 h shows every work item completed in the rolling previous
-   24 hours (no fixed item limit).
+1. **Pipeline** (`/`) — six lifecycle lanes.
+2. **Repos** (`/repos`) — repository management.
+3. **Completed** (`/completed`) — full completed-work archive with pagination.
+
+Completed uses wider archive-style cards (journey legs, forge PR/MR badge,
+full session id) in a responsive grid and keeps repository filters in the
+sticky chrome.
 
 There are no separate Working or Failed list tabs. Pipeline still assembles
 tickets from the existing working, failed, and completed Work Item queries.
@@ -101,8 +109,8 @@ destroying the flow grouping supplied by the board.
 
 Kanban tickets reuse the Work Item lifecycle chip row, but **collapse earlier
 lanes by default** so the card focuses on steps for the lane the ticket is in.
-This is **Kanban-only**; other surfaces (e.g. completed rows) leave collapse off
-and keep the full chip list.
+Completed archive cards use a related pattern: condensed BUILD / REVIEW / PR|MR
+legs that expand to the same fine-grained lifecycle chips (ephemeral ▸ / ▾).
 
 ### Focus lane
 
@@ -145,7 +153,6 @@ GitHub status-checks phase counts as PR.
 
 ### Out of scope (v1)
 
-- Home, Completed tab rows, and any non-Kanban chip row.
 - Persisted expand state, hover-only expand, or wall-clock span durations.
 - Hiding in-lane chips (succeeded steps in the focus lane stay visible).
 
@@ -190,8 +197,8 @@ Home (`/`) is a thin composition layer:
 
 1. With zero repositories, render the shared add-repo blank slate.
 2. With one or more repositories, render the committed pull-request totals and
-   `KanbanJobsBoard` (pipeline lanes + Completed last 24 h).
-3. Primary nav: product title → `/`; tabs are Repos, Kanban (`/`), Completed.
+   `KanbanJobsBoard` (pipeline lanes; Completed links to `/completed`).
+3. Jobs switcher: Pipeline (`/`), Repos (`/repos`), Completed (`/completed`).
 4. `/kanban` redirects to `/`. Repository management stays on `/repos`.
 
 Shared pieces:

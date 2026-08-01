@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { cx, ui } from "./ui.js"
 
 export function Copy({
   value,
@@ -53,7 +54,7 @@ export function Copy({
       ) : null}
       <button
         type="button"
-        className={`icon-btn${copied ? " icon-btn--copied" : ""}`}
+        className={cx(ui.iconBtn, copied && ui.iconBtnCopied)}
         onClick={() => {
           void handleCopy()
         }}
