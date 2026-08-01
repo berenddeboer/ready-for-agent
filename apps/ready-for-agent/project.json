@@ -99,7 +99,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions=@ready-for-agent/source test"
+        "command": "bun --conditions=@ready-for-agent/source test --timeout=15000"
       },
       "inputs": ["default", "^production"],
       "cache": true,

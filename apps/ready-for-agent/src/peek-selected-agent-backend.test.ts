@@ -7,7 +7,11 @@ import {
   peekSelectedAgentBackendIds,
 } from "./peek-selected-agent-backend.ts"
 import { Database } from "bun:sqlite"
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test"
+
+// File-backed bun:sqlite under nx parallel CI load can exceed the 5s default
+// (first temp-db opens have timed out at ~5.6s while later cases settle to ms).
+setDefaultTimeout(15_000)
 
 const createTempDb = (): { readonly path: string; readonly root: string } => {
   const root = mkdtempSync(join(tmpdir(), "rfa-peek-backend-"))
