@@ -1,6 +1,7 @@
 import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
+import { expect, it } from "@effect/vitest"
 import { Effect, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
@@ -9,7 +10,6 @@ import {
   type GitLabServiceShape,
 } from "@ready-for-agent/gitlab-service"
 import { ambientGitLabLayer } from "../src/server/ambient-gitlab-layer.js"
-import { expect, test } from "bun:test"
 
 const processLayer = BunChildProcessSpawner.layer.pipe(
   Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
@@ -122,138 +122,140 @@ const glabProcessLayer = (options: {
   }
 }
 
-test("GITLAB_TOKEN takes precedence over glab and is cached per host", async () => {
-  let resolutions = 0
-  const tokens: string[] = []
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    environment: { GITLAB_TOKEN: " environment-token " },
-    resolveToken: async () => {
-      resolutions += 1
-      return "glab-token"
-    },
-    makeService: (token) => {
-      tokens.push(token)
-      return service()
-    },
-  })
-
-  await Effect.runPromise(
+it.effect(
+  "GITLAB_TOKEN takes precedence over glab and is cached per host",
+  () =>
     Effect.gen(function* () {
-      const gitlab = yield* GitLabService
-      yield* gitlab.listReadyIssues(repository)
-      yield* gitlab.getAuthenticatedUserLogin({
-        ...repository,
-        projectPath: "project/other",
+      let resolutions = 0
+      const tokens: string[] = []
+      const layer = ambientGitLabLayer({
+        workspaceRoot: "/workspace",
+        environment: { GITLAB_TOKEN: " environment-token " },
+        resolveToken: async () => {
+          resolutions += 1
+          return "glab-token"
+        },
+        makeService: (token) => {
+          tokens.push(token)
+          return service()
+        },
       })
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
-  )
 
-  expect(resolutions).toBe(0)
-  expect(tokens).toEqual(["environment-token", "environment-token"])
-})
+      yield* Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        yield* gitlab.listReadyIssues(repository)
+        yield* gitlab.getAuthenticatedUserLogin({
+          ...repository,
+          projectPath: "project/other",
+        })
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
 
-test("glab tokens are resolved independently per GitLab host", async () => {
-  const hosts: string[] = []
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    resolveToken: async (host) => {
-      hosts.push(host)
-      return `token-for-${host}`
-    },
-    makeService: () => service(),
-  })
+      expect(resolutions).toBe(0)
+      expect(tokens).toEqual(["environment-token", "environment-token"])
+    }),
+)
 
-  await Effect.runPromise(
-    Effect.gen(function* () {
+it.effect("glab tokens are resolved independently per GitLab host", () =>
+  Effect.gen(function* () {
+    const hosts: string[] = []
+    const layer = ambientGitLabLayer({
+      workspaceRoot: "/workspace",
+      resolveToken: async (host) => {
+        hosts.push(host)
+        return `token-for-${host}`
+      },
+      makeService: () => service(),
+    })
+
+    yield* Effect.gen(function* () {
       const gitlab = yield* GitLabService
       yield* gitlab.listReadyIssues(repository)
       yield* gitlab.listReadyIssues({
         ...repository,
         forgeHost: "gitlab.example.com",
       })
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
-  )
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
 
-  expect(hosts).toEqual(["git.drupalcode.org", "gitlab.example.com"])
-})
+    expect(hosts).toEqual(["git.drupalcode.org", "gitlab.example.com"])
+  }),
+)
 
-test("authentication refreshes once after a GitLab 401", async () => {
-  const resolvedTokens = ["expired", "fresh"]
-  let resolutions = 0
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    resolveToken: async () => resolvedTokens[resolutions++]!,
-    makeService: (token) =>
-      service({
-        listReadyIssues: () =>
-          token === "expired"
-            ? Effect.fail(
-                new GitLabRequestError({
-                  message: "Unauthorized",
-                  statusCode: 401,
-                }),
-              )
-            : Effect.succeed([]),
-      }),
-  })
+it.effect("authentication refreshes once after a GitLab 401", () =>
+  Effect.gen(function* () {
+    const resolvedTokens = ["expired", "fresh"]
+    let resolutions = 0
+    const layer = ambientGitLabLayer({
+      workspaceRoot: "/workspace",
+      resolveToken: async () => resolvedTokens[resolutions++]!,
+      makeService: (token) =>
+        service({
+          listReadyIssues: () =>
+            token === "expired"
+              ? Effect.fail(
+                  new GitLabRequestError({
+                    message: "Unauthorized",
+                    statusCode: 401,
+                  }),
+                )
+              : Effect.succeed([]),
+        }),
+    })
 
-  await Effect.runPromise(
-    Effect.gen(function* () {
+    yield* Effect.gen(function* () {
       const gitlab = yield* GitLabService
       yield* gitlab.listReadyIssues(repository)
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
-  )
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
 
-  expect(resolutions).toBe(2)
-})
+    expect(resolutions).toBe(2)
+  }),
+)
 
-test("public project verification falls back to anonymous access", async () => {
-  let anonymousVerifications = 0
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    resolveToken: async () => {
-      throw new Error("glab is not authenticated")
-    },
-    makeAnonymousService: () =>
-      service({
-        verifyProject: (identity) => {
-          anonymousVerifications += 1
-          return Effect.succeed(identity)
-        },
-        hasCredentials: () => Effect.succeed(false),
-        hasAmbientCredentials: () => Effect.succeed(false),
-      }),
-  })
+it.effect("public project verification falls back to anonymous access", () =>
+  Effect.gen(function* () {
+    let anonymousVerifications = 0
+    const layer = ambientGitLabLayer({
+      workspaceRoot: "/workspace",
+      resolveToken: async () => {
+        throw new Error("glab is not authenticated")
+      },
+      makeAnonymousService: () =>
+        service({
+          verifyProject: (identity) => {
+            anonymousVerifications += 1
+            return Effect.succeed(identity)
+          },
+          hasCredentials: () => Effect.succeed(false),
+          hasAmbientCredentials: () => Effect.succeed(false),
+        }),
+    })
 
-  await Effect.runPromise(
-    Effect.gen(function* () {
+    yield* Effect.gen(function* () {
       const gitlab = yield* GitLabService
       expect(yield* gitlab.hasCredentials(repository)).toBe(false)
       yield* gitlab.verifyProject(repository)
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
-  )
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
 
-  expect(anonymousVerifications).toBe(1)
-})
+    expect(anonymousVerifications).toBe(1)
+  }),
+)
 
-test("glab login for a host is recognized for that host only", async () => {
-  const glab = glabProcessLayer({
-    hostTokens: new Map([["git.drupalcode.org", "token-for-drupalcode"]]),
-    // Non-zero exit with Token found simulates API outage resilience.
-    authenticatedExitCode: 1,
-  })
-  const tokens: string[] = []
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    makeService: (token) => {
-      tokens.push(token)
-      return service()
-    },
-  })
+it.effect("glab login for a host is recognized for that host only", () =>
+  Effect.gen(function* () {
+    const glab = glabProcessLayer({
+      hostTokens: new Map([["git.drupalcode.org", "token-for-drupalcode"]]),
+      // Non-zero exit with Token found simulates API outage resilience.
+      authenticatedExitCode: 1,
+    })
+    const tokens: string[] = []
+    const layer = ambientGitLabLayer({
+      workspaceRoot: "/workspace",
+      makeService: (token) => {
+        tokens.push(token)
+        return service()
+      },
+    })
 
-  const result = await Effect.runPromise(
-    Effect.gen(function* () {
+    const result = yield* Effect.gen(function* () {
       const gitlab = yield* GitLabService
       const configured = yield* gitlab.hasCredentials(repository)
       const wrongSshHost = yield* gitlab.hasCredentials({
@@ -277,106 +279,108 @@ test("glab login for a host is recognized for that host only", async () => {
         ambientConfigured,
         ambientWrong,
       }
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(glab.layer)))),
-  )
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(glab.layer))))
 
-  expect(result).toEqual({
-    configured: true,
-    wrongSshHost: false,
-    arbitrary: false,
-    ambientConfigured: true,
-    ambientWrong: false,
-  })
-  expect(tokens).toEqual(["token-for-drupalcode"])
-  expect(
-    glab.commands.some(
-      (args) =>
-        args[0] === "glab" &&
-        args[1] === "auth" &&
-        args[2] === "status" &&
-        args[3] === "--hostname" &&
-        args[4] === "git.drupalcode.org" &&
-        args.includes("--show-token"),
-    ),
-  ).toBe(true)
-  expect(
-    glab.commands.some(
-      (args) =>
-        args[0] === "glab" &&
-        args[1] === "auth" &&
-        args[2] === "status" &&
-        args[3] === "--hostname" &&
-        args[4] === "not-a-real-host.example",
-    ),
-  ).toBe(true)
-  // Shared helper never uses config-get (fallback-token path).
-  expect(
-    glab.commands.some(
-      (args) =>
-        args[0] === "glab" &&
-        args[1] === "config" &&
-        args[2] === "get" &&
-        args[3] === "token",
-    ),
-  ).toBe(false)
-})
+    expect(result).toEqual({
+      configured: true,
+      wrongSshHost: false,
+      arbitrary: false,
+      ambientConfigured: true,
+      ambientWrong: false,
+    })
+    expect(tokens).toEqual(["token-for-drupalcode"])
+    expect(
+      glab.commands.some(
+        (args) =>
+          args[0] === "glab" &&
+          args[1] === "auth" &&
+          args[2] === "status" &&
+          args[3] === "--hostname" &&
+          args[4] === "git.drupalcode.org" &&
+          args.includes("--show-token"),
+      ),
+    ).toBe(true)
+    expect(
+      glab.commands.some(
+        (args) =>
+          args[0] === "glab" &&
+          args[1] === "auth" &&
+          args[2] === "status" &&
+          args[3] === "--hostname" &&
+          args[4] === "not-a-real-host.example",
+      ),
+    ).toBe(true)
+    // Shared helper never uses config-get (fallback-token path).
+    expect(
+      glab.commands.some(
+        (args) =>
+          args[0] === "glab" &&
+          args[1] === "config" &&
+          args[2] === "get" &&
+          args[3] === "token",
+      ),
+    ).toBe(false)
+  }),
+)
 
-test("unconfigured hosts do not receive credentials from glab", async () => {
-  const glab = glabProcessLayer({
-    hostTokens: new Map(),
-  })
-  const tokens: string[] = []
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    makeService: (token) => {
-      tokens.push(token)
-      return service()
-    },
-  })
+it.effect("unconfigured hosts do not receive credentials from glab", () =>
+  Effect.gen(function* () {
+    const glab = glabProcessLayer({
+      hostTokens: new Map(),
+    })
+    const tokens: string[] = []
+    const layer = ambientGitLabLayer({
+      workspaceRoot: "/workspace",
+      makeService: (token) => {
+        tokens.push(token)
+        return service()
+      },
+    })
 
-  const hasCredentials = await Effect.runPromise(
-    Effect.gen(function* () {
+    const hasCredentials = yield* Effect.gen(function* () {
       const gitlab = yield* GitLabService
       return yield* gitlab.hasCredentials({
         ...repository,
         forgeHost: "not-a-real-host.example",
       })
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(glab.layer)))),
-  )
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(glab.layer))))
 
-  expect(hasCredentials).toBe(false)
-  expect(tokens).toEqual([])
-})
+    expect(hasCredentials).toBe(false)
+    expect(tokens).toEqual([])
+  }),
+)
 
-test("GITLAB_TOKEN still takes precedence over host-specific glab auth", async () => {
-  const glab = glabProcessLayer({
-    hostTokens: new Map([["git.drupalcode.org", "glab-token"]]),
-  })
-  const tokens: string[] = []
-  const layer = ambientGitLabLayer({
-    workspaceRoot: "/workspace",
-    environment: { GITLAB_TOKEN: " env-token " },
-    makeService: (token) => {
-      tokens.push(token)
-      return service()
-    },
-  })
-
-  await Effect.runPromise(
+it.effect(
+  "GITLAB_TOKEN still takes precedence over host-specific glab auth",
+  () =>
     Effect.gen(function* () {
-      const gitlab = yield* GitLabService
-      expect(yield* gitlab.hasCredentials(repository)).toBe(true)
-      expect(
-        yield* gitlab.hasCredentials({
-          ...repository,
-          forgeHost: "not-a-real-host.example",
-        }),
-      ).toBe(true)
-      yield* gitlab.listReadyIssues(repository)
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(glab.layer)))),
-  )
+      const glab = glabProcessLayer({
+        hostTokens: new Map([["git.drupalcode.org", "glab-token"]]),
+      })
+      const tokens: string[] = []
+      const layer = ambientGitLabLayer({
+        workspaceRoot: "/workspace",
+        environment: { GITLAB_TOKEN: " env-token " },
+        makeService: (token) => {
+          tokens.push(token)
+          return service()
+        },
+      })
 
-  expect(tokens).toEqual(["env-token"])
-  // Env token short-circuits; glab must not be consulted.
-  expect(glab.commands).toEqual([])
-})
+      yield* Effect.gen(function* () {
+        const gitlab = yield* GitLabService
+        expect(yield* gitlab.hasCredentials(repository)).toBe(true)
+        expect(
+          yield* gitlab.hasCredentials({
+            ...repository,
+            forgeHost: "not-a-real-host.example",
+          }),
+        ).toBe(true)
+        yield* gitlab.listReadyIssues(repository)
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(glab.layer))))
+
+      expect(tokens).toEqual(["env-token"])
+      // Env token short-circuits; glab must not be consulted.
+      expect(glab.commands).toEqual([])
+    }),
+)

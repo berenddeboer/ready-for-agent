@@ -1,3 +1,4 @@
+import { describe, expect, it } from "@effect/vitest"
 import {
   DateTime,
   Deferred,
@@ -78,7 +79,6 @@ import {
   startJobWorker,
   transferPersistedRefreshJobs,
 } from "../src/server/job-worker.js"
-import { describe, expect, test } from "bun:test"
 
 const repository = makeRepositoryRecord({
   id: RepositoryId.make("repo-01J00000000000000000000000"),
@@ -317,10 +317,8 @@ const queueLayer = (
 const runScoped = <A, E, R, LE>(
   effect: Effect.Effect<A, E, R | Scope.Scope>,
   layer: Layer.Layer<R, LE, never>,
-): Promise<A> =>
-  Effect.runPromise(
-    Effect.scoped(effect).pipe(Effect.provide(layer), Effect.orDie),
-  )
+): Effect.Effect<A> =>
+  Effect.scoped(effect).pipe(Effect.provide(layer), Effect.orDie)
 
 const readyRuntimeStatus = (): AgentBackendRuntimeStatus => ({
   backend: { id: "opencode", label: "OpenCode" },
@@ -386,404 +384,493 @@ const stubActiveAgentBackend = (): ActiveAgentBackendShape => {
 }
 
 describe("Job worker", () => {
-  test("enqueues a validated Refresh Job on the issue-refresh queue", async () => {
-    let enqueued:
-      | {
-          queue: string
-          payload: Record<string, unknown>
-          retryLimit: number | undefined
-        }
-      | undefined
-    const queue = Layer.succeed(
-      QueueService,
-      stubQueueService({
-        enqueue: (queueName, payload, options) =>
-          Effect.sync(() => {
-            enqueued = {
-              queue: queueName,
-              payload,
-              retryLimit: options?.retryLimit,
-            }
-            return makeJobId()
-          }),
-      }),
-    )
-
-    await Effect.runPromise(
-      enqueueRefreshRepositoryJob(refreshPayload.repositoryId).pipe(
-        Effect.provide(queue),
-      ),
-    )
-
-    expect(enqueued).toEqual({
-      queue: ISSUE_REFRESH_QUEUE,
-      payload: refreshPayload,
-      retryLimit: JOB_RECOVERY_RETRY_LIMIT,
-    })
-  })
-
-  test("extends a Lifecycle Job lease and leaves a live no-op unacknowledged", async () => {
-    const stepRunId = makeStepRunId()
-    const payload = WorkItemStepJob.make({ stepRunId })
-    const job = rawJob(payload, JOBS_QUEUE)
-    const dispatched = await Effect.runPromise(Deferred.make<string>())
-    const extended = await Effect.runPromise(
-      Deferred.make<{ readonly jobId: string; readonly timeoutMs: number }>(),
-    )
-    const recovered = await Effect.runPromise(Deferred.make<void>())
-    const acknowledged: string[] = []
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        yield* Deferred.await(recovered)
-        expect(yield* Deferred.await(dispatched)).toBe(stepRunId)
-        expect(yield* Deferred.await(extended)).toEqual({
-          jobId: job.jobId,
-          timeoutMs: Duration.toMillis(Duration.hours(2)) + 60_000,
-        })
-        yield* Effect.sleep("10 millis")
-        expect(acknowledged).toEqual([])
-      }),
-      Layer.mergeAll(
-        queueLayer(
-          [job],
-          (jobId) =>
+  it.live("enqueues a validated Refresh Job on the issue-refresh queue", () =>
+    Effect.gen(function* () {
+      let enqueued:
+        | {
+            queue: string
+            payload: Record<string, unknown>
+            retryLimit: number | undefined
+          }
+        | undefined
+      const queue = Layer.succeed(
+        QueueService,
+        stubQueueService({
+          enqueue: (queueName, payload, options) =>
             Effect.sync(() => {
-              acknowledged.push(jobId)
-            }),
-          undefined,
-          undefined,
-          (receivedStepRunId) =>
-            Deferred.succeed(dispatched, receivedStepRunId).pipe(
-              Effect.as({ _tag: "noop" as const }),
-            ),
-          (jobId, timeout) =>
-            Deferred.succeed(extended, {
-              jobId,
-              timeoutMs: Duration.toMillis(timeout),
-            }),
-          Deferred.succeed(recovered, undefined).pipe(Effect.as(0)),
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, { reconcile: unused }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("skips a stale Lifecycle Job and processes a later delivery", async () => {
-    const staleStepRunId = makeStepRunId()
-    const laterStepRunId = makeStepRunId()
-    const staleJob = rawJob(
-      WorkItemStepJob.make({ stepRunId: staleStepRunId }),
-      JOBS_QUEUE,
-    )
-    const laterJob = rawJob(
-      WorkItemStepJob.make({ stepRunId: laterStepRunId }),
-      JOBS_QUEUE,
-    )
-    const processed = await Effect.runPromise(Deferred.make<string>())
-    const extendedJobIds: string[] = []
-    const dispatchedStepRunIds: string[] = []
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        expect(
-          yield* Deferred.await(processed).pipe(Effect.timeout("100 millis")),
-        ).toBe(laterStepRunId)
-        expect(extendedJobIds).toEqual([staleJob.jobId, laterJob.jobId])
-        expect(dispatchedStepRunIds).toEqual([laterStepRunId])
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [staleJob, laterJob],
-          undefined,
-          undefined,
-          undefined,
-          (stepRunId) =>
-            Effect.gen(function* () {
-              dispatchedStepRunIds.push(stepRunId)
-              yield* Deferred.succeed(processed, stepRunId)
-              return { _tag: "noop" as const }
-            }),
-          (jobId) =>
-            Effect.gen(function* () {
-              extendedJobIds.push(jobId)
-              if (jobId === staleJob.jobId) {
-                return yield* new JobNotFoundError({ jobId })
+              enqueued = {
+                queue: queueName,
+                payload,
+                retryLimit: options?.retryLimit,
               }
+              return makeJobId()
             }),
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, { reconcile: unused }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
+        }),
+      )
 
-  test("keeps Issue refresh operational and logs context after a Lifecycle lease extension failure", async () => {
-    const stepRunId = makeStepRunId()
-    const lifecycleJob = rawJob(WorkItemStepJob.make({ stepRunId }), JOBS_QUEUE)
-    const refreshJob = rawJob(refreshPayload)
-    const extensionAttempted = await Effect.runPromise(Deferred.make<void>())
-    const refreshAcknowledged = await Effect.runPromise(Deferred.make<string>())
-    const dispatchedStepRunIds: string[] = []
-    const logs: unknown[] = []
-    const logger = Logger.make(({ message }) => {
-      logs.push(message)
-    })
+      yield* enqueueRefreshRepositoryJob(refreshPayload.repositoryId).pipe(
+        Effect.provide(queue),
+      )
 
-    await runScoped(
+      expect(enqueued).toEqual({
+        queue: ISSUE_REFRESH_QUEUE,
+        payload: refreshPayload,
+        retryLimit: JOB_RECOVERY_RETRY_LIMIT,
+      })
+    }),
+  )
+
+  it.live(
+    "extends a Lifecycle Job lease and leaves a live no-op unacknowledged",
+    () =>
       Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        expect(
-          yield* Deferred.await(refreshAcknowledged).pipe(
-            Effect.timeout("100 millis"),
-          ),
-        ).toBe(refreshJob.jobId)
-        expect(dispatchedStepRunIds).toEqual([])
-        expect(logs).toContainEqual([
-          "Lifecycle Job lease extension failed",
-          expect.objectContaining({
-            jobId: lifecycleJob.jobId,
-            stepRunId,
-            error: "temporary lease extension failure",
+        const stepRunId = makeStepRunId()
+        const payload = WorkItemStepJob.make({ stepRunId })
+        const job = rawJob(payload, JOBS_QUEUE)
+        const dispatched = yield* Deferred.make<string>()
+        const extended = yield* Deferred.make<{
+          readonly jobId: string
+          readonly timeoutMs: number
+        }>()
+        const recovered = yield* Deferred.make<void>()
+        const acknowledged: string[] = []
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            yield* Deferred.await(recovered)
+            expect(yield* Deferred.await(dispatched)).toBe(stepRunId)
+            expect(yield* Deferred.await(extended)).toEqual({
+              jobId: job.jobId,
+              timeoutMs: Duration.toMillis(Duration.hours(2)) + 60_000,
+            })
+            yield* Effect.sleep("10 millis")
+            expect(acknowledged).toEqual([])
           }),
-        ])
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [lifecycleJob, refreshJob],
-          (jobId) => Deferred.succeed(refreshAcknowledged, jobId),
-          undefined,
-          undefined,
-          (receivedStepRunId) =>
-            Effect.sync(() => {
-              dispatchedStepRunIds.push(receivedStepRunId)
-              return { _tag: "noop" as const }
-            }),
-          (jobId) =>
-            Effect.gen(function* () {
-              yield* Deferred.succeed(extensionAttempted, undefined)
-              return yield* new AcknowledgeError({
-                jobId,
-                message: "temporary lease extension failure",
-              })
-            }),
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Deferred.await(extensionAttempted).pipe(
-              Effect.as({
-                fetched: 0,
-                inserted: 0,
-                updated: 0,
-                deleted: 0,
-                unchanged: 0,
-              }),
+          Layer.mergeAll(
+            queueLayer(
+              [job],
+              (jobId) =>
+                Effect.sync(() => {
+                  acknowledged.push(jobId)
+                }),
+              undefined,
+              undefined,
+              (receivedStepRunId) =>
+                Deferred.succeed(dispatched, receivedStepRunId).pipe(
+                  Effect.as({ _tag: "noop" as const }),
+                ),
+              (jobId, timeout) =>
+                Deferred.succeed(extended, {
+                  jobId,
+                  timeoutMs: Duration.toMillis(timeout),
+                }),
+              Deferred.succeed(recovered, undefined).pipe(Effect.as(0)),
             ),
-        }),
-        keymaxxerLayer(),
-        Logger.layer([logger]),
-      ),
-    )
-  })
-
-  test("rechecks orphan recovery while the worker is running", async () => {
-    let recoveryCalls = 0
-    const recoveredTwice = await Effect.runPromise(Deferred.make<void>())
-    const recover = Effect.gen(function* () {
-      recoveryCalls += 1
-      if (recoveryCalls === 2) {
-        yield* Deferred.succeed(recoveredTwice, undefined)
-      }
-      return 0
-    })
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          orphanRecoveryInterval: Duration.zero,
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        yield* Deferred.await(recoveredTwice).pipe(Effect.timeout("100 millis"))
-        expect(recoveryCalls).toBeGreaterThanOrEqual(2)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [],
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          recover,
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, { reconcile: unused }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("reconciles the Issue store and acknowledges after success", async () => {
-    const jobs: RawJob[] = []
-    let job: RawJob | undefined
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
-    const queue = queueLayer(jobs, (jobId) =>
-      Deferred.succeed(acknowledged, jobId),
-    )
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const github = Layer.succeed(GitHubService, {
-      getOpenPullRequestNumber: () => Effect.succeed(1),
-      findOpenPullRequestNumber: () => Effect.succeed(1),
-      createDraftPullRequest: () => Effect.succeed(1),
-      updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
-      countOpenNonDraftPullRequests: () => Effect.succeed(0),
-      getPullRequestCheckStatus: () =>
-        Effect.succeed({
-          _tag: "succeeded",
-          terminalChecks: [],
-          mergeability: "mergeable",
-          baseRefName: "main",
-          headPushedAt: null,
-          headSha: null,
-          createdAt: null,
-          isDraft: null,
-        }),
-      getPrStatusCheckDiagnostics: () => Effect.succeed([]),
-      observeAutomatedReviewEvidence: () =>
-        Effect.succeed({
-          _tag: "ambiguous" as const,
-          reason: "Automated review evidence observation is not configured",
-        }),
-      getPullRequestLifecycleStatus: () =>
-        Effect.succeed({ _tag: "open" as const }),
-      markPullRequestReadyForReview: () => Effect.void,
-      mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
-      rerunWorkflowRun: () => Effect.void,
-      ensureIssueCompletedWithSummary: () => Effect.void,
-      getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
-      listReadyIssues: () =>
-        Effect.succeed([
-          {
-            number: 57,
-            title: "Execute queued Refresh Jobs in Harness",
-            body: "Worker acceptance criteria",
-            url: "https://github.com/acme/widgets/issues/57",
-            createdAt: new Date("2026-07-14T00:00:00.000Z"),
-            state: "OPEN" as const,
-            author: "test-operator",
-            parent: null,
-            parentPosition: null,
-            hasChildren: false,
-            hierarchySupported: true,
-            blockedBy: [],
-            closingPullRequests: [],
-          },
-        ]),
-    } satisfies GitHubServiceShape)
-    const reconciler = IssueReconcilerLive.pipe(
-      Layer.provideMerge(database),
-      Layer.provideMerge(github),
-      Layer.provideMerge(defaultGitlabLayer),
-    )
-    const layer = Layer.mergeAll(
-      database,
-      reconciler,
-      queue,
-      keymaxxerLayer(),
-      defaultGithubLayer,
-    )
-
-    await runScoped(
-      Effect.gen(function* () {
-        const db = yield* DbService
-        const added = yield* db.addRepository({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-          localPath: repository.localPath,
-          isBare: true,
-        })
-        job = rawJob({
-          _tag: "refresh-repository",
-          repositoryId: RepositoryId.make(added.id),
-        })
-        jobs.push(job)
-
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, { reconcile: unused }),
+            keymaxxerLayer(),
+          ),
         )
-        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
-        const issues = yield* db.listIssues(added.id)
-        expect(issues.map(({ issueNumber }) => issueNumber)).toEqual([57])
       }),
-      layer,
-    )
-  })
+  )
 
-  test("marks malformed and unknown payloads terminal", async () => {
-    for (const { payload, queue } of [
-      {
-        payload: { _tag: "refresh-repository", repositoryId: "invalid" },
-        queue: ISSUE_REFRESH_QUEUE,
-      },
-      {
-        payload: { _tag: "unknown-job", repositoryId: repository.id },
-        queue: ISSUE_REFRESH_QUEUE,
-      },
-      {
-        payload: { _tag: "unknown-job", stepRunId: "srun-bad" },
-        queue: JOBS_QUEUE,
-      },
-    ]) {
-      const job = rawJob(payload, queue)
-      const failed = await Effect.runPromise(Deferred.make<string>())
-      await runScoped(
+  it.live("skips a stale Lifecycle Job and processes a later delivery", () =>
+    Effect.gen(function* () {
+      const staleStepRunId = makeStepRunId()
+      const laterStepRunId = makeStepRunId()
+      const staleJob = rawJob(
+        WorkItemStepJob.make({ stepRunId: staleStepRunId }),
+        JOBS_QUEUE,
+      )
+      const laterJob = rawJob(
+        WorkItemStepJob.make({ stepRunId: laterStepRunId }),
+        JOBS_QUEUE,
+      )
+      const processed = yield* Deferred.make<string>()
+      const extendedJobIds: string[] = []
+      const dispatchedStepRunIds: string[] = []
+
+      yield* runScoped(
         Effect.gen(function* () {
           yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
             Effect.forkScoped({ startImmediately: true }),
           )
-          expect(yield* Deferred.await(failed)).toBe(job.jobId)
+          expect(
+            yield* Deferred.await(processed).pipe(Effect.timeout("100 millis")),
+          ).toBe(laterStepRunId)
+          expect(extendedJobIds).toEqual([staleJob.jobId, laterJob.jobId])
+          expect(dispatchedStepRunIds).toEqual([laterStepRunId])
         }),
         Layer.mergeAll(
           defaultGithubLayer,
-          queueLayer([job], undefined, (jobId) =>
-            Deferred.succeed(failed, jobId),
+          queueLayer(
+            [staleJob, laterJob],
+            undefined,
+            undefined,
+            undefined,
+            (stepRunId) =>
+              Effect.gen(function* () {
+                dispatchedStepRunIds.push(stepRunId)
+                yield* Deferred.succeed(processed, stepRunId)
+                return { _tag: "noop" as const }
+              }),
+            (jobId) =>
+              Effect.gen(function* () {
+                extendedJobIds.push(jobId)
+                if (jobId === staleJob.jobId) {
+                  return yield* new JobNotFoundError({ jobId })
+                }
+              }),
           ),
           dbLayer(),
           Layer.succeed(IssueReconciler, { reconcile: unused }),
           keymaxxerLayer(),
         ),
       )
-    }
-  })
+    }),
+  )
 
-  test("publishes Issues-changed invalidation only after successful reconciliation", async () => {
-    const successJob = rawJob(refreshPayload)
-    const failureJob = rawJob(refreshPayload)
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
-    const failed = await Effect.runPromise(Deferred.make<string>())
-    const notifications: string[] = []
-    let calls = 0
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: () =>
+  it.live(
+    "keeps Issue refresh operational and logs context after a Lifecycle lease extension failure",
+    () =>
+      Effect.gen(function* () {
+        const stepRunId = makeStepRunId()
+        const lifecycleJob = rawJob(
+          WorkItemStepJob.make({ stepRunId }),
+          JOBS_QUEUE,
+        )
+        const refreshJob = rawJob(refreshPayload)
+        const extensionAttempted = yield* Deferred.make<void>()
+        const refreshAcknowledged = yield* Deferred.make<string>()
+        const dispatchedStepRunIds: string[] = []
+        const logs: unknown[] = []
+        const logger = Logger.make(({ message }) => {
+          logs.push(message)
+        })
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            expect(
+              yield* Deferred.await(refreshAcknowledged).pipe(
+                Effect.timeout("100 millis"),
+              ),
+            ).toBe(refreshJob.jobId)
+            expect(dispatchedStepRunIds).toEqual([])
+            expect(logs).toContainEqual([
+              "Lifecycle Job lease extension failed",
+              expect.objectContaining({
+                jobId: lifecycleJob.jobId,
+                stepRunId,
+                error: "temporary lease extension failure",
+              }),
+            ])
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [lifecycleJob, refreshJob],
+              (jobId) => Deferred.succeed(refreshAcknowledged, jobId),
+              undefined,
+              undefined,
+              (receivedStepRunId) =>
+                Effect.sync(() => {
+                  dispatchedStepRunIds.push(receivedStepRunId)
+                  return { _tag: "noop" as const }
+                }),
+              (jobId) =>
+                Effect.gen(function* () {
+                  yield* Deferred.succeed(extensionAttempted, undefined)
+                  return yield* new AcknowledgeError({
+                    jobId,
+                    message: "temporary lease extension failure",
+                  })
+                }),
+            ),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Deferred.await(extensionAttempted).pipe(
+                  Effect.as({
+                    fetched: 0,
+                    inserted: 0,
+                    updated: 0,
+                    deleted: 0,
+                    unchanged: 0,
+                  }),
+                ),
+            }),
+            keymaxxerLayer(),
+            Logger.layer([logger]),
+          ),
+        )
+      }),
+  )
+
+  it.live("rechecks orphan recovery while the worker is running", () =>
+    Effect.gen(function* () {
+      let recoveryCalls = 0
+      const recoveredTwice = yield* Deferred.make<void>()
+      const recover = Effect.gen(function* () {
+        recoveryCalls += 1
+        if (recoveryCalls === 2) {
+          yield* Deferred.succeed(recoveredTwice, undefined)
+        }
+        return 0
+      })
+
+      yield* runScoped(
         Effect.gen(function* () {
-          calls += 1
-          if (calls === 1) {
+          yield* runJobWorker({
+            idlePollInterval: Duration.zero,
+            orphanRecoveryInterval: Duration.zero,
+          }).pipe(Effect.forkScoped({ startImmediately: true }))
+          yield* Deferred.await(recoveredTwice).pipe(
+            Effect.timeout("100 millis"),
+          )
+          expect(recoveryCalls).toBeGreaterThanOrEqual(2)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            recover,
+          ),
+          dbLayer(),
+          Layer.succeed(IssueReconciler, { reconcile: unused }),
+          keymaxxerLayer(),
+        ),
+      )
+    }),
+  )
+
+  it.live("reconciles the Issue store and acknowledges after success", () =>
+    Effect.gen(function* () {
+      const jobs: RawJob[] = []
+      let job: RawJob | undefined
+      const acknowledged = yield* Deferred.make<string>()
+      const queue = queueLayer(jobs, (jobId) =>
+        Deferred.succeed(acknowledged, jobId),
+      )
+      const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+      const github = Layer.succeed(GitHubService, {
+        getOpenPullRequestNumber: () => Effect.succeed(1),
+        findOpenPullRequestNumber: () => Effect.succeed(1),
+        createDraftPullRequest: () => Effect.succeed(1),
+        updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
+        countOpenNonDraftPullRequests: () => Effect.succeed(0),
+        getPullRequestCheckStatus: () =>
+          Effect.succeed({
+            _tag: "succeeded",
+            terminalChecks: [],
+            mergeability: "mergeable",
+            baseRefName: "main",
+            headPushedAt: null,
+            headSha: null,
+            createdAt: null,
+            isDraft: null,
+          }),
+        getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+        observeAutomatedReviewEvidence: () =>
+          Effect.succeed({
+            _tag: "ambiguous" as const,
+            reason: "Automated review evidence observation is not configured",
+          }),
+        getPullRequestLifecycleStatus: () =>
+          Effect.succeed({ _tag: "open" as const }),
+        markPullRequestReadyForReview: () => Effect.void,
+        mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+        rerunWorkflowRun: () => Effect.void,
+        ensureIssueCompletedWithSummary: () => Effect.void,
+        getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+        listReadyIssues: () =>
+          Effect.succeed([
+            {
+              number: 57,
+              title: "Execute queued Refresh Jobs in Harness",
+              body: "Worker acceptance criteria",
+              url: "https://github.com/acme/widgets/issues/57",
+              createdAt: new Date("2026-07-14T00:00:00.000Z"),
+              state: "OPEN" as const,
+              author: "test-operator",
+              parent: null,
+              parentPosition: null,
+              hasChildren: false,
+              hierarchySupported: true,
+              blockedBy: [],
+              closingPullRequests: [],
+            },
+          ]),
+      } satisfies GitHubServiceShape)
+      const reconciler = IssueReconcilerLive.pipe(
+        Layer.provideMerge(database),
+        Layer.provideMerge(github),
+        Layer.provideMerge(defaultGitlabLayer),
+      )
+      const layer = Layer.mergeAll(
+        database,
+        reconciler,
+        queue,
+        keymaxxerLayer(),
+        defaultGithubLayer,
+      )
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const added = yield* db.addRepository({
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: repository.localPath,
+            isBare: true,
+          })
+          job = rawJob({
+            _tag: "refresh-repository",
+            repositoryId: RepositoryId.make(added.id),
+          })
+          jobs.push(job)
+
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+          const issues = yield* db.listIssues(added.id)
+          expect(issues.map(({ issueNumber }) => issueNumber)).toEqual([57])
+        }),
+        layer,
+      )
+    }),
+  )
+
+  it.live("marks malformed and unknown payloads terminal", () =>
+    Effect.gen(function* () {
+      for (const { payload, queue } of [
+        {
+          payload: { _tag: "refresh-repository", repositoryId: "invalid" },
+          queue: ISSUE_REFRESH_QUEUE,
+        },
+        {
+          payload: { _tag: "unknown-job", repositoryId: repository.id },
+          queue: ISSUE_REFRESH_QUEUE,
+        },
+        {
+          payload: { _tag: "unknown-job", stepRunId: "srun-bad" },
+          queue: JOBS_QUEUE,
+        },
+      ]) {
+        const job = rawJob(payload, queue)
+        const failed = yield* Deferred.make<string>()
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            expect(yield* Deferred.await(failed)).toBe(job.jobId)
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer([job], undefined, (jobId) =>
+              Deferred.succeed(failed, jobId),
+            ),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, { reconcile: unused }),
+            keymaxxerLayer(),
+          ),
+        )
+      }
+    }),
+  )
+
+  it.live(
+    "publishes Issues-changed invalidation only after successful reconciliation",
+    () =>
+      Effect.gen(function* () {
+        const successJob = rawJob(refreshPayload)
+        const failureJob = rawJob(refreshPayload)
+        const acknowledged = yield* Deferred.make<string>()
+        const failed = yield* Deferred.make<string>()
+        const notifications: string[] = []
+        let calls = 0
+        const reconciler = Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Effect.gen(function* () {
+              calls += 1
+              if (calls === 1) {
+                return {
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                }
+              }
+              return yield* new DatabaseError({
+                message: "reconciliation failed",
+              })
+            }),
+        } satisfies IssueReconcilerShape)
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            expect(yield* Deferred.await(acknowledged)).toBe(successJob.jobId)
+            expect(notifications).toEqual([repository.id])
+            expect(yield* Deferred.await(failed)).toBe(failureJob.jobId)
+            expect(notifications).toEqual([repository.id])
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [successJob, failureJob],
+              (jobId) => Deferred.succeed(acknowledged, jobId),
+              (jobId) => Deferred.succeed(failed, jobId),
+            ),
+            dbLayer([repository], (repositoryId) =>
+              Effect.sync(() => {
+                notifications.push(repositoryId)
+              }),
+            ),
+            reconciler,
+            keymaxxerLayer(),
+          ),
+        )
+      }),
+  )
+
+  it.live("delivers only successful worker invalidations through GraphQL", () =>
+    Effect.gen(function* () {
+      const jobs: RawJob[] = []
+      const acknowledged = yield* Deferred.make<string>()
+      const failed = yield* Deferred.make<string>()
+      let reconciliations = 0
+      const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+      const queue = queueLayer(
+        jobs,
+        (jobId) => Deferred.succeed(acknowledged, jobId),
+        (jobId) => Deferred.succeed(failed, jobId),
+      )
+      const reconciler = Layer.succeed(IssueReconciler, {
+        reconcile: () =>
+          Effect.gen(function* () {
+            reconciliations += 1
+            if (reconciliations === 2) {
+              return yield* new DatabaseError({
+                message: "reconciliation failed",
+              })
+            }
             return {
               fetched: 0,
               inserted: 0,
@@ -791,117 +878,67 @@ describe("Job worker", () => {
               deleted: 0,
               unchanged: 0,
             }
-          }
-          return yield* new DatabaseError({
-            message: "reconciliation failed",
-          })
-        }),
-    } satisfies IssueReconcilerShape)
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        expect(yield* Deferred.await(acknowledged)).toBe(successJob.jobId)
-        expect(notifications).toEqual([repository.id])
-        expect(yield* Deferred.await(failed)).toBe(failureJob.jobId)
-        expect(notifications).toEqual([repository.id])
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [successJob, failureJob],
-          (jobId) => Deferred.succeed(acknowledged, jobId),
-          (jobId) => Deferred.succeed(failed, jobId),
+          }),
+      } satisfies IssueReconcilerShape)
+      const sessionStore = Layer.succeed(OpencodeSessionStore, {
+        getSession: (id) =>
+          Effect.succeed({
+            id,
+            availability: "missing" as const,
+            model: null,
+            tokens: null,
+            cost: null,
+            createdAt: null,
+            updatedAt: null,
+          }),
+      })
+      const localGit = Layer.succeed(LocalGit, {
+        inspect: () =>
+          Effect.die("local git not used in issue subscription test"),
+      })
+      const directoryPicker = Layer.succeed(DirectoryPicker, {
+        available: Effect.succeed(false),
+        pick: Effect.succeed(null),
+      })
+      const controller = new AbortController()
+      // Scope finalizer always aborts the subscription and disposes the runtime
+      // (JS try/finally + yield* does not run on Effect failure).
+      const runtime = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          ManagedRuntime.make(
+            Layer.mergeAll(
+              database,
+              queue,
+              reconciler,
+              keymaxxerLayer(),
+              Layer.succeed(ActiveAgentBackend, stubActiveAgentBackend()),
+              sessionStore,
+              defaultGithubLayer,
+              localGit,
+              directoryPicker,
+            ),
+          ),
         ),
-        dbLayer([repository], (repositoryId) =>
-          Effect.sync(() => {
-            notifications.push(repositoryId)
+        (managed) =>
+          Effect.promise(() => {
+            controller.abort()
+            return managed.dispose()
+          }),
+      )
+
+      const added = yield* Effect.promise(() =>
+        runtime.runPromise(
+          Effect.gen(function* () {
+            const db = yield* DbService
+            return yield* db.addRepository({
+              forge: repository.forge,
+              forgeHost: repository.forgeHost,
+              projectPath: repository.projectPath,
+              localPath: repository.localPath,
+              isBare: true,
+            })
           }),
         ),
-        reconciler,
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("delivers only successful worker invalidations through GraphQL", async () => {
-    const jobs: RawJob[] = []
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
-    const failed = await Effect.runPromise(Deferred.make<string>())
-    let reconciliations = 0
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = queueLayer(
-      jobs,
-      (jobId) => Deferred.succeed(acknowledged, jobId),
-      (jobId) => Deferred.succeed(failed, jobId),
-    )
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: () =>
-        Effect.gen(function* () {
-          reconciliations += 1
-          if (reconciliations === 2) {
-            return yield* new DatabaseError({
-              message: "reconciliation failed",
-            })
-          }
-          return {
-            fetched: 0,
-            inserted: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-          }
-        }),
-    } satisfies IssueReconcilerShape)
-    const sessionStore = Layer.succeed(OpencodeSessionStore, {
-      getSession: (id) =>
-        Effect.succeed({
-          id,
-          availability: "missing" as const,
-          model: null,
-          tokens: null,
-          cost: null,
-          createdAt: null,
-          updatedAt: null,
-        }),
-    })
-    const localGit = Layer.succeed(LocalGit, {
-      inspect: () =>
-        Effect.die("local git not used in issue subscription test"),
-    })
-    const directoryPicker = Layer.succeed(DirectoryPicker, {
-      available: Effect.succeed(false),
-      pick: Effect.succeed(null),
-    })
-    const runtime = ManagedRuntime.make(
-      Layer.mergeAll(
-        database,
-        queue,
-        reconciler,
-        keymaxxerLayer(),
-        Layer.succeed(ActiveAgentBackend, stubActiveAgentBackend()),
-        sessionStore,
-        defaultGithubLayer,
-        localGit,
-        directoryPicker,
-      ),
-    )
-    const controller = new AbortController()
-
-    try {
-      const added = await runtime.runPromise(
-        Effect.gen(function* () {
-          const db = yield* DbService
-          return yield* db.addRepository({
-            forge: repository.forge,
-            forgeHost: repository.forgeHost,
-            projectPath: repository.projectPath,
-            localPath: repository.localPath,
-            isBare: true,
-          })
-        }),
       )
       const successJob = rawJob({
         _tag: "refresh-repository",
@@ -913,24 +950,27 @@ describe("Job worker", () => {
       })
       jobs.push(successJob, failureJob)
 
-      const response = await createGraphqlApi(runtime).fetch(
-        new Request("http://127.0.0.1:6056/graphql", {
-          method: "POST",
-          headers: {
-            accept: "text/event-stream",
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            query: `subscription {
+      const response = yield* Effect.promise(() =>
+        createGraphqlApi(runtime).fetch(
+          new Request("http://127.0.0.1:6056/graphql", {
+            method: "POST",
+            headers: {
+              accept: "text/event-stream",
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              query: `subscription {
               issuesChanged(repositoryId: "${added.id}")
             }`,
+            }),
+            signal: controller.signal,
           }),
-          signal: controller.signal,
-        }),
+        ),
       )
       const reader = response.body?.getReader()
       if (reader === undefined) throw new Error("Subscription has no body")
 
+      // Keep Promise/await in a plain async IIFE — not inside Effect.gen.
       const invalidation = (async () => {
         let event = ""
         const decoder = new TextDecoder()
@@ -943,1361 +983,1435 @@ describe("Job worker", () => {
         }
         return event
       })()
-      await Bun.sleep(0)
-      runtime.runFork(runJobWorker())
+      yield* Effect.sleep("0 millis")
+      yield* Effect.sync(() => runtime.runFork(runJobWorker()))
 
-      expect(await runtime.runPromise(Deferred.await(acknowledged))).toBe(
-        successJob.jobId,
+      expect(
+        yield* Effect.promise(() =>
+          runtime.runPromise(Deferred.await(acknowledged)),
+        ),
+      ).toBe(successJob.jobId)
+      expect(yield* Effect.promise(() => invalidation)).toContain(
+        '"data":{"issuesChanged":true}',
       )
-      expect(await invalidation).toContain('"data":{"issuesChanged":true}')
 
-      expect(await runtime.runPromise(Deferred.await(failed))).toBe(
-        failureJob.jobId,
-      )
+      expect(
+        yield* Effect.promise(() => runtime.runPromise(Deferred.await(failed))),
+      ).toBe(failureJob.jobId)
       const secondEvent = reader
         .read()
         .then(({ value }) =>
           value === undefined ? "" : new TextDecoder().decode(value),
         )
         .catch(() => "")
-      const unexpectedInvalidation = await Promise.race([
-        secondEvent.then((chunk) =>
-          chunk.includes('"data":{"issuesChanged":true}'),
+      const unexpectedInvalidation = yield* Effect.race(
+        Effect.promise(() =>
+          secondEvent.then((chunk) =>
+            chunk.includes('"data":{"issuesChanged":true}'),
+          ),
         ),
-        Bun.sleep(20).then(() => false),
-      ])
+        Effect.sleep("20 millis").pipe(Effect.as(false)),
+      )
       expect(unexpectedInvalidation).toBe(false)
-    } finally {
-      controller.abort()
-      await runtime.dispose()
-    }
-  })
+    }),
+  )
 
-  test("marks a caught Refresh Job failure terminal", async () => {
-    const job = rawJob(refreshPayload)
-    const failed = await Effect.runPromise(Deferred.make<string>())
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: () =>
-        Effect.fail(new DatabaseError({ message: "reconciliation failed" })),
-    } satisfies IssueReconcilerShape)
+  it.live("marks a caught Refresh Job failure terminal", () =>
+    Effect.gen(function* () {
+      const job = rawJob(refreshPayload)
+      const failed = yield* Deferred.make<string>()
+      const reconciler = Layer.succeed(IssueReconciler, {
+        reconcile: () =>
+          Effect.fail(new DatabaseError({ message: "reconciliation failed" })),
+      } satisfies IssueReconcilerShape)
 
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        expect(yield* Deferred.await(failed)).toBe(job.jobId)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer([job], undefined, (jobId) =>
-          Deferred.succeed(failed, jobId),
-        ),
-        dbLayer(),
-        reconciler,
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("executes duplicate Refresh Jobs serially across repositories", async () => {
-    const jobs = [
-      rawJob(refreshPayload),
-      rawJob({
-        _tag: "refresh-repository",
-        repositoryId: RepositoryId.make(otherRepository.id),
-      }),
-    ]
-    const firstStarted = await Effect.runPromise(Deferred.make<void>())
-    const releaseFirst = await Effect.runPromise(Deferred.make<void>())
-    const secondStarted = await Effect.runPromise(Deferred.make<void>())
-    let calls = 0
-    let active = 0
-    let maximumActive = 0
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: () =>
+      yield* runScoped(
         Effect.gen(function* () {
-          calls += 1
-          active += 1
-          maximumActive = Math.max(maximumActive, active)
-          if (calls === 1) {
-            yield* Deferred.succeed(firstStarted, undefined)
-            yield* Deferred.await(releaseFirst)
-          } else {
-            yield* Deferred.succeed(secondStarted, undefined)
-          }
-          active -= 1
-          return {
-            fetched: 0,
-            inserted: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-          }
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          expect(yield* Deferred.await(failed)).toBe(job.jobId)
         }),
-    } satisfies IssueReconcilerShape)
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        yield* Deferred.await(firstStarted)
-        expect(calls).toBe(1)
-        yield* Deferred.succeed(releaseFirst, undefined)
-        yield* Deferred.await(secondStarted)
-        expect(maximumActive).toBe(1)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(jobs),
-        dbLayer([repository, otherRepository]),
-        reconciler,
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("runs Work Item lifecycle jobs while Issue refresh is active", async () => {
-    const refreshJob = rawJob(refreshPayload)
-    const stepRunId = makeStepRunId()
-    const lifecycleJob = rawJob(WorkItemStepJob.make({ stepRunId }), JOBS_QUEUE)
-    const jobs = [refreshJob, lifecycleJob]
-    const refreshStarted = await Effect.runPromise(Deferred.make<void>())
-    const releaseRefresh = await Effect.runPromise(Deferred.make<void>())
-    const lifecycleDispatched = await Effect.runPromise(Deferred.make<string>())
-    const lifecycleLeaseExtended = await Effect.runPromise(
-      Deferred.make<string>(),
-    )
-    let refreshActiveDuringLifecycle = false
-
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: () =>
-        Effect.gen(function* () {
-          yield* Deferred.succeed(refreshStarted, undefined)
-          yield* Deferred.await(releaseRefresh)
-          return {
-            fetched: 0,
-            inserted: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-          }
-        }),
-    } satisfies IssueReconcilerShape)
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        yield* Deferred.await(refreshStarted)
-        expect(yield* Deferred.await(lifecycleDispatched)).toBe(stepRunId)
-        expect(refreshActiveDuringLifecycle).toBe(true)
-        expect(yield* Deferred.await(lifecycleLeaseExtended)).toBe(
-          lifecycleJob.jobId,
-        )
-        yield* Deferred.succeed(releaseRefresh, undefined)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          jobs,
-          undefined,
-          undefined,
-          undefined,
-          (receivedStepRunId) =>
-            Effect.gen(function* () {
-              refreshActiveDuringLifecycle = true
-              yield* Deferred.succeed(lifecycleDispatched, receivedStepRunId)
-              return { _tag: "noop" as const }
-            }),
-          (jobId) => Deferred.succeed(lifecycleLeaseExtended, jobId),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer([job], undefined, (jobId) =>
+            Deferred.succeed(failed, jobId),
+          ),
+          dbLayer(),
+          reconciler,
+          keymaxxerLayer(),
         ),
-        dbLayer(),
-        reconciler,
-        keymaxxerLayer(),
-      ),
-    )
-  })
+      )
+    }),
+  )
 
-  test("runs multiple lifecycle jobs concurrently up to Config capacity", async () => {
-    const firstStepRunId = makeStepRunId()
-    const secondStepRunId = makeStepRunId()
-    const jobs = [
-      rawJob(WorkItemStepJob.make({ stepRunId: firstStepRunId }), JOBS_QUEUE),
-      rawJob(WorkItemStepJob.make({ stepRunId: secondStepRunId }), JOBS_QUEUE),
-    ]
-    const firstStarted = await Effect.runPromise(Deferred.make<void>())
-    const secondStarted = await Effect.runPromise(Deferred.make<void>())
-    const release = await Effect.runPromise(Deferred.make<void>())
-    let active = 0
-    let maximumActive = 0
-    const seen = new Set<string>()
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        yield* Deferred.await(firstStarted)
-        yield* Deferred.await(secondStarted)
-        expect(maximumActive).toBe(2)
-        expect(seen).toEqual(new Set([firstStepRunId, secondStepRunId]))
-        yield* Deferred.succeed(release, undefined)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(jobs, undefined, undefined, undefined, (stepRunId) =>
+  it.live("executes duplicate Refresh Jobs serially across repositories", () =>
+    Effect.gen(function* () {
+      const jobs = [
+        rawJob(refreshPayload),
+        rawJob({
+          _tag: "refresh-repository",
+          repositoryId: RepositoryId.make(otherRepository.id),
+        }),
+      ]
+      const firstStarted = yield* Deferred.make<void>()
+      const releaseFirst = yield* Deferred.make<void>()
+      const secondStarted = yield* Deferred.make<void>()
+      let calls = 0
+      let active = 0
+      let maximumActive = 0
+      const reconciler = Layer.succeed(IssueReconciler, {
+        reconcile: () =>
           Effect.gen(function* () {
-            seen.add(stepRunId)
+            calls += 1
             active += 1
             maximumActive = Math.max(maximumActive, active)
-            if (stepRunId === firstStepRunId) {
+            if (calls === 1) {
               yield* Deferred.succeed(firstStarted, undefined)
+              yield* Deferred.await(releaseFirst)
             } else {
               yield* Deferred.succeed(secondStarted, undefined)
             }
-            yield* Deferred.await(release)
             active -= 1
-            return { _tag: "noop" as const }
+            return {
+              fetched: 0,
+              inserted: 0,
+              updated: 0,
+              deleted: 0,
+              unchanged: 0,
+            }
           }),
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Effect.succeed({
-              fetched: 0,
-              inserted: 0,
-              updated: 0,
-              deleted: 0,
-              unchanged: 0,
-            }),
-        } satisfies IssueReconcilerShape),
-        keymaxxerLayer(),
-      ),
-    )
-  })
+      } satisfies IssueReconcilerShape)
 
-  test("recovers after a queue infrastructure error", async () => {
-    const job = rawJob(refreshPayload)
-    const acknowledged = await Effect.runPromise(Deferred.make<void>())
-    let refreshClaims = 0
-    const claim = (queueName: string) => {
-      if (queueName !== ISSUE_REFRESH_QUEUE) {
-        return Effect.succeed(Option.none())
-      }
-      refreshClaims += 1
-      return refreshClaims === 1
-        ? Effect.fail(
-            new ClaimError({
-              queue: ISSUE_REFRESH_QUEUE,
-              message: "temporarily down",
-            }),
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
           )
-        : Effect.succeed(refreshClaims === 2 ? Option.some(job) : Option.none())
-    }
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        yield* Deferred.await(acknowledged)
-        expect(refreshClaims).toBe(2)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [],
-          () => Deferred.succeed(acknowledged, undefined),
-          undefined,
-          claim,
+          yield* Deferred.await(firstStarted)
+          expect(calls).toBe(1)
+          yield* Deferred.succeed(releaseFirst, undefined)
+          yield* Deferred.await(secondStarted)
+          expect(maximumActive).toBe(1)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(jobs),
+          dbLayer([repository, otherRepository]),
+          reconciler,
+          keymaxxerLayer(),
         ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Effect.succeed({
+      )
+    }),
+  )
+
+  it.live("runs Work Item lifecycle jobs while Issue refresh is active", () =>
+    Effect.gen(function* () {
+      const refreshJob = rawJob(refreshPayload)
+      const stepRunId = makeStepRunId()
+      const lifecycleJob = rawJob(
+        WorkItemStepJob.make({ stepRunId }),
+        JOBS_QUEUE,
+      )
+      const jobs = [refreshJob, lifecycleJob]
+      const refreshStarted = yield* Deferred.make<void>()
+      const releaseRefresh = yield* Deferred.make<void>()
+      const lifecycleDispatched = yield* Deferred.make<string>()
+      const lifecycleLeaseExtended = yield* Deferred.make<string>()
+      let refreshActiveDuringLifecycle = false
+
+      const reconciler = Layer.succeed(IssueReconciler, {
+        reconcile: () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(refreshStarted, undefined)
+            yield* Deferred.await(releaseRefresh)
+            return {
               fetched: 0,
               inserted: 0,
               updated: 0,
               deleted: 0,
               unchanged: 0,
-            }),
+            }
+          }),
+      } satisfies IssueReconcilerShape)
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          yield* Deferred.await(refreshStarted)
+          expect(yield* Deferred.await(lifecycleDispatched)).toBe(stepRunId)
+          expect(refreshActiveDuringLifecycle).toBe(true)
+          expect(yield* Deferred.await(lifecycleLeaseExtended)).toBe(
+            lifecycleJob.jobId,
+          )
+          yield* Deferred.succeed(releaseRefresh, undefined)
         }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("scope disposal interrupts an active Job without queue finalization", async () => {
-    const job = rawJob(refreshPayload)
-    const started = await Effect.runPromise(Deferred.make<void>())
-    const interrupted = await Effect.runPromise(Deferred.make<void>())
-    let finalized = false
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: () =>
-        Deferred.succeed(started, undefined).pipe(
-          Effect.andThen(Effect.never),
-          Effect.ensuring(
-            Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            jobs,
+            undefined,
+            undefined,
+            undefined,
+            (receivedStepRunId) =>
+              Effect.gen(function* () {
+                refreshActiveDuringLifecycle = true
+                yield* Deferred.succeed(lifecycleDispatched, receivedStepRunId)
+                return { _tag: "noop" as const }
+              }),
+            (jobId) => Deferred.succeed(lifecycleLeaseExtended, jobId),
           ),
+          dbLayer(),
+          reconciler,
+          keymaxxerLayer(),
         ),
-    } satisfies IssueReconcilerShape)
+      )
+    }),
+  )
 
-    await runScoped(
+  it.live(
+    "runs multiple lifecycle jobs concurrently up to Config capacity",
+    () =>
       Effect.gen(function* () {
-        yield* Effect.scoped(
+        const firstStepRunId = makeStepRunId()
+        const secondStepRunId = makeStepRunId()
+        const jobs = [
+          rawJob(
+            WorkItemStepJob.make({ stepRunId: firstStepRunId }),
+            JOBS_QUEUE,
+          ),
+          rawJob(
+            WorkItemStepJob.make({ stepRunId: secondStepRunId }),
+            JOBS_QUEUE,
+          ),
+        ]
+        const firstStarted = yield* Deferred.make<void>()
+        const secondStarted = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        let active = 0
+        let maximumActive = 0
+        const seen = new Set<string>()
+
+        yield* runScoped(
           Effect.gen(function* () {
             yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
               Effect.forkScoped({ startImmediately: true }),
             )
-            yield* Deferred.await(started)
+            yield* Deferred.await(firstStarted)
+            yield* Deferred.await(secondStarted)
+            expect(maximumActive).toBe(2)
+            expect(seen).toEqual(new Set([firstStepRunId, secondStepRunId]))
+            yield* Deferred.succeed(release, undefined)
           }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(jobs, undefined, undefined, undefined, (stepRunId) =>
+              Effect.gen(function* () {
+                seen.add(stepRunId)
+                active += 1
+                maximumActive = Math.max(maximumActive, active)
+                if (stepRunId === firstStepRunId) {
+                  yield* Deferred.succeed(firstStarted, undefined)
+                } else {
+                  yield* Deferred.succeed(secondStarted, undefined)
+                }
+                yield* Deferred.await(release)
+                active -= 1
+                return { _tag: "noop" as const }
+              }),
+            ),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.succeed({
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                }),
+            } satisfies IssueReconcilerShape),
+            keymaxxerLayer(),
+          ),
         )
-        yield* Deferred.await(interrupted)
-        expect(finalized).toBe(false)
       }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          () => Effect.sync(() => (finalized = true)),
-          () => Effect.sync(() => (finalized = true)),
-        ),
-        dbLayer(),
-        reconciler,
-        keymaxxerLayer(),
-      ),
-    )
-  })
+  )
 
-  test("transfers persisted Refresh Jobs into the issue-refresh queue once", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    const layer = Layer.mergeAll(database, queue)
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* QueueService
-        const retainedId = yield* service.enqueue(
-          JOBS_QUEUE,
-          {
-            _tag: "refresh-repository",
-            repositoryId: RepositoryId.make(repository.id),
-          },
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-        )
-        const lifecycleId = yield* service.enqueue(
-          JOBS_QUEUE,
-          WorkItemStepJob.make({ stepRunId: makeStepRunId() }),
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-        )
-
-        const moved = yield* transferPersistedRefreshJobs
-        expect(moved).toBe(1)
-        const movedAgain = yield* transferPersistedRefreshJobs
-        expect(movedAgain).toBe(0)
-
-        const fromLifecycle = yield* service.rawClaim(JOBS_QUEUE)
-        expect(Option.isSome(fromLifecycle)).toBe(true)
-        if (Option.isSome(fromLifecycle)) {
-          expect(fromLifecycle.value.jobId).toBe(lifecycleId)
-          expect(fromLifecycle.value.payload).toMatchObject({
-            _tag: "work-item-step",
-          })
+  it.live("recovers after a queue infrastructure error", () =>
+    Effect.gen(function* () {
+      const job = rawJob(refreshPayload)
+      const acknowledged = yield* Deferred.make<void>()
+      let refreshClaims = 0
+      const claim = (queueName: string) => {
+        if (queueName !== ISSUE_REFRESH_QUEUE) {
+          return Effect.succeed(Option.none())
         }
+        refreshClaims += 1
+        return refreshClaims === 1
+          ? Effect.fail(
+              new ClaimError({
+                queue: ISSUE_REFRESH_QUEUE,
+                message: "temporarily down",
+              }),
+            )
+          : Effect.succeed(
+              refreshClaims === 2 ? Option.some(job) : Option.none(),
+            )
+      }
 
-        const fromRefresh = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
-        expect(Option.isSome(fromRefresh)).toBe(true)
-        if (Option.isSome(fromRefresh)) {
-          expect(fromRefresh.value.jobId).toBe(retainedId)
-          expect(fromRefresh.value.payload).toEqual({
-            _tag: "refresh-repository",
-            repositoryId: repository.id,
-          })
-        }
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          yield* Deferred.await(acknowledged)
+          expect(refreshClaims).toBe(2)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [],
+            () => Deferred.succeed(acknowledged, undefined),
+            undefined,
+            claim,
+          ),
+          dbLayer(),
+          Layer.succeed(IssueReconciler, {
+            reconcile: () =>
+              Effect.succeed({
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }),
+          }),
+          keymaxxerLayer(),
+        ),
+      )
+    }),
+  )
 
-        const noDuplicate = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
-        expect(Option.isNone(noDuplicate)).toBe(true)
-      }).pipe(Effect.provide(layer), Effect.orDie),
-    )
-  })
-
-  test("checks high-priority Refresh Jobs before scheduled Issue polls", async () => {
-    const claimOrder: string[] = []
-    const repositoryOrder: string[] = []
-    const manualJob = rawJob(refreshPayload, ISSUE_REFRESH_QUEUE)
-    const scheduledJob = rawJob(
-      {
-        _tag: "refresh-repository",
-        repositoryId: RepositoryId.make(otherRepository.id),
-      },
-      ISSUE_POLL_QUEUE,
-      otherRepository.id,
-    )
-    const jobs = [scheduledJob, manualJob]
-    const done = await Effect.runPromise(Deferred.make<void>())
-
-    await runScoped(
+  it.live(
+    "scope disposal interrupts an active Job without queue finalization",
+    () =>
       Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        yield* Deferred.await(done)
-        expect(repositoryOrder).toEqual([repository.id, otherRepository.id])
-        const refreshClaims = claimOrder.filter(
-          (queueName) =>
-            queueName === ISSUE_REFRESH_QUEUE || queueName === ISSUE_POLL_QUEUE,
+        const job = rawJob(refreshPayload)
+        const started = yield* Deferred.make<void>()
+        const interrupted = yield* Deferred.make<void>()
+        let finalized = false
+        const reconciler = Layer.succeed(IssueReconciler, {
+          reconcile: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(
+                Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid),
+              ),
+            ),
+        } satisfies IssueReconcilerShape)
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* Effect.scoped(
+              Effect.gen(function* () {
+                yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+                  Effect.forkScoped({ startImmediately: true }),
+                )
+                yield* Deferred.await(started)
+              }),
+            )
+            yield* Deferred.await(interrupted)
+            expect(finalized).toBe(false)
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [job],
+              () => Effect.sync(() => (finalized = true)),
+              () => Effect.sync(() => (finalized = true)),
+            ),
+            dbLayer(),
+            reconciler,
+            keymaxxerLayer(),
+          ),
         )
-        expect(refreshClaims[0]).toBe(ISSUE_REFRESH_QUEUE)
-        expect(refreshClaims).toContain(ISSUE_POLL_QUEUE)
       }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          jobs,
-          undefined,
-          undefined,
-          (queueName) =>
-            Effect.sync(() => {
-              claimOrder.push(queueName)
-              const index = jobs.findIndex((job) => job.queue === queueName)
-              if (index === -1) return Option.none()
-              const [job] = jobs.splice(index, 1)
-              return Option.some(job)
-            }),
-          undefined,
-          undefined,
-          undefined,
-          () => Deferred.succeed(done, undefined),
-        ),
-        dbLayer([repository, otherRepository]),
-        Layer.succeed(IssueReconciler, {
-          reconcile: (repo) =>
-            Effect.sync(() => {
-              repositoryOrder.push(repo.id)
-              return {
-                fetched: 0,
-                inserted: 0,
-                updated: 0,
-                deleted: 0,
-                unchanged: 0,
-              }
-            }),
-        }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
+  )
 
-  test("postpones a successful scheduled poll by the sampled cadence", async () => {
-    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
-    const postponed = await Effect.runPromise(
-      Deferred.make<{ jobId: string; delayMs: number }>(),
-    )
-    const notifications: string[] = []
-
-    await runScoped(
+  it.live(
+    "transfers persisted Refresh Jobs into the issue-refresh queue once",
+    () =>
       Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(137)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(postponed)).toEqual({
-          jobId: job.jobId,
-          delayMs: 137_000,
-        })
-        expect(notifications).toEqual([repository.id])
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          (jobId, delay) =>
-            Deferred.succeed(postponed, {
-              jobId,
-              delayMs: Duration.toMillis(delay),
-            }),
-        ),
-        dbLayer([repository], (repositoryId) =>
-          Effect.sync(() => {
-            notifications.push(repositoryId)
-          }),
-        ),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Effect.succeed({
-              fetched: 0,
-              inserted: 0,
-              updated: 0,
-              deleted: 0,
-              unchanged: 0,
-            }),
-        }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        const layer = Layer.mergeAll(database, queue)
 
-  test("postpones a failed scheduled poll without publishing success", async () => {
-    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
-    const postponed = await Effect.runPromise(Deferred.make<string>())
-    const notifications: string[] = []
-    let failed = false
+        yield* Effect.gen(function* () {
+          const service = yield* QueueService
+          const retainedId = yield* service.enqueue(
+            JOBS_QUEUE,
+            {
+              _tag: "refresh-repository",
+              repositoryId: RepositoryId.make(repository.id),
+            },
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
+          const lifecycleId = yield* service.enqueue(
+            JOBS_QUEUE,
+            WorkItemStepJob.make({ stepRunId: makeStepRunId() }),
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
 
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(postponed)).toBe(job.jobId)
-        expect(notifications).toEqual([])
-        expect(failed).toBe(false)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          undefined,
-          () =>
-            Effect.sync(() => {
-              failed = true
-            }),
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          (jobId) => Deferred.succeed(postponed, jobId),
-        ),
-        dbLayer([repository], (repositoryId) =>
-          Effect.sync(() => {
-            notifications.push(repositoryId)
-          }),
-        ),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Effect.fail(new DatabaseError({ message: "scheduled fail" })),
-        }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
+          const moved = yield* transferPersistedRefreshJobs
+          expect(moved).toBe(1)
+          const movedAgain = yield* transferPersistedRefreshJobs
+          expect(movedAgain).toBe(0)
 
-  test("finalizes a scheduled poll without recurrence when the Repository is missing", async () => {
-    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
-    let postponed = false
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
-        expect(postponed).toBe(false)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          (jobId) => Deferred.succeed(acknowledged, jobId),
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          () =>
-            Effect.sync(() => {
-              postponed = true
-            }),
-        ),
-        dbLayer([]),
-        Layer.succeed(IssueReconciler, { reconcile: unused }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("finalizes a scheduled poll without recurrence when uncredentialed", async () => {
-    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
-    let postponed = false
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
-        expect(postponed).toBe(false)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          (jobId) => Deferred.succeed(acknowledged, jobId),
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          () =>
-            Effect.sync(() => {
-              postponed = true
-            }),
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Effect.fail(new DatabaseError({ message: "no credential" })),
-        }),
-        keymaxxerLayer(new Set()),
-      ),
-    )
-  })
-
-  test("does not alter a scheduled entry when a manual Refresh Job runs", async () => {
-    const scheduledJob = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
-    const manualJob = rawJob(refreshPayload)
-    const jobs = [manualJob]
-    const acknowledged = await Effect.runPromise(Deferred.make<string>())
-    let postponed = false
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(acknowledged)).toBe(manualJob.jobId)
-        expect(postponed).toBe(false)
-        expect(jobs).toEqual([])
-        // Scheduled job remains unclaimed in its queue (not in the jobs list
-        // because we only enqueued the manual job).
-        expect(scheduledJob.queue).toBe(ISSUE_POLL_QUEUE)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          jobs,
-          (jobId) => Deferred.succeed(acknowledged, jobId),
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          () =>
-            Effect.sync(() => {
-              postponed = true
-            }),
-        ),
-        dbLayer(),
-        Layer.succeed(IssueReconciler, {
-          reconcile: () =>
-            Effect.succeed({
-              fetched: 0,
-              inserted: 0,
-              updated: 0,
-              deleted: 0,
-              unchanged: 0,
-            }),
-        }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("polls a Paused Repository on the scheduled cadence", async () => {
-    const paused = makeRepositoryRecord({
-      id: repository.id,
-      paused: true,
-    })
-    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, paused.id)
-    const postponed = await Effect.runPromise(Deferred.make<string>())
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(125)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(postponed)).toBe(job.jobId)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          (jobId) => Deferred.succeed(postponed, jobId),
-        ),
-        dbLayer([paused]),
-        Layer.succeed(IssueReconciler, {
-          reconcile: (repo) =>
-            Effect.sync(() => {
-              expect(repo.paused).toBe(true)
-              return {
-                fetched: 0,
-                inserted: 0,
-                updated: 0,
-                deleted: 0,
-                unchanged: 0,
-              }
-            }),
-        }),
-        keymaxxerLayer(),
-      ),
-    )
-  })
-
-  test("polls a credentialed GitLab Repository while Paused", async () => {
-    const pausedGitlab = makeRepositoryRecord({
-      id: repository.id,
-      forge: "gitlab",
-      forgeHost: "git.drupalcode.org",
-      projectPath: "project/oauth_client",
-      paused: true,
-    })
-    const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, pausedGitlab.id)
-    const postponed = await Effect.runPromise(Deferred.make<string>())
-
-    await runScoped(
-      Effect.gen(function* () {
-        yield* runJobWorker({
-          idlePollInterval: Duration.zero,
-          samplePollingDelay: Effect.succeed(Duration.seconds(125)),
-        }).pipe(Effect.forkScoped({ startImmediately: true }))
-        expect(yield* Deferred.await(postponed)).toBe(job.jobId)
-      }),
-      Layer.mergeAll(
-        defaultGithubLayer,
-        queueLayer(
-          [job],
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          (jobId) => Deferred.succeed(postponed, jobId),
-        ),
-        dbLayer([pausedGitlab]),
-        Layer.succeed(IssueReconciler, {
-          reconcile: (repo) =>
-            Effect.sync(() => {
-              expect(repo.forge).toBe("gitlab")
-              expect(repo.paused).toBe(true)
-              return {
-                fetched: 0,
-                inserted: 0,
-                updated: 0,
-                deleted: 0,
-                unchanged: 0,
-              }
-            }),
-        }),
-        // GitHub has no credential, proving GitLab ambient auth owns this
-        // Repository's polling eligibility.
-        keymaxxerLayer(new Set()),
-      ),
-    )
-  })
-
-  test("persists a scheduled entry across worker restarts without replaying", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    const reconciliations: string[] = []
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: (repo) =>
-        Effect.sync(() => {
-          reconciliations.push(repo.id)
-          return {
-            fetched: 0,
-            inserted: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
+          const fromLifecycle = yield* service.rawClaim(JOBS_QUEUE)
+          expect(Option.isSome(fromLifecycle)).toBe(true)
+          if (Option.isSome(fromLifecycle)) {
+            expect(fromLifecycle.value.jobId).toBe(lifecycleId)
+            expect(fromLifecycle.value.payload).toMatchObject({
+              _tag: "work-item-step",
+            })
           }
-        }),
-    } satisfies IssueReconcilerShape)
-    const lifecycle = Layer.succeed(WorkItemLifecycle, {
-      maxDurations: {
-        create_worktree: Duration.minutes(5),
-        install_dependencies: Duration.minutes(15),
-        implement: Duration.hours(2),
-        assess_changes: Duration.minutes(5),
-        pre_commit: Duration.hours(2),
-        review: Duration.hours(1),
-        commit: Duration.minutes(5),
-        create_pr: Duration.minutes(10),
-        watch_pr_status_checks: Duration.minutes(5),
-        resolve_pr_merge_conflict: Duration.hours(2),
-        investigate_pr_status_checks: Duration.hours(2),
-        mark_pr_ready_for_review: Duration.minutes(5),
-        decide_pr_merge: Duration.minutes(15),
-        merge_pr: Duration.minutes(5),
-        close_issue: Duration.minutes(5),
-        local_cleanup: Duration.minutes(5),
-      },
-      implementNow: unused,
-      implementLocally: unused,
-      implementAllWithAutoMerge: unused,
-      queue: unused,
-      recoverOrphanedStepRuns: Effect.succeed(0),
-      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
-      runStep: () => Effect.succeed({ _tag: "noop" as const }),
-      retry: unused,
-      pause: unused,
-      start: unused,
-      abandon: unused,
-      reset: unused,
-      getWorkItem: unused,
-      listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: () => Effect.succeed([]),
-      listCompletedWorkItems: () =>
-        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-      ownsSessionId: () => Effect.succeed(false),
-      countCommittedPullRequests: () => Effect.succeed(0),
-      continueAfterHumanPrOutcome: unused,
-      admitWaitingWorkItems: Effect.succeed(0),
-      releaseWaitingForBlockers: () => Effect.succeed(0),
-    })
 
-    await Effect.runPromise(
+          const fromRefresh = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
+          expect(Option.isSome(fromRefresh)).toBe(true)
+          if (Option.isSome(fromRefresh)) {
+            expect(fromRefresh.value.jobId).toBe(retainedId)
+            expect(fromRefresh.value.payload).toEqual({
+              _tag: "refresh-repository",
+              repositoryId: repository.id,
+            })
+          }
+
+          const noDuplicate = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
+          expect(Option.isNone(noDuplicate)).toBe(true)
+        }).pipe(Effect.provide(layer), Effect.orDie)
+      }),
+  )
+
+  it.live(
+    "checks high-priority Refresh Jobs before scheduled Issue polls",
+    () =>
       Effect.gen(function* () {
-        const db = yield* DbService
-        const service = yield* QueueService
-        const added = yield* db.addRepository({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-          localPath: repository.localPath,
-          isBare: true,
-        })
-        yield* service.ensureKeyed(
-          ISSUE_POLL_QUEUE,
-          added.id,
+        const claimOrder: string[] = []
+        const repositoryOrder: string[] = []
+        const manualJob = rawJob(refreshPayload, ISSUE_REFRESH_QUEUE)
+        const scheduledJob = rawJob(
           {
             _tag: "refresh-repository",
-            repositoryId: RepositoryId.make(added.id),
+            repositoryId: RepositoryId.make(otherRepository.id),
           },
-          Duration.zero,
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          ISSUE_POLL_QUEUE,
+          otherRepository.id,
         )
+        const jobs = [scheduledJob, manualJob]
+        const done = yield* Deferred.make<void>()
 
-        yield* Effect.scoped(
+        yield* runScoped(
           Effect.gen(function* () {
             yield* runJobWorker({
               idlePollInterval: Duration.zero,
               samplePollingDelay: Effect.succeed(Duration.seconds(120)),
             }).pipe(Effect.forkScoped({ startImmediately: true }))
-            while (reconciliations.length < 1) {
-              yield* Effect.sleep("5 millis")
-            }
+            yield* Deferred.await(done)
+            expect(repositoryOrder).toEqual([repository.id, otherRepository.id])
+            const refreshClaims = claimOrder.filter(
+              (queueName) =>
+                queueName === ISSUE_REFRESH_QUEUE ||
+                queueName === ISSUE_POLL_QUEUE,
+            )
+            expect(refreshClaims[0]).toBe(ISSUE_REFRESH_QUEUE)
+            expect(refreshClaims).toContain(ISSUE_POLL_QUEUE)
           }),
-        )
-
-        expect(reconciliations).toEqual([added.id])
-
-        const keyed = yield* service.listKeyed(ISSUE_POLL_QUEUE)
-        expect(keyed).toHaveLength(1)
-        expect(keyed[0]?.key).toBe(added.id)
-        expect(keyed[0]?.attempts).toBe(0)
-
-        // Not immediately available again (postponed 120s).
-        const claimNow = yield* service.rawClaim(ISSUE_POLL_QUEUE)
-        expect(Option.isNone(claimNow)).toBe(true)
-      }).pipe(
-        Effect.provide(
           Layer.mergeAll(
             defaultGithubLayer,
-            database,
-            queue,
-            reconciler,
-            keymaxxerLayer(),
-            lifecycle,
-          ),
-        ),
-        Effect.orDie,
-      ),
-    )
-  })
-
-  test("startup interrupts Step Runs left running by a prior worker process", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    let priorWorkerInterruptCalls = 0
-    const lifecycle = Layer.succeed(WorkItemLifecycle, {
-      maxDurations: {
-        create_worktree: Duration.minutes(5),
-        install_dependencies: Duration.minutes(15),
-        implement: Duration.hours(2),
-        assess_changes: Duration.minutes(5),
-        pre_commit: Duration.hours(2),
-        review: Duration.hours(1),
-        commit: Duration.minutes(5),
-        create_pr: Duration.minutes(10),
-        watch_pr_status_checks: Duration.minutes(5),
-        resolve_pr_merge_conflict: Duration.hours(2),
-        investigate_pr_status_checks: Duration.hours(2),
-        mark_pr_ready_for_review: Duration.minutes(5),
-        decide_pr_merge: Duration.minutes(15),
-        merge_pr: Duration.minutes(5),
-        close_issue: Duration.minutes(5),
-        local_cleanup: Duration.minutes(5),
-      },
-      implementNow: unused,
-      implementLocally: unused,
-      implementAllWithAutoMerge: unused,
-      queue: unused,
-      recoverOrphanedStepRuns: Effect.succeed(0),
-      interruptRunningStepRunsFromPriorWorker: Effect.sync(() => {
-        priorWorkerInterruptCalls += 1
-        return 1
-      }),
-      runStep: () => Effect.succeed({ _tag: "noop" as const }),
-      retry: unused,
-      pause: unused,
-      start: unused,
-      abandon: unused,
-      reset: unused,
-      getWorkItem: unused,
-      listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: () => Effect.succeed([]),
-      listCompletedWorkItems: () =>
-        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-      ownsSessionId: () => Effect.succeed(false),
-      countCommittedPullRequests: () => Effect.succeed(0),
-      continueAfterHumanPrOutcome: unused,
-      admitWaitingWorkItems: Effect.succeed(0),
-      releaseWaitingForBlockers: () => Effect.succeed(0),
-    })
-
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          yield* startJobWorker({
-            idlePollInterval: Duration.zero,
-            samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-          })
-          expect(priorWorkerInterruptCalls).toBe(1)
-        }),
-      ).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            defaultGithubLayer,
-            database,
-            queue,
+            queueLayer(
+              jobs,
+              undefined,
+              undefined,
+              (queueName) =>
+                Effect.sync(() => {
+                  claimOrder.push(queueName)
+                  const index = jobs.findIndex((job) => job.queue === queueName)
+                  if (index === -1) return Option.none()
+                  const [job] = jobs.splice(index, 1)
+                  return Option.some(job)
+                }),
+              undefined,
+              undefined,
+              undefined,
+              () => Deferred.succeed(done, undefined),
+            ),
+            dbLayer([repository, otherRepository]),
             Layer.succeed(IssueReconciler, {
-              reconcile: () => Effect.die("not used"),
+              reconcile: (repo) =>
+                Effect.sync(() => {
+                  repositoryOrder.push(repo.id)
+                  return {
+                    fetched: 0,
+                    inserted: 0,
+                    updated: 0,
+                    deleted: 0,
+                    unchanged: 0,
+                  }
+                }),
             }),
             keymaxxerLayer(),
-            lifecycle,
           ),
+        )
+      }),
+  )
+
+  it.live("postpones a successful scheduled poll by the sampled cadence", () =>
+    Effect.gen(function* () {
+      const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+      const postponed = yield* Deferred.make<{
+        jobId: string
+        delayMs: number
+      }>()
+      const notifications: string[] = []
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({
+            idlePollInterval: Duration.zero,
+            samplePollingDelay: Effect.succeed(Duration.seconds(137)),
+          }).pipe(Effect.forkScoped({ startImmediately: true }))
+          expect(yield* Deferred.await(postponed)).toEqual({
+            jobId: job.jobId,
+            delayMs: 137_000,
+          })
+          expect(notifications).toEqual([repository.id])
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [job],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            (jobId, delay) =>
+              Deferred.succeed(postponed, {
+                jobId,
+                delayMs: Duration.toMillis(delay),
+              }),
+          ),
+          dbLayer([repository], (repositoryId) =>
+            Effect.sync(() => {
+              notifications.push(repositoryId)
+            }),
+          ),
+          Layer.succeed(IssueReconciler, {
+            reconcile: () =>
+              Effect.succeed({
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }),
+          }),
+          keymaxxerLayer(),
         ),
-        Effect.orDie,
-      ),
-    )
-  })
+      )
+    }),
+  )
 
-  test("startup enqueues one Polling Auto-heal Job without awaiting repair", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    const lifecycle = Layer.succeed(WorkItemLifecycle, {
-      maxDurations: {
-        create_worktree: Duration.minutes(5),
-        install_dependencies: Duration.minutes(15),
-        implement: Duration.hours(2),
-        assess_changes: Duration.minutes(5),
-        pre_commit: Duration.hours(2),
-        review: Duration.hours(1),
-        commit: Duration.minutes(5),
-        create_pr: Duration.minutes(10),
-        watch_pr_status_checks: Duration.minutes(5),
-        resolve_pr_merge_conflict: Duration.hours(2),
-        investigate_pr_status_checks: Duration.hours(2),
-        mark_pr_ready_for_review: Duration.minutes(5),
-        decide_pr_merge: Duration.minutes(15),
-        merge_pr: Duration.minutes(5),
-        close_issue: Duration.minutes(5),
-        local_cleanup: Duration.minutes(5),
-      },
-      implementNow: unused,
-      implementLocally: unused,
-      implementAllWithAutoMerge: unused,
-      queue: unused,
-      recoverOrphanedStepRuns: Effect.succeed(0),
-      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
-      runStep: () => Effect.succeed({ _tag: "noop" as const }),
-      retry: unused,
-      pause: unused,
-      start: unused,
-      abandon: unused,
-      reset: unused,
-      getWorkItem: unused,
-      listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: () => Effect.succeed([]),
-      listCompletedWorkItems: () =>
-        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-      ownsSessionId: () => Effect.succeed(false),
-      countCommittedPullRequests: () => Effect.succeed(0),
-      continueAfterHumanPrOutcome: unused,
-      admitWaitingWorkItems: Effect.succeed(0),
-      releaseWaitingForBlockers: () => Effect.succeed(0),
-    })
-    // Block Keymaxxer so auto-heal cannot finish during startup.
-    const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
-      initialize: Effect.void,
-      findSecret: () => Effect.never,
-      findSecrets: () => Effect.die("not used"),
-      hasSecret: () => Effect.die("not used"),
-      addSecret: () => Effect.die("not used"),
-      runWithSecrets: () => Effect.die("not used"),
-    })
+  it.live("postpones a failed scheduled poll without publishing success", () =>
+    Effect.gen(function* () {
+      const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+      const postponed = yield* Deferred.make<string>()
+      const notifications: string[] = []
+      let failed = false
 
-    await Effect.runPromise(
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({
+            idlePollInterval: Duration.zero,
+            samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+          }).pipe(Effect.forkScoped({ startImmediately: true }))
+          expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+          expect(notifications).toEqual([])
+          expect(failed).toBe(false)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [job],
+            undefined,
+            () =>
+              Effect.sync(() => {
+                failed = true
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            (jobId) => Deferred.succeed(postponed, jobId),
+          ),
+          dbLayer([repository], (repositoryId) =>
+            Effect.sync(() => {
+              notifications.push(repositoryId)
+            }),
+          ),
+          Layer.succeed(IssueReconciler, {
+            reconcile: () =>
+              Effect.fail(new DatabaseError({ message: "scheduled fail" })),
+          }),
+          keymaxxerLayer(),
+        ),
+      )
+    }),
+  )
+
+  it.live(
+    "finalizes a scheduled poll without recurrence when the Repository is missing",
+    () =>
       Effect.gen(function* () {
-        const db = yield* DbService
-        const service = yield* QueueService
-        // Ensure auto-heal must consult Keymaxxer (and therefore blocks).
-        yield* db.addRepository({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-          localPath: repository.localPath,
-          isBare: true,
+        const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+        const acknowledged = yield* Deferred.make<string>()
+        let postponed = false
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+            expect(postponed).toBe(false)
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [job],
+              (jobId) => Deferred.succeed(acknowledged, jobId),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              () =>
+                Effect.sync(() => {
+                  postponed = true
+                }),
+            ),
+            dbLayer([]),
+            Layer.succeed(IssueReconciler, { reconcile: unused }),
+            keymaxxerLayer(),
+          ),
+        )
+      }),
+  )
+
+  it.live(
+    "finalizes a scheduled poll without recurrence when uncredentialed",
+    () =>
+      Effect.gen(function* () {
+        const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, repository.id)
+        const acknowledged = yield* Deferred.make<string>()
+        let postponed = false
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            expect(yield* Deferred.await(acknowledged)).toBe(job.jobId)
+            expect(postponed).toBe(false)
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              [job],
+              (jobId) => Deferred.succeed(acknowledged, jobId),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              () =>
+                Effect.sync(() => {
+                  postponed = true
+                }),
+            ),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.fail(new DatabaseError({ message: "no credential" })),
+            }),
+            keymaxxerLayer(new Set()),
+          ),
+        )
+      }),
+  )
+
+  it.live(
+    "does not alter a scheduled entry when a manual Refresh Job runs",
+    () =>
+      Effect.gen(function* () {
+        const scheduledJob = rawJob(
+          refreshPayload,
+          ISSUE_POLL_QUEUE,
+          repository.id,
+        )
+        const manualJob = rawJob(refreshPayload)
+        const jobs = [manualJob]
+        const acknowledged = yield* Deferred.make<string>()
+        let postponed = false
+
+        yield* runScoped(
+          Effect.gen(function* () {
+            yield* runJobWorker({
+              idlePollInterval: Duration.zero,
+              samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+            }).pipe(Effect.forkScoped({ startImmediately: true }))
+            expect(yield* Deferred.await(acknowledged)).toBe(manualJob.jobId)
+            expect(postponed).toBe(false)
+            expect(jobs).toEqual([])
+            // Scheduled job remains unclaimed in its queue (not in the jobs list
+            // because we only enqueued the manual job).
+            expect(scheduledJob.queue).toBe(ISSUE_POLL_QUEUE)
+          }),
+          Layer.mergeAll(
+            defaultGithubLayer,
+            queueLayer(
+              jobs,
+              (jobId) => Deferred.succeed(acknowledged, jobId),
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              () =>
+                Effect.sync(() => {
+                  postponed = true
+                }),
+            ),
+            dbLayer(),
+            Layer.succeed(IssueReconciler, {
+              reconcile: () =>
+                Effect.succeed({
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                }),
+            }),
+            keymaxxerLayer(),
+          ),
+        )
+      }),
+  )
+
+  it.live("polls a Paused Repository on the scheduled cadence", () =>
+    Effect.gen(function* () {
+      const paused = makeRepositoryRecord({
+        id: repository.id,
+        paused: true,
+      })
+      const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, paused.id)
+      const postponed = yield* Deferred.make<string>()
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({
+            idlePollInterval: Duration.zero,
+            samplePollingDelay: Effect.succeed(Duration.seconds(125)),
+          }).pipe(Effect.forkScoped({ startImmediately: true }))
+          expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [job],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            (jobId) => Deferred.succeed(postponed, jobId),
+          ),
+          dbLayer([paused]),
+          Layer.succeed(IssueReconciler, {
+            reconcile: (repo) =>
+              Effect.sync(() => {
+                expect(repo.paused).toBe(true)
+                return {
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                }
+              }),
+          }),
+          keymaxxerLayer(),
+        ),
+      )
+    }),
+  )
+
+  it.live("polls a credentialed GitLab Repository while Paused", () =>
+    Effect.gen(function* () {
+      const pausedGitlab = makeRepositoryRecord({
+        id: repository.id,
+        forge: "gitlab",
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+        paused: true,
+      })
+      const job = rawJob(refreshPayload, ISSUE_POLL_QUEUE, pausedGitlab.id)
+      const postponed = yield* Deferred.make<string>()
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({
+            idlePollInterval: Duration.zero,
+            samplePollingDelay: Effect.succeed(Duration.seconds(125)),
+          }).pipe(Effect.forkScoped({ startImmediately: true }))
+          expect(yield* Deferred.await(postponed)).toBe(job.jobId)
+        }),
+        Layer.mergeAll(
+          defaultGithubLayer,
+          queueLayer(
+            [job],
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            (jobId) => Deferred.succeed(postponed, jobId),
+          ),
+          dbLayer([pausedGitlab]),
+          Layer.succeed(IssueReconciler, {
+            reconcile: (repo) =>
+              Effect.sync(() => {
+                expect(repo.forge).toBe("gitlab")
+                expect(repo.paused).toBe(true)
+                return {
+                  fetched: 0,
+                  inserted: 0,
+                  updated: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                }
+              }),
+          }),
+          // GitHub has no credential, proving GitLab ambient auth owns this
+          // Repository's polling eligibility.
+          keymaxxerLayer(new Set()),
+        ),
+      )
+    }),
+  )
+
+  it.live(
+    "persists a scheduled entry across worker restarts without replaying",
+    () =>
+      Effect.gen(function* () {
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        const reconciliations: string[] = []
+        const reconciler = Layer.succeed(IssueReconciler, {
+          reconcile: (repo) =>
+            Effect.sync(() => {
+              reconciliations.push(repo.id)
+              return {
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }
+            }),
+        } satisfies IssueReconcilerShape)
+        const lifecycle = Layer.succeed(WorkItemLifecycle, {
+          maxDurations: {
+            create_worktree: Duration.minutes(5),
+            install_dependencies: Duration.minutes(15),
+            implement: Duration.hours(2),
+            assess_changes: Duration.minutes(5),
+            pre_commit: Duration.hours(2),
+            review: Duration.hours(1),
+            commit: Duration.minutes(5),
+            create_pr: Duration.minutes(10),
+            watch_pr_status_checks: Duration.minutes(5),
+            resolve_pr_merge_conflict: Duration.hours(2),
+            investigate_pr_status_checks: Duration.hours(2),
+            mark_pr_ready_for_review: Duration.minutes(5),
+            decide_pr_merge: Duration.minutes(15),
+            merge_pr: Duration.minutes(5),
+            close_issue: Duration.minutes(5),
+            local_cleanup: Duration.minutes(5),
+          },
+          implementNow: unused,
+          implementLocally: unused,
+          implementAllWithAutoMerge: unused,
+          queue: unused,
+          recoverOrphanedStepRuns: Effect.succeed(0),
+          interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+          runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          retry: unused,
+          pause: unused,
+          start: unused,
+          abandon: unused,
+          reset: unused,
+          getWorkItem: unused,
+          listWorkItemsForIssue: unused,
+          listWorkItemsForRepository: () => Effect.succeed([]),
+          listCompletedWorkItems: () =>
+            Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+          ownsSessionId: () => Effect.succeed(false),
+          countCommittedPullRequests: () => Effect.succeed(0),
+          continueAfterHumanPrOutcome: unused,
+          admitWaitingWorkItems: Effect.succeed(0),
+          releaseWaitingForBlockers: () => Effect.succeed(0),
         })
+
+        yield* Effect.gen(function* () {
+          const db = yield* DbService
+          const service = yield* QueueService
+          const added = yield* db.addRepository({
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: repository.localPath,
+            isBare: true,
+          })
+          yield* service.ensureKeyed(
+            ISSUE_POLL_QUEUE,
+            added.id,
+            {
+              _tag: "refresh-repository",
+              repositoryId: RepositoryId.make(added.id),
+            },
+            Duration.zero,
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* runJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+              }).pipe(Effect.forkScoped({ startImmediately: true }))
+              while (reconciliations.length < 1) {
+                yield* Effect.sleep("5 millis")
+              }
+            }),
+          )
+
+          expect(reconciliations).toEqual([added.id])
+
+          const keyed = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+          expect(keyed).toHaveLength(1)
+          expect(keyed[0]?.key).toBe(added.id)
+          expect(keyed[0]?.attempts).toBe(0)
+
+          // Not immediately available again (postponed 120s).
+          const claimNow = yield* service.rawClaim(ISSUE_POLL_QUEUE)
+          expect(Option.isNone(claimNow)).toBe(true)
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              defaultGithubLayer,
+              database,
+              queue,
+              reconciler,
+              keymaxxerLayer(),
+              lifecycle,
+            ),
+          ),
+          Effect.orDie,
+        )
+      }),
+  )
+
+  it.live(
+    "startup interrupts Step Runs left running by a prior worker process",
+    () =>
+      Effect.gen(function* () {
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        let priorWorkerInterruptCalls = 0
+        const lifecycle = Layer.succeed(WorkItemLifecycle, {
+          maxDurations: {
+            create_worktree: Duration.minutes(5),
+            install_dependencies: Duration.minutes(15),
+            implement: Duration.hours(2),
+            assess_changes: Duration.minutes(5),
+            pre_commit: Duration.hours(2),
+            review: Duration.hours(1),
+            commit: Duration.minutes(5),
+            create_pr: Duration.minutes(10),
+            watch_pr_status_checks: Duration.minutes(5),
+            resolve_pr_merge_conflict: Duration.hours(2),
+            investigate_pr_status_checks: Duration.hours(2),
+            mark_pr_ready_for_review: Duration.minutes(5),
+            decide_pr_merge: Duration.minutes(15),
+            merge_pr: Duration.minutes(5),
+            close_issue: Duration.minutes(5),
+            local_cleanup: Duration.minutes(5),
+          },
+          implementNow: unused,
+          implementLocally: unused,
+          implementAllWithAutoMerge: unused,
+          queue: unused,
+          recoverOrphanedStepRuns: Effect.succeed(0),
+          interruptRunningStepRunsFromPriorWorker: Effect.sync(() => {
+            priorWorkerInterruptCalls += 1
+            return 1
+          }),
+          runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          retry: unused,
+          pause: unused,
+          start: unused,
+          abandon: unused,
+          reset: unused,
+          getWorkItem: unused,
+          listWorkItemsForIssue: unused,
+          listWorkItemsForRepository: () => Effect.succeed([]),
+          listCompletedWorkItems: () =>
+            Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+          ownsSessionId: () => Effect.succeed(false),
+          countCommittedPullRequests: () => Effect.succeed(0),
+          continueAfterHumanPrOutcome: unused,
+          admitWaitingWorkItems: Effect.succeed(0),
+          releaseWaitingForBlockers: () => Effect.succeed(0),
+        })
+
         yield* Effect.scoped(
           Effect.gen(function* () {
             yield* startJobWorker({
               idlePollInterval: Duration.zero,
               samplePollingDelay: Effect.succeed(Duration.seconds(120)),
             })
-            // startJobWorker returns after durable enqueue + forking workers,
-            // without waiting for auto-heal to finish (blocked on Keymaxxer).
-            const autoHeal = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
-            expect(autoHeal).toHaveLength(1)
-            expect(autoHeal[0]?.key).toBe(POLLING_AUTO_HEAL_KEY)
-            expect(autoHeal[0]?.payload).toEqual({
-              _tag: "polling-auto-heal",
-            })
-            // Repair has not completed: no schedules yet.
-            expect(yield* service.listKeyed(ISSUE_POLL_QUEUE)).toEqual([])
+            expect(priorWorkerInterruptCalls).toBe(1)
           }),
-        )
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            defaultGithubLayer,
-            database,
-            queue,
-            Layer.succeed(IssueReconciler, {
-              reconcile: () => Effect.die("not used"),
-            }),
-            blockedKeymaxxer,
-            lifecycle,
-          ),
-        ),
-        Effect.orDie,
-      ),
-    )
-  })
-
-  test("repeated startup scheduling does not create unbounded Auto-heal Jobs", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const service = yield* QueueService
-        const first = yield* enqueuePollingAutoHealJob
-        const second = yield* enqueuePollingAutoHealJob
-        const third = yield* enqueuePollingAutoHealJob
-        expect(first.created).toBe(true)
-        expect(second.created).toBe(false)
-        expect(third.created).toBe(false)
-        expect(second.jobId).toBe(first.jobId)
-        expect(third.jobId).toBe(first.jobId)
-        const keyed = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
-        expect(keyed).toHaveLength(1)
-        expect(keyed[0]?.key).toBe(POLLING_AUTO_HEAL_KEY)
-      }).pipe(Effect.provide(Layer.mergeAll(database, queue)), Effect.orDie),
-    )
-  })
-
-  test("auto-heal repairs missing schedules, orphans, due times, and first refreshes", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    const reconciliations: string[] = []
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: (repo) =>
-        Effect.sync(() => {
-          reconciliations.push(repo.id)
-          return {
-            fetched: 0,
-            inserted: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-          }
-        }),
-    } satisfies IssueReconcilerShape)
-    const lifecycle = Layer.succeed(WorkItemLifecycle, {
-      maxDurations: {
-        create_worktree: Duration.minutes(5),
-        install_dependencies: Duration.minutes(15),
-        implement: Duration.hours(2),
-        assess_changes: Duration.minutes(5),
-        pre_commit: Duration.hours(2),
-        review: Duration.hours(1),
-        commit: Duration.minutes(5),
-        create_pr: Duration.minutes(10),
-        watch_pr_status_checks: Duration.minutes(5),
-        resolve_pr_merge_conflict: Duration.hours(2),
-        investigate_pr_status_checks: Duration.hours(2),
-        mark_pr_ready_for_review: Duration.minutes(5),
-        decide_pr_merge: Duration.minutes(15),
-        merge_pr: Duration.minutes(5),
-        close_issue: Duration.minutes(5),
-        local_cleanup: Duration.minutes(5),
-      },
-      implementNow: unused,
-      implementLocally: unused,
-      implementAllWithAutoMerge: unused,
-      queue: unused,
-      recoverOrphanedStepRuns: Effect.succeed(0),
-      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
-      runStep: () => Effect.succeed({ _tag: "noop" as const }),
-      retry: unused,
-      pause: unused,
-      start: unused,
-      abandon: unused,
-      reset: unused,
-      getWorkItem: unused,
-      listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: () => Effect.succeed([]),
-      listCompletedWorkItems: () =>
-        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-      ownsSessionId: () => Effect.succeed(false),
-      countCommittedPullRequests: () => Effect.succeed(0),
-      continueAfterHumanPrOutcome: unused,
-      admitWaitingWorkItems: Effect.succeed(0),
-      releaseWaitingForBlockers: () => Effect.succeed(0),
-    })
-
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const db = yield* DbService
-        const service = yield* QueueService
-        const credentialed = yield* db.addRepository({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-          localPath: repository.localPath,
-          isBare: true,
-        })
-        const uncredentialed = yield* db.addRepository({
-          forge: "github",
-          forgeHost: "github.com",
-          projectPath: "other/uncredentialed",
-          localPath: "/repos/other/uncredentialed.git",
-          isBare: true,
-        })
-        const preserved = yield* service.ensureKeyed(
-          ISSUE_POLL_QUEUE,
-          credentialed.id,
-          {
-            _tag: "refresh-repository",
-            repositoryId: RepositoryId.make(credentialed.id),
-          },
-          Duration.millis(90_000),
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-        )
-        const preservedBefore = yield* service.listKeyed(ISSUE_POLL_QUEUE)
-        const preservedAvailableAt = DateTime.toEpochMillis(
-          preservedBefore.find((entry) => entry.key === credentialed.id)!
-            .availableAt,
-        )
-        yield* service.ensureKeyed(
-          ISSUE_POLL_QUEUE,
-          uncredentialed.id,
-          {
-            _tag: "refresh-repository",
-            repositoryId: RepositoryId.make(uncredentialed.id),
-          },
-          Duration.seconds(30),
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-        )
-        yield* service.ensureKeyed(
-          ISSUE_POLL_QUEUE,
-          "repo-deleted-orphan",
-          {
-            _tag: "refresh-repository",
-            repositoryId: RepositoryId.make("repo-01J00000000000000000000099"),
-          },
-          Duration.seconds(30),
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-        )
-
-        const missing = yield* db.addRepository({
-          forge: otherRepository.forge,
-          forgeHost: otherRepository.forgeHost,
-          projectPath: otherRepository.projectPath,
-          localPath: otherRepository.localPath,
-          isBare: true,
-        })
-
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            yield* startJobWorker({
-              idlePollInterval: Duration.zero,
-              samplePollingDelay: Effect.succeed(Duration.seconds(142)),
-            })
-            // Wait until auto-heal finishes and the missing repo's first refresh runs.
-            while (
-              !(
-                reconciliations.includes(missing.id) &&
-                (yield* service.listKeyed(ISSUE_REFRESH_QUEUE)).every(
-                  (entry) => entry.key !== POLLING_AUTO_HEAL_KEY,
-                )
-              )
-            ) {
-              yield* Effect.sleep("5 millis")
-            }
-          }),
-        )
-
-        const schedules = yield* service.listKeyed(ISSUE_POLL_QUEUE)
-        expect(schedules.map((entry) => entry.key).sort()).toEqual(
-          [credentialed.id, missing.id].sort(),
-        )
-        const preservedEntry = schedules.find(
-          (entry) => entry.key === credentialed.id,
-        )
-        expect(preservedEntry?.jobId).toBe(preserved.jobId)
-        expect(
-          Math.abs(
-            DateTime.toEpochMillis(preservedEntry!.availableAt) -
-              preservedAvailableAt,
-          ),
-        ).toBeLessThan(2_000)
-
-        const missingEntry = schedules.find((entry) => entry.key === missing.id)
-        expect(missingEntry).toBeDefined()
-        expect(
-          DateTime.toEpochMillis(missingEntry!.availableAt) - Date.now(),
-        ).toBeGreaterThan(100_000)
-
-        // Manual first refresh for the repaired Repository was accepted and run.
-        expect(reconciliations).toContain(missing.id)
-        // Existing correct schedule was not reset into an immediate poll.
-        expect(reconciliations).not.toContain(credentialed.id)
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            defaultGithubLayer,
-            database,
-            queue,
-            reconciler,
-            keymaxxerLayer(
-              new Set([
-                `${repository.projectPath}`,
-                `${otherRepository.projectPath}`,
-              ]),
+        ).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              defaultGithubLayer,
+              database,
+              queue,
+              Layer.succeed(IssueReconciler, {
+                reconcile: () => Effect.die("not used"),
+              }),
+              keymaxxerLayer(),
+              lifecycle,
             ),
-            lifecycle,
           ),
-        ),
-        Effect.orDie,
-      ),
-    )
-  })
+          Effect.orDie,
+        )
+      }),
+  )
 
-  test("auto-heal retries with backoff until Keymaxxer succeeds", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    let findSecretCalls = 0
-    const keymaxxer = Layer.succeed(KeymaxxerService, {
-      initialize: Effect.void,
-      findSecret: ({ account, provider }) =>
-        Effect.gen(function* () {
-          findSecretCalls += 1
-          if (findSecretCalls < 3) {
-            return yield* new KeymaxxerError({
-              operation: "findSecret",
-              message: "Keymaxxer unavailable",
-            })
-          }
-          return provider === "github" &&
-            account === `${repository.projectPath}`
-            ? `GITHUB_TOKEN`
-            : null
-        }),
-      findSecrets: () => Effect.die("not used"),
-      hasSecret: () => Effect.die("not used"),
-      addSecret: () => Effect.die("not used"),
-      runWithSecrets: () => Effect.die("not used"),
-    })
-    const lifecycle = Layer.succeed(WorkItemLifecycle, {
-      maxDurations: {
-        create_worktree: Duration.minutes(5),
-        install_dependencies: Duration.minutes(15),
-        implement: Duration.hours(2),
-        assess_changes: Duration.minutes(5),
-        pre_commit: Duration.hours(2),
-        review: Duration.hours(1),
-        commit: Duration.minutes(5),
-        create_pr: Duration.minutes(10),
-        watch_pr_status_checks: Duration.minutes(5),
-        resolve_pr_merge_conflict: Duration.hours(2),
-        investigate_pr_status_checks: Duration.hours(2),
-        mark_pr_ready_for_review: Duration.minutes(5),
-        decide_pr_merge: Duration.minutes(15),
-        merge_pr: Duration.minutes(5),
-        close_issue: Duration.minutes(5),
-        local_cleanup: Duration.minutes(5),
-      },
-      implementNow: unused,
-      implementLocally: unused,
-      implementAllWithAutoMerge: unused,
-      queue: unused,
-      recoverOrphanedStepRuns: Effect.succeed(0),
-      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
-      runStep: () => Effect.succeed({ _tag: "noop" as const }),
-      retry: unused,
-      pause: unused,
-      start: unused,
-      abandon: unused,
-      reset: unused,
-      getWorkItem: unused,
-      listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: () => Effect.succeed([]),
-      listCompletedWorkItems: () =>
-        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-      ownsSessionId: () => Effect.succeed(false),
-      countCommittedPullRequests: () => Effect.succeed(0),
-      continueAfterHumanPrOutcome: unused,
-      admitWaitingWorkItems: Effect.succeed(0),
-      releaseWaitingForBlockers: () => Effect.succeed(0),
-    })
-
-    await Effect.runPromise(
+  it.live(
+    "startup enqueues one Polling Auto-heal Job without awaiting repair",
+    () =>
       Effect.gen(function* () {
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        const lifecycle = Layer.succeed(WorkItemLifecycle, {
+          maxDurations: {
+            create_worktree: Duration.minutes(5),
+            install_dependencies: Duration.minutes(15),
+            implement: Duration.hours(2),
+            assess_changes: Duration.minutes(5),
+            pre_commit: Duration.hours(2),
+            review: Duration.hours(1),
+            commit: Duration.minutes(5),
+            create_pr: Duration.minutes(10),
+            watch_pr_status_checks: Duration.minutes(5),
+            resolve_pr_merge_conflict: Duration.hours(2),
+            investigate_pr_status_checks: Duration.hours(2),
+            mark_pr_ready_for_review: Duration.minutes(5),
+            decide_pr_merge: Duration.minutes(15),
+            merge_pr: Duration.minutes(5),
+            close_issue: Duration.minutes(5),
+            local_cleanup: Duration.minutes(5),
+          },
+          implementNow: unused,
+          implementLocally: unused,
+          implementAllWithAutoMerge: unused,
+          queue: unused,
+          recoverOrphanedStepRuns: Effect.succeed(0),
+          interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+          runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          retry: unused,
+          pause: unused,
+          start: unused,
+          abandon: unused,
+          reset: unused,
+          getWorkItem: unused,
+          listWorkItemsForIssue: unused,
+          listWorkItemsForRepository: () => Effect.succeed([]),
+          listCompletedWorkItems: () =>
+            Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+          ownsSessionId: () => Effect.succeed(false),
+          countCommittedPullRequests: () => Effect.succeed(0),
+          continueAfterHumanPrOutcome: unused,
+          admitWaitingWorkItems: Effect.succeed(0),
+          releaseWaitingForBlockers: () => Effect.succeed(0),
+        })
+        // Block Keymaxxer so auto-heal cannot finish during startup.
+        const blockedKeymaxxer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.never,
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () => Effect.die("not used"),
+        })
+
+        yield* Effect.gen(function* () {
+          const db = yield* DbService
+          const service = yield* QueueService
+          // Ensure auto-heal must consult Keymaxxer (and therefore blocks).
+          yield* db.addRepository({
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: repository.localPath,
+            isBare: true,
+          })
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* startJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+              })
+              // startJobWorker returns after durable enqueue + forking workers,
+              // without waiting for auto-heal to finish (blocked on Keymaxxer).
+              const autoHeal = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
+              expect(autoHeal).toHaveLength(1)
+              expect(autoHeal[0]?.key).toBe(POLLING_AUTO_HEAL_KEY)
+              expect(autoHeal[0]?.payload).toEqual({
+                _tag: "polling-auto-heal",
+              })
+              // Repair has not completed: no schedules yet.
+              expect(yield* service.listKeyed(ISSUE_POLL_QUEUE)).toEqual([])
+            }),
+          )
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              defaultGithubLayer,
+              database,
+              queue,
+              Layer.succeed(IssueReconciler, {
+                reconcile: () => Effect.die("not used"),
+              }),
+              blockedKeymaxxer,
+              lifecycle,
+            ),
+          ),
+          Effect.orDie,
+        )
+      }),
+  )
+
+  it.live(
+    "repeated startup scheduling does not create unbounded Auto-heal Jobs",
+    () =>
+      Effect.gen(function* () {
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+
+        yield* Effect.gen(function* () {
+          const service = yield* QueueService
+          const first = yield* enqueuePollingAutoHealJob
+          const second = yield* enqueuePollingAutoHealJob
+          const third = yield* enqueuePollingAutoHealJob
+          expect(first.created).toBe(true)
+          expect(second.created).toBe(false)
+          expect(third.created).toBe(false)
+          expect(second.jobId).toBe(first.jobId)
+          expect(third.jobId).toBe(first.jobId)
+          const keyed = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
+          expect(keyed).toHaveLength(1)
+          expect(keyed[0]?.key).toBe(POLLING_AUTO_HEAL_KEY)
+        }).pipe(Effect.provide(Layer.mergeAll(database, queue)), Effect.orDie)
+      }),
+  )
+
+  it.live(
+    "auto-heal repairs missing schedules, orphans, due times, and first refreshes",
+    () =>
+      Effect.gen(function* () {
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        const reconciliations: string[] = []
+        const reconciler = Layer.succeed(IssueReconciler, {
+          reconcile: (repo) =>
+            Effect.sync(() => {
+              reconciliations.push(repo.id)
+              return {
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }
+            }),
+        } satisfies IssueReconcilerShape)
+        const lifecycle = Layer.succeed(WorkItemLifecycle, {
+          maxDurations: {
+            create_worktree: Duration.minutes(5),
+            install_dependencies: Duration.minutes(15),
+            implement: Duration.hours(2),
+            assess_changes: Duration.minutes(5),
+            pre_commit: Duration.hours(2),
+            review: Duration.hours(1),
+            commit: Duration.minutes(5),
+            create_pr: Duration.minutes(10),
+            watch_pr_status_checks: Duration.minutes(5),
+            resolve_pr_merge_conflict: Duration.hours(2),
+            investigate_pr_status_checks: Duration.hours(2),
+            mark_pr_ready_for_review: Duration.minutes(5),
+            decide_pr_merge: Duration.minutes(15),
+            merge_pr: Duration.minutes(5),
+            close_issue: Duration.minutes(5),
+            local_cleanup: Duration.minutes(5),
+          },
+          implementNow: unused,
+          implementLocally: unused,
+          implementAllWithAutoMerge: unused,
+          queue: unused,
+          recoverOrphanedStepRuns: Effect.succeed(0),
+          interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+          runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          retry: unused,
+          pause: unused,
+          start: unused,
+          abandon: unused,
+          reset: unused,
+          getWorkItem: unused,
+          listWorkItemsForIssue: unused,
+          listWorkItemsForRepository: () => Effect.succeed([]),
+          listCompletedWorkItems: () =>
+            Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+          ownsSessionId: () => Effect.succeed(false),
+          countCommittedPullRequests: () => Effect.succeed(0),
+          continueAfterHumanPrOutcome: unused,
+          admitWaitingWorkItems: Effect.succeed(0),
+          releaseWaitingForBlockers: () => Effect.succeed(0),
+        })
+
+        yield* Effect.gen(function* () {
+          const db = yield* DbService
+          const service = yield* QueueService
+          const credentialed = yield* db.addRepository({
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: repository.localPath,
+            isBare: true,
+          })
+          const uncredentialed = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "other/uncredentialed",
+            localPath: "/repos/other/uncredentialed.git",
+            isBare: true,
+          })
+          const preserved = yield* service.ensureKeyed(
+            ISSUE_POLL_QUEUE,
+            credentialed.id,
+            {
+              _tag: "refresh-repository",
+              repositoryId: RepositoryId.make(credentialed.id),
+            },
+            Duration.millis(90_000),
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
+          const preservedBefore = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+          const preservedAvailableAt = DateTime.toEpochMillis(
+            preservedBefore.find((entry) => entry.key === credentialed.id)!
+              .availableAt,
+          )
+          yield* service.ensureKeyed(
+            ISSUE_POLL_QUEUE,
+            uncredentialed.id,
+            {
+              _tag: "refresh-repository",
+              repositoryId: RepositoryId.make(uncredentialed.id),
+            },
+            Duration.seconds(30),
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
+          yield* service.ensureKeyed(
+            ISSUE_POLL_QUEUE,
+            "repo-deleted-orphan",
+            {
+              _tag: "refresh-repository",
+              repositoryId: RepositoryId.make(
+                "repo-01J00000000000000000000099",
+              ),
+            },
+            Duration.seconds(30),
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
+
+          const missing = yield* db.addRepository({
+            forge: otherRepository.forge,
+            forgeHost: otherRepository.forgeHost,
+            projectPath: otherRepository.projectPath,
+            localPath: otherRepository.localPath,
+            isBare: true,
+          })
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* startJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(142)),
+              })
+              // Wait until auto-heal finishes and the missing repo's first refresh runs.
+              while (
+                !(
+                  reconciliations.includes(missing.id) &&
+                  (yield* service.listKeyed(ISSUE_REFRESH_QUEUE)).every(
+                    (entry) => entry.key !== POLLING_AUTO_HEAL_KEY,
+                  )
+                )
+              ) {
+                yield* Effect.sleep("5 millis")
+              }
+            }),
+          )
+
+          const schedules = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+          expect(schedules.map((entry) => entry.key).sort()).toEqual(
+            [credentialed.id, missing.id].sort(),
+          )
+          const preservedEntry = schedules.find(
+            (entry) => entry.key === credentialed.id,
+          )
+          expect(preservedEntry?.jobId).toBe(preserved.jobId)
+          expect(
+            Math.abs(
+              DateTime.toEpochMillis(preservedEntry!.availableAt) -
+                preservedAvailableAt,
+            ),
+          ).toBeLessThan(2_000)
+
+          const missingEntry = schedules.find(
+            (entry) => entry.key === missing.id,
+          )
+          expect(missingEntry).toBeDefined()
+          expect(
+            DateTime.toEpochMillis(missingEntry!.availableAt) - Date.now(),
+          ).toBeGreaterThan(100_000)
+
+          // Manual first refresh for the repaired Repository was accepted and run.
+          expect(reconciliations).toContain(missing.id)
+          // Existing correct schedule was not reset into an immediate poll.
+          expect(reconciliations).not.toContain(credentialed.id)
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              defaultGithubLayer,
+              database,
+              queue,
+              reconciler,
+              keymaxxerLayer(
+                new Set([
+                  `${repository.projectPath}`,
+                  `${otherRepository.projectPath}`,
+                ]),
+              ),
+              lifecycle,
+            ),
+          ),
+          Effect.orDie,
+        )
+      }),
+  )
+
+  it.live("auto-heal retries with backoff until Keymaxxer succeeds", () =>
+    Effect.gen(function* () {
+      const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+      const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+      let findSecretCalls = 0
+      const keymaxxer = Layer.succeed(KeymaxxerService, {
+        initialize: Effect.void,
+        findSecret: ({ account, provider }) =>
+          Effect.gen(function* () {
+            findSecretCalls += 1
+            if (findSecretCalls < 3) {
+              return yield* new KeymaxxerError({
+                operation: "findSecret",
+                message: "Keymaxxer unavailable",
+              })
+            }
+            return provider === "github" &&
+              account === `${repository.projectPath}`
+              ? `GITHUB_TOKEN`
+              : null
+          }),
+        findSecrets: () => Effect.die("not used"),
+        hasSecret: () => Effect.die("not used"),
+        addSecret: () => Effect.die("not used"),
+        runWithSecrets: () => Effect.die("not used"),
+      })
+      const lifecycle = Layer.succeed(WorkItemLifecycle, {
+        maxDurations: {
+          create_worktree: Duration.minutes(5),
+          install_dependencies: Duration.minutes(15),
+          implement: Duration.hours(2),
+          assess_changes: Duration.minutes(5),
+          pre_commit: Duration.hours(2),
+          review: Duration.hours(1),
+          commit: Duration.minutes(5),
+          create_pr: Duration.minutes(10),
+          watch_pr_status_checks: Duration.minutes(5),
+          resolve_pr_merge_conflict: Duration.hours(2),
+          investigate_pr_status_checks: Duration.hours(2),
+          mark_pr_ready_for_review: Duration.minutes(5),
+          decide_pr_merge: Duration.minutes(15),
+          merge_pr: Duration.minutes(5),
+          close_issue: Duration.minutes(5),
+          local_cleanup: Duration.minutes(5),
+        },
+        implementNow: unused,
+        implementLocally: unused,
+        implementAllWithAutoMerge: unused,
+        queue: unused,
+        recoverOrphanedStepRuns: Effect.succeed(0),
+        interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+        runStep: () => Effect.succeed({ _tag: "noop" as const }),
+        retry: unused,
+        pause: unused,
+        start: unused,
+        abandon: unused,
+        reset: unused,
+        getWorkItem: unused,
+        listWorkItemsForIssue: unused,
+        listWorkItemsForRepository: () => Effect.succeed([]),
+        listCompletedWorkItems: () =>
+          Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+        ownsSessionId: () => Effect.succeed(false),
+        countCommittedPullRequests: () => Effect.succeed(0),
+        continueAfterHumanPrOutcome: unused,
+        admitWaitingWorkItems: Effect.succeed(0),
+        releaseWaitingForBlockers: () => Effect.succeed(0),
+      })
+
+      yield* Effect.gen(function* () {
         const db = yield* DbService
         const service = yield* QueueService
         const added = yield* db.addRepository({
@@ -2350,131 +2464,133 @@ describe("Job worker", () => {
           ),
         ),
         Effect.orDie,
-      ),
-    )
-  })
+      )
+    }),
+  )
 
-  test("successful auto-heal does not disturb queued manual Refresh Jobs", async () => {
-    const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
-    const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
-    const reconciliations: string[] = []
-    const reconciler = Layer.succeed(IssueReconciler, {
-      reconcile: (repo) =>
-        Effect.sync(() => {
-          reconciliations.push(repo.id)
-          return {
-            fetched: 0,
-            inserted: 0,
-            updated: 0,
-            deleted: 0,
-            unchanged: 0,
-          }
-        }),
-    } satisfies IssueReconcilerShape)
-    const lifecycle = Layer.succeed(WorkItemLifecycle, {
-      maxDurations: {
-        create_worktree: Duration.minutes(5),
-        install_dependencies: Duration.minutes(15),
-        implement: Duration.hours(2),
-        assess_changes: Duration.minutes(5),
-        pre_commit: Duration.hours(2),
-        review: Duration.hours(1),
-        commit: Duration.minutes(5),
-        create_pr: Duration.minutes(10),
-        watch_pr_status_checks: Duration.minutes(5),
-        resolve_pr_merge_conflict: Duration.hours(2),
-        investigate_pr_status_checks: Duration.hours(2),
-        mark_pr_ready_for_review: Duration.minutes(5),
-        decide_pr_merge: Duration.minutes(15),
-        merge_pr: Duration.minutes(5),
-        close_issue: Duration.minutes(5),
-        local_cleanup: Duration.minutes(5),
-      },
-      implementNow: unused,
-      implementLocally: unused,
-      implementAllWithAutoMerge: unused,
-      queue: unused,
-      recoverOrphanedStepRuns: Effect.succeed(0),
-      interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
-      runStep: () => Effect.succeed({ _tag: "noop" as const }),
-      retry: unused,
-      pause: unused,
-      start: unused,
-      abandon: unused,
-      reset: unused,
-      getWorkItem: unused,
-      listWorkItemsForIssue: unused,
-      listWorkItemsForRepository: () => Effect.succeed([]),
-      listCompletedWorkItems: () =>
-        Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
-      ownsSessionId: () => Effect.succeed(false),
-      countCommittedPullRequests: () => Effect.succeed(0),
-      continueAfterHumanPrOutcome: unused,
-      admitWaitingWorkItems: Effect.succeed(0),
-      releaseWaitingForBlockers: () => Effect.succeed(0),
-    })
-
-    await Effect.runPromise(
+  it.live(
+    "successful auto-heal does not disturb queued manual Refresh Jobs",
+    () =>
       Effect.gen(function* () {
-        const db = yield* DbService
-        const service = yield* QueueService
-        const added = yield* db.addRepository({
-          forge: repository.forge,
-          forgeHost: repository.forgeHost,
-          projectPath: repository.projectPath,
-          localPath: repository.localPath,
-          isBare: true,
-        })
-        const manualId = yield* service.enqueue(
-          ISSUE_REFRESH_QUEUE,
-          {
-            _tag: "refresh-repository",
-            repositoryId: RepositoryId.make(added.id),
+        const database = DbServiceLive.pipe(Layer.provideMerge(DatabaseTest))
+        const queue = SqliteQueueServiceLive.pipe(Layer.provideMerge(database))
+        const reconciliations: string[] = []
+        const reconciler = Layer.succeed(IssueReconciler, {
+          reconcile: (repo) =>
+            Effect.sync(() => {
+              reconciliations.push(repo.id)
+              return {
+                fetched: 0,
+                inserted: 0,
+                updated: 0,
+                deleted: 0,
+                unchanged: 0,
+              }
+            }),
+        } satisfies IssueReconcilerShape)
+        const lifecycle = Layer.succeed(WorkItemLifecycle, {
+          maxDurations: {
+            create_worktree: Duration.minutes(5),
+            install_dependencies: Duration.minutes(15),
+            implement: Duration.hours(2),
+            assess_changes: Duration.minutes(5),
+            pre_commit: Duration.hours(2),
+            review: Duration.hours(1),
+            commit: Duration.minutes(5),
+            create_pr: Duration.minutes(10),
+            watch_pr_status_checks: Duration.minutes(5),
+            resolve_pr_merge_conflict: Duration.hours(2),
+            investigate_pr_status_checks: Duration.hours(2),
+            mark_pr_ready_for_review: Duration.minutes(5),
+            decide_pr_merge: Duration.minutes(15),
+            merge_pr: Duration.minutes(5),
+            close_issue: Duration.minutes(5),
+            local_cleanup: Duration.minutes(5),
           },
-          { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
-        )
+          implementNow: unused,
+          implementLocally: unused,
+          implementAllWithAutoMerge: unused,
+          queue: unused,
+          recoverOrphanedStepRuns: Effect.succeed(0),
+          interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
+          runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          retry: unused,
+          pause: unused,
+          start: unused,
+          abandon: unused,
+          reset: unused,
+          getWorkItem: unused,
+          listWorkItemsForIssue: unused,
+          listWorkItemsForRepository: () => Effect.succeed([]),
+          listCompletedWorkItems: () =>
+            Effect.succeed({ items: [], page: 1, pageSize: 20, totalCount: 0 }),
+          ownsSessionId: () => Effect.succeed(false),
+          countCommittedPullRequests: () => Effect.succeed(0),
+          continueAfterHumanPrOutcome: unused,
+          admitWaitingWorkItems: Effect.succeed(0),
+          releaseWaitingForBlockers: () => Effect.succeed(0),
+        })
 
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            yield* startJobWorker({
-              idlePollInterval: Duration.zero,
-              samplePollingDelay: Effect.succeed(Duration.seconds(120)),
-            })
-            while (!reconciliations.includes(added.id)) {
-              yield* Effect.sleep("5 millis")
-            }
-            // Allow the worker to drain high-priority work.
-            yield* Effect.sleep("50 millis")
-          }),
-        )
+        yield* Effect.gen(function* () {
+          const db = yield* DbService
+          const service = yield* QueueService
+          const added = yield* db.addRepository({
+            forge: repository.forge,
+            forgeHost: repository.forgeHost,
+            projectPath: repository.projectPath,
+            localPath: repository.localPath,
+            isBare: true,
+          })
+          const manualId = yield* service.enqueue(
+            ISSUE_REFRESH_QUEUE,
+            {
+              _tag: "refresh-repository",
+              repositoryId: RepositoryId.make(added.id),
+            },
+            { retryLimit: JOB_RECOVERY_RETRY_LIMIT },
+          )
 
-        expect(
-          reconciliations.filter((id) => id === added.id).length,
-        ).toBeGreaterThanOrEqual(1)
-        // Manual job identity was accepted before auto-heal; after drain it is gone.
-        const remaining = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
-        expect(Option.isNone(remaining)).toBe(true)
-        // The schedule exists and auto-heal is finalized.
-        const schedules = yield* service.listKeyed(ISSUE_POLL_QUEUE)
-        expect(schedules.map((entry) => entry.key)).toEqual([added.id])
-        const autoHeal = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
-        expect(
-          autoHeal.filter((entry) => entry.key === POLLING_AUTO_HEAL_KEY),
-        ).toHaveLength(0)
-        void manualId
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            defaultGithubLayer,
-            database,
-            queue,
-            reconciler,
-            keymaxxerLayer(),
-            lifecycle,
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              yield* startJobWorker({
+                idlePollInterval: Duration.zero,
+                samplePollingDelay: Effect.succeed(Duration.seconds(120)),
+              })
+              while (!reconciliations.includes(added.id)) {
+                yield* Effect.sleep("5 millis")
+              }
+              // Allow the worker to drain high-priority work.
+              yield* Effect.sleep("50 millis")
+            }),
+          )
+
+          expect(
+            reconciliations.filter((id) => id === added.id).length,
+          ).toBeGreaterThanOrEqual(1)
+          // Manual job identity was accepted before auto-heal; after drain it is gone.
+          const remaining = yield* service.rawClaim(ISSUE_REFRESH_QUEUE)
+          expect(Option.isNone(remaining)).toBe(true)
+          // The schedule exists and auto-heal is finalized.
+          const schedules = yield* service.listKeyed(ISSUE_POLL_QUEUE)
+          expect(schedules.map((entry) => entry.key)).toEqual([added.id])
+          const autoHeal = yield* service.listKeyed(ISSUE_REFRESH_QUEUE)
+          expect(
+            autoHeal.filter((entry) => entry.key === POLLING_AUTO_HEAL_KEY),
+          ).toHaveLength(0)
+          void manualId
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              defaultGithubLayer,
+              database,
+              queue,
+              reconciler,
+              keymaxxerLayer(),
+              lifecycle,
+            ),
           ),
-        ),
-        Effect.orDie,
-      ),
-    )
-  })
+          Effect.orDie,
+        )
+      }),
+  )
 })

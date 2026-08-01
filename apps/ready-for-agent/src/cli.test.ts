@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { BunServices } from "@effect/platform-bun"
+import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { Command } from "effect/unstable/cli"
 import { cli } from "./cli.ts"
@@ -10,7 +12,9 @@ import { HARNESS_START_HINT } from "./graphql-error.ts"
 import { GraphqlApi, GraphqlRequestFailed } from "./services/graphql-api.ts"
 import { LocalGit } from "./services/local-git.ts"
 import { StartHarness } from "./services/start-harness.ts"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+
+/** Package root (`apps/ready-for-agent`), independent of Bun's `import.meta.dir`. */
+const packageRoot = fileURLToPath(new URL("..", import.meta.url))
 
 const runOperator = (
   args: ReadonlyArray<string>,
@@ -53,84 +57,88 @@ describe("operator binary CLI seam", () => {
       }),
   })
 
-  test("default and start invoke the harness start seam", async () => {
-    const layer = mockStart.pipe(
-      Layer.provideMerge(mockLocalGit),
-      Layer.provideMerge(
-        Layer.succeed(GraphqlApi, {
-          addRepository: () => Effect.die("graphql should not run for start"),
-        }),
-      ),
-    )
+  it.live("default and start invoke the harness start seam", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            addRepository: () => Effect.die("graphql should not run for start"),
+          }),
+        ),
+      )
 
-    await Effect.runPromise(runOperator([], layer))
-    expect(started).toBe(1)
+      yield* runOperator([], layer)
+      expect(started).toBe(1)
 
-    await Effect.runPromise(runOperator(["start"], layer))
-    expect(started).toBe(2)
-  })
+      yield* runOperator(["start"], layer)
+      expect(started).toBe(2)
+    }),
+  )
 
-  test("add reports GraphQL start-hint failures from the service", async () => {
-    const layer = mockStart.pipe(
-      Layer.provideMerge(mockLocalGit),
-      Layer.provideMerge(
-        Layer.succeed(GraphqlApi, {
-          addRepository: () =>
-            Effect.fail(
-              new GraphqlRequestFailed({
-                message: `Unable to connect\n\n${HARNESS_START_HINT}`,
+  it.live("add reports GraphQL start-hint failures from the service", () =>
+    Effect.gen(function* () {
+      const layer = mockStart.pipe(
+        Layer.provideMerge(mockLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            addRepository: () =>
+              Effect.fail(
+                new GraphqlRequestFailed({
+                  message: `Unable to connect\n\n${HARNESS_START_HINT}`,
+                }),
+              ),
+          }),
+        ),
+      )
+
+      const result = yield* runOperator(["add", "/tmp/repo"], layer).pipe(
+        Effect.flip,
+      )
+
+      expect(result._tag).toBe("GraphqlRequestFailed")
+      if (result._tag === "GraphqlRequestFailed") {
+        expect(result.message).toContain(HARNESS_START_HINT)
+      }
+    }),
+  )
+
+  it.live("add lets the operator correct a guessed GitLab identity", () =>
+    Effect.gen(function* () {
+      let added:
+        | {
+            readonly forgeHost: string
+            readonly projectPath: string
+          }
+        | undefined
+      const gitlabLocalGit = Layer.succeed(LocalGit, {
+        inspect: (path) =>
+          Effect.succeed({
+            forge: "gitlab" as const,
+            forgeHost: "git.drupal.org",
+            projectPath: "project/oauth_client",
+            localPath: path,
+            isBare: false,
+            paused: true as const,
+          }),
+      })
+      const layer = mockStart.pipe(
+        Layer.provideMerge(gitlabLocalGit),
+        Layer.provideMerge(
+          Layer.succeed(GraphqlApi, {
+            addRepository: (repository) =>
+              Effect.sync(() => {
+                added = repository
+                return {
+                  id: "repo-1",
+                  ...repository,
+                }
               }),
-            ),
-        }),
-      ),
-    )
+          }),
+        ),
+      )
 
-    const result = await Effect.runPromise(
-      runOperator(["add", "/tmp/repo"], layer).pipe(Effect.flip),
-    )
-
-    expect(result._tag).toBe("GraphqlRequestFailed")
-    if (result._tag === "GraphqlRequestFailed") {
-      expect(result.message).toContain(HARNESS_START_HINT)
-    }
-  })
-
-  test("add lets the operator correct a guessed GitLab identity", async () => {
-    let added:
-      | {
-          readonly forgeHost: string
-          readonly projectPath: string
-        }
-      | undefined
-    const gitlabLocalGit = Layer.succeed(LocalGit, {
-      inspect: (path) =>
-        Effect.succeed({
-          forge: "gitlab" as const,
-          forgeHost: "git.drupal.org",
-          projectPath: "project/oauth_client",
-          localPath: path,
-          isBare: false,
-          paused: true as const,
-        }),
-    })
-    const layer = mockStart.pipe(
-      Layer.provideMerge(gitlabLocalGit),
-      Layer.provideMerge(
-        Layer.succeed(GraphqlApi, {
-          addRepository: (repository) =>
-            Effect.sync(() => {
-              added = repository
-              return {
-                id: "repo-1",
-                ...repository,
-              }
-            }),
-        }),
-      ),
-    )
-
-    await Effect.runPromise(
-      runOperator(
+      yield* runOperator(
         [
           "add",
           "--forge-host",
@@ -140,21 +148,21 @@ describe("operator binary CLI seam", () => {
           "/tmp/repo",
         ],
         layer,
-      ),
-    )
+      )
 
-    expect(added).toMatchObject({
-      forgeHost: "git.drupalcode.org",
-      projectPath: "project/oauth_client",
-    })
-  })
+      expect(added).toMatchObject({
+        forgeHost: "git.drupalcode.org",
+        projectPath: "project/oauth_client",
+      })
+    }),
+  )
 
-  test("binary help lists start, add, and --no-open", () => {
+  it("binary help lists start, add, and --no-open", () => {
     const result = spawnSync(
       "bun",
       ["--conditions", "@ready-for-agent/source", "src/main.ts", "--help"],
       {
-        cwd: join(import.meta.dir, ".."),
+        cwd: packageRoot,
         encoding: "utf8",
       },
     )
@@ -167,24 +175,29 @@ describe("operator binary CLI seam", () => {
     expect(output).toContain("no-open")
   })
 
-  test("default and start accept --no-open without starting GraphQL commands", async () => {
-    const layer = mockStart.pipe(
-      Layer.provideMerge(mockLocalGit),
-      Layer.provideMerge(
-        Layer.succeed(GraphqlApi, {
-          addRepository: () => Effect.die("graphql should not run for start"),
-        }),
-      ),
-    )
+  it.live(
+    "default and start accept --no-open without starting GraphQL commands",
+    () =>
+      Effect.gen(function* () {
+        const layer = mockStart.pipe(
+          Layer.provideMerge(mockLocalGit),
+          Layer.provideMerge(
+            Layer.succeed(GraphqlApi, {
+              addRepository: () =>
+                Effect.die("graphql should not run for start"),
+            }),
+          ),
+        )
 
-    await Effect.runPromise(runOperator(["--no-open"], layer))
-    expect(started).toBe(1)
+        yield* runOperator(["--no-open"], layer)
+        expect(started).toBe(1)
 
-    await Effect.runPromise(runOperator(["start", "--no-open"], layer))
-    expect(started).toBe(2)
-  })
+        yield* runOperator(["start", "--no-open"], layer)
+        expect(started).toBe(2)
+      }),
+  )
 
-  test("binary add against unreachable GraphQL prints start hint", () => {
+  it("binary add against unreachable GraphQL prints start hint", () => {
     const repoDir = join(tempRoot, "repo")
     mkdirSync(repoDir)
     writeFileSync(join(repoDir, "README.md"), "fixture\n")
@@ -205,7 +218,7 @@ describe("operator binary CLI seam", () => {
         repoDir,
       ],
       {
-        cwd: join(import.meta.dir, ".."),
+        cwd: packageRoot,
         encoding: "utf8",
         env: {
           ...process.env,
