@@ -1,4 +1,5 @@
 import { createServer } from "node:net"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { Duration, Effect, Layer, ManagedRuntime, PubSub, Stream } from "effect"
 import {
   ActiveAgentBackend,
@@ -38,7 +39,6 @@ import {
   PRODUCTION_HTTP_IDLE_TIMEOUT_SECONDS,
   startProductionLifecycle,
 } from "../src/server/production-lifecycle.ts"
-import { afterEach, describe, expect, test } from "bun:test"
 
 /**
  * GraphQL Yoga production SSE ping interval (seconds). Source of truth is
@@ -246,7 +246,7 @@ describe("production GraphQL SSE idle timeout", () => {
     }
   })
 
-  test("declares an idle timeout longer than Yoga's production heartbeat", () => {
+  it("declares an idle timeout longer than Yoga's production heartbeat", () => {
     // Guards the production constant against accidental regression below the
     // Yoga interval documented in YOGA_SSE_HEARTBEAT_INTERVAL_SECONDS.
     expect(PRODUCTION_HTTP_IDLE_TIMEOUT_SECONDS).toBeGreaterThanOrEqual(30)
@@ -257,7 +257,7 @@ describe("production GraphQL SSE idle timeout", () => {
     expect(YOGA_SSE_HEARTBEAT_INTERVAL_SECONDS).toBeGreaterThan(10)
   })
 
-  test("keeps quiet Repository, Issue, and Work Item subscriptions alive across heartbeats", async () => {
+  it("keeps quiet Repository, Issue, and Work Item subscriptions alive across heartbeats", async () => {
     // Yoga shortens SSE pings under NODE_ENV=test (300ms). Force production
     // cadence so this exercises the real 12s heartbeat vs Bun idle timeout.
     // Restore in an outer finally so setup failures cannot leave NODE_ENV set.

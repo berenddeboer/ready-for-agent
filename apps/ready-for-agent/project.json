@@ -99,7 +99,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions=@ready-for-agent/source test --timeout=15000"
+        "command": "bash scripts/run-unit-tests.sh"
       },
       "inputs": ["default", "^production"],
       "cache": true,

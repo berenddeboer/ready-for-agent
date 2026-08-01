@@ -61,7 +61,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions=@ready-for-agent/source test test/production-sse-idle-timeout.test.ts"
+        "command": "bun --bun ./node_modules/vitest/vitest.mjs run --config vitest.config.ts test/production-sse-idle-timeout.test.ts"
       },
       "inputs": ["default", "^production"],
       "cache": true,
