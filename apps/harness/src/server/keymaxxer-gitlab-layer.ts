@@ -1,11 +1,9 @@
 import { Duration, Effect, Layer, Schema } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process"
-import { sanitizeUserFacingText } from "@ready-for-agent/github-service"
 import {
   GITLAB_VAULT_METADATA_BUDGET_SECONDS,
   type GitLabHelperOperation,
   GitLabProjectUnavailableError,
-  type GitLabReadyLabeledIssue,
   type GitLabRepository,
   GitLabRequestError,
   GitLabService,
@@ -17,6 +15,16 @@ import {
 } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import { ambientGitLabLayer } from "./ambient-gitlab-layer.js"
+import {
+  SerializedMergePullRequestResult,
+  SerializedPrStatusCheckDiagnostics,
+  SerializedPullRequestCheckStatus,
+  SerializedPullRequestLifecycleStatus,
+  encodeArgument,
+  encodedRepositoryArguments,
+  makeRequestError,
+  parseSerializedIssues,
+} from "./forge-helper-schemas.js"
 
 type GitLabServiceError = GitLabProjectUnavailableError | GitLabRequestError
 
@@ -34,204 +42,12 @@ type VaultSecretProbe =
   | { readonly kind: "miss" }
   | { readonly kind: "unavailable" }
 
-const PositiveInt = Schema.Int.pipe(Schema.check(Schema.isGreaterThan(0)))
-const NonNegativeInt = Schema.Int.pipe(
-  Schema.check(Schema.isGreaterThanOrEqualTo(0)),
-)
-const RequiredString = Schema.String.pipe(
-  Schema.check(
-    Schema.makeFilter((value: string) =>
-      value.trim() === "" ? "Expected a non-empty string" : undefined,
-    ),
-  ),
-)
-const UrlString = Schema.String.pipe(
-  Schema.check(
-    Schema.makeFilter((value: string) => {
-      try {
-        new URL(value)
-        return undefined
-      } catch {
-        return "Invalid URL"
-      }
-    }),
-  ),
-)
-
-const SerializedIssue = Schema.Struct({
-  number: PositiveInt,
-  title: RequiredString,
-  body: Schema.String,
-  url: UrlString,
-  createdAt: Schema.DateFromString,
-  state: Schema.Literals(["OPEN", "CLOSED"]),
-  author: Schema.NullOr(RequiredString),
-  hierarchySupported: Schema.Boolean,
-  hasChildren: Schema.Boolean,
-  parentPosition: Schema.NullOr(NonNegativeInt),
-  parent: Schema.NullOr(
-    Schema.Struct({
-      number: PositiveInt,
-      url: UrlString,
-      state: Schema.Literals(["OPEN", "CLOSED"]),
-      isReadyLabeled: Schema.Boolean,
-    }),
-  ),
-  blockedBy: Schema.Array(
-    Schema.Struct({
-      number: PositiveInt,
-      url: UrlString,
-    }),
-  ),
-  closingPullRequests: Schema.Array(
-    Schema.Struct({
-      number: PositiveInt,
-      repository: RequiredString,
-      state: Schema.Literals(["OPEN", "MERGED", "CLOSED"]),
-      isDraft: Schema.Boolean,
-    }),
-  ),
-})
-
-const SerializedIssues = Schema.Array(SerializedIssue)
-
-const SerializedTerminalPrStatusCheck = Schema.Struct({
-  externalId: Schema.String,
-  name: Schema.String,
-  outcome: Schema.Literals(["green", "red"]),
-})
-
-const SerializedPrStatusCheckLogFetch = Schema.Union([
-  Schema.TaggedStruct("ok", {
-    excerpt: Schema.String,
-    localPath: Schema.NullOr(Schema.String),
-  }),
-  Schema.TaggedStruct("unavailable", {
-    reason: Schema.String,
-  }),
-])
-
-const SerializedPrStatusCheckDiagnostic = Schema.Struct({
-  externalId: Schema.String,
-  name: Schema.String,
-  source: Schema.Literals(["actions-job", "status", "gitlab-job", "unknown"]),
-  htmlUrl: Schema.NullOr(Schema.String),
-  logFetch: SerializedPrStatusCheckLogFetch,
-})
-
-const SerializedPrStatusCheckDiagnostics = Schema.Array(
-  SerializedPrStatusCheckDiagnostic,
-)
-
-const SerializedPullRequestCheckStatusFields = {
-  mergeability: Schema.Literals(["mergeable", "conflicting", "unknown"]),
-  baseRefName: Schema.NullOr(Schema.String),
-  headPushedAt: Schema.NullOr(Schema.String),
-  headSha: Schema.NullOr(Schema.String),
-  createdAt: Schema.NullOr(Schema.String),
-  isDraft: Schema.NullOr(Schema.Boolean),
-} as const
-
-const SerializedPullRequestCheckStatus = Schema.Union([
-  Schema.TaggedStruct("pending", {
-    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    ...SerializedPullRequestCheckStatusFields,
-  }),
-  Schema.TaggedStruct("expected", {
-    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    ...SerializedPullRequestCheckStatusFields,
-  }),
-  Schema.TaggedStruct("no_checks", {
-    ...SerializedPullRequestCheckStatusFields,
-  }),
-  Schema.TaggedStruct("succeeded", {
-    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    ...SerializedPullRequestCheckStatusFields,
-  }),
-  Schema.TaggedStruct("failed", {
-    terminalChecks: Schema.Array(SerializedTerminalPrStatusCheck),
-    ...SerializedPullRequestCheckStatusFields,
-  }),
-  Schema.TaggedStruct("closed", {
-    ...SerializedPullRequestCheckStatusFields,
-  }),
-])
-
-const SerializedPullRequestLifecycleStatus = Schema.Union([
-  Schema.TaggedStruct("open", {}),
-  Schema.TaggedStruct("merged", {}),
-  Schema.TaggedStruct("closed", {}),
-  Schema.TaggedStruct("not_found", {}),
-])
-
-const SerializedMergePullRequestResult = Schema.Union([
-  Schema.TaggedStruct("merged", {}),
-  Schema.TaggedStruct("revalidation", {
-    reason: Schema.Literals([
-      "head_changed",
-      "checks_not_green",
-      "mergeability_changed",
-    ]),
-    message: RequiredString,
-  }),
-  Schema.TaggedStruct("needs_human", {
-    reason: Schema.Literals(["closed_unmerged", "merge_rejected"]),
-    message: RequiredString,
-  }),
-])
-
-const decodeOptionalInstant = (value: string | null): Date | null => {
-  if (value === null) {
-    return null
-  }
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) {
-    return null
-  }
-  return parsed
-}
-
-const requestError = (
-  repository: GitLabRepository,
-  operation: string,
-  detail?: string,
-) => {
-  const cleaned =
-    detail === undefined || detail.trim() === ""
-      ? ""
-      : sanitizeUserFacingText(detail, 300)
-  return new GitLabRequestError({
-    message:
-      cleaned === ""
-        ? `Failed to ${operation} for ${repository.projectPath}`
-        : `Failed to ${operation} for ${repository.projectPath}: ${cleaned}`,
-  })
-}
-
-const encodeArgument = (value: string) =>
-  Buffer.from(value, "utf8").toString("base64url")
-
-const encodedRepositoryArguments = (repository: GitLabRepository) =>
-  [
-    encodeArgument(repository.forge),
-    encodeArgument(repository.forgeHost),
-    encodeArgument(repository.projectPath),
-  ] as const
+const requestError = makeRequestError(GitLabRequestError)
 
 const repositoryUnavailable = (repository: GitLabRepository) =>
   new GitLabProjectUnavailableError(repository)
 
-const parseIssues = (
-  stdout: string,
-  repository: GitLabRepository,
-): Effect.Effect<readonly GitLabReadyLabeledIssue[], GitLabRequestError> =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(SerializedIssues))(
-    stdout,
-  ).pipe(
-    Effect.mapError(() =>
-      requestError(repository, "list Ready-labeled Issues"),
-    ),
-  )
+const parseIssues = parseSerializedIssues(requestError)
 
 /** Decode a positive integer from helper stdout (trimmed). */
 const decodePositiveInt = (
@@ -733,18 +549,11 @@ export const keymaxxerGitLabLayer = (options: {
                 tokenName,
                 describe: "get pull request check status",
                 args: [encodeArgument(headRefName)],
-                decode: (stdout) =>
-                  decodeJson(
-                    SerializedPullRequestCheckStatus,
-                    repository,
-                    "decode pull request check status",
-                  )(stdout).pipe(
-                    Effect.map((status) => ({
-                      ...status,
-                      headPushedAt: decodeOptionalInstant(status.headPushedAt),
-                      createdAt: decodeOptionalInstant(status.createdAt),
-                    })),
-                  ),
+                decode: decodeJson(
+                  SerializedPullRequestCheckStatus,
+                  repository,
+                  "decode pull request check status",
+                ),
               }),
             (ambientService) =>
               ambientService.getPullRequestCheckStatus(repository, headRefName),

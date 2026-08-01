@@ -285,6 +285,71 @@ describe("Keymaxxer-backed GitHub layer", () => {
     expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
   })
 
+  test("maps unparseable PR check-status instants to null", async () => {
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: () =>
+        Effect.succeed({
+          exitCode: 0,
+          stdout: JSON.stringify({
+            _tag: "succeeded",
+            mergeability: "mergeable",
+            baseRefName: "main",
+            headPushedAt: "not-a-date",
+            headSha: "abc123",
+            createdAt: "garbage",
+            isDraft: false,
+            terminalChecks: [
+              {
+                externalId: "checkrun:1",
+                name: "lint",
+                outcome: "green",
+              },
+            ],
+          }),
+          stderr: "",
+        }),
+    })
+    const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+      Layer.provide(keymaxxerLayer),
+    )
+
+    const status = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHubService
+        return yield* github.getPullRequestCheckStatus(
+          {
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+          },
+          "rfa/acme-widgets/42/wi-test",
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(status).toEqual({
+      _tag: "succeeded",
+      mergeability: "mergeable",
+      baseRefName: "main",
+      headPushedAt: null,
+      headSha: "abc123",
+      createdAt: null,
+      isDraft: false,
+      terminalChecks: [
+        {
+          externalId: "checkrun:1",
+          name: "lint",
+          outcome: "green",
+        },
+      ],
+    })
+  })
+
   test("resolves an open PR number through the configured repository token", async () => {
     const runs: RunWithSecretsInput[] = []
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
