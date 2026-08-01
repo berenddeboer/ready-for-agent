@@ -138,8 +138,11 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(ui).toMatch(/mergedPrStatsSkeleton:[\s\S]*?animate-\[skeleton-pulse/)
     // Keyframes stay in the tokens stylesheet.
     expect(styles).toContain("@keyframes skeleton-pulse")
+    expect(copy).toContain("ui.iconBtnBare")
     expect(copy).toContain("ui.iconBtnCopied")
     expect(copy).toContain("1_500")
+    expect(ui).toContain("iconBtnBare:")
+    expect(ui).toMatch(/iconBtnBare:[\s\S]*?border-0/)
     expect(ui).toContain("iconBtnCopied:")
     expect(ui).toMatch(/iconBtnCopied:[\s\S]*?text-lane-pr/)
   })

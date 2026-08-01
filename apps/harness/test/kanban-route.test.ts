@@ -262,7 +262,7 @@ describe("kanban home board", () => {
   })
 
   test("Kanban tickets opt into earlier-lane lifecycle chip collapse", () => {
-    // Issue #679: Kanban-only presentation; other surfaces leave collapse off.
+    // Issue #679: collapse earlier lanes on board tickets; repos reuses it.
     const source = boardSource()
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
@@ -282,21 +282,19 @@ describe("kanban home board", () => {
       join(import.meta.dir, "../src/completed-work-item-row.tsx"),
       "utf8",
     )
-    // Non-Kanban call sites must not opt into collapse (default remains false).
-    const nonKanbanSources = [home, completedRow]
-    let nonKanbanCallCount = 0
-    for (const nonKanbanSource of nonKanbanSources) {
-      const calls = [
-        ...nonKanbanSource.matchAll(/<WorkItemLifecycleStatus[\s\S]*?\/>/g),
-      ].map((match) => match[0])
-      nonKanbanCallCount += calls.length
-      for (const call of calls) {
-        expect(call).not.toContain("collapseEarlierLanes")
-      }
-    }
-    expect(nonKanbanCallCount).toBeGreaterThan(0)
-    // Only the Kanban ticket path opts in; the prop defaults off elsewhere.
+    // Repos issue chrome opts in (same collapse language as Kanban).
+    const homeCalls = [
+      ...home.matchAll(/<WorkItemLifecycleStatus[\s\S]*?\/>/g),
+    ].map((match) => match[0])
+    expect(homeCalls.length).toBeGreaterThan(0)
+    expect(
+      homeCalls.some((call) => call.includes("collapseEarlierLanes")),
+    ).toBe(true)
+    // Completed archive uses journey legs, not this lifecycle collapse prop.
+    expect(completedRow).not.toContain("collapseEarlierLanes")
+    // Prop still defaults off on the component signature.
     expect(home).toContain("collapseEarlierLanes = false")
+    // Board path opts in once (ticket only).
     expect(source.match(/collapseEarlierLanes/g)).toHaveLength(1)
   })
 
@@ -414,9 +412,12 @@ describe("kanban home board", () => {
     expect(ui).toContain("sticky")
     expect(ui).toContain("jobTicket:")
     expect(ui).not.toContain("jobTicketMetalLight")
-    // Merged tickets use parchment --ticket-merged (#f4f1e8), not white/metal.
-    expect(ui).toMatch(/jobTicket:[\s\S]*?--ticket-merged/)
-    expect(stylesSource()).toContain("--ticket-merged: #f4f1e8")
+    // All board tickets use parchment --ticket-fill (#f4f1e8), not white/metal.
+    expect(ui).toMatch(/jobTicket:\s*cx\([\s\S]*?bg-\[var\(--ticket-fill\)\]/)
+    // No longer gated to Merged only.
+    expect(ui).not.toContain("data-[lane=complete]:!bg-[var(--ticket-")
+    expect(stylesSource()).toContain("--ticket-fill: #f4f1e8")
+    expect(stylesSource()).not.toContain("--ticket-merged:")
     // Dark theme must not restyle the board: light tokens re-locked on surface.
     // Tailwind utilities read --color-* (computed at :root), so aliases must
     // be re-set too — --ink alone does not fix bg-ink / text-ink / border-ink.
@@ -425,7 +426,7 @@ describe("kanban home board", () => {
       '[data-theme="dark"] [data-kanban-surface]',
     )
     expect(stylesSource()).toMatch(
-      /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--ticket-merged: #f4f1e8/,
+      /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--ticket-fill: #f4f1e8/,
     )
     expect(stylesSource()).toMatch(
       /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--color-ink: #151515/,

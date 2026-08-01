@@ -22,6 +22,7 @@ import {
 import { Banner, BannerActionButton } from "../banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "../card-collapse.js"
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
+import { Copy } from "../copy.js"
 import {
   type GraphqlWorkItemState,
   issueActionEligibility,
@@ -59,6 +60,7 @@ import {
   completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
+import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { cx, ui } from "../ui.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { canShowWorkItemResetAction } from "../work-item-job-actions.js"
@@ -2682,6 +2684,15 @@ function RepositoryIssues({
   workItemsLoading: boolean
 }) {
   const { data: issues } = useSuspenseQuery(issuesQuery(repository.id))
+  // One Session usage dialog for the whole list (not per issue row) so the
+  // fixed session-usage-title id stays unique — same pattern as Kanban/Completed.
+  const [sessionDialog, setSessionDialog] = useState<{
+    workItemId: string
+    sessionId: string
+  } | null>(null)
+  const onOpenSession = (workItemId: string, sessionId: string) => {
+    setSessionDialog({ workItemId, sessionId })
+  }
 
   if (issues.length === 0) {
     return (
@@ -2700,38 +2711,48 @@ function RepositoryIssues({
   }
 
   return (
-    <ul className={ui.repoIssuesList}>
-      {issues.map((issue) => {
-        if (issue.parent !== null) return null
-        if (!issue.hasChildren) {
+    <>
+      <ul className={ui.repoIssuesList}>
+        {issues.map((issue) => {
+          if (issue.parent !== null) return null
+          if (!issue.hasChildren) {
+            return (
+              <RepositoryIssueRow
+                issue={issue}
+                key={issue.id}
+                repository={repository}
+                workItems={workItems}
+                workItemsLoading={workItemsLoading}
+                onOpenSession={onOpenSession}
+              />
+            )
+          }
+
+          const children = childrenByParent.get(issue.issueNumber) ?? []
+          const closedChildren = children.filter(
+            (child) => child.state === "CLOSED",
+          ).length
           return (
-            <RepositoryIssueRow
-              issue={issue}
+            <ParentIssueGroup
               key={issue.id}
+              parent={issue}
+              childIssues={children}
+              closedChildren={closedChildren}
               repository={repository}
               workItems={workItems}
               workItemsLoading={workItemsLoading}
+              onOpenSession={onOpenSession}
             />
           )
-        }
-
-        const children = childrenByParent.get(issue.issueNumber) ?? []
-        const closedChildren = children.filter(
-          (child) => child.state === "CLOSED",
-        ).length
-        return (
-          <ParentIssueGroup
-            key={issue.id}
-            parent={issue}
-            childIssues={children}
-            closedChildren={closedChildren}
-            repository={repository}
-            workItems={workItems}
-            workItemsLoading={workItemsLoading}
-          />
-        )
-      })}
-    </ul>
+        })}
+      </ul>
+      <SessionUsageDialog
+        workItemId={sessionDialog?.workItemId ?? null}
+        sessionId={sessionDialog?.sessionId ?? null}
+        open={sessionDialog !== null}
+        onClose={() => setSessionDialog(null)}
+      />
+    </>
   )
 }
 
@@ -2742,6 +2763,7 @@ function ParentIssueGroup({
   repository,
   workItems,
   workItemsLoading,
+  onOpenSession,
 }: {
   parent: RepositoryIssue
   childIssues: readonly RepositoryIssue[]
@@ -2749,6 +2771,7 @@ function ParentIssueGroup({
   repository: Repository
   workItems: readonly WorkItem[]
   workItemsLoading: boolean
+  readonly onOpenSession: (workItemId: string, sessionId: string) => void
 }) {
   const queryClient = useQueryClient()
   const openChildren = childIssues.filter((child) => child.state === "OPEN")
@@ -2870,6 +2893,7 @@ function ParentIssueGroup({
               repository={repository}
               workItems={workItems}
               workItemsLoading={workItemsLoading}
+              onOpenSession={onOpenSession}
             />
           ))}
         </ul>
@@ -2883,11 +2907,13 @@ function RepositoryIssueRow({
   repository,
   workItems,
   workItemsLoading,
+  onOpenSession,
 }: {
   issue: RepositoryIssue
   repository: Repository
   workItems: readonly WorkItem[]
   workItemsLoading: boolean
+  readonly onOpenSession: (workItemId: string, sessionId: string) => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const queryClient = useQueryClient()
@@ -3072,6 +3098,7 @@ function RepositoryIssueRow({
       {latestWorkItem !== undefined && (
         <WorkItemLifecycleStatus
           workItem={latestWorkItem}
+          collapseEarlierLanes
           issueUrl={
             issue.url !== ""
               ? issue.url
@@ -3088,6 +3115,7 @@ function RepositoryIssueRow({
             repository.projectPath,
             latestWorkItem.pullRequestNumber,
           )}
+          onOpenSession={onOpenSession}
         />
       )}
       {(implementNow.isError ||
@@ -3426,22 +3454,30 @@ export function WorkItemLifecycleStatus({
   workItem,
   compact = false,
   /**
-   * Kanban-only: collapse earlier Build/Review/PR lane chips into summary
-   * rows. Other surfaces leave this off for the full list.
+   * Collapse earlier Build/Review/PR lane chips into summary rows (▸ BUILD ·
+   * 5m). Used on Kanban tickets and repos issue chrome; leave off for full
+   * lists.
    */
   collapseEarlierLanes = false,
   pullRequestUrl = null,
   issueUrl = null,
+  onOpenSession,
 }: {
   workItem: WorkItem
   compact?: boolean
   collapseEarlierLanes?: boolean
   pullRequestUrl?: string | null
   issueUrl?: string | null
+  /** Opens Session usage for a session id (repos / non-compact chrome). */
+  onOpenSession?: (workItemId: string, sessionId: string) => void
 }) {
   const queryClient = useQueryClient()
   const status = workItem.status
   const heldForBlockers = status === "WAITING_FOR_BLOCKERS"
+  const { sessionId, worktreePath } = sessionWorktreeParts(
+    workItem.sessionId,
+    workItem.worktreePath,
+  )
   // Queue hold: Retry is never offered; API also sets canRetry false.
   const canRetry = compact && workItem.canRetry && !heldForBlockers
   const retriesStatusChecks =
@@ -3610,6 +3646,49 @@ export function WorkItemLifecycleStatus({
 
   return (
     <div className={compact ? "mt-2" : ui.lifecycleInset}>
+      {/*
+       * Non-compact (repos): same runtime lines as kanban tickets — agent
+       * backend, session id (Session usage + copy), worktree path + copy.
+       * Compact kanban tickets render these above this component.
+       */}
+      {!compact ? (
+        <div className={cx(ui.jobTicketRuntime, "mb-1")}>
+          <p className={ui.jobTicketRuntimeLine}>
+            {workItem.agentBackend.label}
+          </p>
+          {sessionId !== null ? (
+            <div
+              className={cx(
+                ui.jobTicketRuntimeLine,
+                "flex min-w-0 items-center gap-1",
+              )}
+            >
+              {onOpenSession !== undefined ? (
+                <button
+                  type="button"
+                  className={cx(ui.jobTicketSession, "min-w-0 truncate")}
+                  title={sessionId}
+                  onClick={() => onOpenSession(workItem.id, sessionId)}
+                >
+                  {sessionId}
+                </button>
+              ) : (
+                <span className="min-w-0 truncate" title={sessionId}>
+                  {sessionId}
+                </span>
+              )}
+              <Copy value={sessionId} showValue={false} className="shrink-0" />
+            </div>
+          ) : null}
+          {worktreePath !== null ? (
+            <Copy
+              value={worktreePath}
+              className="min-w-0 max-w-full"
+              textClassName={ui.jobTicketRuntimeLine}
+            />
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span
           className={cx(

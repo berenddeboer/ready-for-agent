@@ -14,6 +14,9 @@ describe("Copy component", () => {
     expect(source).toContain("title={value}")
     expect(source).toContain("truncate")
     expect(source).toContain('aria-label={copied ? "Copied" : "Copy"}')
+    // Inline copy is borderless (no ink box next to mono session/worktree).
+    expect(source).toContain("ui.iconBtnBare")
+    expect(source).not.toMatch(/className=\{cx\(ui\.iconBtn,/)
     const textIndex = source.indexOf("title={value}")
     const buttonIndex = source.indexOf('type="button"')
     expect(textIndex).toBeGreaterThan(-1)

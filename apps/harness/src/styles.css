@@ -30,9 +30,10 @@
   --lane-bed: #dedbd2;
 
   /*
-   * Merged-lane ticket fill — warm parchment (rgb(244, 241, 232)).
+   * Board ticket fill — warm parchment (rgb(244, 241, 232)).
+   * Every kanban lane (Build through Merged) uses this; not lane-specific.
    */
-  --ticket-merged: #f4f1e8;
+  --ticket-fill: #f4f1e8;
 }
 
 :root,
@@ -87,7 +88,7 @@
   --merged-halo: rgb(242 243 241 / 0.85);
   --scrim: rgb(0 0 0 / 0.55);
   /* Dark: soft lift over panel (no warm parchment). */
-  --ticket-merged: #32383d;
+  --ticket-fill: #32383d;
 
   --mast-bg: #000000;
   --mast-ink: #ffffff;
@@ -137,7 +138,7 @@
   --signal: #ffd21c;
   --merged-halo: transparent;
   --scrim: rgb(21 21 21 / 0.45);
-  --ticket-merged: #f4f1e8;
+  --ticket-fill: #f4f1e8;
   --plate: #dfe4e1;
   --plate-hover: #cfd6d2;
   --plate-ink: #23282b;
