@@ -135,6 +135,36 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssuesSkeleton(",
     )
     expect(lifecycle).toContain('compact ? "mt-2" : ui.lifecycleInset')
+    // Non-compact (repos) shows agent backend, session id + copy, worktree.
+    expect(lifecycle).toContain("{workItem.agentBackend.label}")
+    expect(lifecycle).toContain("ui.jobTicketRuntime")
+    expect(lifecycle).toContain("sessionWorktreeParts")
+    expect(lifecycle).toContain("onOpenSession")
+    expect(lifecycle).toContain("<Copy value={sessionId} showValue={false}")
+    expect(lifecycle).toContain("value={worktreePath}")
+    // Compact kanban path keeps runtime lines outside this component.
+    expect(lifecycle).toContain("{!compact ? (")
+    // Earlier-lane collapse (▸ BUILD · 5m) is shared with Kanban.
+    expect(lifecycle).toContain("collapseEarlierLanes")
+    expect(lifecycle).toContain("ui.legSummary")
+
+    const row = sliceBetweenMarkers(
+      homeSource(),
+      "function RepositoryIssueRow(",
+      "export function SessionUsageDialog(",
+    )
+    expect(row).toContain("onOpenSession=")
+    expect(row).toContain("collapseEarlierLanes")
+    // One SessionUsageDialog at RepositoryIssues — not per issue row.
+    expect(row).not.toContain("<SessionUsageDialog")
+
+    const issuesList = sliceBetweenMarkers(
+      homeSource(),
+      "function RepositoryIssues(",
+      "function ParentIssueGroup(",
+    )
+    expect(issuesList).toContain("<SessionUsageDialog")
+    expect(issuesList).toContain("onOpenSession={onOpenSession}")
 
     const ui = uiSource()
     expect(ui).toContain("lifecycleInset:")

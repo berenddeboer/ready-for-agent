@@ -54,7 +54,7 @@ export function Copy({
       ) : null}
       <button
         type="button"
-        className={cx(ui.iconBtn, copied && ui.iconBtnCopied)}
+        className={cx(ui.iconBtnBare, copied && ui.iconBtnCopied)}
         onClick={() => {
           void handleCopy()
         }}

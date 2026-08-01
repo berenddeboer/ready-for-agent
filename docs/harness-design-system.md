@@ -331,18 +331,20 @@ Anatomy (top to bottom):
    (Title stays at relaxed card size; only meta under the title is larger.)
 6. **Via lines**: mono uppercase faint, 2px `--line-soft` left border,
    padding-left ("Via Build — 14 min").
-7. **Journey legs** (§5.2): with the Kanban-only earlier-lane collapse —
-   collapsed summary rows are **consistently lane-colored** (per #695): in
-   the Review lane the Build summary is a Build-blue chip with white text
-   ("▸ BUILD · 14m"); likewise everywhere, name + summed duration only.
-   Expansion replaces the summary with that lane's chips; ephemeral local
-   state (behavior per `docs/kanban.md`, unchanged).
-8. **Merged-lane variant**: no legs; warm parchment `--ticket-merged`
-   (`#f4f1e8` / rgb(244, 241, 232) light; soft charcoal lift dark); mono
-   lines for **Started** and **Elapsed** separately; PR badge (§5.5).
+7. **Journey legs** (§5.2): earlier-lane collapse is shared by **Kanban
+   tickets and repos lifecycle chrome** — collapsed summary rows are
+   **consistently lane-colored** (per #695): in the Review lane the Build
+   summary is a Build-blue chip with white text ("▸ BUILD · 14m"); likewise
+   everywhere, name + summed duration only. Expansion replaces the summary
+   with that lane's chips; ephemeral local state (behavior per
+   `docs/kanban.md`, unchanged).
+8. **Merged-lane variant**: no per-step legs on the board; mono lines for
+   **Started** and **Elapsed** separately; PR badge (§5.5). Fill is the same
+   parchment as every other lane (see card frame below).
 
-Card frame: 1.5px ink border, `--panel` fill (Merged uses `--ticket-merged`),
-no radius, no offset shadow.
+Card frame: 1.5px ink border, warm parchment `--ticket-fill` (`#f4f1e8` /
+rgb(244, 241, 232) light; soft charcoal lift dark) in every board lane —
+not pure white, not brushed metal. No radius, no offset shadow.
 
 ### 4.5 Completed page (archive) — per #698 prototype
 
@@ -413,8 +415,10 @@ prototype, so this spec governs:
   tag (a blocked issue is queue-held — lane-consistent). Blocked rows keep
   the "Blocked by #n" mono link line; the old amber row-wash is dropped —
   the yellow tag carries the state, no wash fills in the new language.
-- **Latest work item** renders the standard lifecycle chrome (§4.4 status
-  block) inside a bordered inset panel (`--panel`, 1.5px).
+- **Latest work item** renders the standard lifecycle chrome (§4.4) inside a
+  bordered inset panel (`--panel`, 1.5px): runtime lines (agent backend,
+  session + copy, worktree + copy), STARTED / status, and earlier-lane
+  collapse for step chips (same as Kanban).
 - **Parent issue groups**: `<details>` card, 1.5px border — summary with
   parent link, "n/m closed" mono, chevron, parent actions menu; children
   with a 2px `--line-soft` left rule.

@@ -592,12 +592,13 @@ export const ui = {
     "justify-self-start font-mono text-[0.68rem] font-bold tracking-[0.08em] uppercase text-[#151515] underline decoration-[1.5px] underline-offset-[3px] hover:bg-[#151515] hover:text-lane-queue hover:no-underline",
 
   jobTicket: cx(
-    "relative grid min-w-0 gap-[0.4rem] rounded-none border-[1.5px] border-ink bg-panel",
+    "relative grid min-w-0 gap-[0.4rem] rounded-none border-[1.5px] border-ink",
+    // Warm cream slip (lane-bed mix) — not pure white, not brushed metal.
+    // Same parchment fill in every lane so Build/Review/PR match Merged.
+    "bg-[var(--ticket-fill)]",
     "px-[0.65rem] py-[0.55rem] pr-[0.65rem] pb-[0.7rem] pl-[0.95rem]",
     "shadow-[inset_6px_0_0_var(--ticket-color,var(--ink))]",
     "data-[lane=complete]:shadow-[inset_6px_0_0_var(--ticket-color,var(--lane-merged)),inset_8px_0_0_var(--merged-halo)]",
-    // Warm cream slip (lane-bed mix) — not pure white, not brushed metal.
-    "data-[lane=complete]:!bg-[var(--ticket-merged)]",
   ),
 
   jobTicketRepo:
@@ -655,18 +656,20 @@ export const ui = {
 
   /* ---------- Status tags (§5.1) ---------- */
 
+  // Base is layout/type only — each tone owns border/fill/ink so Tailwind
+  // cascade does not leave plain `bg-transparent` winning over alarm fill.
   statusTag:
-    "inline-flex items-center whitespace-nowrap border-[1.5px] border-ink bg-transparent px-[0.4rem] py-[0.18rem] font-mono text-[0.66rem] font-bold leading-[1.2] tracking-[0.12em] uppercase text-ink-2 no-underline",
+    "inline-flex items-center whitespace-nowrap border-[1.5px] px-[0.4rem] py-[0.18rem] font-mono text-[0.66rem] font-bold leading-[1.2] tracking-[0.12em] uppercase no-underline",
 
   statusTagAlarm: "border-lane-attention bg-lane-attention text-[#151515]",
 
-  statusTagHold: "border-dashed text-ink-2",
+  statusTagHold: "border-dashed border-ink bg-transparent text-ink-2",
 
   statusTagComplete: "border-ink bg-ink text-paper",
 
-  statusTagGhost: "border-dashed border-ink-faint text-ink-2",
+  statusTagGhost: "border-dashed border-ink-faint bg-transparent text-ink-2",
 
-  statusTagPlain: "text-ink-2",
+  statusTagPlain: "border-ink bg-transparent text-ink-2",
 
   statusMessage: "mt-[0.35rem] mb-0 font-mono text-[0.6rem] text-ink-2",
 
@@ -698,12 +701,26 @@ export const ui = {
     "[&_svg]:h-[0.9rem] [&_svg]:w-[0.9rem]",
   ),
 
+  /**
+   * Borderless icon control for inline copy next to mono runtime lines.
+   * Keeps hit target; hover plate wash only (no ink box).
+   */
+  iconBtnBare: cx(
+    "inline-flex h-7 w-7 shrink-0 items-center justify-center border-0 bg-transparent p-0",
+    "cursor-pointer text-ink-2",
+    "transition-[color,background-color] duration-100 ease-in-out",
+    "hover:bg-[var(--plate-hover)] hover:text-ink",
+    "disabled:cursor-wait disabled:opacity-55",
+    "[&_svg]:h-[0.9rem] [&_svg]:w-[0.9rem]",
+  ),
+
   iconBtnArmed:
     "border-[1.5px] border-lane-attention text-lane-attention hover:bg-lane-attention hover:text-[#151515]",
 
   iconBtnPaused: "border-ink text-ink",
 
-  iconBtnCopied: "border-lane-pr text-lane-pr",
+  /** Success flash for Copy — PR-green glyph (no border box). */
+  iconBtnCopied: "text-lane-pr",
 
   iconBtnSvg: "h-[0.9rem] w-[0.9rem]",
 

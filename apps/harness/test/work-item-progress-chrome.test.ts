@@ -40,6 +40,13 @@ describe("work-item-progress-chrome", () => {
     expect(prBadgeClassName).toBe(ui.prBadge)
     expect(statusBadgeBaseClassName).not.toContain("rounded")
     expect(prBadgeClassName).not.toContain("rounded")
+    // Base must not set bg/border/ink — tones own those (alarm fill must win).
+    expect(ui.statusTag).not.toContain("bg-transparent")
+    expect(ui.statusTag).not.toContain("border-ink")
+    expect(ui.statusTagAlarm).toContain("bg-lane-attention")
+    expect(ui.statusTagAlarm).toContain("border-lane-attention")
+    expect(ui.statusTagPlain).toContain("border-ink")
+    expect(ui.statusTagPlain).toContain("bg-transparent")
     expect(statusBadgeClassNameForStatus("COMPLETE")).toContain(
       statusBadgeBaseClassName,
     )
