@@ -84,6 +84,11 @@ jobs:
             bun nx affected -t lint knip test typecheck
           fi
 
+      # Production SSE idle-timeout (~13s) is excluded from harness:test so the
+      # default suite can run with Bun --parallel. Keep the real heartbeat gate.
+      - name: Harness slow tests
+        run: bunx nx run harness:slow-test
+
       # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
       # Production live e2e below remains vault-backed and separate.
       - name: Harness dev smoke

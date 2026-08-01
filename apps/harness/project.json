@@ -51,7 +51,17 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions=@ready-for-agent/source test"
+        "command": "bun --conditions=@ready-for-agent/source test --parallel --path-ignore-patterns='**/production-sse-idle-timeout.test.ts'"
+      },
+      "inputs": ["default", "^production"],
+      "cache": true,
+      "dependsOn": ["^build"]
+    },
+    "slow-test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "bun --conditions=@ready-for-agent/source test test/production-sse-idle-timeout.test.ts"
       },
       "inputs": ["default", "^production"],
       "cache": true,
