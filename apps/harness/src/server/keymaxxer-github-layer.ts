@@ -6,7 +6,6 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
-  type MergePullRequestResult,
   type ReadyLabeledIssue,
   formatGitHubHelperShellCommand,
   resolveGitHubHelperChildSpawn,
@@ -22,12 +21,12 @@ import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
  */
 export const OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS = 5_000
 
-type GitHubCountError = GitHubRepositoryUnavailableError | GitHubRequestError
+type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
 
 type OpenPullRequestCountCacheEntry =
   | {
       readonly kind: "inflight"
-      readonly deferred: Deferred.Deferred<number, GitHubCountError>
+      readonly deferred: Deferred.Deferred<number, GitHubServiceError>
     }
   | {
       readonly kind: "success"
@@ -258,6 +257,82 @@ const parseIssues = (
     ),
   )
 
+/** Decode a positive integer from helper stdout (trimmed). */
+const decodePositiveInt = (
+  stdout: string,
+  repository: GitHubRepository,
+  describe: string,
+): Effect.Effect<number, GitHubRequestError> => {
+  const number = Number(stdout.trim())
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    return Effect.fail(requestError(repository, describe, stdout))
+  }
+  return Effect.succeed(number)
+}
+
+/**
+ * Decode a non-negative integer from helper stdout.
+ * Empty body on exit 0 must not become `Number("") === 0`.
+ */
+const decodeNonNegativeInt = (
+  stdout: string,
+  repository: GitHubRepository,
+  describe: string,
+): Effect.Effect<number, GitHubRequestError> => {
+  const trimmed = stdout.trim()
+  if (trimmed === "") {
+    return Effect.fail(requestError(repository, describe, "empty stdout"))
+  }
+  const count = Number(trimmed)
+  if (!Number.isSafeInteger(count) || count < 0) {
+    return Effect.fail(requestError(repository, describe, stdout))
+  }
+  return Effect.succeed(count)
+}
+
+/** Decode a positive integer, or null when stdout is empty / `"null"`. */
+const decodeNullableInt = (
+  stdout: string,
+  repository: GitHubRepository,
+  describe: string,
+): Effect.Effect<number | null, GitHubRequestError> => {
+  const trimmed = stdout.trim()
+  if (trimmed === "" || trimmed === "null") {
+    return Effect.succeed(null)
+  }
+  const number = Number(trimmed)
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    return Effect.fail(requestError(repository, describe, stdout))
+  }
+  return Effect.succeed(number)
+}
+
+const decodeVoid = (_stdout: string): Effect.Effect<void, never> => Effect.void
+
+const decodeNonEmptyTrimmed = (
+  stdout: string,
+  repository: GitHubRepository,
+  describe: string,
+  emptyDetail: string,
+): Effect.Effect<string, GitHubRequestError> => {
+  const value = stdout.trim()
+  if (value === "") {
+    return Effect.fail(requestError(repository, describe, emptyDetail))
+  }
+  return Effect.succeed(value)
+}
+
+const decodeJson =
+  <A, I>(
+    schema: Schema.Codec<A, I>,
+    repository: GitHubRepository,
+    describe: string,
+  ) =>
+  (stdout: string): Effect.Effect<A, GitHubRequestError> =>
+    Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(stdout).pipe(
+      Effect.mapError(() => requestError(repository, describe, stdout)),
+    )
+
 export const keymaxxerGitHubLayer = (options: {
   readonly workspaceRoot: string
   /**
@@ -310,60 +385,66 @@ export const keymaxxerGitHubLayer = (options: {
           ),
       )
 
-      const fetchOpenNonDraftPullRequestCount = (
-        repository: GitHubRepository,
-      ): Effect.Effect<number, GitHubCountError> =>
+      /**
+       * Shared Keymaxxer helper invocation: token lookup, repository arg
+       * encoding, exit-code mapping, stdout decode, and KeymaxxerError →
+       * requestError. Each service method supplies only operation, args, and
+       * a decoder.
+       */
+      const callHelper = <A>(input: {
+        readonly operation: GitHubHelperOperation
+        readonly repository: GitHubRepository
+        readonly describe: string
+        readonly args?: readonly string[]
+        readonly decode: (
+          stdout: string,
+        ) => Effect.Effect<A, GitHubRequestError>
+      }): Effect.Effect<A, GitHubServiceError> =>
         Effect.gen(function* () {
-          const tokenName = yield* ensureToken(repository)
+          const tokenName = yield* ensureToken(input.repository)
           if (tokenName === null) {
-            return yield* requestError(
-              repository,
-              "count open non-draft pull requests",
-            )
+            return yield* requestError(input.repository, input.describe)
           }
-          const [forge, forgeHost, projectPath] =
-            encodedRepositoryArguments(repository)
-          const result = yield* runGitHubBin(
-            tokenName,
-            "count-open-non-draft-pull-requests",
-            [forge, forgeHost, projectPath],
+          const [forge, forgeHost, projectPath] = encodedRepositoryArguments(
+            input.repository,
           )
+          const result = yield* runGitHubBin(tokenName, input.operation, [
+            forge,
+            forgeHost,
+            projectPath,
+            ...(input.args ?? []),
+          ])
           if (result.exitCode === 2) {
-            return yield* repositoryUnavailable(repository)
+            return yield* repositoryUnavailable(input.repository)
           }
           if (result.exitCode !== 0) {
             return yield* requestError(
-              repository,
-              "count open non-draft pull requests",
+              input.repository,
+              input.describe,
               result.stderr || result.stdout,
             )
           }
-          // Empty body on exit 0 must not become Number("") === 0 and then be
-          // success-cached as a genuine open-PR count of zero.
-          const trimmed = result.stdout.trim()
-          if (trimmed === "") {
-            return yield* requestError(
-              repository,
-              "decode open non-draft pull request count",
-              "empty stdout",
-            )
-          }
-          const count = Number(trimmed)
-          if (!Number.isSafeInteger(count) || count < 0) {
-            return yield* requestError(
-              repository,
-              "decode open non-draft pull request count",
-              result.stdout,
-            )
-          }
-          return count
+          return yield* input.decode(result.stdout)
         }).pipe(
           Effect.catchTag("KeymaxxerError", () =>
-            Effect.fail(
-              requestError(repository, "count open non-draft pull requests"),
-            ),
+            Effect.fail(requestError(input.repository, input.describe)),
           ),
         )
+
+      const fetchOpenNonDraftPullRequestCount = (
+        repository: GitHubRepository,
+      ): Effect.Effect<number, GitHubServiceError> =>
+        callHelper({
+          operation: "count-open-non-draft-pull-requests",
+          repository,
+          describe: "count open non-draft pull requests",
+          decode: (stdout) =>
+            decodeNonNegativeInt(
+              stdout,
+              repository,
+              "decode open non-draft pull request count",
+            ),
+        })
 
       /**
        * Process-wide single-flight + short success cache per Repository.
@@ -374,13 +455,13 @@ export const keymaxxerGitHubLayer = (options: {
         "KeymaxxerGitHub.countOpenNonDraftPullRequests",
       )(function* (repository: GitHubRepository) {
         const key = openPullRequestCountCacheKey(repository)
-        const candidate = yield* Deferred.make<number, GitHubCountError>()
+        const candidate = yield* Deferred.make<number, GitHubServiceError>()
 
         type Claim =
           | { readonly role: "owner" }
           | {
               readonly role: "join"
-              readonly deferred: Deferred.Deferred<number, GitHubCountError>
+              readonly deferred: Deferred.Deferred<number, GitHubServiceError>
             }
           | { readonly role: "cached"; readonly count: number }
 
@@ -453,633 +534,255 @@ export const keymaxxerGitHubLayer = (options: {
       })
 
       const service: GitHubServiceShape = {
-        getAuthenticatedUserLogin: (repository) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "resolve authenticated GitHub user",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "get-authenticated-user-login",
-              [forge, forgeHost, projectPath],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "resolve authenticated GitHub user",
-                result.stderr || result.stdout,
-              )
-            }
-            const login = result.stdout.trim()
-            if (login === "") {
-              return yield* requestError(
+        getAuthenticatedUserLogin: Effect.fn(
+          "KeymaxxerGitHub.getAuthenticatedUserLogin",
+        )((repository) =>
+          callHelper({
+            operation: "get-authenticated-user-login",
+            repository,
+            describe: "resolve authenticated GitHub user",
+            decode: (stdout) =>
+              decodeNonEmptyTrimmed(
+                stdout,
                 repository,
                 "resolve authenticated GitHub user",
                 "empty login",
-              )
-            }
-            return login
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "resolve authenticated GitHub user"),
               ),
-            ),
-          ),
-        getOpenPullRequestNumber: (repository, headRefName) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "get open pull request number",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "get-open-pr-number",
-              [forge, forgeHost, projectPath, head],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "get open pull request number",
-                result.stderr || result.stdout,
-              )
-            }
-            const number = Number(result.stdout.trim())
-            if (!Number.isSafeInteger(number) || number <= 0) {
-              return yield* requestError(
+          }),
+        ),
+        getOpenPullRequestNumber: Effect.fn(
+          "KeymaxxerGitHub.getOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          callHelper({
+            operation: "get-open-pr-number",
+            repository,
+            describe: "get open pull request number",
+            args: [encodeArgument(headRefName)],
+            decode: (stdout) =>
+              decodePositiveInt(
+                stdout,
                 repository,
                 "decode open pull request number",
-                result.stdout,
-              )
-            }
-            return number
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "get open pull request number"),
               ),
-            ),
-          ),
-        findOpenPullRequestNumber: (repository, headRefName) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "find open pull request number",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "find-open-pr-number",
-              [forge, forgeHost, projectPath, head],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "find open pull request number",
-                result.stderr || result.stdout,
-              )
-            }
-            const trimmed = result.stdout.trim()
-            if (trimmed === "" || trimmed === "null") {
-              return null
-            }
-            const number = Number(trimmed)
-            if (!Number.isSafeInteger(number) || number <= 0) {
-              return yield* requestError(
+          }),
+        ),
+        findOpenPullRequestNumber: Effect.fn(
+          "KeymaxxerGitHub.findOpenPullRequestNumber",
+        )((repository, headRefName) =>
+          callHelper({
+            operation: "find-open-pr-number",
+            repository,
+            describe: "find open pull request number",
+            args: [encodeArgument(headRefName)],
+            decode: (stdout) =>
+              decodeNullableInt(
+                stdout,
                 repository,
                 "decode open pull request number",
-                result.stdout,
-              )
-            }
-            return number
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "find open pull request number"),
               ),
-            ),
-          ),
-        createDraftPullRequest: (repository, input) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "create draft pull request",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const payload = encodeArgument(
-              JSON.stringify({
-                headRefName: input.headRefName,
-                title: input.title,
-                body: input.body,
-                ...(input.baseRefName === undefined
-                  ? {}
-                  : { baseRefName: input.baseRefName }),
-              }),
-            )
-            const result = yield* runGitHubBin(
-              tokenName,
-              "create-draft-pull-request",
-              [forge, forgeHost, projectPath, payload],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "create draft pull request",
-                result.stderr || result.stdout,
-              )
-            }
-            const number = Number(result.stdout.trim())
-            if (!Number.isSafeInteger(number) || number <= 0) {
-              return yield* requestError(
+          }),
+        ),
+        createDraftPullRequest: Effect.fn(
+          "KeymaxxerGitHub.createDraftPullRequest",
+        )((repository, input) =>
+          callHelper({
+            operation: "create-draft-pull-request",
+            repository,
+            describe: "create draft pull request",
+            args: [
+              encodeArgument(
+                JSON.stringify({
+                  headRefName: input.headRefName,
+                  title: input.title,
+                  body: input.body,
+                  ...(input.baseRefName === undefined
+                    ? {}
+                    : { baseRefName: input.baseRefName }),
+                }),
+              ),
+            ],
+            decode: (stdout) =>
+              decodePositiveInt(
+                stdout,
                 repository,
                 "decode created draft pull request number",
-                result.stdout,
-              )
-            }
-            return number
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "create draft pull request"),
               ),
-            ),
-          ),
-        updateOpenDraftPullRequestCopy: (repository, headRefName, input) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "update open draft pull request copy",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const payload = encodeArgument(
-              JSON.stringify({
-                headRefName,
-                title: input.title,
-                body: input.body,
-              }),
-            )
-            const result = yield* runGitHubBin(
-              tokenName,
-              "update-open-draft-pull-request-copy",
-              [forge, forgeHost, projectPath, payload],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "update open draft pull request copy",
-                result.stderr || result.stdout,
-              )
-            }
-            const trimmed = result.stdout.trim()
-            if (trimmed === "" || trimmed === "null") {
-              return null
-            }
-            const number = Number(trimmed)
-            if (!Number.isSafeInteger(number) || number <= 0) {
-              return yield* requestError(
+          }),
+        ),
+        updateOpenDraftPullRequestCopy: Effect.fn(
+          "KeymaxxerGitHub.updateOpenDraftPullRequestCopy",
+        )((repository, headRefName, input) =>
+          callHelper({
+            operation: "update-open-draft-pull-request-copy",
+            repository,
+            describe: "update open draft pull request copy",
+            args: [
+              encodeArgument(
+                JSON.stringify({
+                  headRefName,
+                  title: input.title,
+                  body: input.body,
+                }),
+              ),
+            ],
+            decode: (stdout) =>
+              decodeNullableInt(
+                stdout,
                 repository,
                 "decode updated draft pull request number",
-                result.stdout,
-              )
-            }
-            return number
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "update open draft pull request copy"),
               ),
-            ),
-          ),
+          }),
+        ),
         countOpenNonDraftPullRequests: countOpenNonDraftPullRequestsCoalesced,
-        getPullRequestCheckStatus: (repository, headRefName) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
+        getPullRequestCheckStatus: Effect.fn(
+          "KeymaxxerGitHub.getPullRequestCheckStatus",
+        )((repository, headRefName) =>
+          callHelper({
+            operation: "get-pr-check-status",
+            repository,
+            describe: "get pull request check status",
+            args: [encodeArgument(headRefName)],
+            decode: (stdout) =>
+              decodeJson(
+                SerializedPullRequestCheckStatus,
                 repository,
-                "get pull request check status",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "get-pr-check-status",
-              [forge, forgeHost, projectPath, head],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "get pull request check status",
-                result.stderr || result.stdout,
-              )
-            }
-            return yield* Schema.decodeUnknownEffect(
-              Schema.fromJsonString(SerializedPullRequestCheckStatus),
-            )(result.stdout).pipe(
-              Effect.map((status) => ({
-                ...status,
-                headPushedAt: decodeOptionalInstant(status.headPushedAt),
-                createdAt: decodeOptionalInstant(status.createdAt),
+                "decode pull request check status",
+              )(stdout).pipe(
+                Effect.map((status) => ({
+                  ...status,
+                  headPushedAt: decodeOptionalInstant(status.headPushedAt),
+                  createdAt: decodeOptionalInstant(status.createdAt),
+                })),
+              ),
+          }),
+        ),
+        getPrStatusCheckDiagnostics: Effect.fn(
+          "KeymaxxerGitHub.getPrStatusCheckDiagnostics",
+        )((repository, checks, options = {}) => {
+          const checksArg = encodeArgument(
+            JSON.stringify(
+              checks.map((check) => ({
+                externalId: check.externalId,
+                name: check.name,
               })),
-              Effect.mapError(() =>
-                requestError(
-                  repository,
-                  "decode pull request check status",
-                  result.stdout,
+            ),
+          )
+          const logDirectory =
+            typeof options.logDirectory === "string" &&
+            options.logDirectory.trim() !== ""
+              ? encodeArgument(options.logDirectory)
+              : ""
+          return callHelper({
+            operation: "get-pr-status-check-diagnostics",
+            repository,
+            describe: "get PR Status Check diagnostics",
+            args: logDirectory === "" ? [checksArg] : [checksArg, logDirectory],
+            decode: decodeJson(
+              SerializedPrStatusCheckDiagnostics,
+              repository,
+              "decode PR Status Check diagnostics",
+            ),
+          })
+        }),
+        observeAutomatedReviewEvidence: Effect.fn(
+          "KeymaxxerGitHub.observeAutomatedReviewEvidence",
+        )((repository, headRefName, checks) =>
+          callHelper({
+            operation: "observe-automated-review-evidence",
+            repository,
+            describe: "observe automated review evidence",
+            args: [
+              encodeArgument(headRefName),
+              encodeArgument(
+                JSON.stringify(
+                  checks.map((check) => ({
+                    externalId: check.externalId,
+                    name: check.name,
+                  })),
                 ),
               ),
-            )
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "get pull request check status"),
-              ),
+            ],
+            decode: decodeJson(
+              SerializedAutomatedReviewEvidenceObservation,
+              repository,
+              "decode automated review evidence",
             ),
-          ),
-        getPrStatusCheckDiagnostics: (repository, checks, options = {}) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "get PR Status Check diagnostics",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const checksArg = encodeArgument(
-              JSON.stringify(
-                checks.map((check) => ({
-                  externalId: check.externalId,
-                  name: check.name,
-                })),
-              ),
-            )
-            const logDirectory =
-              typeof options.logDirectory === "string" &&
-              options.logDirectory.trim() !== ""
-                ? encodeArgument(options.logDirectory)
-                : ""
-            const result = yield* runGitHubBin(
-              tokenName,
-              "get-pr-status-check-diagnostics",
-              logDirectory === ""
-                ? [forge, forgeHost, projectPath, checksArg]
-                : [forge, forgeHost, projectPath, checksArg, logDirectory],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "get PR Status Check diagnostics",
-                result.stderr || result.stdout,
-              )
-            }
-            return yield* Schema.decodeUnknownEffect(
-              Schema.fromJsonString(SerializedPrStatusCheckDiagnostics),
-            )(result.stdout).pipe(
-              Effect.mapError(() =>
-                requestError(
-                  repository,
-                  "decode PR Status Check diagnostics",
-                  result.stdout,
-                ),
-              ),
-            )
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "get PR Status Check diagnostics"),
-              ),
+          }),
+        ),
+        getPullRequestLifecycleStatus: Effect.fn(
+          "KeymaxxerGitHub.getPullRequestLifecycleStatus",
+        )((repository, headRefName) =>
+          callHelper({
+            operation: "get-pr-lifecycle-status",
+            repository,
+            describe: "get pull request lifecycle status",
+            args: [encodeArgument(headRefName)],
+            decode: decodeJson(
+              SerializedPullRequestLifecycleStatus,
+              repository,
+              "decode pull request lifecycle status",
             ),
-          ),
-        observeAutomatedReviewEvidence: (repository, headRefName, checks) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
+          }),
+        ),
+        markPullRequestReadyForReview: Effect.fn(
+          "KeymaxxerGitHub.markPullRequestReadyForReview",
+        )((repository, headRefName) =>
+          callHelper({
+            operation: "mark-pr-ready-for-review",
+            repository,
+            describe: "mark pull request ready for review",
+            args: [encodeArgument(headRefName)],
+            decode: decodeVoid,
+          }),
+        ),
+        mergePullRequest: Effect.fn("KeymaxxerGitHub.mergePullRequest")(
+          (repository, headRefName) =>
+            callHelper({
+              operation: "merge-pull-request",
+              repository,
+              describe: "merge pull request",
+              args: [encodeArgument(headRefName)],
+              decode: decodeJson(
+                SerializedMergePullRequestResult,
                 repository,
-                "observe automated review evidence",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const checksArg = encodeArgument(
-              JSON.stringify(
-                checks.map((check) => ({
-                  externalId: check.externalId,
-                  name: check.name,
-                })),
+                "decode merge pull request result",
               ),
-            )
-            const result = yield* runGitHubBin(
-              tokenName,
-              "observe-automated-review-evidence",
-              [forge, forgeHost, projectPath, head, checksArg],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "observe automated review evidence",
-                result.stderr || result.stdout,
-              )
-            }
-            return yield* Schema.decodeUnknownEffect(
-              Schema.fromJsonString(
-                SerializedAutomatedReviewEvidenceObservation,
-              ),
-            )(result.stdout).pipe(
-              Effect.mapError(() =>
-                requestError(
-                  repository,
-                  "decode automated review evidence",
-                  result.stdout,
-                ),
-              ),
-            )
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "observe automated review evidence"),
-              ),
-            ),
-          ),
-        getPullRequestLifecycleStatus: (repository, headRefName) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "get pull request lifecycle status",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "get-pr-lifecycle-status",
-              [forge, forgeHost, projectPath, head],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "get pull request lifecycle status",
-                result.stderr || result.stdout,
-              )
-            }
-            return yield* Schema.decodeUnknownEffect(
-              Schema.fromJsonString(SerializedPullRequestLifecycleStatus),
-            )(result.stdout).pipe(
-              Effect.mapError(() =>
-                requestError(
-                  repository,
-                  "decode pull request lifecycle status",
-                  result.stdout,
-                ),
-              ),
-            )
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "get pull request lifecycle status"),
-              ),
-            ),
-          ),
-        markPullRequestReadyForReview: (repository, headRefName) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "mark pull request ready for review",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "mark-pr-ready-for-review",
-              [forge, forgeHost, projectPath, head],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "mark pull request ready for review",
-                result.stderr || result.stdout,
-              )
-            }
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "mark pull request ready for review"),
-              ),
-            ),
-          ),
-        mergePullRequest: (repository, headRefName) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(repository, "merge pull request")
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const head = encodeArgument(headRefName)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "merge-pull-request",
-              [forge, forgeHost, projectPath, head],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "merge pull request",
-                result.stderr || result.stdout,
-              )
-            }
-            return yield* Schema.decodeUnknownEffect(
-              Schema.fromJsonString(SerializedMergePullRequestResult),
-            )(result.stdout).pipe(
-              Effect.mapError(() =>
-                requestError(
-                  repository,
-                  "decode merge pull request result",
-                  result.stdout,
-                ),
-              ),
-            ) as Effect.Effect<MergePullRequestResult, GitHubRequestError>
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(requestError(repository, "merge pull request")),
-            ),
-          ),
-        rerunWorkflowRun: (repository, workflowRunId) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(repository, "rerun workflow run")
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const runId = encodeArgument(String(workflowRunId))
-            const result = yield* runGitHubBin(
-              tokenName,
-              "rerun-workflow-run",
-              [forge, forgeHost, projectPath, runId],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "rerun workflow run",
-                result.stderr || result.stdout,
-              )
-            }
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(requestError(repository, "rerun workflow run")),
-            ),
-          ),
-        ensureIssueCompletedWithSummary: (
-          repository,
-          issueNumber,
-          workItemId,
-          summaryMarkdown,
-        ) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "complete Issue with summary",
-              )
-            }
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const number = encodeArgument(String(issueNumber))
-            const workItem = encodeArgument(workItemId)
-            const summary = encodeArgument(summaryMarkdown)
-            const result = yield* runGitHubBin(
-              tokenName,
-              "ensure-issue-completed-with-summary",
-              [forge, forgeHost, projectPath, number, workItem, summary],
-            )
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "complete Issue with summary",
-                result.stderr || result.stdout,
-              )
-            }
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "complete Issue with summary"),
-              ),
-            ),
-          ),
-        listReadyIssues: (repository) =>
-          Effect.gen(function* () {
-            const tokenName = yield* ensureToken(repository)
-            if (tokenName === null) {
-              return yield* requestError(
-                repository,
-                "list Ready-labeled Issues",
-              )
-            }
-
-            const [forge, forgeHost, projectPath] =
-              encodedRepositoryArguments(repository)
-            const result = yield* runGitHubBin(tokenName, "list-ready-issues", [
-              forge,
-              forgeHost,
-              projectPath,
-            ])
-
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(repository)
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                repository,
-                "list Ready-labeled Issues",
-                result.stderr || result.stdout,
-              )
-            }
-            return yield* parseIssues(result.stdout, repository)
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(
-                requestError(repository, "list Ready-labeled Issues"),
-              ),
-            ),
-          ),
+            }),
+        ),
+        rerunWorkflowRun: Effect.fn("KeymaxxerGitHub.rerunWorkflowRun")(
+          (repository, workflowRunId) =>
+            callHelper({
+              operation: "rerun-workflow-run",
+              repository,
+              describe: "rerun workflow run",
+              args: [encodeArgument(String(workflowRunId))],
+              decode: decodeVoid,
+            }),
+        ),
+        ensureIssueCompletedWithSummary: Effect.fn(
+          "KeymaxxerGitHub.ensureIssueCompletedWithSummary",
+        )((repository, issueNumber, workItemId, summaryMarkdown) =>
+          callHelper({
+            operation: "ensure-issue-completed-with-summary",
+            repository,
+            describe: "complete Issue with summary",
+            args: [
+              encodeArgument(String(issueNumber)),
+              encodeArgument(workItemId),
+              encodeArgument(summaryMarkdown),
+            ],
+            decode: decodeVoid,
+          }),
+        ),
+        listReadyIssues: Effect.fn("KeymaxxerGitHub.listReadyIssues")(
+          (repository) =>
+            callHelper({
+              operation: "list-ready-issues",
+              repository,
+              describe: "list Ready-labeled Issues",
+              decode: (stdout) => parseIssues(stdout, repository),
+            }),
+        ),
       }
 
       return service

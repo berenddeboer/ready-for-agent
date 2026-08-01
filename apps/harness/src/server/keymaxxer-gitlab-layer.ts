@@ -233,6 +233,85 @@ const parseIssues = (
     ),
   )
 
+/** Decode a positive integer from helper stdout (trimmed). */
+const decodePositiveInt = (
+  stdout: string,
+  repository: GitLabRepository,
+  describe: string,
+): Effect.Effect<number, GitLabRequestError> => {
+  const number = Number(stdout.trim())
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    return Effect.fail(requestError(repository, describe, stdout))
+  }
+  return Effect.succeed(number)
+}
+
+/**
+ * Decode a non-negative integer from helper stdout.
+ *
+ * Intentional forge difference vs GitHub: empty stdout is accepted as `0`
+ * (`Number("") === 0`). GitHub's sibling rejects empty body so a blank exit-0
+ * count cannot be success-cached as zero. Do not "align" these without a
+ * product decision and test updates on both layers.
+ */
+const decodeNonNegativeInt = (
+  stdout: string,
+  repository: GitLabRepository,
+  describe: string,
+): Effect.Effect<number, GitLabRequestError> => {
+  const count = Number(stdout.trim())
+  if (!Number.isSafeInteger(count) || count < 0) {
+    return Effect.fail(requestError(repository, describe, stdout))
+  }
+  return Effect.succeed(count)
+}
+
+/**
+ * Decode a positive integer, or null when stdout is empty.
+ * GitLab helpers emit empty stdout (not the string `"null"`) for a miss.
+ */
+const decodeNullableInt = (
+  stdout: string,
+  repository: GitLabRepository,
+  describe: string,
+): Effect.Effect<number | null, GitLabRequestError> => {
+  const trimmed = stdout.trim()
+  if (trimmed === "") {
+    return Effect.succeed(null)
+  }
+  const number = Number(trimmed)
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    return Effect.fail(requestError(repository, describe, stdout))
+  }
+  return Effect.succeed(number)
+}
+
+const decodeVoid = (_stdout: string): Effect.Effect<void, never> => Effect.void
+
+const decodeNonEmptyTrimmed = (
+  stdout: string,
+  repository: GitLabRepository,
+  describe: string,
+  emptyDetail: string,
+): Effect.Effect<string, GitLabRequestError> => {
+  const value = stdout.trim()
+  if (value === "") {
+    return Effect.fail(requestError(repository, describe, emptyDetail))
+  }
+  return Effect.succeed(value)
+}
+
+const decodeJson =
+  <A, I>(
+    schema: Schema.Codec<A, I>,
+    repository: GitLabRepository,
+    describe: string,
+  ) =>
+  (stdout: string): Effect.Effect<A, GitLabRequestError> =>
+    Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(stdout).pipe(
+      Effect.mapError(() => requestError(repository, describe, stdout)),
+    )
+
 /**
  * Vault-first GitLab service layer.
  *
@@ -334,37 +413,46 @@ export const keymaxxerGitLabLayer = (options: {
           ),
       )
 
-      const runVaultHelper = <A>(
-        repository: GitLabRepository,
-        tokenName: string,
-        operation: GitLabHelperOperation,
-        decode: (stdout: string) => Effect.Effect<A, GitLabServiceError>,
-        operationLabel: string,
-        extraArgs: readonly string[] = [],
-      ): Effect.Effect<A, GitLabServiceError> =>
+      /**
+       * Shared Keymaxxer helper invocation once a vault secret name is known:
+       * repository arg encoding, exit-code mapping, stdout decode, and
+       * KeymaxxerError → requestError. Callers supply operation, args, and a
+       * decoder (token name comes from {@link withVaultOrAmbient}).
+       */
+      const callHelper = <A>(input: {
+        readonly operation: GitLabHelperOperation
+        readonly repository: GitLabRepository
+        readonly tokenName: string
+        readonly describe: string
+        readonly args?: readonly string[]
+        readonly decode: (
+          stdout: string,
+        ) => Effect.Effect<A, GitLabServiceError>
+      }): Effect.Effect<A, GitLabServiceError> =>
         Effect.gen(function* () {
-          const [forge, forgeHost, projectPath] =
-            encodedRepositoryArguments(repository)
-          const result = yield* runGitLabBin(tokenName, operation, [
+          const [forge, forgeHost, projectPath] = encodedRepositoryArguments(
+            input.repository,
+          )
+          const result = yield* runGitLabBin(input.tokenName, input.operation, [
             forge,
             forgeHost,
             projectPath,
-            ...extraArgs,
+            ...(input.args ?? []),
           ])
           if (result.exitCode === 2) {
-            return yield* repositoryUnavailable(repository)
+            return yield* repositoryUnavailable(input.repository)
           }
           if (result.exitCode !== 0) {
             return yield* requestError(
-              repository,
-              operationLabel,
+              input.repository,
+              input.describe,
               result.stderr || result.stdout,
             )
           }
-          return yield* decode(result.stdout)
+          return yield* input.decode(result.stdout)
         }).pipe(
           Effect.catchTag("KeymaxxerError", () =>
-            Effect.fail(requestError(repository, operationLabel)),
+            Effect.fail(requestError(input.repository, input.describe)),
           ),
         )
 
@@ -393,11 +481,12 @@ export const keymaxxerGitLabLayer = (options: {
             withVaultOrAmbient(
               repository,
               (tokenName) =>
-                runVaultHelper(
+                callHelper({
+                  operation: "verify-project",
                   repository,
                   tokenName,
-                  "verify-project",
-                  (stdout) => {
+                  describe: "verify GitLab project",
+                  decode: (stdout) => {
                     const trimmed = stdout.trim()
                     // Legacy helpers printed "ok"; treat that as "no host change".
                     if (trimmed === "" || trimmed === "ok") {
@@ -442,8 +531,7 @@ export const keymaxxerGitLabLayer = (options: {
                       )
                     }
                   },
-                  "verify GitLab project",
-                ),
+                }),
               (ambientService) => ambientService.verifyProject(repository),
             ),
         ),
@@ -453,25 +541,19 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "get-authenticated-user-login",
                 repository,
                 tokenName,
-                "get-authenticated-user-login",
-                (stdout) => {
-                  const login = stdout.trim()
-                  if (login === "") {
-                    return Effect.fail(
-                      requestError(
-                        repository,
-                        "resolve authenticated GitLab user",
-                        "empty login",
-                      ),
-                    )
-                  }
-                  return Effect.succeed(login)
-                },
-                "resolve authenticated GitLab user",
-              ),
+                describe: "resolve authenticated GitLab user",
+                decode: (stdout) =>
+                  decodeNonEmptyTrimmed(
+                    stdout,
+                    repository,
+                    "resolve authenticated GitLab user",
+                    "empty login",
+                  ),
+              }),
             (ambientService) =>
               ambientService.getAuthenticatedUserLogin(repository),
           ),
@@ -481,13 +563,13 @@ export const keymaxxerGitLabLayer = (options: {
             withVaultOrAmbient(
               repository,
               (tokenName) =>
-                runVaultHelper(
+                callHelper({
+                  operation: "list-ready-issues",
                   repository,
                   tokenName,
-                  "list-ready-issues",
-                  (stdout) => parseIssues(stdout, repository),
-                  "list Ready-labeled Issues",
-                ),
+                  describe: "list Ready-labeled Issues",
+                  decode: (stdout) => parseIssues(stdout, repository),
+                }),
               (ambientService) => ambientService.listReadyIssues(repository),
             ),
         ),
@@ -511,26 +593,19 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "get-open-pull-request-number",
                 repository,
                 tokenName,
-                "get-open-pull-request-number",
-                (stdout) => {
-                  const number = Number(stdout.trim())
-                  if (!Number.isSafeInteger(number) || number <= 0) {
-                    return Effect.fail(
-                      requestError(
-                        repository,
-                        "decode open pull request number",
-                        stdout,
-                      ),
-                    )
-                  }
-                  return Effect.succeed(number)
-                },
-                "get open pull request number",
-                [encodeArgument(headRefName)],
-              ),
+                describe: "get open pull request number",
+                args: [encodeArgument(headRefName)],
+                decode: (stdout) =>
+                  decodePositiveInt(
+                    stdout,
+                    repository,
+                    "decode open pull request number",
+                  ),
+              }),
             (ambientService) =>
               ambientService.getOpenPullRequestNumber(repository, headRefName),
           ),
@@ -541,28 +616,19 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "find-open-pull-request-number",
                 repository,
                 tokenName,
-                "find-open-pull-request-number",
-                (stdout) => {
-                  const trimmed = stdout.trim()
-                  if (trimmed === "") return Effect.succeed(null)
-                  const number = Number(trimmed)
-                  if (!Number.isSafeInteger(number) || number <= 0) {
-                    return Effect.fail(
-                      requestError(
-                        repository,
-                        "decode open pull request number",
-                        stdout,
-                      ),
-                    )
-                  }
-                  return Effect.succeed(number)
-                },
-                "find open pull request number",
-                [encodeArgument(headRefName)],
-              ),
+                describe: "find open pull request number",
+                args: [encodeArgument(headRefName)],
+                decode: (stdout) =>
+                  decodeNullableInt(
+                    stdout,
+                    repository,
+                    "decode open pull request number",
+                  ),
+              }),
             (ambientService) =>
               ambientService.findOpenPullRequestNumber(repository, headRefName),
           ),
@@ -573,25 +639,12 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "create-draft-pull-request",
                 repository,
                 tokenName,
-                "create-draft-pull-request",
-                (stdout) => {
-                  const number = Number(stdout.trim())
-                  if (!Number.isSafeInteger(number) || number <= 0) {
-                    return Effect.fail(
-                      requestError(
-                        repository,
-                        "decode created draft pull request number",
-                        stdout,
-                      ),
-                    )
-                  }
-                  return Effect.succeed(number)
-                },
-                "create draft pull request",
-                [
+                describe: "create draft pull request",
+                args: [
                   encodeArgument(
                     JSON.stringify({
                       headRefName: input.headRefName,
@@ -603,7 +656,13 @@ export const keymaxxerGitLabLayer = (options: {
                     }),
                   ),
                 ],
-              ),
+                decode: (stdout) =>
+                  decodePositiveInt(
+                    stdout,
+                    repository,
+                    "decode created draft pull request number",
+                  ),
+              }),
             (ambientService) =>
               ambientService.createDraftPullRequest(repository, input),
           ),
@@ -614,33 +673,24 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "update-open-draft-pull-request-copy",
                 repository,
                 tokenName,
-                "update-open-draft-pull-request-copy",
-                (stdout) => {
-                  const trimmed = stdout.trim()
-                  if (trimmed === "") return Effect.succeed(null)
-                  const number = Number(trimmed)
-                  if (!Number.isSafeInteger(number) || number <= 0) {
-                    return Effect.fail(
-                      requestError(
-                        repository,
-                        "decode updated draft pull request number",
-                        stdout,
-                      ),
-                    )
-                  }
-                  return Effect.succeed(number)
-                },
-                "update open draft pull request copy",
-                [
+                describe: "update open draft pull request copy",
+                args: [
                   encodeArgument(headRefName),
                   encodeArgument(
                     JSON.stringify({ title: input.title, body: input.body }),
                   ),
                 ],
-              ),
+                decode: (stdout) =>
+                  decodeNullableInt(
+                    stdout,
+                    repository,
+                    "decode updated draft pull request number",
+                  ),
+              }),
             (ambientService) =>
               ambientService.updateOpenDraftPullRequestCopy(
                 repository,
@@ -655,25 +705,18 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "count-open-non-draft-pull-requests",
                 repository,
                 tokenName,
-                "count-open-non-draft-pull-requests",
-                (stdout) => {
-                  const count = Number(stdout.trim())
-                  if (!Number.isSafeInteger(count) || count < 0) {
-                    return Effect.fail(
-                      requestError(
-                        repository,
-                        "decode open non-draft pull request count",
-                        stdout,
-                      ),
-                    )
-                  }
-                  return Effect.succeed(count)
-                },
-                "count open non-draft pull requests",
-              ),
+                describe: "count open non-draft pull requests",
+                decode: (stdout) =>
+                  decodeNonNegativeInt(
+                    stdout,
+                    repository,
+                    "decode open non-draft pull request count",
+                  ),
+              }),
             (ambientService) =>
               ambientService.countOpenNonDraftPullRequests(repository),
           ),
@@ -684,30 +727,25 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "get-pr-check-status",
                 repository,
                 tokenName,
-                "get-pr-check-status",
-                (stdout) =>
-                  Schema.decodeUnknownEffect(
-                    Schema.fromJsonString(SerializedPullRequestCheckStatus),
+                describe: "get pull request check status",
+                args: [encodeArgument(headRefName)],
+                decode: (stdout) =>
+                  decodeJson(
+                    SerializedPullRequestCheckStatus,
+                    repository,
+                    "decode pull request check status",
                   )(stdout).pipe(
                     Effect.map((status) => ({
                       ...status,
                       headPushedAt: decodeOptionalInstant(status.headPushedAt),
                       createdAt: decodeOptionalInstant(status.createdAt),
                     })),
-                    Effect.mapError(() =>
-                      requestError(
-                        repository,
-                        "decode pull request check status",
-                        stdout,
-                      ),
-                    ),
                   ),
-                "get pull request check status",
-                [encodeArgument(headRefName)],
-              ),
+              }),
             (ambientService) =>
               ambientService.getPullRequestCheckStatus(repository, headRefName),
           ),
@@ -731,25 +769,19 @@ export const keymaxxerGitLabLayer = (options: {
                 options.logDirectory.trim() !== ""
                   ? encodeArgument(options.logDirectory)
                   : ""
-              return runVaultHelper(
+              return callHelper({
+                operation: "get-pr-status-check-diagnostics",
                 repository,
                 tokenName,
-                "get-pr-status-check-diagnostics",
-                (stdout) =>
-                  Schema.decodeUnknownEffect(
-                    Schema.fromJsonString(SerializedPrStatusCheckDiagnostics),
-                  )(stdout).pipe(
-                    Effect.mapError(() =>
-                      requestError(
-                        repository,
-                        "decode PR Status Check diagnostics",
-                        stdout,
-                      ),
-                    ),
-                  ),
-                "get PR Status Check diagnostics",
-                logDirectory === "" ? [checksArg] : [checksArg, logDirectory],
-              )
+                describe: "get PR Status Check diagnostics",
+                args:
+                  logDirectory === "" ? [checksArg] : [checksArg, logDirectory],
+                decode: decodeJson(
+                  SerializedPrStatusCheckDiagnostics,
+                  repository,
+                  "decode PR Status Check diagnostics",
+                ),
+              })
             },
             (ambientService) =>
               ambientService.getPrStatusCheckDiagnostics(
@@ -765,14 +797,14 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "mark-pr-ready-for-review",
                 repository,
                 tokenName,
-                "mark-pr-ready-for-review",
-                () => Effect.void,
-                "mark pull request ready for review",
-                [encodeArgument(headRefName)],
-              ),
+                describe: "mark pull request ready for review",
+                args: [encodeArgument(headRefName)],
+                decode: decodeVoid,
+              }),
             (ambientService) =>
               ambientService.markPullRequestReadyForReview(
                 repository,
@@ -786,25 +818,18 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "get-pr-lifecycle-status",
                 repository,
                 tokenName,
-                "get-pr-lifecycle-status",
-                (stdout) =>
-                  Schema.decodeUnknownEffect(
-                    Schema.fromJsonString(SerializedPullRequestLifecycleStatus),
-                  )(stdout).pipe(
-                    Effect.mapError(() =>
-                      requestError(
-                        repository,
-                        "decode pull request lifecycle status",
-                        stdout,
-                      ),
-                    ),
-                  ),
-                "get pull request lifecycle status",
-                [encodeArgument(headRefName)],
-              ),
+                describe: "get pull request lifecycle status",
+                args: [encodeArgument(headRefName)],
+                decode: decodeJson(
+                  SerializedPullRequestLifecycleStatus,
+                  repository,
+                  "decode pull request lifecycle status",
+                ),
+              }),
             (ambientService) =>
               ambientService.getPullRequestLifecycleStatus(
                 repository,
@@ -817,25 +842,18 @@ export const keymaxxerGitLabLayer = (options: {
             withVaultOrAmbient(
               repository,
               (tokenName) =>
-                runVaultHelper(
+                callHelper({
+                  operation: "merge-pull-request",
                   repository,
                   tokenName,
-                  "merge-pull-request",
-                  (stdout) =>
-                    Schema.decodeUnknownEffect(
-                      Schema.fromJsonString(SerializedMergePullRequestResult),
-                    )(stdout).pipe(
-                      Effect.mapError(() =>
-                        requestError(
-                          repository,
-                          "decode merge pull request result",
-                          stdout,
-                        ),
-                      ),
-                    ),
-                  "merge pull request",
-                  [encodeArgument(headRefName)],
-                ),
+                  describe: "merge pull request",
+                  args: [encodeArgument(headRefName)],
+                  decode: decodeJson(
+                    SerializedMergePullRequestResult,
+                    repository,
+                    "decode merge pull request result",
+                  ),
+                }),
               (ambientService) =>
                 ambientService.mergePullRequest(repository, headRefName),
             ),
@@ -846,18 +864,18 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "ensure-issue-completed-with-summary",
                 repository,
                 tokenName,
-                "ensure-issue-completed-with-summary",
-                () => Effect.void,
-                "ensure issue completed with summary",
-                [
+                describe: "ensure issue completed with summary",
+                args: [
                   encodeArgument(String(issueNumber)),
                   encodeArgument(workItemId),
                   encodeArgument(summaryMarkdown),
                 ],
-              ),
+                decode: decodeVoid,
+              }),
             (ambientService) =>
               ambientService.ensureIssueCompletedWithSummary(
                 repository,
@@ -873,14 +891,14 @@ export const keymaxxerGitLabLayer = (options: {
           withVaultOrAmbient(
             repository,
             (tokenName) =>
-              runVaultHelper(
+              callHelper({
+                operation: "close-open-pull-requests-for-branch",
                 repository,
                 tokenName,
-                "close-open-pull-requests-for-branch",
-                () => Effect.void,
-                "close open pull requests for branch",
-                [encodeArgument(headRefName)],
-              ),
+                describe: "close open pull requests for branch",
+                args: [encodeArgument(headRefName)],
+                decode: decodeVoid,
+              }),
             (ambientService) =>
               ambientService.closeOpenPullRequestsForBranch(
                 repository,
@@ -893,14 +911,14 @@ export const keymaxxerGitLabLayer = (options: {
             withVaultOrAmbient(
               repository,
               (tokenName) =>
-                runVaultHelper(
+                callHelper({
+                  operation: "delete-branch",
                   repository,
                   tokenName,
-                  "delete-branch",
-                  () => Effect.void,
-                  "delete branch",
-                  [encodeArgument(branchName)],
-                ),
+                  describe: "delete branch",
+                  args: [encodeArgument(branchName)],
+                  decode: decodeVoid,
+                }),
               (ambientService) =>
                 ambientService.deleteBranch(repository, branchName),
             ),
