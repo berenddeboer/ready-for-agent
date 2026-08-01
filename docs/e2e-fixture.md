@@ -213,7 +213,17 @@ These leave the developer's real Keymaxxer vault untouched.
 
 ## CI gating
 
-Live Gherkin e2e runs only on trusted pushes to `main` (not on pull requests),
-after lint/typecheck/unit tests, with Playwright Chromium installed. See
-`.github/workflows/ci-cd.yml` and ADR 0021. GitHub and GitLab scenarios share
-that single `bunx nx run harness:e2e` step.
+Live Gherkin e2e runs after lint/typecheck/unit tests on trusted pushes to
+`main` (`.github/workflows/ci-cd.yml`) and on pull requests
+(`.github/workflows/pr.yml`), with Playwright Chromium installed when the
+vault secret is available. Both workflows unlock the fixture vault with
+repository secret `E2E_KEYMAXXER_MASTER_KEY`.
+
+| Event | Secret available | Policy |
+| --- | --- | --- |
+| `push` to `main` | required | Fail closed if missing |
+| Same-repo PR | yes | Run live e2e |
+| Fork PR | no (secrets not exposed) | Skip live e2e (log + continue); quality gates still run |
+
+See ADR 0021. GitHub and GitLab scenarios share that single
+`bunx nx run harness:e2e` step.

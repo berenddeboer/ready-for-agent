@@ -28,6 +28,7 @@ import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
+import { repositoriesQuery } from "../repositories-query.js"
 import appCss from "../styles.css?url"
 import {
   THEME_BOOTSTRAP_SCRIPT,
@@ -302,6 +303,11 @@ function SettingsChrome() {
   const [autoOpenAttempted, setAutoOpenAttempted] = useState(false)
   const config = useQuery(configQuery)
   const backendStatus = useQuery(agentBackendStatusQuery)
+  // Do not treat pending/unknown as empty: hide the band only once membership
+  // has loaded with zero repositories (matches HomeContent blank-slate gate).
+  const repositoriesMembership = useQuery(repositoriesQuery)
+  const showCommittedPullRequestsBand =
+    !repositoriesMembership.isSuccess || repositoriesMembership.data.length > 0
   const models = useQuery({ ...modelsQuery, enabled: dialogOpen })
   const [selectedAgentBackend, setSelectedAgentBackend] = useState("opencode")
   const [defaultModel, setDefaultModel] = useState("")
@@ -754,12 +760,15 @@ function SettingsChrome() {
           <span />
           <span />
         </div>
-        <section
-          className={ui.mergedPrStatsBand}
-          aria-label="Committed pull requests"
-        >
-          <CommittedPullRequestsDashboard />
-        </section>
+        {/* Throughput band belongs with the board, not the zero-repo blank slate. */}
+        {showCommittedPullRequestsBand ? (
+          <section
+            className={ui.mergedPrStatsBand}
+            aria-label="Committed pull requests"
+          >
+            <CommittedPullRequestsDashboard />
+          </section>
+        ) : null}
         <JobsViewSwitcher />
       </div>
 

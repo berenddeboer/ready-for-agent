@@ -94,7 +94,7 @@ jobs:
       - name: Harness dev smoke
         run: bunx nx run harness:smoke
 
-      # Live Gherkin e2e: trusted main only (this workflow). Never on PR (pr.yml).
+      # Live Gherkin e2e: also runs on PRs via pr.yml (same vault secret).
       - name: Require live e2e vault key
         env:
           E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}

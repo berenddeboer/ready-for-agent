@@ -5,6 +5,9 @@ import { describe, expect, test } from "bun:test"
 const homeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
 
+const repositoriesQuerySource = () =>
+  readFileSync(join(import.meta.dir, "../src/repositories-query.ts"), "utf8")
+
 const refreshSource = () =>
   readFileSync(
     join(import.meta.dir, "../src/refresh-work-items-live.ts"),
@@ -25,22 +28,19 @@ const membershipLiveSource = () =>
 
 describe("repository header pull request count", () => {
   test("main repositories query does not request pullRequestCount", () => {
-    const source = homeSource()
+    const source = repositoriesQuerySource()
+    const home = homeSource()
+    // Shared module owns Configured Repositories; home re-exports it.
+    expect(home).toContain('from "../repositories-query.js"')
+    expect(home).toContain("export { repositoriesQuery }")
     // Dedicated projection owns the count field; the Configured Repositories
     // selection must not include it.
     expect(source).toContain("Intentionally omits pullRequestCount")
     const repositoriesQueryStart = source.indexOf(
       "export const repositoriesQuery = {",
     )
-    const openCountsStart = source.indexOf(
-      "const openPullRequestCountsQuery = {",
-    )
     expect(repositoriesQueryStart).toBeGreaterThan(-1)
-    expect(openCountsStart).toBeGreaterThan(repositoriesQueryStart)
-    const repositoriesQueryBody = source.slice(
-      repositoriesQueryStart,
-      openCountsStart,
-    )
+    const repositoriesQueryBody = source.slice(repositoriesQueryStart)
     expect(repositoriesQueryBody).not.toContain("pullRequestCount: true")
   })
 
@@ -54,9 +54,10 @@ describe("repository header pull request count", () => {
       "const openPullRequestCountsQuery = {",
     )
     const openCountsEnd = source.indexOf(
-      "export type Repository",
+      "const addRepositoryCommandQuery",
       openCountsStart,
     )
+    expect(openCountsEnd).toBeGreaterThan(openCountsStart)
     const body = source.slice(openCountsStart, openCountsEnd)
     expect(body).toContain("pullRequestCount: true")
     expect(body).toContain("id: true")

@@ -376,6 +376,13 @@ describe("Committed pull requests dashboard UI", () => {
     expect(root).toContain("<CommittedPullRequestsDashboard />")
     expect(root).toContain('aria-label="Committed pull requests"')
     expect(root).toContain("ui.mergedPrStatsBand")
+    // Sticky throughput band is gated: hide only when membership is known empty
+    // (pending is not treated as zero-repo blank slate).
+    expect(root).toContain('from "../repositories-query.js"')
+    expect(root).toContain("useQuery(repositoriesQuery)")
+    expect(root).toContain("showCommittedPullRequestsBand")
+    expect(root).toContain("repositoriesMembership.isSuccess")
+    expect(root).toContain("{showCommittedPullRequestsBand ? (")
     expect(board).toContain('aria-label="Jobs"')
     expect(board).toContain("<KanbanJobsBoard />")
     expect(board).not.toContain("<CommittedPullRequestsDashboard />")

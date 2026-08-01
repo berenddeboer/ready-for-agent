@@ -4,6 +4,7 @@ on:
   pull_request:
 
 permissions:
+  # upload-artifact attaches to this run; GITHUB_TOKEN does not need actions:write
   actions: read
   contents: read
 
@@ -72,5 +73,46 @@ jobs:
         run: bunx nx run harness:slow-test
 
       # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
+      # Production live e2e below remains vault-backed and separate.
       - name: Harness dev smoke
         run: bunx nx run harness:smoke
+
+      # Live Gherkin e2e (vault-backed, same suite as ci-cd.yml on main).
+      # Same-repo PRs can read E2E_KEYMAXXER_MASTER_KEY; fork PRs cannot, so
+      # skip rather than fail-closed when the secret is empty.
+      - name: Check live e2e vault key
+        id: e2e-vault
+        env:
+          E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+        run: |
+          if [ -z "${E2E_KEYMAXXER_MASTER_KEY}" ]; then
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping live Harness e2e: E2E_KEYMAXXER_MASTER_KEY is unavailable (expected for fork PRs)."
+          else
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Playwright Chromium
+        if: steps.e2e-vault.outputs.has_key == 'true'
+        working-directory: apps/harness
+        run: bunx playwright install --with-deps chromium
+
+      - name: Live Harness e2e
+        if: steps.e2e-vault.outputs.has_key == 'true'
+        id: live-e2e
+        env:
+          E2E_KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+          KEYMAXXER_MASTER_KEY: ${{ secrets.E2E_KEYMAXXER_MASTER_KEY }}
+          KEYMAXXER_APPROVE: deny
+        run: bunx nx run harness:e2e
+
+      - name: Upload Playwright diagnostics
+        if: failure() && steps.live-e2e.outcome == 'failure'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            apps/harness/playwright-report/
+            apps/harness/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

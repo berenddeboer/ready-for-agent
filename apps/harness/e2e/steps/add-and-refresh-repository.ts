@@ -302,9 +302,10 @@ Given("the Harness has no configured Repositories", async ({ page }) => {
   await expect(
     page.getByRole("region", { name: "Committed pull requests" }),
   ).toHaveCount(0)
+  // Jobs switcher stays available on the blank slate (Pipeline | Repos | Completed).
   await expect(
     page
-      .getByRole("navigation", { name: "Primary" })
+      .getByRole("navigation", { name: "Jobs" })
       .getByRole("link", { name: "Repos" }),
   ).toBeVisible()
   await expect(
