@@ -51,7 +51,7 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions=@ready-for-agent/source test --parallel --path-ignore-patterns='**/production-sse-idle-timeout.test.ts'"
+        "command": "bash scripts/run-unit-tests.sh"
       },
       "inputs": ["default", "^production"],
       "cache": true,
