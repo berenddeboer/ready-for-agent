@@ -9,6 +9,15 @@ import { describe, expect, test } from "bun:test"
 const homeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
 
+const dashboardSource = () =>
+  readFileSync(
+    join(import.meta.dir, "../src/committed-pr-dashboard.tsx"),
+    "utf8",
+  )
+
+const rootSource = () =>
+  readFileSync(join(import.meta.dir, "../src/routes/__root.tsx"), "utf8")
+
 describe("localCommittedPullRequestDayBounds", () => {
   test("uses local calendar day start/end as ISO instants (mid-week Saturday)", () => {
     // 2026-07-18 is a Saturday
@@ -229,16 +238,22 @@ describe("localCommittedPullRequestDayBounds", () => {
 })
 
 describe("Committed pull requests dashboard UI", () => {
-  test("renders above the pipeline board with Today, Yesterday, This week, Last week, and Two weeks ago labels", () => {
-    const source = homeSource()
+  test("sticky root chrome mounts the dashboard above route content", () => {
+    const source = dashboardSource()
+    const root = rootSource()
     const board = readFileSync(
       join(import.meta.dir, "../src/kanban-board.tsx"),
       "utf8",
     )
-    const dashboardIndex = board.indexOf('aria-label="Committed pull requests"')
-    const jobsIndex = board.indexOf('aria-label="Jobs"')
-    expect(dashboardIndex).toBeGreaterThan(-1)
-    expect(jobsIndex).toBeGreaterThan(dashboardIndex)
+    expect(root).toContain("ui.appChrome")
+    expect(root).toContain("ui.mergedPrStatsBand")
+    expect(root).toContain("<CommittedPullRequestsDashboard />")
+    expect(root).toContain('aria-label="Committed pull requests"')
+    expect(root.indexOf("ui.mergedPrStatsBand")).toBeLessThan(
+      root.indexOf("<Outlet />"),
+    )
+    expect(board).not.toContain("<CommittedPullRequestsDashboard />")
+    expect(board).toContain('aria-label="Jobs"')
     expect(source).toContain("Today")
     expect(source).toContain("Yesterday")
     expect(source).toContain("This week")
@@ -248,37 +263,27 @@ describe("Committed pull requests dashboard UI", () => {
   })
 
   test("loads counts via dedicated aggregate query with local day bounds", () => {
-    const source = homeSource()
+    const source = dashboardSource()
     expect(source).toContain("committedPullRequestsCount")
     expect(source).toContain("localCommittedPullRequestDayBounds")
     expect(source).toContain("committedPullRequestsCountQueryKeyPrefix")
     expect(source).toContain(
       "queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to]",
     )
-    const dashboard = source.slice(
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-      source.indexOf("function RepositoryCards()"),
-    )
-    expect(dashboard).toContain("bounds.thisWeekFrom")
-    expect(dashboard).toContain("bounds.thisWeekTo")
-    expect(dashboard).toContain("bounds.lastWeekFrom")
-    expect(dashboard).toContain("bounds.lastWeekTo")
-    expect(dashboard).toContain("bounds.twoWeeksAgoFrom")
-    expect(dashboard).toContain("bounds.twoWeeksAgoTo")
-    expect(dashboard).not.toContain("workItems")
-    expect(dashboard).not.toContain("JOBS_COMPLETED_WINDOW_HOURS")
-    expect(dashboard).not.toContain("JOBS_COMPLETED_LIMIT")
+    expect(source).toContain("bounds.thisWeekFrom")
+    expect(source).toContain("bounds.thisWeekTo")
+    expect(source).toContain("bounds.lastWeekFrom")
+    expect(source).toContain("bounds.lastWeekTo")
+    expect(source).toContain("bounds.twoWeeksAgoFrom")
+    expect(source).toContain("bounds.twoWeeksAgoTo")
+    expect(source).not.toContain("JOBS_COMPLETED_WINDOW_HOURS")
+    expect(source).not.toContain("JOBS_COMPLETED_LIMIT")
   })
 
   test("stays live via work-items subscription without polling", () => {
-    const source = homeSource()
-    expect(source).toContain("followRepositoryWorkItemsLive")
+    const source = dashboardSource()
     expect(source).toContain("committedPullRequestsCountQueryKeyPrefix")
-    const dashboard = source.slice(
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-      source.indexOf("function RepositoryCards()"),
-    )
-    expect(dashboard).not.toContain("refetchInterval")
+    expect(source).not.toContain("refetchInterval")
     const refreshSource = readFileSync(
       join(import.meta.dir, "../src/refresh-work-items-live.ts"),
       "utf8",
@@ -289,19 +294,15 @@ describe("Committed pull requests dashboard UI", () => {
   })
 
   test("rolls day bounds at local midnight and on tab visibility", () => {
-    const source = homeSource()
-    const dashboard = source.slice(
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-      source.indexOf("function RepositoryCards()"),
-    )
-    expect(dashboard).toContain("msUntilNextLocalMidnight")
-    expect(dashboard).toContain("scheduleMidnightRollover")
-    expect(dashboard).toContain("visibilitychange")
-    expect(dashboard).toContain("setBounds")
+    const source = dashboardSource()
+    expect(source).toContain("msUntilNextLocalMidnight")
+    expect(source).toContain("scheduleMidnightRollover")
+    expect(source).toContain("visibilitychange")
+    expect(source).toContain("setBounds")
   })
 
-  test("shows loading and error states without blocking the board", () => {
-    const source = homeSource()
+  test("shows loading and error states without blocking route content", () => {
+    const source = dashboardSource()
     const board = readFileSync(
       join(import.meta.dir, "../src/kanban-board.tsx"),
       "utf8",
@@ -309,8 +310,8 @@ describe("Committed pull requests dashboard UI", () => {
     expect(source).toContain('aria-label="Loading committed pull requests"')
     expect(source).toContain('role="status"')
     expect(source).toContain('aria-busy="true"')
-    expect(source).toContain("merged-pr-stats-grid")
-    expect(source).toContain("merged-pr-stats-skeleton")
+    expect(source).toContain("ui.mergedPrStatsGrid")
+    expect(source).toContain("ui.mergedPrStatsSkeleton")
     expect(source).toContain(
       "Could not load committed pull requests. Please try again.",
     )
@@ -320,60 +321,64 @@ describe("Committed pull requests dashboard UI", () => {
       source.indexOf("if (failed)"),
       source.indexOf("const today = todayQuery.data"),
     )
-    expect(failedBranch).toContain('className="merged-pr-stats"')
-    expect(failedBranch).toContain("banner--compact")
-    // Board mounts dashboard as a sibling of the pipeline (no Suspense around it).
-    expect(board).toContain("<CommittedPullRequestsDashboard />")
+    expect(failedBranch).toContain("ui.mergedPrStats")
+    expect(failedBranch).toContain("ui.bannerCompact")
+    expect(rootSource()).toContain("<CommittedPullRequestsDashboard />")
+    expect(board).not.toContain("<CommittedPullRequestsDashboard />")
     expect(board).toContain("<KanbanJobsBoard />")
-    expect(board).not.toContain("Suspense fallback={<Committed")
   })
 
   test("waits for all five counts before leaving the loading state", () => {
-    const source = homeSource()
-    const dashboard = source.slice(
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-      source.indexOf("function RepositoryCards()"),
-    )
-    expect(dashboard).toContain("thisWeekQuery.isLoading")
-    expect(dashboard).toContain("thisWeekQuery.isError")
-    expect(dashboard).toContain("lastWeekQuery.isLoading")
-    expect(dashboard).toContain("lastWeekQuery.isError")
-    expect(dashboard).toContain("twoWeeksAgoQuery.isLoading")
-    expect(dashboard).toContain("twoWeeksAgoQuery.isError")
-    expect(dashboard).toContain("todayQuery.isLoading")
-    expect(dashboard).toContain("yesterdayQuery.isLoading")
+    const source = dashboardSource()
+    expect(source).toContain("thisWeekQuery.isLoading")
+    expect(source).toContain("thisWeekQuery.isError")
+    expect(source).toContain("lastWeekQuery.isLoading")
+    expect(source).toContain("lastWeekQuery.isError")
+    expect(source).toContain("twoWeeksAgoQuery.isLoading")
+    expect(source).toContain("twoWeeksAgoQuery.isError")
+    expect(source).toContain("todayQuery.isLoading")
+    expect(source).toContain("yesterdayQuery.isLoading")
   })
 
   test("displays zero counts rather than hiding the dashboard", () => {
-    const source = homeSource()
-    const dashboard = source.slice(
-      source.indexOf("function CommittedPullRequestsDashboard()"),
-      source.indexOf("function RepositoryCards()"),
+    const source = dashboardSource()
+    expect(source).toContain("todayQuery.data ?? 0")
+    expect(source).toContain("yesterdayQuery.data ?? 0")
+    expect(source).toContain("thisWeekQuery.data ?? 0")
+    expect(source).toContain("lastWeekQuery.data ?? 0")
+    expect(source).toContain("twoWeeksAgoQuery.data ?? 0")
+    expect(source).toContain("{today}")
+    expect(source).toContain("{yesterday}")
+    expect(source).toContain("{thisWeek}")
+    expect(source).toContain("{lastWeek}")
+    expect(source).toContain("{twoWeeksAgo}")
+    expect(source).toContain('aria-label="Merged PR throughput"')
+    expect(source).not.toContain("mergedPrStatsHead")
+    expect(source).not.toContain("merged-pr-stats-head")
+    expect(source).not.toContain("mergedPrStatsTag")
+    expect(source).not.toContain("merged-pr-stats-tag")
+    expect(source).toContain("ui.mergedPrStatsLabel")
+    expect(source).toContain("ui.mergedPrStats")
+    // Period label precedes the count in each cell.
+    const successGrid = source.slice(source.lastIndexOf("ui.mergedPrStatsGrid"))
+    expect(successGrid.indexOf("ui.mergedPrStatsLabel")).toBeLessThan(
+      successGrid.indexOf("ui.mergedPrStatsNum"),
     )
-    expect(dashboard).toContain("todayQuery.data ?? 0")
-    expect(dashboard).toContain("yesterdayQuery.data ?? 0")
-    expect(dashboard).toContain("thisWeekQuery.data ?? 0")
-    expect(dashboard).toContain("lastWeekQuery.data ?? 0")
-    expect(dashboard).toContain("twoWeeksAgoQuery.data ?? 0")
-    expect(dashboard).toContain("{today}")
-    expect(dashboard).toContain("{yesterday}")
-    expect(dashboard).toContain("{thisWeek}")
-    expect(dashboard).toContain("{lastWeek}")
-    expect(dashboard).toContain("{twoWeeksAgo}")
-    expect(dashboard).toContain("Merged PR throughput")
-    expect(dashboard).toContain("merged-pr-stats")
   })
 
-  test("board shows PR dashboard and pipeline; zero repos use blank slate", () => {
+  test("root chrome shows PR dashboard; board shows pipeline; zero repos use blank slate", () => {
     const home = homeSource()
     const board = readFileSync(
       join(import.meta.dir, "../src/kanban-board.tsx"),
       "utf8",
     )
-    expect(board).toContain("<CommittedPullRequestsDashboard />")
-    expect(board).toContain('aria-label="Committed pull requests"')
+    const root = rootSource()
+    expect(root).toContain("<CommittedPullRequestsDashboard />")
+    expect(root).toContain('aria-label="Committed pull requests"')
+    expect(root).toContain("ui.mergedPrStatsBand")
     expect(board).toContain('aria-label="Jobs"')
     expect(board).toContain("<KanbanJobsBoard />")
+    expect(board).not.toContain("<CommittedPullRequestsDashboard />")
     expect(board).not.toContain("RepositoryCards")
     // Zero-repo gate lives on home; board assumes repositories exist.
     const homeContent = home.slice(

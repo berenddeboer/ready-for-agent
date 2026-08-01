@@ -3,11 +3,16 @@
  * (`docs/harness-design-system.md` §4.5 / §5.2, wayfinder #698 prototype).
  *
  * The archive is terminal Complete / Abandoned only. Legs are a condensed
- * BUILD → REVIEW → CHECKS / MERGE (or PR / NO PR NEEDED) view — not the full
- * fine-grained lifecycle chip list used on the board.
+ * BUILD → REVIEW → PR|MR (or NO PR|MR NEEDED) view — not the full fine-grained
+ * lifecycle chip list used on the board.
+ *
+ * The entire forge change-request path (status checks, create, merge, …) is
+ * one PR-lane leg labelled PR (GitHub) or MR (GitLab). Legs with underlying
+ * step chips are expandable (same expand/collapse pattern as Kanban earlier-
+ * lane summaries) so operators can open the fine-grained lifecycle list.
  */
 
-import { formatDuration } from "./live-duration.js"
+import { forgeChangeRequestShort } from "./forge-change-request.js"
 import {
   type LifecycleLabelChip,
   lifecycleLaneForPhase,
@@ -26,6 +31,13 @@ export type ArchiveLeg = {
   readonly durationMs: number | null
   /** Lane colour for done legs; fail always uses Attention. */
   readonly lane: ArchiveLegLane | null
+  /** Optional hover title (e.g. forge noun for the PR-lane leg). */
+  readonly title: string | null
+  /**
+   * Fine-grained lifecycle chips under this leg. Non-empty ⇒ expandable in
+   * the Completed card footer (ephemeral UI expand, like Kanban).
+   */
+  readonly chips: readonly LifecycleLabelChip[]
 }
 
 export type ArchiveWorkItemInput = {
@@ -34,6 +46,8 @@ export type ArchiveWorkItemInput = {
   readonly pullRequestNumber: number | null
   readonly completionSummary: string | null
   readonly lifecycleLabels: readonly LifecycleLabelChip[]
+  /** Repository forge — drives PR vs MR leg labels. Defaults to GitHub. */
+  readonly forge?: string | null
 }
 
 const BUILD_PHASES = new Set([
@@ -154,76 +168,128 @@ const isArchiveComplete = (
   workItem.status === "SUCCEEDED" ||
   workItem.state === "COMPLETE"
 
+const changeLegTitle = (short: string): string =>
+  short === "MR"
+    ? "Merge request path — create, checks, and merge time on GitLab"
+    : "Pull request path — create, checks, and merge time on GitHub"
+
+/** Sum nullable subgroup durations; null when every part is null/absent. */
+const sumNullableMs = (
+  ...parts: readonly (number | null | undefined)[]
+): number | null => {
+  let total = 0
+  let any = false
+  for (const part of parts) {
+    if (part === null || part === undefined) continue
+    total += part
+    any = true
+  }
+  return any ? total : null
+}
+
 const doneLeg = (
   id: string,
   label: string,
   lane: ArchiveLegLane,
   durationMs: number | null,
+  chips: readonly LifecycleLabelChip[] = [],
+  title: string | null = null,
 ): ArchiveLeg => ({
   id,
   label,
   kind: "done",
   durationMs,
   lane,
+  title,
+  chips,
 })
 
-const skipLeg = (id: string, label: string): ArchiveLeg => ({
+const skipLeg = (
+  id: string,
+  label: string,
+  title: string | null = null,
+): ArchiveLeg => ({
   id,
   label,
   kind: "skip",
   durationMs: null,
   lane: null,
+  title,
+  chips: [],
 })
 
 const failLeg = (
   id: string,
   label: string,
   durationMs: number | null,
+  chips: readonly LifecycleLabelChip[] = [],
+  title: string | null = null,
 ): ArchiveLeg => ({
   id,
   label,
   kind: "fail",
   durationMs,
   lane: null,
+  title,
+  chips,
 })
 
 /**
- * Format a leg duration for the archive chip, e.g. "14M" / "1M 30S".
- * Matches the prototype's uppercase mono leg labels.
+ * Format a leg duration for the archive chip: compact lowercase, no spaces
+ * between units — "7m27s", "14m", "45s", "1h5m".
  */
 export function formatArchiveLegDuration(ms: number): string {
-  return formatDuration(ms).toUpperCase()
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes < 60) {
+    return seconds === 0 ? `${minutes}m` : `${minutes}m${seconds}s`
+  }
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return remainingMinutes === 0 ? `${hours}h` : `${hours}h${remainingMinutes}m`
 }
 
-/** Text content of a leg chip including mark and optional duration. */
+/**
+ * Text content of a leg chip. Done legs omit the ✓ (lane colour is enough);
+ * fail / skip keep ✕ / ○ so exceptions stay scannable.
+ */
 export function archiveLegText(leg: ArchiveLeg): string {
-  const mark = leg.kind === "done" ? "✓" : leg.kind === "fail" ? "✕" : "○"
+  if (leg.kind === "done") {
+    if (leg.durationMs === null) return leg.label
+    return `${leg.label} · ${formatArchiveLegDuration(leg.durationMs)}`
+  }
+  const mark = leg.kind === "fail" ? "✕" : "○"
   if (leg.durationMs === null) {
     return `${mark} ${leg.label}`
   }
   return `${mark} ${leg.label} · ${formatArchiveLegDuration(leg.durationMs)}`
 }
 
-/** CSS variables for a lane-coloured done leg. */
+/**
+ * CSS variables for a lane-coloured done leg.
+ * Must match `lifecycleLaneCssVars` / `ui.legLane` (`--leg-lane`, `--leg-on`).
+ */
 export function archiveLegLaneStyle(lane: ArchiveLegLane): {
   "--leg-lane": string
-  "--leg-on-lane": string
+  "--leg-on": string
 } {
   switch (lane) {
     case "build":
       return {
         "--leg-lane": "var(--lane-build)",
-        "--leg-on-lane": "var(--lane-build-ink)",
+        "--leg-on": "var(--lane-build-ink)",
       }
     case "review":
       return {
         "--leg-lane": "var(--lane-review)",
-        "--leg-on-lane": "var(--lane-review-ink)",
+        "--leg-on": "var(--lane-review-ink)",
       }
     case "pr":
       return {
         "--leg-lane": "var(--lane-pr)",
-        "--leg-on-lane": "var(--lane-pr-ink)",
+        "--leg-on": "var(--lane-pr-ink)",
       }
   }
 }
@@ -231,36 +297,14 @@ export function archiveLegLaneStyle(lane: ArchiveLegLane): {
 /**
  * Plan condensed archive journey legs for a terminal Work Item.
  *
- * - Complete + PR: BUILD / REVIEW / CHECKS / MERGE as done (lane-coloured).
- * - Complete + no change: done build (+ optional review) + "NO PR NEEDED" skip.
+ * - Complete + PR: BUILD / REVIEW / PR|MR as done (lane-coloured).
+ * - Complete + no change: done build (+ optional review) + "NO PR|MR NEEDED".
  * - Abandoned: done groups, optional ✕ fail at chronological position, then
- *   dashed unreached REVIEW / PR. Retryable failures never appear here.
+ *   dashed unreached REVIEW / PR|MR. Retryable failures never appear here.
+ *
+ * The PR lane is a single forge-labelled chip (checks + merge + other PR
+ * phases summed). The black badge opens the change request on the forge.
  */
-/**
- * Emit non-failed PR subgroups as done legs (CHECKS then MERGE, or PR for
- * other PR-path phases). Used for abandoned progress that did not fail.
- */
-const pushDonePrSubgroups = (
-  legs: ArchiveLeg[],
-  groups: Record<GroupId, GroupOutcome>,
-): void => {
-  if (groups.checks.hasAny && !groups.checks.hasFailed) {
-    legs.push(doneLeg("checks", "CHECKS", "pr", groups.checks.durationMs))
-  }
-  if (groups.merge.hasAny && !groups.merge.hasFailed) {
-    legs.push(doneLeg("merge", "MERGE", "pr", groups.merge.durationMs))
-  } else if (
-    !groups.checks.hasAny &&
-    !groups.merge.hasAny &&
-    groups.pr_other.hasAny &&
-    !groups.pr_other.hasFailed
-  ) {
-    legs.push(
-      doneLeg("pr", "PR", "pr", sumLaneDurationMs(groups.pr_other.chips)),
-    )
-  }
-}
-
 export function planArchiveLegs(
   workItem: ArchiveWorkItemInput,
 ): readonly ArchiveLeg[] {
@@ -270,49 +314,84 @@ export function planArchiveLegs(
   const noChange = isArchiveNoChangeComplete(workItem)
   const hasPr =
     workItem.pullRequestNumber !== null && workItem.pullRequestNumber > 0
+  const changeShort = forgeChangeRequestShort(workItem.forge)
+  const changeTitle = changeLegTitle(changeShort)
+  const noChangeNeededLabel = `NO ${changeShort} NEEDED`
+
+  const prChips = [
+    ...groups.checks.chips,
+    ...groups.merge.chips,
+    ...groups.pr_other.chips,
+  ]
+  const prAny = prChips.length > 0
+  const prFailed = prChips.some((chip) => isFailedStatus(chip.status))
+  const prSucceeded = prChips.some((chip) => isSucceededStatus(chip.status))
+  const prDurationMs = sumLaneDurationMs(prChips)
+  /** Duration of only the failed PR-path chips (for ✕ legs). */
+  const prFailDurationMs = sumLaneDurationMs(
+    prChips.filter((chip) => isFailedStatus(chip.status)),
+  )
+  const prPathDurationMs = sumNullableMs(
+    groups.checks.hasAny ? groups.checks.durationMs : null,
+    groups.merge.hasAny ? groups.merge.durationMs : null,
+    groups.pr_other.hasAny ? groups.pr_other.durationMs : null,
+  )
+
+  const changeDone = (durationMs: number | null): ArchiveLeg =>
+    doneLeg("pr", changeShort, "pr", durationMs, prChips, changeTitle)
+  const changeSkip = (): ArchiveLeg => skipLeg("pr", changeShort, changeTitle)
+  const changeFail = (durationMs: number | null): ArchiveLeg =>
+    failLeg("pr", changeShort, durationMs, prChips, changeTitle)
 
   if (complete && noChange) {
     const legs: ArchiveLeg[] = []
     if (groups.build.hasAny || groups.build.hasSucceeded) {
-      legs.push(doneLeg("build", "BUILD", "build", groups.build.durationMs))
+      legs.push(
+        doneLeg(
+          "build",
+          "BUILD",
+          "build",
+          groups.build.durationMs,
+          groups.build.chips,
+        ),
+      )
     } else {
       // Still show BUILD as done when the item completed without step data.
       legs.push(doneLeg("build", "BUILD", "build", null))
     }
     if (groups.review.hasSucceeded) {
-      legs.push(doneLeg("review", "REVIEW", "review", groups.review.durationMs))
+      legs.push(
+        doneLeg(
+          "review",
+          "REVIEW",
+          "review",
+          groups.review.durationMs,
+          groups.review.chips,
+        ),
+      )
     }
-    legs.push(skipLeg("no_pr", "NO PR NEEDED"))
+    legs.push(skipLeg("no_pr", noChangeNeededLabel))
     return legs
   }
 
   if (complete && hasPr) {
-    // Full PR path: always four lane-coloured legs when the run completed.
+    // Full PR path: three lane-coloured legs (PR lane is one forge chip).
     return [
       doneLeg(
         "build",
         "BUILD",
         "build",
         groups.build.hasAny ? groups.build.durationMs : null,
+        groups.build.chips,
       ),
       doneLeg(
         "review",
         "REVIEW",
         "review",
         groups.review.hasAny ? groups.review.durationMs : null,
+        groups.review.chips,
       ),
-      doneLeg(
-        "checks",
-        "CHECKS",
-        "pr",
-        groups.checks.hasAny ? groups.checks.durationMs : null,
-      ),
-      doneLeg(
-        "merge",
-        "MERGE",
-        "pr",
-        groups.merge.hasAny ? groups.merge.durationMs : null,
-      ),
+      changeDone(prAny ? prDurationMs : null),
     ]
   }
 
@@ -320,16 +399,29 @@ export function planArchiveLegs(
     // Complete without PR number and without summary — show done groups only.
     const legs: ArchiveLeg[] = []
     if (groups.build.hasAny) {
-      legs.push(doneLeg("build", "BUILD", "build", groups.build.durationMs))
+      legs.push(
+        doneLeg(
+          "build",
+          "BUILD",
+          "build",
+          groups.build.durationMs,
+          groups.build.chips,
+        ),
+      )
     }
     if (groups.review.hasAny) {
-      legs.push(doneLeg("review", "REVIEW", "review", groups.review.durationMs))
+      legs.push(
+        doneLeg(
+          "review",
+          "REVIEW",
+          "review",
+          groups.review.durationMs,
+          groups.review.chips,
+        ),
+      )
     }
-    if (groups.checks.hasAny) {
-      legs.push(doneLeg("checks", "CHECKS", "pr", groups.checks.durationMs))
-    }
-    if (groups.merge.hasAny) {
-      legs.push(doneLeg("merge", "MERGE", "pr", groups.merge.durationMs))
+    if (prAny) {
+      legs.push(changeDone(prDurationMs))
     }
     if (legs.length === 0) {
       legs.push(doneLeg("build", "BUILD", "build", null))
@@ -348,7 +440,7 @@ export function planArchiveLegs(
   ): "done" | "fail" | "none" => {
     if (!group.hasAny) return "none"
     if (group.hasFailed && abandoned) {
-      legs.push(failLeg(group.id, doneLabel, group.durationMs))
+      legs.push(failLeg(group.id, doneLabel, group.durationMs, group.chips))
       failedEmitted = true
       return "fail"
     }
@@ -358,7 +450,9 @@ export function planArchiveLegs(
       if (group.hasFailed && !abandoned) {
         return "none"
       }
-      legs.push(doneLeg(group.id, doneLabel, lane, group.durationMs))
+      legs.push(
+        doneLeg(group.id, doneLabel, lane, group.durationMs, group.chips),
+      )
       return "done"
     }
     return "none"
@@ -368,61 +462,28 @@ export function planArchiveLegs(
   if (failedEmitted) {
     // Chronological: failed BUILD stops the line; remaining are unreached.
     legs.push(skipLeg("review", "REVIEW"))
-    legs.push(skipLeg("pr", "PR"))
+    legs.push(changeSkip())
     return legs
   }
 
   const reviewResult = pushGroup(groups.review, "REVIEW", "review")
   if (failedEmitted) {
-    legs.push(skipLeg("pr", "PR"))
+    legs.push(changeSkip())
     return legs
   }
 
-  // PR umbrella for checks / merge / other PR phases on abandoned paths.
-  const prChips = [
-    ...groups.checks.chips,
-    ...groups.merge.chips,
-    ...groups.pr_other.chips,
-  ]
-  const prFailed = prChips.some((chip) => isFailedStatus(chip.status))
-  const prSucceeded = prChips.some((chip) => isSucceededStatus(chip.status))
-  const prAny = prChips.length > 0
-
   if (prFailed && abandoned) {
-    // Chronological: keep successful earlier PR legs, then ✕ at the failure.
-    if (groups.checks.hasFailed) {
-      // CHECKS failed first — no prior PR sub-leg to keep.
-      legs.push(failLeg("checks", "CHECKS", groups.checks.durationMs))
-    } else if (groups.merge.hasFailed) {
-      if (groups.checks.hasAny && !groups.checks.hasFailed) {
-        legs.push(doneLeg("checks", "CHECKS", "pr", groups.checks.durationMs))
-      }
-      legs.push(failLeg("merge", "MERGE", groups.merge.durationMs))
-    } else {
-      // pr_other failed: keep non-failed checks/merge, then ✕ PR with only
-      // pr_other duration (do not re-sum CHECKS/MERGE already shown).
-      if (groups.checks.hasAny && !groups.checks.hasFailed) {
-        legs.push(doneLeg("checks", "CHECKS", "pr", groups.checks.durationMs))
-      }
-      if (groups.merge.hasAny && !groups.merge.hasFailed) {
-        legs.push(doneLeg("merge", "MERGE", "pr", groups.merge.durationMs))
-      }
-      legs.push(failLeg("pr", "PR", groups.pr_other.durationMs))
-    }
+    // Single ✕ PR|MR for any failure on the change-request path.
+    legs.push(
+      changeFail(
+        prFailDurationMs !== null ? prFailDurationMs : prPathDurationMs,
+      ),
+    )
     return legs
   }
 
   if (prSucceeded || prAny) {
-    pushDonePrSubgroups(legs, groups)
-    // Abandoned journeys that stopped mid-PR still show unreached MERGE when
-    // merge never ran (complete+PR always paints the four-leg path).
-    if (
-      abandoned &&
-      !groups.merge.hasAny &&
-      !legs.some((leg) => leg.id === "merge" || leg.id === "pr")
-    ) {
-      legs.push(skipLeg("merge", "MERGE"))
-    }
+    legs.push(changeDone(prDurationMs))
     return legs
   }
 
@@ -433,7 +494,7 @@ export function planArchiveLegs(
       return [
         skipLeg("build", "BUILD"),
         skipLeg("review", "REVIEW"),
-        skipLeg("pr", "PR"),
+        changeSkip(),
       ]
     }
     if (buildResult === "none") {
@@ -443,12 +504,8 @@ export function planArchiveLegs(
     if (reviewResult === "none" && !legs.some((leg) => leg.id === "review")) {
       legs.push(skipLeg("review", "REVIEW"))
     }
-    if (
-      !legs.some(
-        (leg) => leg.id === "pr" || leg.id === "checks" || leg.id === "merge",
-      )
-    ) {
-      legs.push(skipLeg("pr", "PR"))
+    if (!legs.some((leg) => leg.id === "pr")) {
+      legs.push(changeSkip())
     }
     return legs
   }
@@ -458,7 +515,7 @@ export function planArchiveLegs(
     return [
       skipLeg("build", "BUILD"),
       skipLeg("review", "REVIEW"),
-      skipLeg("pr", "PR"),
+      changeSkip(),
     ]
   }
   return legs

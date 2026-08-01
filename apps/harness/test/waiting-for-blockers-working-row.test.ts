@@ -11,8 +11,8 @@ const chromeSource = () =>
     "utf8",
   )
 
-const stylesSource = () =>
-  readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
+const uiSource = () =>
+  readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")
 
 describe("Waiting for blockers Working-row polish", () => {
   test("badge chrome uses Interchange hold tags for blockers and worker slot", () => {
@@ -20,21 +20,25 @@ describe("Waiting for blockers Working-row polish", () => {
     const chrome = chromeSource()
     expect(chrome).toContain('status === "WAITING_FOR_WORKER_SLOT"')
     expect(chrome).toContain('status === "WAITING_FOR_BLOCKERS"')
-    expect(chrome).toContain("status-tag--hold")
-    expect(chrome).toContain("status-tag--plain")
-    expect(chrome).toContain("status-tag--alarm")
-    expect(stylesSource()).toContain(".status-tag--hold")
-    expect(stylesSource()).toContain("border-style: dashed")
+    expect(chrome).toContain("ui.statusTagHold")
+    expect(chrome).toContain("ui.statusTagPlain")
+    expect(chrome).toContain("ui.statusTagAlarm")
+    const ui = uiSource()
+    expect(ui).toContain("statusTagHold:")
+    expect(ui).toMatch(/statusTagHold:[\s\S]*?border-dashed/)
   })
 
   test("status message uses shared helper with alarm prefix for failures", () => {
     const source = homeSource()
     expect(source).toContain("statusMessageClassNameForStatus")
     expect(source).toContain("statusMessageClassName")
+    expect(source).toContain("isStatusMessageAlarm")
+    expect(source).not.toContain("status-message--alarm")
     expect(chromeSource()).toContain(
       "export function statusMessageClassNameForStatus",
     )
-    expect(chromeSource()).toContain("status-message--alarm")
+    expect(chromeSource()).toContain("export function isStatusMessageAlarm")
+    expect(chromeSource()).toContain("ui.statusMessageAlarm")
   })
 
   test("Pause/Start control is omitted while Waiting for blockers", () => {

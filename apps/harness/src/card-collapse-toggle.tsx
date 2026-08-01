@@ -1,3 +1,5 @@
+import { ui } from "./ui.js"
+
 type CardCollapseToggleProps = {
   collapsed: boolean
   onToggle: () => void
@@ -15,7 +17,7 @@ export function CardCollapseToggle({
   return (
     <button
       type="button"
-      className="icon-btn"
+      className={ui.iconBtn}
       aria-expanded={!collapsed}
       aria-controls={controlsId}
       aria-label={collapsed ? `Expand ${label}` : `Collapse ${label}`}

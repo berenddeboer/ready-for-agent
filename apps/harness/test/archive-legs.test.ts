@@ -1,4 +1,5 @@
 import {
+  archiveLegLaneStyle,
   archiveLegText,
   formatArchiveLegDuration,
   planArchiveLegs,
@@ -17,7 +18,7 @@ const chip = (
 })
 
 describe("planArchiveLegs", () => {
-  test("complete with PR shows BUILD / REVIEW / CHECKS / MERGE done legs", () => {
+  test("complete with PR shows BUILD / REVIEW / PR done legs (single PR-lane chip)", () => {
     const legs = planArchiveLegs({
       status: "COMPLETE",
       state: "COMPLETE",
@@ -33,11 +34,38 @@ describe("planArchiveLegs", () => {
     expect(legs.map((leg) => [leg.label, leg.kind, leg.lane])).toEqual([
       ["BUILD", "done", "build"],
       ["REVIEW", "done", "review"],
-      ["CHECKS", "done", "pr"],
-      ["MERGE", "done", "pr"],
+      ["PR", "done", "pr"],
     ])
-    expect(archiveLegText(legs[0]!)).toBe("✓ BUILD · 14M")
-    expect(archiveLegText(legs[2]!)).toBe("✓ CHECKS · 2M")
+    expect(archiveLegText(legs[0]!)).toBe("BUILD · 14m")
+    // Checks + merge durations are summed into one PR leg.
+    expect(archiveLegText(legs[2]!)).toBe("PR · 3m")
+    expect(legs[2]!.title).toContain("Pull request path")
+    // Underlying step chips enable expand on Completed cards.
+    expect(legs[0]!.chips.map((c) => c.phase)).toEqual(["IMPLEMENT"])
+    expect(legs[1]!.chips.map((c) => c.phase)).toEqual(["REVIEW"])
+    expect(legs[2]!.chips.map((c) => c.phase)).toEqual([
+      "GITHUB_STATUS_CHECKS",
+      "MERGE_PR",
+    ])
+  })
+
+  test("complete with PR on GitLab labels the PR-lane leg MR", () => {
+    const legs = planArchiveLegs({
+      status: "COMPLETE",
+      state: "COMPLETE",
+      pullRequestNumber: 42,
+      completionSummary: null,
+      forge: "gitlab",
+      lifecycleLabels: [
+        chip("IMPLEMENT", "SUCCEEDED", 5 * 60_000),
+        chip("REVIEW", "SUCCEEDED", 2 * 60_000),
+        chip("GITHUB_STATUS_CHECKS", "SUCCEEDED", 30_000),
+        chip("MERGE_PR", "SUCCEEDED", 15_000),
+      ],
+    })
+    expect(legs.map((leg) => leg.label)).toEqual(["BUILD", "REVIEW", "MR"])
+    expect(archiveLegText(legs[2]!)).toBe("MR · 45s")
+    expect(legs[2]!.title).toContain("Merge request path")
   })
 
   test("complete no-change shows BUILD done and NO PR NEEDED skip", () => {
@@ -53,6 +81,18 @@ describe("planArchiveLegs", () => {
       ["NO PR NEEDED", "skip"],
     ])
     expect(archiveLegText(legs[1]!)).toBe("○ NO PR NEEDED")
+  })
+
+  test("complete no-change on GitLab shows NO MR NEEDED", () => {
+    const legs = planArchiveLegs({
+      status: "COMPLETE",
+      state: "COMPLETE",
+      pullRequestNumber: null,
+      completionSummary: "Nothing to do.",
+      forge: "gitlab",
+      lifecycleLabels: [chip("IMPLEMENT", "SUCCEEDED", 10 * 60_000)],
+    })
+    expect(legs.map((leg) => leg.label)).toEqual(["BUILD", "NO MR NEEDED"])
   })
 
   test("abandoned after build shows done BUILD and unreached REVIEW / PR", () => {
@@ -101,7 +141,7 @@ describe("planArchiveLegs", () => {
       ["REVIEW", "fail"],
       ["PR", "skip"],
     ])
-    expect(archiveLegText(legs[1]!)).toBe("✕ REVIEW · 3M")
+    expect(archiveLegText(legs[1]!)).toBe("✕ REVIEW · 3m")
   })
 
   test("failed BUILD then abandoned shows ✕ BUILD and unreached REVIEW / PR", () => {
@@ -119,7 +159,7 @@ describe("planArchiveLegs", () => {
     ])
   })
 
-  test("failed CHECKS then abandoned keeps prior done legs", () => {
+  test("failed checks then abandoned is a single ✕ PR leg", () => {
     const legs = planArchiveLegs({
       status: "ABANDONED",
       state: "ABANDONED",
@@ -134,11 +174,12 @@ describe("planArchiveLegs", () => {
     expect(legs.map((leg) => [leg.label, leg.kind])).toEqual([
       ["BUILD", "done"],
       ["REVIEW", "done"],
-      ["CHECKS", "fail"],
+      ["PR", "fail"],
     ])
+    expect(archiveLegText(legs[2]!)).toBe("✕ PR · 2m")
   })
 
-  test("failed MERGE after successful CHECKS keeps done CHECKS before ✕ MERGE", () => {
+  test("failed merge after successful checks is a single ✕ PR leg", () => {
     const legs = planArchiveLegs({
       status: "ABANDONED",
       state: "ABANDONED",
@@ -154,11 +195,10 @@ describe("planArchiveLegs", () => {
     expect(legs.map((leg) => [leg.label, leg.kind])).toEqual([
       ["BUILD", "done"],
       ["REVIEW", "done"],
-      ["CHECKS", "done"],
-      ["MERGE", "fail"],
+      ["PR", "fail"],
     ])
-    expect(archiveLegText(legs[2]!)).toBe("✓ CHECKS · 2M")
-    expect(archiveLegText(legs[3]!)).toBe("✕ MERGE · 1M")
+    // Fail duration is the failed merge step only.
+    expect(archiveLegText(legs[2]!)).toBe("✕ PR · 1m")
   })
 
   test("abandoned with REVIEW but missing BUILD chips keeps REVIEW progress", () => {
@@ -176,7 +216,7 @@ describe("planArchiveLegs", () => {
     ])
   })
 
-  test("failed DECIDE_PR after CHECKS uses pr_other duration only on ✕ PR", () => {
+  test("failed DECIDE_PR after checks is a single ✕ PR with fail duration", () => {
     const legs = planArchiveLegs({
       status: "ABANDONED",
       state: "ABANDONED",
@@ -192,13 +232,12 @@ describe("planArchiveLegs", () => {
     expect(legs.map((leg) => [leg.label, leg.kind, leg.durationMs])).toEqual([
       ["BUILD", "done", 10 * 60_000],
       ["REVIEW", "done", 5 * 60_000],
-      ["CHECKS", "done", 2 * 60_000],
       ["PR", "fail", 90_000],
     ])
-    expect(archiveLegText(legs[3]!)).toBe("✕ PR · 1M 30S")
+    expect(archiveLegText(legs[2]!)).toBe("✕ PR · 1m30s")
   })
 
-  test("abandoned after successful CHECKS only appends unreached MERGE", () => {
+  test("abandoned after successful checks shows a single done PR leg", () => {
     const legs = planArchiveLegs({
       status: "ABANDONED",
       state: "ABANDONED",
@@ -213,13 +252,32 @@ describe("planArchiveLegs", () => {
     expect(legs.map((leg) => [leg.label, leg.kind])).toEqual([
       ["BUILD", "done"],
       ["REVIEW", "done"],
-      ["CHECKS", "done"],
-      ["MERGE", "skip"],
+      ["PR", "done"],
     ])
+    expect(archiveLegText(legs[2]!)).toBe("PR · 2m")
   })
 
-  test("formatArchiveLegDuration uppercases compact duration units", () => {
-    expect(formatArchiveLegDuration(90_000)).toBe("1M 30S")
-    expect(formatArchiveLegDuration(14 * 60_000)).toBe("14M")
+  test("formatArchiveLegDuration is compact lowercase without spaces", () => {
+    expect(formatArchiveLegDuration(90_000)).toBe("1m30s")
+    expect(formatArchiveLegDuration(14 * 60_000)).toBe("14m")
+    expect(formatArchiveLegDuration(7 * 60_000 + 27_000)).toBe("7m27s")
+    expect(formatArchiveLegDuration(45_000)).toBe("45s")
+  })
+})
+
+describe("archiveLegLaneStyle", () => {
+  test("sets --leg-lane and --leg-on for each archive lane (matches ui.legLane)", () => {
+    expect(archiveLegLaneStyle("build")).toEqual({
+      "--leg-lane": "var(--lane-build)",
+      "--leg-on": "var(--lane-build-ink)",
+    })
+    expect(archiveLegLaneStyle("review")).toEqual({
+      "--leg-lane": "var(--lane-review)",
+      "--leg-on": "var(--lane-review-ink)",
+    })
+    expect(archiveLegLaneStyle("pr")).toEqual({
+      "--leg-lane": "var(--lane-pr)",
+      "--leg-on": "var(--lane-pr-ink)",
+    })
   })
 })

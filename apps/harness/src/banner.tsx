@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react"
+import { cx, ui } from "./ui.js"
 
 /**
  * Interchange banner pattern (`docs/harness-design-system.md` §4.8).
@@ -21,19 +22,25 @@ export function Banner({
   role?: "status" | "alert"
   className?: string
 }) {
-  const classes = [
-    "banner",
-    tone === "guidance" ? "banner--guidance" : "banner--alarm",
-    className,
-  ]
-    .filter((part): part is string => part != null && part.length > 0)
-    .join(" ")
-
   return (
-    <div className={classes} role={role}>
-      <span className="banner-tag">{tag}</span>
-      <div className="banner-body">{children}</div>
-      {action != null ? <div className="banner-action">{action}</div> : null}
+    <div
+      className={cx(
+        ui.banner,
+        tone === "guidance" ? ui.bannerGuidance : ui.bannerAlarm,
+        className,
+      )}
+      role={role}
+    >
+      <span
+        className={cx(
+          ui.bannerTag,
+          tone === "guidance" ? ui.bannerTagGuidance : ui.bannerTagAlarm,
+        )}
+      >
+        {tag}
+      </span>
+      <div className={ui.bannerBody}>{children}</div>
+      {action != null ? <div className={ui.bannerAction}>{action}</div> : null}
     </div>
   )
 }
@@ -45,11 +52,8 @@ export function BannerActionButton({
   type = "button",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement>) {
-  const classes = ["plate-mini", className]
-    .filter((part): part is string => part != null && part.length > 0)
-    .join(" ")
   return (
-    <button type={type} className={classes} {...props}>
+    <button type={type} className={cx(ui.plateMini, className)} {...props}>
       {children}
     </button>
   )

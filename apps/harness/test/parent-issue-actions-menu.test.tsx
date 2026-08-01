@@ -101,10 +101,10 @@ describe("ParentIssueActionsMenu", () => {
     )
     expect(html).toContain('role="alert"')
     expect(html).toContain("Could not start Implement all with auto-merge")
-    // In-flow alarm Banner (not absolute under kebab).
-    expect(html).toContain("banner--compact")
-    expect(html).toContain("parent-issue-error")
-    expect(html).toContain("banner-tag")
+    // In-flow alarm Banner (recipes applied at render time).
+    expect(html).toContain("px-[0.6rem]")
+    expect(html).toContain("mx-[0.65rem]")
+    expect(html).toContain("bg-lane-attention")
     expect(html).toContain("Error")
     expect(html).not.toContain("absolute top-full right-0 z-10 mt-1 w-56")
   })
@@ -130,22 +130,18 @@ describe("ParentIssueActionsMenu", () => {
       "utf8",
     )
     // §4.10: icon-btn trigger; shared menu-panel / menu-item (no Ledger shadow).
-    expect(source).toContain('className="icon-btn"')
+    expect(source).toContain("className={ui.iconBtn}")
     expect(source).toMatch(
-      /role="menu"[\s\S]*?menu-panel[\s\S]*?role="menuitem"/,
+      /role="menu"[\s\S]*?ui\.menuPanel[\s\S]*?role="menuitem"/,
     )
-    expect(source).toContain('className="menu-item"')
+    expect(source).toContain("className={ui.menuItem}")
+    // Component must not reintroduce raw shadow utilities (recipe owns shadow-none).
     expect(source).not.toContain("shadow-[")
-    const styles = readFileSync(
-      join(import.meta.dir, "../src/styles.css"),
-      "utf8",
-    )
-    expect(styles).toContain(".menu-panel")
-    expect(styles).toContain(".menu-item")
-    expect(styles).toMatch(
-      /\.menu-item\s*\{[^}]*font-family:\s*var\(--font-mono\)/s,
-    )
-    expect(styles).toMatch(/\.menu-item\s*\{[^}]*text-transform:\s*uppercase/s)
+    const ui = readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")
+    expect(ui).toContain("menuPanel:")
+    expect(ui).toContain("menuItem:")
+    expect(ui).toMatch(/menuItem:[\s\S]*?font-mono/)
+    expect(ui).toMatch(/menuItem:[\s\S]*?uppercase/)
   })
 })
 
@@ -164,15 +160,15 @@ describe("ParentIssueGroup control order", () => {
 
     // Anchor on the UI closed-count label, not the closedChildren prop name.
     const closedLabel = group.indexOf("childIssues.length} closed")
-    const chevron = group.indexOf("parent-issue-chevron")
+    const chevron = group.indexOf("ui.parentIssueChevron")
     const kebab = group.indexOf("<ParentIssueActionsMenu")
     expect(closedLabel).toBeGreaterThanOrEqual(0)
     expect(chevron).toBeGreaterThan(closedLabel)
     expect(kebab).toBeGreaterThan(chevron)
 
     // Closed-count mono chip sits left of the chevron and kebab.
-    expect(group).toContain("parent-issue-closed-count")
-    expect(group).toContain("parent-issue-summary-actions")
+    expect(group).toContain("ui.parentIssueClosedCount")
+    expect(group).toContain("ui.parentIssueSummaryActions")
     expect(group).not.toMatch(/flex shrink-0 items-center gap-1\.5 font-mono/)
   })
 })

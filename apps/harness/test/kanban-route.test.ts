@@ -14,6 +14,9 @@ const kanbanRedirectSource = () =>
 const rootSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/__root.tsx"), "utf8")
 
+const uiSource = () =>
+  readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")
+
 const stylesSource = () =>
   readFileSync(join(import.meta.dir, "../src/styles.css"), "utf8")
 
@@ -43,12 +46,16 @@ describe("kanban home board", () => {
     expect(source).not.toContain("KanbanBoard")
   })
 
-  test("board defaults Pipeline tab and mounts committed PR dashboard", () => {
+  test("board mounts pipeline body; Jobs switcher lives in sticky root chrome", () => {
     const source = boardSource()
     expect(source).toContain("export function KanbanBoard()")
-    expect(source).toContain('useState<JobsTab>("pipeline")')
-    expect(source).toContain("<CommittedPullRequestsDashboard />")
+    // Primary Pipeline | Repos | Completed tabs are sticky root chrome, not the board.
+    expect(source).not.toContain('id="jobs-tab-pipeline"')
+    expect(source).not.toContain('id="jobs-tab-repos"')
+    expect(source).not.toContain('to="/completed"')
+    expect(source).not.toContain("<CommittedPullRequestsDashboard />")
     expect(source).toContain("<KanbanJobsBoard />")
+    expect(source).toContain('id="jobs-panel-pipeline"')
   })
 
   test("does not render the former board masthead (title, deck, or separator)", () => {
@@ -62,15 +69,16 @@ describe("kanban home board", () => {
     expect(source).not.toContain("Work pipeline")
     expect(source).not.toContain("Live production flow from intake to merge.")
 
-    // Committed PR dashboard is the first content landmark under main.
+    // Jobs pipeline is the first content landmark under main (throughput is root chrome).
     const main = source.slice(source.indexOf("<main"))
     const firstSection = main.indexOf("<section")
     expect(firstSection).toBeGreaterThan(-1)
     expect(main.slice(firstSection, firstSection + 80)).toContain(
-      'aria-label="Committed pull requests"',
+      'aria-label="Jobs"',
     )
-    // Intentional top spacing only — no masthead-sized clamp padding.
-    expect(source).toMatch(/industrial-shell pt-6 sm:pt-8/)
+    // Board body is uncapped industrial-shell; throughput chrome is in root.
+    expect(source).toContain("className={ui.industrialShell}")
+    expect(source).not.toMatch(/industrial-shell pt-6/)
   })
 
   test("does not render the Jobs section header band (eyebrow, title, LIVE, collapse)", () => {
@@ -100,30 +108,34 @@ describe("kanban home board", () => {
     expect(page).not.toContain("Pipeline</h2>")
     expect(page).toContain("<KanbanJobsBoard />")
 
-    // Filter controls remain the board's leading chrome (before the lane grid).
+    // Jobs switcher + filters are sticky root chrome; board starts at the grid.
     const board = source.slice(source.indexOf("function KanbanJobsBoard("))
-    const controlsIndex = board.indexOf("pipeline-controls")
-    const pipelineBoardIndex = board.indexOf("pipeline-board")
-    expect(controlsIndex).toBeGreaterThan(-1)
-    expect(pipelineBoardIndex).toBeGreaterThan(controlsIndex)
+    expect(board).not.toContain("pipelineControls")
+    expect(board).not.toContain("pipeline-controls")
+    expect(board).toContain("ui.pipelineBoard")
+    expect(board).toContain("useJobsRepositoryFilter")
   })
 
   test("drops obsolete masthead and section-header styles while keeping industrial pipeline chrome", () => {
+    const ui = uiSource()
     const styles = stylesSource()
-    expect(styles).not.toContain(".board-masthead")
-    expect(styles).not.toContain(".board-kicker")
-    expect(styles).not.toContain(".board-title")
-    expect(styles).not.toContain(".board-deck")
-    // Issue #681: section-rail header band styles are gone.
-    expect(styles).not.toContain(".section-rail")
-    expect(styles).not.toContain(".section-index")
-    expect(styles).not.toContain(".section-title")
-    expect(styles).not.toContain(".live-marker")
-    expect(styles).not.toContain("industrial-pulse")
-    // Pipeline board language remains.
-    expect(styles).toContain(".pipeline-board")
-    expect(styles).toContain(".pipeline-controls")
-    expect(styles).toContain(".industrial-shell")
+    // Old Ledger chrome must not live in recipes or the tokens file.
+    for (const source of [ui, styles]) {
+      expect(source).not.toContain(".board-masthead")
+      expect(source).not.toContain(".board-kicker")
+      expect(source).not.toContain(".board-title")
+      expect(source).not.toContain(".board-deck")
+      // Issue #681: section-rail header band styles are gone.
+      expect(source).not.toContain(".section-rail")
+      expect(source).not.toContain(".section-index")
+      expect(source).not.toContain(".section-title")
+      expect(source).not.toContain(".live-marker")
+      expect(source).not.toContain("industrial-pulse")
+    }
+    // Pipeline board language remains as Tailwind recipes.
+    expect(ui).toContain("pipelineBoard:")
+    expect(ui).toContain("pipelineControls:")
+    expect(ui).toContain("industrialShell:")
   })
 
   test("renders all six lifecycle lanes as an accessible pipeline", () => {
@@ -131,73 +143,55 @@ describe("kanban home board", () => {
     expect(source).toContain('aria-label="Lifecycle pipeline"')
     expect(source).toContain("pipelineLaneFor(workItem)")
     expect(source).toContain("Lane clear")
-    // Mobile switcher + nameboard each render {lane.label}.
-    expect(source.match(/\{lane\.label\}/g)).toHaveLength(2)
-    expect(source).toContain("lane-roundel")
-    expect(source).toContain("lane-platform")
-    expect(source).toContain("queue-hint")
+    // Mobile switcher + route roundel aria-label + lane header each use {lane.label}.
+    expect(source.match(/\{lane\.label\}/g)).toHaveLength(3)
+    expect(source).toContain("ui.pipelineRoute")
+    expect(source).toContain("ui.laneRoundel")
+    expect(source).toContain("ui.laneHeader")
+    expect(source).toContain("ui.laneTitle")
+    expect(source).not.toContain("lane-number")
+    expect(source).not.toContain("lane-count")
+    expect(source).toContain("ui.queueHint")
     expect(source).toContain("Feed the queue — work starts at your repos.")
     expect(source).toContain("Manage repos →")
     expect(source).toContain('to="/repos"')
   })
 
-  test("retains accessible two-tab control, keyboard navigation, and repository filtering", () => {
-    // Working and Failed tabs were Home-only Jobs; board keeps Pipeline
-    // (default) and Completed last 24 h.
+  test("Jobs strip + repository filters are sticky root chrome", () => {
+    // Working/Failed list tabs are gone. Switcher + filters are root chrome.
     const source = boardSource()
-    expect(source).toContain('type JobsTab = "pipeline" | "completed"')
-    expect(source).toContain('{ id: "pipeline", label: "Pipeline" }')
-    expect(source).toContain(
-      '{ id: "completed", label: JOBS_COMPLETED_TAB_LABEL }',
-    )
-    expect(source).toContain(
-      "Completed last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h",
-    )
+    const root = rootSource()
+    expect(source).not.toContain('type JobsTab = "pipeline" | "completed"')
+    expect(source).not.toContain("JOBS_TABS")
+    expect(source).not.toContain("JOBS_COMPLETED_TAB_LABEL")
+    expect(source).not.toContain("JOBS_COMPLETED_EMPTY_MESSAGE")
     expect(source).not.toContain('{ id: "working", label: "Working" }')
     expect(source).not.toContain('{ id: "failed", label: "Failed" }')
-    expect(source).not.toContain('label: "Working"')
-    expect(source).not.toContain('label: "Failed"')
-    expect(source).not.toContain("No working jobs.")
-    expect(source).not.toContain("No failed jobs.")
-    expect(source).not.toContain("Working jobs")
-    expect(source).not.toContain("Failed jobs")
-    expect(source).not.toContain('tab.id === "working"')
-    expect(source).not.toContain('tab.id === "failed"')
-    expect(source).not.toContain('selectedListTab === "working"')
-    expect(source).not.toContain('selectedListTab === "failed"')
-    expect(source).toContain("JOBS_COMPLETED_EMPTY_MESSAGE")
-    expect(source).toContain(
-      "No jobs completed in the last $" + "{JOBS_COMPLETED_WINDOW_HOURS} h.",
+    // Board consumes shared filter; does not render the filter strip itself.
+    expect(source).toContain("useJobsRepositoryFilter")
+    expect(source).not.toContain("All sources")
+    expect(root).toContain("<JobsViewSwitcher")
+    expect(root).toContain("JobsRepositoryFilterProvider")
+    const switcher = readFileSync(
+      join(import.meta.dir, "../src/jobs-view-switcher.tsx"),
+      "utf8",
     )
-    // Tab strip order: Pipeline then Completed only.
-    const jobsTabsBlock = source.slice(
-      source.indexOf("const JOBS_TABS = ["),
-      source.indexOf(
-        "] as const satisfies readonly { id: JobsTab; label: string }[]",
-      ),
+    expect(switcher).toContain("ui.jobsSwitcherBand")
+    expect(switcher).toContain("Pipeline")
+    expect(switcher).toContain("Repos")
+    expect(switcher).toContain("Completed")
+    expect(switcher).toContain('to="/repos"')
+    expect(switcher).toContain('to="/completed"')
+    expect(switcher).toContain("<PipelineTabIcon")
+    expect(switcher).toContain("<ReposTabIcon")
+    expect(switcher).toContain("<CompletedTabIcon")
+    expect(switcher).toContain("<JobsRepositoryFilters")
+    const filters = readFileSync(
+      join(import.meta.dir, "../src/jobs-repository-filter.tsx"),
+      "utf8",
     )
-    const pipelineTabIndex = jobsTabsBlock.indexOf('label: "Pipeline"')
-    const completedTabIndex = jobsTabsBlock.indexOf(
-      "label: JOBS_COMPLETED_TAB_LABEL",
-    )
-    expect(pipelineTabIndex).toBeGreaterThan(-1)
-    expect(completedTabIndex).toBeGreaterThan(pipelineTabIndex)
-    expect(jobsTabsBlock).not.toContain("Working")
-    expect(jobsTabsBlock).not.toContain("Failed")
-    // Keyboard cycles only between the two remaining tabs.
-    expect(source).toContain('role="tablist"')
-    expect(source).toContain('role="tab"')
-    expect(source).toContain("aria-selected={selected}")
-    expect(source).toContain('event.key === "ArrowRight"')
-    expect(source).toContain('event.key === "ArrowLeft"')
-    expect(source).toContain(
-      "(tabIndex + delta + JOBS_TABS.length) % JOBS_TABS.length",
-    )
-    expect(source).toContain("All sources")
-    expect(source).toContain("aria-pressed={selectedRepositoryId === null}")
-    expect(source).toContain(
-      "aria-pressed={selectedRepositoryId === repository.id}",
-    )
+    expect(filters).toContain("All sources")
+    expect(filters).toContain("ui.repositoryFilters")
   })
 
   test("retains board controls and excludes repository management on the board", () => {
@@ -241,6 +235,8 @@ describe("kanban home board", () => {
     )
     expect(summary).toContain("Elapsed ${")
     expect(summary).toContain("formatDuration(elapsedMs)")
+    // Started and Elapsed are separate lines (not joined with ·).
+    expect(summary).not.toContain('{" · "}')
     expect(summary).not.toContain("lifecycleLabels")
     expect(summary).not.toContain("WorkItemLifecycleStatus")
     expect(summary).not.toContain("Lifecycle steps")
@@ -254,6 +250,9 @@ describe("kanban home board", () => {
     )
     expect(ticket).toContain('laneId === "complete"')
     expect(ticket).toContain("<PipelineCompleteSummary")
+    // Merged-lane omits the COMPLETE status tag (lane is the status).
+    expect(ticket).toContain("isCompleteLane ? null : (")
+    expect(ticket).toContain("ui.jobTicketStatus")
     // Non-Merged lanes keep compact lifecycle status with earlier-lane collapse.
     expect(ticket).toContain("<WorkItemLifecycleStatus")
     expect(ticket).toContain("collapseEarlierLanes")
@@ -301,12 +300,12 @@ describe("kanban home board", () => {
     expect(source.match(/collapseEarlierLanes/g)).toHaveLength(1)
   })
 
-  test("Kanban list tabs share Merged-lane compact summary via pipelineLaneFor", () => {
-    // Gate is lane identity, not Pipeline vs Completed tab. Completed-tab rows
-    // that classify as complete intentionally reuse PipelineCompleteSummary.
+  test("Merged-lane compact summary is gated by pipelineLaneFor lane id", () => {
+    // Completed history uses archive cards on /completed/*; pipeline Merged
+    // still uses PipelineCompleteSummary when laneId === "complete".
     const source = boardSource()
     const board = source.slice(source.indexOf("function KanbanJobsBoard("))
-    expect(board).toContain("laneId={pipelineLaneFor(workItem)}")
+    expect(board).toContain("pipelineLaneFor(workItem)")
     expect(board).toContain("<PipelineTicket")
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
@@ -314,17 +313,22 @@ describe("kanban home board", () => {
     )
     expect(ticket).toContain('const isCompleteLane = laneId === "complete"')
     expect(ticket).toContain("<PipelineCompleteSummary")
+    // No local completed-tab ticket list on the home board.
+    expect(board).not.toContain("laneId={pipelineLaneFor(workItem)}")
   })
 
-  test("shows agent backend label inline before session id on pipeline tickets", () => {
+  test("shows agent backend and session id on separate runtime lines", () => {
     const source = boardSource()
     const ticket = source.slice(
       source.indexOf("function PipelineTicket("),
       source.indexOf("function KanbanJobsBoard()"),
     )
     expect(ticket).toContain("{workItem.agentBackend.label}")
-    expect(ticket).toContain('className="job-ticket-runtime"')
-    // Runtime row is unconditional so the label shows before a session exists.
+    expect(ticket).toContain("ui.jobTicketRuntime")
+    // Backend label is its own line; session sits on a following row.
+    expect(ticket).toMatch(
+      /<p className=\{ui\.jobTicketRuntimeLine\}>\s*\{workItem\.agentBackend\.label\}\s*<\/p>/,
+    )
     expect(ticket).not.toContain(
       "(sessionId !== null || worktreePath !== null) && (",
     )
@@ -368,7 +372,7 @@ describe("kanban home board", () => {
   test("starts live invalidation after the initial board queries settle", () => {
     const source = boardSource()
     const loadingBranch = source.slice(
-      source.indexOf("if (loading && activeItems.length === 0)"),
+      source.indexOf("if (loading && pipelineItems.length === 0)"),
       source.indexOf("if (failed)"),
     )
     expect(loadingBranch).toContain("<JobsCardSkeleton />")
@@ -383,7 +387,7 @@ describe("kanban home board", () => {
   test("renders an accessible mobile lane selector controlling one selected lane", () => {
     const source = boardSource()
     expect(source).toContain('useState<PipelineLaneId>("queue")')
-    expect(source).toContain('<fieldset className="lane-switcher">')
+    expect(source).toContain("className={ui.laneSwitcher}")
     expect(source).toContain("aria-pressed={mobileLane === lane.id}")
     expect(source).toMatch(/aria-controls=\{`lane-panel-\$\{lane\.id\}`\}/)
     expect(source).toContain("onClick={() => setMobileLane(lane.id)}")
@@ -392,30 +396,59 @@ describe("kanban home board", () => {
   })
 
   test("keeps the six-column board and sticky lane headers on desktop", () => {
-    // Strip the ≤1500px roundel fallback and the ≤900px mobile block.
-    const styles = stylesSource()
-    const desktopStyles = styles.split("@media (max-width: 1500px)")[0]
-    expect(desktopStyles).toContain(".pipeline-board")
-    expect(desktopStyles).toContain(
-      "grid-template-columns: repeat(6, minmax(0, 1fr))",
+    const ui = uiSource()
+    // Desktop layout lives on recipe strings (no separate media block).
+    expect(ui).toContain("pipelineBoard:")
+    expect(ui).toContain("pipelineRoute:")
+    // Route spine uses before: pseudo utilities.
+    expect(ui).toMatch(/pipelineRoute:[\s\S]*?before:/)
+    expect(ui).toContain("laneRoundel:")
+    expect(ui).toContain("pipelineLanes:")
+    expect(ui).toContain("grid-cols-6")
+    expect(ui).toContain("gap-0.5")
+    expect(ui).toContain("bg-ink")
+    expect(ui).toContain("--lane-bed")
+    expect(ui).toContain("bg-[var(--lane-bed)]")
+    expect(ui).toContain("laneHeader:")
+    expect(ui).toContain("min-h-[5.25rem]")
+    expect(ui).toContain("sticky")
+    expect(ui).toContain("jobTicket:")
+    expect(ui).not.toContain("jobTicketMetalLight")
+    // Merged tickets use parchment --ticket-merged (#f4f1e8), not white/metal.
+    expect(ui).toMatch(/jobTicket:[\s\S]*?--ticket-merged/)
+    expect(stylesSource()).toContain("--ticket-merged: #f4f1e8")
+    // Dark theme must not restyle the board: light tokens re-locked on surface.
+    // Tailwind utilities read --color-* (computed at :root), so aliases must
+    // be re-set too — --ink alone does not fix bg-ink / text-ink / border-ink.
+    expect(boardSource()).toContain("data-kanban-surface")
+    expect(stylesSource()).toContain(
+      '[data-theme="dark"] [data-kanban-surface]',
     )
-    expect(desktopStyles).toContain(".pipeline-board::before")
-    expect(desktopStyles).toContain(".lane-roundel")
-    expect(desktopStyles).toContain(".lane-chrome")
-    expect(desktopStyles).toContain(".lane-platform")
-    expect(desktopStyles).toContain(".lane-header")
-    expect(desktopStyles).toContain("position: sticky")
-    expect(desktopStyles).toContain(".job-ticket")
-    expect(desktopStyles).toContain("inset 6px 0 0")
-    expect(desktopStyles).toContain(".lane-switcher")
-    expect(desktopStyles).toContain("display: none")
-    expect(desktopStyles).toContain(".queue-hint")
-    expect(desktopStyles).not.toContain("--industrial-concrete")
-    // ≤1500px pins the nameboard stack (chrome), not a free-floating absolute roundel alone.
-    const midStyles = stylesSource().split("@media (max-width: 1500px)")[1]
-    expect(midStyles).toBeDefined()
-    expect(midStyles).toContain(".lane-chrome")
-    expect(midStyles).toContain("position: sticky")
+    expect(stylesSource()).toMatch(
+      /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--ticket-merged: #f4f1e8/,
+    )
+    expect(stylesSource()).toMatch(
+      /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--color-ink: #151515/,
+    )
+    expect(stylesSource()).toMatch(
+      /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--color-panel: #ffffff/,
+    )
+    expect(stylesSource()).toMatch(
+      /\[data-theme="dark"\] \[data-kanban-surface\][\s\S]*?--color-merged-halo: transparent/,
+    )
+    expect(ui).toContain("shadow-[inset_6px_0_0")
+    expect(ui).toContain("laneSwitcher:")
+    // Lane switcher hidden on desktop, grid on mobile.
+    expect(ui).toMatch(/laneSwitcher:[\s\S]*?hidden/)
+    expect(ui).toContain("queueHint:")
+    // Counts live in route roundels; header keeps title only.
+    expect(ui).not.toContain("laneNumber:")
+    expect(ui).not.toContain("laneCount:")
+    // Open white platforms / chrome stack are gone; route line stays.
+    expect(ui).not.toContain("laneChrome:")
+    expect(ui).not.toContain("lanePlatform:")
+    expect(stylesSource()).not.toContain(".lane-chrome")
+    expect(stylesSource()).not.toContain(".lane-platform")
   })
 
   test("uses full viewport chrome on every route; home board stays uncapped under header", () => {
@@ -426,40 +459,40 @@ describe("kanban home board", () => {
     expect(rootComponent).not.toContain("isKanbanPage")
     // Interchange chrome is full-bleed; page content uses shared page-shell padding.
     expect(rootComponent).toContain('className="min-h-screen w-full"')
-    expect(root).toContain('className="page-shell"')
+    expect(root).toContain("className={ui.pageShell}")
     // Shell must not pathname-gate or hardcode the reading-width cap.
     expect(rootComponent).not.toContain("max-w-[88rem]")
     expect(rootComponent).not.toContain('pathname === "/"')
 
     // industrial-shell must not re-impose a second width cap under home board.
-    const styles = stylesSource()
-    const shellBlock = styles.slice(
-      styles.indexOf(".industrial-shell {"),
-      styles.indexOf("}", styles.indexOf(".industrial-shell {")) + 1,
-    )
-    expect(shellBlock).toContain(".industrial-shell {")
-    expect(shellBlock).not.toContain("max-width: 100rem")
-    expect(shellBlock).not.toMatch(/max-width\s*:/)
+    const ui = uiSource()
+    const shellMatch = ui.match(/industrialShell:\s*"([^"]*)"/)
+    expect(shellMatch).not.toBeNull()
+    expect(shellMatch![1]).toBe("mx-auto")
+    expect(shellMatch![1]).not.toMatch(/max-w/)
   })
 
   test("uses a touch-scrollable repository row and three-column lane selector on mobile", () => {
-    const mobileStyles = stylesSource().split("@media (max-width: 900px)")[1]
-    expect(mobileStyles).toBeDefined()
-    expect(mobileStyles).toContain(".repository-filters")
-    expect(mobileStyles).toContain("flex-wrap: nowrap")
-    expect(mobileStyles).toContain("overflow-x: auto")
-    expect(mobileStyles).toContain("touch-action: pan-x")
-    expect(mobileStyles).toContain(".lane-switcher")
-    expect(mobileStyles).toContain("display: grid")
-    expect(mobileStyles).toContain(
-      "grid-template-columns: repeat(3, minmax(0, 1fr))",
+    // Mobile rules are baked into ui recipes as max-[900px]:… utilities.
+    const ui = uiSource()
+    expect(ui).toContain("repositoryFilters:")
+    expect(ui).toMatch(/repositoryFilters:[\s\S]*?max-\[900px\]:flex-nowrap/)
+    expect(ui).toMatch(
+      /repositoryFilters:[\s\S]*?max-\[900px\]:overflow-x-auto/,
     )
-    expect(mobileStyles).toContain(".pipeline-lane")
-    expect(mobileStyles).toContain("display: none")
-    expect(mobileStyles).toMatch(
-      /\.pipeline-lane\[data-mobile-active="true"\]\s*\{\s*display: block;\s*\}/,
+    expect(ui).toMatch(
+      /repositoryFilters:[\s\S]*?max-\[900px\]:\[touch-action:pan-x\]/,
     )
-    expect(mobileStyles).toContain(".lane-header")
-    expect(mobileStyles).toContain("position: static")
+    expect(ui).toContain("laneSwitcher:")
+    expect(ui).toMatch(/laneSwitcher:[\s\S]*?max-\[900px\]:grid/)
+    expect(ui).toMatch(/laneSwitcher:[\s\S]*?max-\[900px\]:grid-cols-3/)
+    expect(ui).toContain("pipelineLane:")
+    // Hidden by default on mobile; shown when data-mobile-active.
+    expect(ui).toMatch(/pipelineLane:[\s\S]*?max-\[900px\]:hidden/)
+    expect(ui).toMatch(
+      /pipelineLane:[\s\S]*?max-\[900px\]:data-\[mobile-active=true\]:flex/,
+    )
+    expect(ui).toContain("laneHeader:")
+    expect(ui).toMatch(/laneHeader:[\s\S]*?max-\[900px\]:static/)
   })
 })

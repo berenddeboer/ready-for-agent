@@ -1,15 +1,15 @@
 /**
  * Shared Jobs progress chrome: lifecycle chips, status tags, PR badges.
- * Interchange component classes (§5.1–5.2, §5.5). Board density floors at
- * 0.56rem mono; prefer CSS classes over Tailwind rem utilities.
+ * Tailwind recipes from `ui.ts` (§5.1–5.2, §5.5).
  */
 import type { LifecyclePipelineLaneId } from "./pipeline-lanes.js"
+import { cx, ui } from "./ui.js"
 
-export const lifecycleStepChipClassName = "leg leg--done"
+export const lifecycleStepChipClassName = cx(ui.leg, ui.legDone)
 
-export const statusBadgeBaseClassName = "status-tag"
+export const statusBadgeBaseClassName = ui.statusTag
 
-export const prBadgeClassName = "pr-badge"
+export const prBadgeClassName = ui.prBadge
 
 const LANE_STYLE: Record<
   LifecyclePipelineLaneId,
@@ -42,16 +42,16 @@ export function statusBadgeClassNameForStatus(status: string): string {
     status === "INTERRUPTED" ||
     status === "NEEDS_HUMAN" ||
     status === "NEEDS_HUMAN_REVIEW"
-      ? "status-tag--alarm"
+      ? ui.statusTagAlarm
       : status === "COMPLETE" || status === "SUCCEEDED"
-        ? "status-tag--complete"
+        ? ui.statusTagComplete
         : status === "ABANDONED" || status === "CANCELLED"
-          ? "status-tag--ghost"
+          ? ui.statusTagGhost
           : status === "WAITING_FOR_WORKER_SLOT" ||
               status === "WAITING_FOR_BLOCKERS"
-            ? "status-tag--hold"
-            : "status-tag--plain"
-  return `${statusBadgeBaseClassName} ${tone}`
+            ? ui.statusTagHold
+            : ui.statusTagPlain
+  return cx(statusBadgeBaseClassName, tone)
 }
 
 /**
@@ -68,27 +68,32 @@ export function lifecycleStepChipClassNameForStatus(status: string): string {
     status === "NEEDS_HUMAN" ||
     status === "NEEDS_HUMAN_REVIEW"
   ) {
-    return "leg leg--fail"
+    return cx(ui.leg, ui.legFail)
   }
   if (status === "RUNNING") {
-    return "leg leg--run"
+    return cx(ui.leg, ui.legRun)
   }
   if (status === "SUCCEEDED" || status === "COMPLETE") {
-    return "leg leg--done"
+    return cx(ui.leg, ui.legDone)
   }
   // QUEUED / unreached / other holds
-  return "leg leg--next"
+  return cx(ui.leg, ui.legNext)
 }
 
-/** Message line under the status tag (§5.1). Alarm statuses get ▲ via CSS. */
-export function statusMessageClassNameForStatus(status: string): string {
-  if (
+/** Alarm Work Item statuses — UI prefixes the message with ▲. */
+export function isStatusMessageAlarm(status: string): boolean {
+  return (
     status === "FAILED" ||
     status === "INTERRUPTED" ||
     status === "NEEDS_HUMAN" ||
     status === "NEEDS_HUMAN_REVIEW"
-  ) {
-    return "status-message status-message--alarm"
+  )
+}
+
+/** Message line under the status tag (§5.1). Alarm statuses get ▲ in the row. */
+export function statusMessageClassNameForStatus(status: string): string {
+  if (isStatusMessageAlarm(status)) {
+    return cx(ui.statusMessage, ui.statusMessageAlarm)
   }
-  return "status-message"
+  return ui.statusMessage
 }

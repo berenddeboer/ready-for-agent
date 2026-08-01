@@ -81,9 +81,13 @@ Then("all six pipeline lane headers are visible", async ({ page }) => {
 })
 
 Then("the Pipeline jobs tab is active", async ({ page }) => {
+  // Jobs destinations are a navigation list (not ARIA tabs).
   await expect(
-    page.getByRole("tab", { name: "Pipeline", exact: true }),
-  ).toHaveAttribute("aria-selected", "true")
+    page.getByRole("navigation", { name: "Jobs" }).getByRole("link", {
+      name: "Pipeline",
+      exact: true,
+    }),
+  ).toHaveAttribute("aria-current", "page")
 })
 
 Then("repository management is not rendered", async ({ page }) => {

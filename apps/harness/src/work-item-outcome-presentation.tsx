@@ -1,3 +1,4 @@
+import { ui } from "./ui.js"
 import { prBadgeClassName } from "./work-item-progress-chrome.js"
 
 /**
@@ -81,7 +82,7 @@ export function WorkItemOutcomePresentation({
           )}
           {summary !== "" && (
             <section
-              className="completion-summary"
+              className={ui.completionSummary}
               aria-label="Completion summary"
             >
               <p>{summary}</p>

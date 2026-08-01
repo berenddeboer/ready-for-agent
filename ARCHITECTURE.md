@@ -20,4 +20,11 @@
 - Prefer Bun APIs.
 - All action/work is done by clanker, harness only does the purely deterministic steering,
   while always consulting the clanker for advice.
-- Use tailwind
+- **UI styling: Tailwind first.** Put layout and visuals in component
+  `className`s as Tailwind utilities (see `apps/harness/src/ui.ts` for shared
+  recipes). `apps/harness/src/styles.css` holds design tokens (`@theme` /
+  CSS variables), base element defaults, keyframes, and only CSS that
+  utilities cannot express cleanly (e.g. `dialog::backdrop`). Do **not**
+  grow a parallel component stylesheet — no new `.foo { … }` rules for UI
+  chrome. Theme values live as CSS variables / `@theme` colors so utilities
+  like `bg-paper` and `text-ink` stay theme-aware.

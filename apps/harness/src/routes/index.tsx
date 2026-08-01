@@ -35,10 +35,6 @@ import {
   useNowMs,
 } from "../live-duration.js"
 import {
-  localCommittedPullRequestDayBounds,
-  msUntilNextLocalMidnight,
-} from "../local-day-bounds.js"
-import {
   ParentIssueActionsMenu,
   isParentImplementAllWithAutoMergeEligible,
 } from "../parent-issue-actions-menu.js"
@@ -60,14 +56,15 @@ import {
   liveUpdatesWarningPresentation,
 } from "../refresh-repositories-live.js"
 import {
-  committedPullRequestsCountQueryKeyPrefix,
   completedWorkItemsHistoryQueryKeyPrefix,
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
+import { cx, ui } from "../ui.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
 import { canShowWorkItemResetAction } from "../work-item-job-actions.js"
 import { WorkItemOutcomePresentation } from "../work-item-outcome-presentation.js"
 import {
+  isStatusMessageAlarm,
   lifecycleLaneCssVars,
   lifecycleStepChipClassNameForStatus,
   statusBadgeClassNameForStatus,
@@ -459,10 +456,11 @@ type WorkItemsQueryOptions = {
 }
 
 /**
- * Rolling window hours for Jobs Completed labels (same source as server filter).
+ * Rolling window hours for Jobs Completed (same source as server filter).
  * Filtering uses Work Item stateReadyAt within JOBS_COMPLETED_WINDOW_MS on the API.
+ * Kept in the query key so a window-hours change busts the client cache.
  */
-export const JOBS_COMPLETED_WINDOW_HOURS = jobsCompletedWindowHours
+const JOBS_COMPLETED_WINDOW_HOURS = jobsCompletedWindowHours
 /** Failed history window (fixed item cap; independent of Completed). */
 export const JOBS_FAILED_LIMIT = 15
 /** Historical Completed page size (server-paginated; not the Jobs 24 h tab). */
@@ -506,10 +504,15 @@ export const jobsFailedWorkItemsQuery = (repositoryId: string) =>
     limit: JOBS_FAILED_LIMIT,
   })
 
-export const jobsCompletedWorkItemsQuery = (repositoryId: string) =>
-  workItemsQuery(repositoryId, {
+export const jobsCompletedWorkItemsQuery = (repositoryId: string) => {
+  const base = workItemsQuery(repositoryId, {
     listKind: "COMPLETED",
   })
+  return {
+    ...base,
+    queryKey: [...base.queryKey, JOBS_COMPLETED_WINDOW_HOURS] as const,
+  }
+}
 
 export type CompletedWorkItemsPage = {
   readonly items: readonly WorkItem[]
@@ -549,18 +552,6 @@ export const completedWorkItemsHistoryQuery = (page: number) => ({
       },
     })
     return result.completedWorkItems
-  },
-})
-
-const committedPullRequestsCountQuery = (from: string, to: string) => ({
-  queryKey: [...committedPullRequestsCountQueryKeyPrefix, from, to] as const,
-  queryFn: async (): Promise<number> => {
-    const result = await graphql.query({
-      committedPullRequestsCount: {
-        __args: { from, to },
-      },
-    })
-    return result.committedPullRequestsCount
   },
 })
 
@@ -650,8 +641,8 @@ function HomeContent() {
           aria-label="Loading home"
           aria-busy="true"
         >
-          <span className="skeleton h-10 w-[40%]" />
-          <span className="skeleton h-24" />
+          <span className={cx(ui.skeleton, "h-10", "w-[40%]")} />
+          <span className={cx(ui.skeleton, "h-24")} />
         </div>
       </main>
     )
@@ -691,8 +682,8 @@ function HomeContent() {
               aria-label="Loading add repository guidance"
               aria-busy="true"
             >
-              <span className="skeleton h-10 w-[50%]" />
-              <span className="skeleton h-32" />
+              <span className={cx(ui.skeleton, "h-10", "w-[50%]")} />
+              <span className={cx(ui.skeleton, "h-32")} />
             </div>
           }
         >
@@ -714,167 +705,6 @@ function EmptyRepositoriesBlankSlate() {
       command={addRepositoryCommand}
       heading="No repositories configured"
     />
-  )
-}
-
-export function CommittedPullRequestsDashboard() {
-  const [bounds, setBounds] = useState(() =>
-    localCommittedPullRequestDayBounds(),
-  )
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const syncBounds = () => {
-      const next = localCommittedPullRequestDayBounds()
-      setBounds((current) =>
-        current.todayFrom === next.todayFrom && current.todayTo === next.todayTo
-          ? current
-          : next,
-      )
-    }
-    const scheduleMidnightRollover = () => {
-      timer = setTimeout(() => {
-        syncBounds()
-        scheduleMidnightRollover()
-      }, msUntilNextLocalMidnight())
-    }
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") syncBounds()
-    }
-    scheduleMidnightRollover()
-    document.addEventListener("visibilitychange", onVisibility)
-    return () => {
-      if (timer !== undefined) clearTimeout(timer)
-      document.removeEventListener("visibilitychange", onVisibility)
-    }
-  }, [])
-
-  const todayQuery = useQuery(
-    committedPullRequestsCountQuery(bounds.todayFrom, bounds.todayTo),
-  )
-  const yesterdayQuery = useQuery(
-    committedPullRequestsCountQuery(bounds.yesterdayFrom, bounds.yesterdayTo),
-  )
-  const thisWeekQuery = useQuery(
-    committedPullRequestsCountQuery(bounds.thisWeekFrom, bounds.thisWeekTo),
-  )
-  const lastWeekQuery = useQuery(
-    committedPullRequestsCountQuery(bounds.lastWeekFrom, bounds.lastWeekTo),
-  )
-  const twoWeeksAgoQuery = useQuery(
-    committedPullRequestsCountQuery(
-      bounds.twoWeeksAgoFrom,
-      bounds.twoWeeksAgoTo,
-    ),
-  )
-  const loading =
-    todayQuery.isLoading ||
-    yesterdayQuery.isLoading ||
-    thisWeekQuery.isLoading ||
-    lastWeekQuery.isLoading ||
-    twoWeeksAgoQuery.isLoading
-  const failed =
-    todayQuery.isError ||
-    yesterdayQuery.isError ||
-    thisWeekQuery.isError ||
-    lastWeekQuery.isError ||
-    twoWeeksAgoQuery.isError
-
-  if (loading) {
-    return (
-      <article
-        className="merged-pr-stats"
-        role="status"
-        aria-label="Loading committed pull requests"
-        aria-busy="true"
-      >
-        <header className="merged-pr-stats-head">
-          <span className="merged-pr-stats-tag">Merged</span>
-          <h2 className="merged-pr-stats-title">Merged PR throughput</h2>
-          <span className="merged-pr-stats-note">
-            Qty per period · local time
-          </span>
-        </header>
-        <div className="merged-pr-stats-grid">
-          <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton" />
-          </div>
-          <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton" />
-          </div>
-          <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton" />
-          </div>
-          <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton" />
-          </div>
-          <div className="merged-pr-stats-cell">
-            <span className="merged-pr-stats-skeleton" />
-          </div>
-        </div>
-      </article>
-    )
-  }
-
-  if (failed) {
-    return (
-      <article className="merged-pr-stats">
-        <header className="merged-pr-stats-head">
-          <span className="merged-pr-stats-tag">Merged</span>
-          <h2 className="merged-pr-stats-title">Merged PR throughput</h2>
-        </header>
-        <div className="merged-pr-stats-body">
-          <Banner
-            tone="alarm"
-            tag="Error"
-            role="alert"
-            className="banner--compact"
-          >
-            Could not load committed pull requests. Please try again.
-          </Banner>
-        </div>
-      </article>
-    )
-  }
-
-  const today = todayQuery.data ?? 0
-  const yesterday = yesterdayQuery.data ?? 0
-  const thisWeek = thisWeekQuery.data ?? 0
-  const lastWeek = lastWeekQuery.data ?? 0
-  const twoWeeksAgo = twoWeeksAgoQuery.data ?? 0
-
-  return (
-    <article className="merged-pr-stats">
-      <header className="merged-pr-stats-head">
-        <span className="merged-pr-stats-tag">Merged</span>
-        <h2 className="merged-pr-stats-title">Merged PR throughput</h2>
-        <span className="merged-pr-stats-note">
-          Qty per period · local time
-        </span>
-      </header>
-      <div className="merged-pr-stats-grid">
-        <div className="merged-pr-stats-cell">
-          <span className="merged-pr-stats-num">{today}</span>
-          <span className="merged-pr-stats-label">Today</span>
-        </div>
-        <div className="merged-pr-stats-cell">
-          <span className="merged-pr-stats-num">{yesterday}</span>
-          <span className="merged-pr-stats-label">Yesterday</span>
-        </div>
-        <div className="merged-pr-stats-cell">
-          <span className="merged-pr-stats-num">{thisWeek}</span>
-          <span className="merged-pr-stats-label">This week</span>
-        </div>
-        <div className="merged-pr-stats-cell">
-          <span className="merged-pr-stats-num">{lastWeek}</span>
-          <span className="merged-pr-stats-label">Last week</span>
-        </div>
-        <div className="merged-pr-stats-cell">
-          <span className="merged-pr-stats-num">{twoWeeksAgo}</span>
-          <span className="merged-pr-stats-label">Two weeks ago</span>
-        </div>
-      </div>
-    </article>
   )
 }
 
@@ -975,7 +805,7 @@ export function RepositoryCards() {
   return (
     <>
       {warning}
-      <section className="repo-cards" aria-label="Configured repositories">
+      <section className={ui.repoCards} aria-label="Configured repositories">
         {repositories.map((repository) => (
           <RepositoryCard
             issuesChangeCount={issuesChangeCounts[repository.id] ?? 0}
@@ -1156,25 +986,24 @@ function AddRepositoryGuidance({
   }
 
   return (
-    <section className="blank-slate" aria-label="Add a repository">
+    <section className={ui.blankSlate} aria-label="Add a repository">
       {heading !== undefined ? (
         <>
-          <span className="kicker-tag">Setup</span>
-          <h2 className="blank-slate-title">{heading}</h2>
+          <span className={ui.kickerTag}>Setup</span>
+          <h2 className={ui.blankSlateTitle}>{heading}</h2>
         </>
       ) : null}
       <form
-        className={
-          heading !== undefined
-            ? "blank-slate-form"
-            : "blank-slate-form blank-slate-form--flush"
-        }
+        className={cx(
+          ui.blankSlateForm,
+          heading === undefined && ui.blankSlateFormFlush,
+        )}
         onSubmit={onSubmit}
       >
         <label className="sr-only" htmlFor="add-repository-path">
           Local repository path
         </label>
-        <div className="blank-slate-path-row">
+        <div className={ui.blankSlatePathRow}>
           <input
             id="add-repository-path"
             type="text"
@@ -1190,15 +1019,15 @@ function AddRepositoryGuidance({
             autoComplete="off"
             spellCheck={false}
             disabled={busy}
-            className="blank-slate-input"
+            className={ui.blankSlateInput}
           />
-          <div className="blank-slate-actions">
+          <div className={ui.blankSlateActions}>
             {directoryPickerAvailable ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => pickDirectory.mutate()}
-                className="plate-mini"
+                className={ui.plateMini}
               >
                 {pickDirectory.isPending ? "Browsing…" : "Browse…"}
               </button>
@@ -1206,7 +1035,7 @@ function AddRepositoryGuidance({
             <button
               type="submit"
               disabled={busy}
-              className="plate-primary"
+              className={ui.platePrimary}
               aria-busy={busy || undefined}
             >
               {addLocalRepository.isPending
@@ -1220,9 +1049,9 @@ function AddRepositoryGuidance({
           </div>
         </div>
         {inspection !== null ? (
-          <fieldset className="blank-slate-fieldset">
+          <fieldset className={ui.blankSlateFieldset}>
             <legend>Confirm forge identity</legend>
-            <label className="blank-slate-field">
+            <label className={ui.blankSlateField}>
               Forge
               <select
                 value={inspection.forge}
@@ -1237,7 +1066,7 @@ function AddRepositoryGuidance({
                 <option value="gitlab">GitLab</option>
               </select>
             </label>
-            <label className="blank-slate-field">
+            <label className={ui.blankSlateField}>
               Forge host
               <input
                 required
@@ -1250,7 +1079,7 @@ function AddRepositoryGuidance({
                 }
               />
             </label>
-            <label className="blank-slate-field">
+            <label className={ui.blankSlateField}>
               Project path
               <input
                 required
@@ -1263,14 +1092,14 @@ function AddRepositoryGuidance({
                 }
               />
             </label>
-            <p className="blank-slate-hint">
+            <p className={ui.blankSlateHint}>
               The project is verified against this forge before it is saved.
             </p>
           </fieldset>
         ) : null}
         {errorMessage !== null ? (
           <Banner
-            className="banner--compact w-full"
+            className={cx(ui.bannerCompact, "w-full")}
             tone="alarm"
             tag="Error"
             role="alert"
@@ -1279,13 +1108,13 @@ function AddRepositoryGuidance({
           </Banner>
         ) : null}
       </form>
-      <div className="blank-slate-divider" aria-hidden="true">
+      <div className={ui.blankSlateDivider} aria-hidden="true">
         <span>or</span>
       </div>
-      <p className="blank-slate-cli">
+      <p className={ui.blankSlateCli}>
         Add a local Git repository with the operator binary:
       </p>
-      <code className="guidance-code max-w-full overflow-x-auto">
+      <code className={cx(ui.guidanceCode, "max-w-full", "overflow-x-auto")}>
         {command}
       </code>
     </section>
@@ -1953,13 +1782,11 @@ function RepositoryCard({
   const pauseLabel = repository.paused
     ? "Unpause repository"
     : "Pause repository"
-  const pauseButtonClassName = [
-    "icon-btn",
-    pauseFailed ? "icon-btn--armed" : null,
-    !pauseFailed && repository.paused ? "icon-btn--paused" : null,
-  ]
-    .filter((part): part is string => part != null)
-    .join(" ")
+  const pauseButtonClassName = cx(
+    ui.iconBtn,
+    pauseFailed && ui.iconBtnArmed,
+    !pauseFailed && repository.paused && ui.iconBtnPaused,
+  )
   const repositoryLabel = `${repository.projectPath}`
   // Dedicated count projection: loading/last-known must not block the card.
   const {
@@ -1983,17 +1810,17 @@ function RepositoryCard({
   const repositoryBodyId = `repository-card-body-${repository.id}`
 
   return (
-    <article className="repo-card">
-      <div className="repo-card-head">
-        <h2 className="repo-card-title">
+    <article className={ui.repoCard}>
+      <div className={ui.repoCardHead}>
+        <h2 className={ui.repoCardTitle}>
           <a
-            className="repo-card-link"
+            className={ui.repoCardLink}
             href={`https://${repository.forgeHost}/${repository.projectPath}`}
           >
             {repositoryLabel}
           </a>
           <span
-            className="repo-card-pr-count"
+            className={ui.repoCardPrCount}
             title={pullRequestCountLabel}
             aria-busy={pullRequestCountLoading ? true : undefined}
           >
@@ -2001,7 +1828,7 @@ function RepositoryCard({
             <span aria-hidden="true">{pullRequestCountDisplay}</span>
           </span>
         </h2>
-        <div className="repo-card-controls">
+        <div className={ui.repoCardControls}>
           <CardCollapseToggle
             collapsed={repositoryCollapsed}
             onToggle={toggleRepositoryCollapsed}
@@ -2061,7 +1888,7 @@ function RepositoryCard({
           <span className="relative" data-repo-menu={repository.id}>
             <button
               type="button"
-              className="icon-btn"
+              className={ui.iconBtn}
               aria-label={`Actions for ${repository.projectPath}`}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
@@ -2074,11 +1901,11 @@ function RepositoryCard({
               </svg>
             </button>
             {menuOpen && (
-              <div role="menu" className="menu-panel min-w-40">
+              <div role="menu" className={cx(ui.menuPanel, "min-w-40")}>
                 <button
                   type="button"
                   role="menuitem"
-                  className="menu-item"
+                  className={ui.menuItem}
                   onClick={() => {
                     setMenuOpen(false)
                     openSettings()
@@ -2086,11 +1913,11 @@ function RepositoryCard({
                 >
                   Settings
                 </button>
-                <hr className="menu-sep" />
+                <hr className={ui.menuSep} />
                 <button
                   type="button"
                   role="menuitem"
-                  className="menu-item menu-item--destructive"
+                  className={cx(ui.menuItem, ui.menuItemDestructive)}
                   disabled={removeRepository.isPending}
                   onClick={() => {
                     setMenuOpen(false)
@@ -2106,7 +1933,7 @@ function RepositoryCard({
       </div>
       <dialog
         ref={settingsDialogRef}
-        className="dialog-panel"
+        className={ui.dialogPanel}
         aria-labelledby={`repo-settings-title-${repository.id}`}
         onCancel={(event) => {
           if (updateSettings.isPending) event.preventDefault()
@@ -2114,27 +1941,27 @@ function RepositoryCard({
         onClose={() => setSettingsOpen(false)}
       >
         <form onSubmit={saveSettings}>
-          <div className="dialog-header">
-            <p className="dialog-kicker">Repository settings</p>
+          <div className={ui.dialogHeader}>
+            <p className={ui.dialogKicker}>Repository settings</p>
             <h2
               id={`repo-settings-title-${repository.id}`}
-              className="dialog-title dialog-title--path"
+              className={cx(ui.dialogTitle, ui.dialogTitlePath)}
             >
               {repository.projectPath}
             </h2>
-            <p className="dialog-lede">
+            <p className={ui.dialogLede}>
               Overrides apply on the next Agent Turn. Empty model fields use
               harness defaults for this Repository&apos;s effective Agent
               Backend.
             </p>
           </div>
-          <div className="dialog-body">
-            <fieldset className="dialog-fieldset">
+          <div className={ui.dialogBody}>
+            <fieldset className={ui.dialogFieldset}>
               <legend>Forge identity</legend>
-              <label className="dialog-field">
+              <label className={ui.dialogField}>
                 Forge
                 <select
-                  className="dialog-input"
+                  className={ui.dialogInput}
                   value={forge}
                   onChange={(event) =>
                     setForge(event.target.value as "github" | "gitlab")
@@ -2144,30 +1971,30 @@ function RepositoryCard({
                   <option value="gitlab">GitLab</option>
                 </select>
               </label>
-              <label className="dialog-field">
+              <label className={ui.dialogField}>
                 Forge host
                 <input
-                  className="dialog-input dialog-input--mono"
+                  className={cx(ui.dialogInput, ui.dialogInputMono)}
                   required
                   value={forgeHost}
                   onChange={(event) => setForgeHost(event.target.value)}
                 />
               </label>
-              <label className="dialog-field">
+              <label className={ui.dialogField}>
                 Project path
                 <input
-                  className="dialog-input dialog-input--mono"
+                  className={cx(ui.dialogInput, ui.dialogInputMono)}
                   required
                   value={projectPath}
                   onChange={(event) => setProjectPath(event.target.value)}
                 />
               </label>
-              <span className="dialog-field-hint">
+              <span className={ui.dialogFieldHint}>
                 GitLab identities are verified before Save. Identity changes are
                 blocked after this Repository has any Work Item.
               </span>
             </fieldset>
-            <label className="dialog-check">
+            <label className={ui.dialogCheck}>
               <input
                 type="checkbox"
                 className="size-4"
@@ -2175,11 +2002,11 @@ function RepositoryCard({
                 onChange={(event) => setPaused(event.target.checked)}
               />
               Paused
-              <span className="dialog-field-hint">
+              <span className={ui.dialogFieldHint}>
                 Skip autonomous work selection
               </span>
             </label>
-            <label className="dialog-check">
+            <label className={ui.dialogCheck}>
               <input
                 type="checkbox"
                 className="size-4"
@@ -2187,11 +2014,11 @@ function RepositoryCard({
                 onChange={(event) => setAutoMerge(event.target.checked)}
               />
               Auto-merge
-              <span className="dialog-field-hint">
+              <span className={ui.dialogFieldHint}>
                 Allow clanker merge when risk is low
               </span>
             </label>
-            <label className="dialog-check">
+            <label className={ui.dialogCheck}>
               <input
                 type="checkbox"
                 className="size-4"
@@ -2201,11 +2028,11 @@ function RepositoryCard({
                 }
               />
               Include all Issue Authors
-              <span className="dialog-field-hint">
+              <span className={ui.dialogFieldHint}>
                 Relevant Issues from every author after Refresh
               </span>
             </label>
-            <label className="dialog-field">
+            <label className={ui.dialogField}>
               <span className="flex items-center gap-3">
                 <input
                   type="checkbox"
@@ -2217,17 +2044,17 @@ function RepositoryCard({
                 />
                 Wait for checks to start after ready for review
               </span>
-              <span className="dialog-field-hint">
+              <span className={ui.dialogFieldHint}>
                 Wait up to 90 seconds for workflows that start after a PR is
                 marked ready for review. If this repository has no such
                 workflows, turn off this setting to skip the wait.
               </span>
             </label>
 
-            <label className="dialog-field">
+            <label className={ui.dialogField}>
               Agent Backend
               <select
-                className="dialog-input"
+                className={ui.dialogInput}
                 name="selectedAgentBackend"
                 value={selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE}
                 disabled={
@@ -2256,7 +2083,7 @@ function RepositoryCard({
                   </option>
                 ))}
               </select>
-              <span className="dialog-field-hint">
+              <span className={ui.dialogFieldHint}>
                 {backendChangeBlocked
                   ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
                       repository.blockingUnfinishedWorkItemCount === 1
@@ -2269,7 +2096,7 @@ function RepositoryCard({
 
             {agentBackends.isError && (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -2281,7 +2108,7 @@ function RepositoryCard({
 
             {usesPreviewCatalog && previewError !== null && (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -2295,10 +2122,10 @@ function RepositoryCard({
             )}
 
             {modelsLoading ? (
-              <p className="dialog-loading">Loading models...</p>
+              <p className={ui.dialogLoading}>Loading models...</p>
             ) : !usesPreviewCatalog && models.isError ? (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -2307,10 +2134,10 @@ function RepositoryCard({
               </Banner>
             ) : (
               <>
-                <label className="dialog-field">
+                <label className={ui.dialogField}>
                   Build model
                   <select
-                    className="dialog-input dialog-input--mono"
+                    className={cx(ui.dialogInput, ui.dialogInputMono)}
                     value={defaultModel}
                     disabled={modelsDisabled}
                     onChange={(event) => {
@@ -2359,7 +2186,7 @@ function RepositoryCard({
                 {buildVariantSourceModel.length > 0 &&
                 buildVariantSourceUnavailable ? (
                   <Banner
-                    className="banner--compact"
+                    className={ui.bannerCompact}
                     tone="alarm"
                     tag="Error"
                     role="alert"
@@ -2370,16 +2197,16 @@ function RepositoryCard({
                   </Banner>
                 ) : buildVariantSourceModel.length > 0 &&
                   buildVariants.length === 0 ? (
-                  <p className="dialog-note">
+                  <p className={ui.dialogNote}>
                     Build effort (thinking) override is unavailable — this model
                     has no effort (thinking) options. Use harness default or
                     pick another model.
                   </p>
                 ) : (
-                  <label className="dialog-field">
+                  <label className={ui.dialogField}>
                     Build effort (thinking)
                     <select
-                      className="dialog-input"
+                      className={ui.dialogInput}
                       value={defaultThinkingLevel}
                       onChange={(event) =>
                         setDefaultVariant(event.target.value)
@@ -2406,10 +2233,10 @@ function RepositoryCard({
                     </select>
                   </label>
                 )}
-                <label className="dialog-field">
+                <label className={ui.dialogField}>
                   Review model
                   <select
-                    className="dialog-input dialog-input--mono"
+                    className={cx(ui.dialogInput, ui.dialogInputMono)}
                     value={reviewModel}
                     disabled={modelsDisabled}
                     onChange={(event) => {
@@ -2449,7 +2276,7 @@ function RepositoryCard({
                 {reviewThinkingLevelSourceModel.length > 0 &&
                 reviewThinkingLevelSourceUnavailable ? (
                   <Banner
-                    className="banner--compact"
+                    className={ui.bannerCompact}
                     tone="alarm"
                     tag="Error"
                     role="alert"
@@ -2460,16 +2287,16 @@ function RepositoryCard({
                   </Banner>
                 ) : reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevels.length === 0 ? (
-                  <p className="dialog-note">
+                  <p className={ui.dialogNote}>
                     Review effort (thinking) override is unavailable — this
                     model has no effort (thinking) options. Use harness default
                     or pick another model.
                   </p>
                 ) : (
-                  <label className="dialog-field">
+                  <label className={ui.dialogField}>
                     Review effort (thinking)
                     <select
-                      className="dialog-input"
+                      className={ui.dialogInput}
                       value={reviewThinkingLevel}
                       onChange={(event) => setReviewVariant(event.target.value)}
                       disabled={
@@ -2498,7 +2325,7 @@ function RepositoryCard({
             )}
             {updateSettings.isError && (
               <Banner
-                className="banner--compact"
+                className={ui.bannerCompact}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -2509,10 +2336,10 @@ function RepositoryCard({
               </Banner>
             )}
           </div>
-          <div className="dialog-footer">
+          <div className={ui.dialogFooter}>
             <button
               type="button"
-              className="plate-mini"
+              className={ui.plateMini}
               onClick={() => {
                 settingsDialogRef.current?.close()
                 setSettingsOpen(false)
@@ -2523,7 +2350,7 @@ function RepositoryCard({
             </button>
             <button
               type="submit"
-              className="plate-primary"
+              className={ui.platePrimary}
               aria-busy={updateSettings.isPending || undefined}
               disabled={
                 updateSettings.isPending ||
@@ -2546,16 +2373,16 @@ function RepositoryCard({
       </dialog>
       {!repositoryCollapsed && (
         <div id={repositoryBodyId}>
-          <dl className="repo-meta">
-            <div className="repo-meta-row">
+          <dl className={ui.repoMeta}>
+            <div className={ui.repoMetaRow}>
               <dt>Path</dt>
               <dd title={repository.localPath}>{repository.localPath}</dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Checkout</dt>
               <dd>{repository.isBare ? "Bare repository" : "Working tree"}</dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Agent Backend</dt>
               <dd>
                 {repository.selectedAgentBackend === null
@@ -2563,7 +2390,7 @@ function RepositoryCard({
                   : repository.effectiveAgentBackend}
               </dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Build model</dt>
               <dd>
                 {repository.defaultModel ??
@@ -2581,7 +2408,7 @@ function RepositoryCard({
                     : "Harness default")}
               </dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Review model</dt>
               <dd>
                 {repository.reviewModel ??
@@ -2609,17 +2436,17 @@ function RepositoryCard({
                     : "Harness default")}
               </dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Auto-merge</dt>
               <dd>{repository.autoMerge ? "Enabled" : "Disabled"}</dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Include all Issue Authors</dt>
               <dd>
                 {repository.includeAllIssueAuthors ? "Enabled" : "Disabled"}
               </dd>
             </div>
-            <div className="repo-meta-row">
+            <div className={ui.repoMetaRow}>
               <dt>Wait for ready checks</dt>
               <dd>
                 {repository.waitForReadyForReviewChecks
@@ -2639,7 +2466,7 @@ function RepositoryCard({
                   githubTokenCreated ? (
                     <button
                       type="button"
-                      className="plate-primary"
+                      className={ui.platePrimary}
                       disabled={addGitHubToken.isPending}
                       aria-busy={addGitHubToken.isPending || undefined}
                       onClick={() => addGitHubToken.mutate()}
@@ -2650,7 +2477,7 @@ function RepositoryCard({
                     </button>
                   ) : (
                     <a
-                      className="plate-primary"
+                      className={ui.platePrimary}
                       href={repository.credential.githubTokenCreationUrl}
                       onClick={() => setGithubTokenCreated(true)}
                       rel="noreferrer"
@@ -2665,7 +2492,7 @@ function RepositoryCard({
                 {githubTokenCreated ? (
                   <p className="m-0 mt-1">
                     Store the generated token as{" "}
-                    <code className="guidance-code">
+                    <code className={ui.guidanceCode}>
                       {repository.credential.githubTokenSecretName}
                     </code>{" "}
                     in Keymaxxer. Already-created tokens are not upgraded
@@ -2676,7 +2503,7 @@ function RepositoryCard({
                   <p className="m-0 mt-1">
                     Create a fine-grained token, choose{" "}
                     <strong>Only select repositories</strong>, select{" "}
-                    <code className="guidance-code">
+                    <code className={ui.guidanceCode}>
                       {repository.projectPath.split("/").at(-1)}
                     </code>
                     , and allow <strong>Actions: Read and write</strong>{" "}
@@ -2703,7 +2530,7 @@ function RepositoryCard({
                   gitlabTokenCreated ? (
                     <button
                       type="button"
-                      className="plate-primary"
+                      className={ui.platePrimary}
                       disabled={addGitLabToken.isPending}
                       aria-busy={addGitLabToken.isPending || undefined}
                       onClick={() => addGitLabToken.mutate()}
@@ -2714,7 +2541,7 @@ function RepositoryCard({
                     </button>
                   ) : (
                     <a
-                      className="plate-primary"
+                      className={ui.platePrimary}
                       href={repository.credential.githubTokenCreationUrl}
                       onClick={() => setGitlabTokenCreated(true)}
                       rel="noreferrer"
@@ -2732,12 +2559,12 @@ function RepositoryCard({
                   {gitlabTokenCreated ? (
                     <>
                       Store the generated token as{" "}
-                      <code className="guidance-code">
+                      <code className={ui.guidanceCode}>
                         {repository.credential.githubTokenSecretName}
                       </code>{" "}
                       in Keymaxxer when available (provider{" "}
-                      <code className="guidance-code">gitlab</code>, account{" "}
-                      <code className="guidance-code">
+                      <code className={ui.guidanceCode}>gitlab</code>, account{" "}
+                      <code className={ui.guidanceCode}>
                         {repository.forgeHost}/{repository.projectPath}
                       </code>
                       ). Or set ambient auth without Keymaxxer:{" "}
@@ -2746,15 +2573,15 @@ function RepositoryCard({
                     <>
                       Create a personal access token on this GitLab instance
                       with API access for{" "}
-                      <code className="guidance-code">
+                      <code className={ui.guidanceCode}>
                         {repository.projectPath}
                       </code>
                       . Store it in Keymaxxer when available, or set ambient
                       auth:{" "}
                     </>
                   )}
-                  <code className="guidance-code">GITLAB_TOKEN</code> or{" "}
-                  <code className="guidance-code">
+                  <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
+                  <code className={ui.guidanceCode}>
                     glab auth login --hostname {repository.forgeHost}
                   </code>{" "}
                   before starting the Harness.
@@ -2762,19 +2589,19 @@ function RepositoryCard({
                 {addGitLabToken.isError ? (
                   <p className="m-0 mt-1">
                     Keymaxxer setup was cancelled or failed. Use ambient{" "}
-                    <code className="guidance-code">GITLAB_TOKEN</code> or{" "}
-                    <code className="guidance-code">glab auth login</code> and
+                    <code className={ui.guidanceCode}>GITLAB_TOKEN</code> or{" "}
+                    <code className={ui.guidanceCode}>glab auth login</code> and
                     restart the Harness if Keymaxxer is unavailable.
                   </p>
                 ) : null}
               </Banner>
             )}
-          <div className="repo-issues">
-            <div className="repo-issues-head">
-              <h3 className="repo-issues-kicker">Relevant issues</h3>
+          <div className={ui.repoIssues}>
+            <div className={ui.repoIssuesHead}>
+              <h3 className={ui.repoIssuesKicker}>Relevant issues</h3>
               <button
                 type="button"
-                className="icon-btn"
+                className={ui.iconBtn}
                 disabled={refreshingIssues || !repository.credential.configured}
                 onClick={() => refreshIssues.mutate()}
                 aria-label={
@@ -2809,7 +2636,7 @@ function RepositoryCard({
             </div>
             {refreshIssues.isError && (
               <Banner
-                className="banner--compact mb-2"
+                className={cx(ui.bannerCompact, "mb-2")}
                 tone="alarm"
                 tag="Error"
                 role="alert"
@@ -2818,7 +2645,7 @@ function RepositoryCard({
               </Banner>
             )}
             {repository.issuesReconciledAt === null ? (
-              <p className="repo-issues-empty">Not refreshed yet.</p>
+              <p className={ui.repoIssuesEmpty}>Not refreshed yet.</p>
             ) : (
               <Suspense fallback={<RepositoryIssuesSkeleton />}>
                 <RepositoryIssues
@@ -2831,7 +2658,7 @@ function RepositoryCard({
           </div>
           {removeRepository.isError && (
             <Banner
-              className="banner--compact mt-3"
+              className={cx(ui.bannerCompact, "mt-3")}
               tone="alarm"
               tag="Error"
               role="alert"
@@ -2858,7 +2685,7 @@ function RepositoryIssues({
 
   if (issues.length === 0) {
     return (
-      <p className="repo-issues-empty">
+      <p className={ui.repoIssuesEmpty}>
         No issues found this harness can work on.
       </p>
     )
@@ -2873,7 +2700,7 @@ function RepositoryIssues({
   }
 
   return (
-    <ul className="repo-issues-list">
+    <ul className={ui.repoIssuesList}>
       {issues.map((issue) => {
         if (issue.parent !== null) return null
         if (!issue.hasChildren) {
@@ -2981,28 +2808,28 @@ function ParentIssueGroup({
 
   return (
     <li className="min-w-0">
-      <details className="parent-issue" open>
+      <details className={ui.parentIssue} open>
         <summary>
-          <span className="repo-issue-num">#{parent.issueNumber}</span>
+          <span className={ui.repoIssueNum}>#{parent.issueNumber}</span>
           <span className="min-w-0">
             <a
-              className="repo-issue-title"
+              className={ui.repoIssueTitle}
               href={parent.url}
               onClick={(event) => event.stopPropagation()}
             >
               {parent.title}
             </a>
             {parent.issueAuthor !== null && parent.issueAuthor !== "" && (
-              <span className="repo-issue-author">{parent.issueAuthor}</span>
+              <span className={ui.repoIssueAuthor}>{parent.issueAuthor}</span>
             )}
           </span>
-          <span className="parent-issue-summary-actions">
-            <span className="parent-issue-closed-count">
+          <span className={ui.parentIssueSummaryActions}>
+            <span className={ui.parentIssueClosedCount}>
               {closedChildren}/{childIssues.length} closed
             </span>
             <svg
               aria-hidden="true"
-              className="parent-issue-chevron"
+              className={ui.parentIssueChevron}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -3026,7 +2853,7 @@ function ParentIssueGroup({
         </summary>
         {implementAll.isError && (
           <Banner
-            className="banner--compact parent-issue-error"
+            className={cx(ui.bannerCompact, ui.parentIssueError)}
             tone="alarm"
             tag="Error"
             role="alert"
@@ -3035,7 +2862,7 @@ function ParentIssueGroup({
             and try again.
           </Banner>
         )}
-        <ul className="parent-issue-children">
+        <ul className={ui.parentIssueChildren}>
           {childIssues.map((child) => (
             <RepositoryIssueRow
               issue={child}
@@ -3148,29 +2975,29 @@ function RepositoryIssueRow({
   }, [issue.id, menuOpen])
 
   return (
-    <li className="repo-issue">
-      <div className="repo-issue-row">
-        <span className="repo-issue-num">#{issue.issueNumber}</span>
+    <li className={ui.repoIssue}>
+      <div className={ui.repoIssueRow}>
+        <span className={ui.repoIssueNum}>#{issue.issueNumber}</span>
         <span className="min-w-0">
-          <a className="repo-issue-title" href={issue.url}>
+          <a className={ui.repoIssueTitle} href={issue.url}>
             {issue.title}
           </a>
           {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
-            <span className="repo-issue-author">{issue.issueAuthor}</span>
+            <span className={ui.repoIssueAuthor}>{issue.issueAuthor}</span>
           )}
         </span>
-        <span className="repo-issue-actions">
+        <span className={ui.repoIssueActions}>
           {issue.state === "CLOSED" && (
-            <span className="stamp stamp--closed">Closed</span>
+            <span className={cx(ui.stamp, ui.stampClosed)}>Closed</span>
           )}
           {issue.blockedBy.length > 0 && (
-            <span className="stamp stamp--blocked">Blocked</span>
+            <span className={cx(ui.stamp, ui.stampBlocked)}>Blocked</span>
           )}
           {(canImplement || canQueue) && (
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
-                className="icon-btn"
+                className={ui.iconBtn}
                 aria-label={`Actions for issue #${issue.issueNumber}`}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
@@ -3183,13 +3010,13 @@ function RepositoryIssueRow({
                 </svg>
               </button>
               {menuOpen && (
-                <div role="menu" className="menu-panel min-w-44">
+                <div role="menu" className={cx(ui.menuPanel, "min-w-44")}>
                   {canImplement && (
                     <>
                       <button
                         type="button"
                         role="menuitem"
-                        className="menu-item"
+                        className={ui.menuItem}
                         disabled={implementPending}
                         onClick={() => {
                           setMenuOpen(false)
@@ -3205,7 +3032,7 @@ function RepositoryIssueRow({
                       <button
                         type="button"
                         role="menuitem"
-                        className="menu-item"
+                        className={ui.menuItem}
                         disabled={implementPending}
                         onClick={() => {
                           setMenuOpen(false)
@@ -3224,7 +3051,7 @@ function RepositoryIssueRow({
                     <button
                       type="button"
                       role="menuitem"
-                      className="menu-item"
+                      className={ui.menuItem}
                       disabled={implementPending}
                       onClick={() => {
                         setMenuOpen(false)
@@ -3267,7 +3094,7 @@ function RepositoryIssueRow({
         implementLocally.isError ||
         queueIssue.isError) && (
         <Banner
-          className="banner--compact repo-issue-error"
+          className={cx(ui.bannerCompact, ui.repoIssueError)}
           tone="alarm"
           tag="Error"
           role="alert"
@@ -3278,7 +3105,7 @@ function RepositoryIssueRow({
         </Banner>
       )}
       {issue.blockedBy.length > 0 && (
-        <p className="repo-issue-blocked-by">
+        <p className={ui.repoIssueBlockedBy}>
           Blocked by{" "}
           {issue.blockedBy.map((blocker, index) => (
             <span key={blocker.issueUrl}>
@@ -3325,13 +3152,16 @@ export function SessionUsageDialog({
   return (
     <dialog
       ref={dialogRef}
-      className="dialog-panel dialog-panel--narrow"
+      className={cx(ui.dialogPanel, ui.dialogPanelNarrow)}
       aria-labelledby="session-usage-title"
       onClose={onClose}
     >
-      <div className="dialog-header dialog-header--compact">
-        <p className="dialog-kicker">Session usage</p>
-        <h2 id="session-usage-title" className="dialog-title dialog-title--sm">
+      <div className={cx(ui.dialogHeader, ui.dialogHeaderCompact)}>
+        <p className={ui.dialogKicker}>Session usage</p>
+        <h2
+          id="session-usage-title"
+          className={cx(ui.dialogTitle, ui.dialogTitleSm)}
+        >
           {backendLabel ? `${backendLabel} Session` : "Session"}
         </h2>
         {sessionId !== null && (
@@ -3343,12 +3173,12 @@ export function SessionUsageDialog({
           </p>
         )}
       </div>
-      <div className="dialog-body dialog-body--compact">
+      <div className={cx(ui.dialogBody, ui.dialogBodyCompact)}>
         {!enabled ? null : session.isPending ? (
-          <p className="dialog-loading">Loading usage…</p>
+          <p className={ui.dialogLoading}>Loading usage…</p>
         ) : session.isError ? (
           <Banner
-            className="banner--compact"
+            className={ui.bannerCompact}
             tone="alarm"
             tag="Error"
             role="alert"
@@ -3357,7 +3187,7 @@ export function SessionUsageDialog({
           </Banner>
         ) : session.data === null || session.data === undefined ? (
           <Banner
-            className="banner--compact"
+            className={ui.bannerCompact}
             tone="guidance"
             tag="Session"
             role="status"
@@ -3366,7 +3196,7 @@ export function SessionUsageDialog({
           </Banner>
         ) : session.data.availability === "UNSUPPORTED" ? (
           <Banner
-            className="banner--compact"
+            className={ui.bannerCompact}
             tone="guidance"
             tag="Session"
             role="status"
@@ -3375,7 +3205,7 @@ export function SessionUsageDialog({
           </Banner>
         ) : session.data.availability === "MISSING" ? (
           <Banner
-            className="banner--compact"
+            className={ui.bannerCompact}
             tone="guidance"
             tag="Session"
             role="status"
@@ -3386,7 +3216,7 @@ export function SessionUsageDialog({
         ) : session.data.availability === "UNAVAILABLE" ? (
           <div className="grid gap-3">
             <Banner
-              className="banner--compact"
+              className={ui.bannerCompact}
               tone="guidance"
               tag="Session"
               role="status"
@@ -3396,7 +3226,7 @@ export function SessionUsageDialog({
             </Banner>
             <button
               type="button"
-              className="plate-mini justify-self-start"
+              className={cx(ui.plateMini, "justify-self-start")}
               onClick={() => {
                 void session.refetch()
               }}
@@ -3405,7 +3235,7 @@ export function SessionUsageDialog({
             </button>
           </div>
         ) : (
-          <table className="dialog-table">
+          <table className={ui.dialogTable}>
             <tbody>
               <tr>
                 <th scope="row">Model</th>
@@ -3467,10 +3297,10 @@ export function SessionUsageDialog({
           </table>
         )}
       </div>
-      <div className="dialog-footer dialog-footer--compact">
+      <div className={cx(ui.dialogFooter, ui.dialogFooterCompact)}>
         <button
           type="button"
-          className="plate-mini"
+          className={ui.plateMini}
           onClick={() => {
             dialogRef.current?.close()
           }}
@@ -3491,8 +3321,8 @@ export function JobsCardSkeleton() {
       aria-busy="true"
     >
       <div className="grid gap-2">
-        <span className="skeleton h-12" />
-        <span className="skeleton h-12" />
+        <span className={cx(ui.skeleton, "h-12")} />
+        <span className={cx(ui.skeleton, "h-12")} />
       </div>
     </article>
   )
@@ -3540,11 +3370,11 @@ export function WorkItemPauseButton({ workItem }: { workItem: WorkItem }) {
   const failed = pause.isError || start.isError
   const label = workItem.paused ? "Start job" : "Pause job"
 
-  const pauseClass = failed
-    ? "icon-btn icon-btn--armed"
-    : workItem.paused
-      ? "icon-btn icon-btn--paused"
-      : "icon-btn"
+  const pauseClass = cx(
+    ui.iconBtn,
+    failed && ui.iconBtnArmed,
+    !failed && workItem.paused && ui.iconBtnPaused,
+  )
 
   return (
     <button
@@ -3779,9 +3609,15 @@ export function WorkItemLifecycleStatus({
   )
 
   return (
-    <div className={compact ? "mt-2" : "lifecycle-inset"}>
+    <div className={compact ? "mt-2" : ui.lifecycleInset}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="job-ticket-runtime-line uppercase tracking-[0.1em]">
+        <span
+          className={cx(
+            ui.jobTicketRuntimeLine,
+            "uppercase",
+            "tracking-[0.1em]",
+          )}
+        >
           {formatStartedAgo(workItem.createdAt, nowMs)}
         </span>
         <WorkItemOutcomePresentation
@@ -3813,7 +3649,7 @@ export function WorkItemLifecycleStatus({
                   <div key={block.lane} className="min-w-0">
                     <button
                       type="button"
-                      className="leg-summary"
+                      className={ui.legSummary}
                       style={summaryStyle}
                       aria-expanded={block.expanded}
                       aria-controls={block.expanded ? chipsId : undefined}
@@ -3852,8 +3688,8 @@ export function WorkItemLifecycleStatus({
         ))}
       {workItem.statusMessage !== null && (
         <p className={statusMessageClassName}>
-          {statusMessageClassName.includes("status-message--alarm") ? (
-            <span className="status-message-mark" aria-hidden="true">
+          {isStatusMessageAlarm(status) ? (
+            <span className={ui.statusMessageMark} aria-hidden="true">
               ▲{" "}
             </span>
           ) : null}
@@ -3865,7 +3701,7 @@ export function WorkItemLifecycleStatus({
           {canReset && (
             <button
               type="button"
-              className="icon-btn icon-btn--armed"
+              className={cx(ui.iconBtn, ui.iconBtnArmed)}
               disabled={actionsPending}
               onClick={() => reset.mutate()}
               aria-label={reset.isPending ? "Resetting job" : "Reset job"}
@@ -3916,7 +3752,7 @@ export function WorkItemLifecycleStatus({
           {canRetry && (
             <button
               type="button"
-              className="plate-mini"
+              className={ui.plateMini}
               disabled={actionsPending}
               onClick={() => retry.mutate()}
             >
@@ -3933,7 +3769,7 @@ export function WorkItemLifecycleStatus({
       )}
       {reset.isError && (
         <Banner
-          className="banner--compact mt-1.5"
+          className={cx(ui.bannerCompact, "mt-1.5")}
           tone="alarm"
           tag="Error"
           role="alert"
@@ -3943,7 +3779,7 @@ export function WorkItemLifecycleStatus({
       )}
       {retry.isError && (
         <Banner
-          className="banner--compact mt-1.5"
+          className={cx(ui.bannerCompact, "mt-1.5")}
           tone="alarm"
           tag="Error"
           role="alert"
@@ -3965,8 +3801,8 @@ function RepositoryIssuesSkeleton() {
       aria-label="Loading issues"
       aria-busy="true"
     >
-      <span className="skeleton h-4 w-[85%]" />
-      <span className="skeleton h-4 w-[65%]" />
+      <span className={cx(ui.skeleton, "h-4", "w-[85%]")} />
+      <span className={cx(ui.skeleton, "h-4", "w-[65%]")} />
     </div>
   )
 }
@@ -3974,15 +3810,15 @@ function RepositoryIssuesSkeleton() {
 export function RepositoryCardsSkeleton() {
   return (
     <section
-      className="repo-cards"
+      className={ui.repoCards}
       aria-label="Loading repositories"
       aria-busy="true"
     >
       {[0, 1].map((item) => (
-        <div className="repo-card-skeleton" key={item}>
-          <span className="skeleton h-[0.85rem] w-[35%]" />
-          <span className="skeleton h-[1.6rem] w-[65%]" />
-          <span className="skeleton h-[0.85rem] w-[90%]" />
+        <div className={ui.repoCardSkeleton} key={item}>
+          <span className={cx(ui.skeleton, "h-[0.85rem]", "w-[35%]")} />
+          <span className={cx(ui.skeleton, "h-[1.6rem]", "w-[65%]")} />
+          <span className={cx(ui.skeleton, "h-[0.85rem]", "w-[90%]")} />
         </div>
       ))}
     </section>
