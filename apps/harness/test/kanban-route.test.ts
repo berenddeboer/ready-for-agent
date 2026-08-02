@@ -342,6 +342,47 @@ describe("kanban home board", () => {
     expect(sessionButtonIndex).toBeGreaterThan(labelIndex)
   })
 
+  test("contains long runtime lines and copy controls inside the ticket (issue #733)", () => {
+    // Flex/grid min-width defaults let mono session/worktree rows paint past
+    // the ticket border (esp. Attention). Structural recipes + shrink chain.
+    const ui = uiSource()
+    expect(ui).toMatch(/jobTicket:\s*cx\([\s\S]*?grid-cols-\[minmax\(0,1fr\)\]/)
+    expect(ui).toMatch(/jobTicketRuntime:\s*"[^"]*min-w-0/)
+    expect(ui).toMatch(/jobTicketRuntimeLine:\s*"[^"]*max-w-full/)
+    expect(ui).toMatch(/jobTicketStatus:\s*"[^"]*min-w-0/)
+    expect(ui).toMatch(/jobTicketState:\s*"[^"]*truncate/)
+    expect(ui).toMatch(/laneStack:\s*"[^"]*min-w-0/)
+    // Status tags and journey legs truncate long labels within the card.
+    expect(ui).toMatch(/statusTag:\s*"[^"]*max-w-full[^"]*min-w-0/)
+    expect(ui).toMatch(/leg:\s*"[^"]*max-w-full[^"]*min-w-0/)
+
+    const ticket = boardSource().slice(
+      boardSource().indexOf("function PipelineTicket("),
+      boardSource().indexOf("function KanbanJobsBoard()"),
+    )
+    // Session value shrinks; copy control stays shrink-0 and fully clickable.
+    expect(ticket).toContain('"min-w-0 flex-1 truncate"')
+    expect(ticket).toContain(
+      '<Copy value={sessionId} showValue={false} className="shrink-0" />',
+    )
+    expect(ticket).toContain('"flex min-w-0 max-w-full items-center gap-1"')
+    expect(ticket).toContain('className="min-w-0 max-w-full"')
+    expect(ticket).toContain("textClassName={ui.jobTicketRuntimeLine}")
+
+    // Lifecycle chips: truncating label + non-shrinking duration + title.
+    const home = homeSource()
+    const lifecycle = home.slice(
+      home.indexOf("export function WorkItemLifecycleStatus("),
+      home.indexOf("function RepositoryIssuesSkeleton("),
+    )
+    expect(lifecycle).toContain('className="min-w-0 truncate"')
+    expect(lifecycle).toContain('className="ml-1 shrink-0 opacity-90"')
+    expect(lifecycle).toContain("title={chipTitle}")
+    expect(lifecycle).toContain(
+      "min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
+    )
+  })
+
   test("reuses existing queries and live invalidation without polling", () => {
     // Working/Failed list queries still feed the Pipeline board merge; they are
     // not tab panels. Completed tab still uses jobsCompletedWorkItemsQuery.
