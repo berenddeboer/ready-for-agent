@@ -1,4 +1,4 @@
-import { Deferred, Duration, Effect, Layer, Ref } from "effect"
+import { Cache, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   type GitHubRepositoryUnavailableError,
@@ -9,6 +9,9 @@ import {
 } from "@ready-for-agent/github-service"
 
 type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
+
+/** Unit key for the process-wide ambient GitHub CLI token cache. */
+const TOKEN_CACHE_KEY = true as const
 
 const authenticationError = (cause: unknown) =>
   new GitHubRequestError({
@@ -31,9 +34,6 @@ export const ambientGitHubLayer = (options: {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const layerScope = yield* Effect.scope
       const makeService = options.makeService ?? makeGitHubServiceFromToken
-      const tokenCache = yield* Ref.make<
-        Deferred.Deferred<string, GitHubRequestError> | undefined
-      >(undefined)
 
       const resolveGhToken = Effect.fn("AmbientGitHub.resolveGhToken")(
         function* () {
@@ -68,45 +68,27 @@ export const ambientGitHubLayer = (options: {
               })
             })
 
+      // Single-flight success cache: concurrent callers share one lookup;
+      // failures expire immediately (TTL zero, not reused); success lives until
+      // 401 invalidate. Cache.get is forked into the layer scope so canceling one
+      // requester cannot abort a shared in-flight lookup for joiners. Nested
+      // consumers must build this layer with Layer.buildWithScope (not a
+      // short-lived Effect.provide) so that scope stays open.
+      const tokenCache = yield* Cache.makeWith(
+        (_key: typeof TOKEN_CACHE_KEY) => resolveToken(),
+        {
+          capacity: 1,
+          timeToLive: (exit) =>
+            Exit.isSuccess(exit) ? Duration.infinity : Duration.zero,
+        },
+      )
+
       const acquireToken = Effect.fn("AmbientGitHub.acquireToken")(
         function* () {
-          const candidate = yield* Deferred.make<string, GitHubRequestError>()
-          type SelectedToken = {
-            readonly source: Deferred.Deferred<string, GitHubRequestError>
-            readonly owner: boolean
-          }
-          const selected = yield* Ref.modify<
-            Deferred.Deferred<string, GitHubRequestError> | undefined,
-            SelectedToken
-          >(tokenCache, (current) =>
-            current === undefined
-              ? [{ source: candidate, owner: true }, candidate]
-              : [{ source: current, owner: false }, current],
+          const fiber = yield* Cache.get(tokenCache, TOKEN_CACHE_KEY).pipe(
+            Effect.forkIn(layerScope),
           )
-
-          if (selected.owner) {
-            yield* resolveToken().pipe(
-              Effect.result,
-              Effect.flatMap((result) =>
-                (result._tag === "Failure"
-                  ? Ref.update(tokenCache, (current) =>
-                      current === candidate ? undefined : current,
-                    )
-                  : Effect.void
-                ).pipe(
-                  Effect.andThen(
-                    Deferred.complete(candidate, Effect.fromResult(result)),
-                  ),
-                ),
-              ),
-              Effect.forkIn(layerScope, { startImmediately: true }),
-            )
-          }
-
-          return {
-            source: selected.source,
-            token: yield* Deferred.await(selected.source),
-          }
+          return yield* Fiber.join(fiber)
         },
       )
 
@@ -115,7 +97,7 @@ export const ambientGitHubLayer = (options: {
           service: GitHubServiceShape,
         ) => Effect.Effect<A, GitHubServiceError>,
       ) {
-        const { source, token } = yield* acquireToken()
+        const token = yield* acquireToken()
         const first = yield* Effect.result(operation(makeService(token)))
         if (
           first._tag !== "Failure" ||
@@ -125,11 +107,15 @@ export const ambientGitHubLayer = (options: {
           return yield* Effect.fromResult(first)
         }
 
-        yield* Ref.update(tokenCache, (current) =>
-          current === source ? undefined : current,
+        // Only drop the cache entry if it still holds the token that 401'd —
+        // concurrent 401s share one refresh instead of stomping a newer token.
+        yield* Cache.invalidateWhen(
+          tokenCache,
+          TOKEN_CACHE_KEY,
+          (cached) => cached === token,
         )
         const refreshed = yield* acquireToken()
-        return yield* operation(makeService(refreshed.token))
+        return yield* operation(makeService(refreshed))
       })
 
       const authenticated = <A>(

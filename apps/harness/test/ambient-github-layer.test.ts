@@ -176,6 +176,8 @@ it("application scope interrupts in-flight ambient authentication", async () => 
 })
 
 it("canceling the first requester keeps shared authentication alive", async () => {
+  // Cache.get is forked into the layer scope: canceling one requester only
+  // drops its Fiber.join, while the shared lookup continues for joiners.
   const process = controlledTokenProcess()
   const runtime = ManagedRuntime.make(
     ambientGitHubLayer({
@@ -197,6 +199,35 @@ it("canceling the first requester keeps shared authentication alive", async () =
 
   try {
     expect(await second).toEqual([])
+    expect(process.startCount()).toBe(1)
+    expect(process.interrupted()).toBe(0)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+it("concurrent joiners survive cancel of the cache owner fiber", async () => {
+  const process = controlledTokenProcess()
+  const runtime = ManagedRuntime.make(
+    ambientGitHubLayer({
+      workspaceRoot: "/workspace",
+      makeService: () => serviceWithList(() => Effect.succeed([])),
+    }).pipe(Layer.provide(process.layer)),
+  )
+  await runtime.context()
+  const ownerController = new AbortController()
+  const owner = runtime
+    .runPromise(listReadyIssues, { signal: ownerController.signal })
+    .catch(() => undefined)
+  const joiner = runtime.runPromise(listReadyIssues)
+
+  await process.started
+  ownerController.abort()
+  await owner
+  process.complete("shared-token")
+
+  try {
+    expect(await joiner).toEqual([])
     expect(process.startCount()).toBe(1)
     expect(process.interrupted()).toBe(0)
   } finally {
