@@ -1,4 +1,4 @@
-import { Deferred, Effect, Layer, Ref } from "effect"
+import { Cache, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   type GitLabProjectUnavailableError,
@@ -38,9 +38,6 @@ export const ambientGitLabLayer = (options: {
       const makeAnonymousService =
         options.makeAnonymousService ?? (() => makeGitLabService({}))
       const ambientToken = options.environment?.GITLAB_TOKEN?.trim()
-      const tokenCache = yield* Ref.make<
-        ReadonlyMap<string, Deferred.Deferred<string, GitLabRequestError>>
-      >(new Map())
 
       const resolveGlabToken = Effect.fn("AmbientGitLab.resolveGlabToken")(
         function* (forgeHost: string) {
@@ -90,65 +87,30 @@ export const ambientGitLabLayer = (options: {
         )
       })
 
+      // Per-host single-flight success cache; failures expire immediately
+      // (TTL zero, not reused); success lives until 401 invalidate. Capacity is
+      // unbounded (same as the prior Map) so multi-host installs are not
+      // evicted. Cache.get is forked into the layer scope so canceling one
+      // requester cannot abort a shared in-flight lookup for joiners. Nested
+      // consumers must build this layer with Layer.buildWithScope (not a
+      // short-lived Effect.provide) so that scope stays open.
+      const tokenCache = yield* Cache.makeWith(
+        (forgeHost: string) => resolveToken(forgeHost),
+        {
+          capacity: Number.POSITIVE_INFINITY,
+          timeToLive: (exit) =>
+            Exit.isSuccess(exit) ? Duration.infinity : Duration.zero,
+        },
+      )
+
       const acquireToken = Effect.fn("AmbientGitLab.acquireToken")(function* (
         forgeHost: string,
       ) {
-        const candidate = yield* Deferred.make<string, GitLabRequestError>()
-        type SelectedToken = {
-          readonly source: Deferred.Deferred<string, GitLabRequestError>
-          readonly owner: boolean
-        }
-        const selected = yield* Ref.modify<
-          ReadonlyMap<string, Deferred.Deferred<string, GitLabRequestError>>,
-          SelectedToken
-        >(tokenCache, (current) => {
-          const cached = current.get(forgeHost)
-          if (cached !== undefined) {
-            return [{ source: cached, owner: false }, current]
-          }
-          const next = new Map(current)
-          next.set(forgeHost, candidate)
-          return [{ source: candidate, owner: true }, next]
-        })
-
-        if (selected.owner) {
-          yield* resolveToken(forgeHost).pipe(
-            Effect.result,
-            Effect.flatMap((result) =>
-              (result._tag === "Failure"
-                ? Ref.update(tokenCache, (current) => {
-                    if (current.get(forgeHost) !== candidate) return current
-                    const next = new Map(current)
-                    next.delete(forgeHost)
-                    return next
-                  })
-                : Effect.void
-              ).pipe(
-                Effect.andThen(
-                  Deferred.complete(candidate, Effect.fromResult(result)),
-                ),
-              ),
-            ),
-            Effect.forkIn(layerScope, { startImmediately: true }),
-          )
-        }
-
-        return {
-          source: selected.source,
-          token: yield* Deferred.await(selected.source),
-        }
+        const fiber = yield* Cache.get(tokenCache, forgeHost).pipe(
+          Effect.forkIn(layerScope),
+        )
+        return yield* Fiber.join(fiber)
       })
-
-      const invalidate = (
-        forgeHost: string,
-        source: Deferred.Deferred<string, GitLabRequestError>,
-      ) =>
-        Ref.update(tokenCache, (current) => {
-          if (current.get(forgeHost) !== source) return current
-          const next = new Map(current)
-          next.delete(forgeHost)
-          return next
-        })
 
       const run = Effect.fn("AmbientGitLab.runAuthenticated")(function* <A>(
         forgeHost: string,
@@ -156,10 +118,8 @@ export const ambientGitLabLayer = (options: {
           service: GitLabServiceShape,
         ) => Effect.Effect<A, GitLabServiceError>,
       ) {
-        const firstToken = yield* acquireToken(forgeHost)
-        const first = yield* Effect.result(
-          operation(makeService(firstToken.token)),
-        )
+        const token = yield* acquireToken(forgeHost)
+        const first = yield* Effect.result(operation(makeService(token)))
         if (
           first._tag !== "Failure" ||
           first.failure._tag !== "GitLabRequestError" ||
@@ -168,9 +128,15 @@ export const ambientGitLabLayer = (options: {
           return yield* Effect.fromResult(first)
         }
 
-        yield* invalidate(forgeHost, firstToken.source)
+        // Only drop the entry if it still holds the token that 401'd —
+        // concurrent 401s share one refresh instead of stomping a newer token.
+        yield* Cache.invalidateWhen(
+          tokenCache,
+          forgeHost,
+          (cached) => cached === token,
+        )
         const refreshed = yield* acquireToken(forgeHost)
-        return yield* operation(makeService(refreshed.token))
+        return yield* operation(makeService(refreshed))
       })
 
       const authenticated = <A>(

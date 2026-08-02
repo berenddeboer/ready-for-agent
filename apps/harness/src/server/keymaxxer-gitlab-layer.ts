@@ -1,4 +1,4 @@
-import { Duration, Effect, Layer, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Schema } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process"
 import {
   GITLAB_VAULT_METADATA_BUDGET_SECONDS,
@@ -159,18 +159,22 @@ export const keymaxxerGitLabLayer = (options: {
       const vaultBudget =
         options.vaultMetadataBudget ?? GITLAB_VAULT_METADATA_BUDGET
       // Build ambient fallback inside this layer so vault-first can delegate
-      // when no per-Repository secret exists (without leaking the raw vault token).
-      const ambient = yield* GitLabService.pipe(
-        Effect.provide(
-          ambientGitLabLayer({
-            workspaceRoot: options.workspaceRoot,
-            environment: options.environment,
-            resolveToken: options.resolveToken,
-            makeService: options.makeService,
-            makeAnonymousService: options.makeAnonymousService,
-          }),
-        ),
+      // when no per-Repository secret exists (without leaking the raw vault
+      // token). Use buildWithScope so ambient's layer scope stays open for the
+      // lifetime of this layer — ambient token acquisition forks into that
+      // scope, and a short-lived Effect.provide would close it immediately.
+      const layerScope = yield* Effect.scope
+      const ambientContext = yield* Layer.buildWithScope(
+        ambientGitLabLayer({
+          workspaceRoot: options.workspaceRoot,
+          environment: options.environment,
+          resolveToken: options.resolveToken,
+          makeService: options.makeService,
+          makeAnonymousService: options.makeAnonymousService,
+        }),
+        layerScope,
       )
+      const ambient = Context.get(ambientContext, GitLabService)
 
       const ensureToken = Effect.fn("KeymaxxerGitLab.ensureToken")(
         (repository: GitLabRepository) =>

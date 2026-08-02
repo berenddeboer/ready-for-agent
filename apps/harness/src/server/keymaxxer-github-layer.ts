@@ -1,4 +1,4 @@
-import { Deferred, Effect, Exit, Layer, Ref, Schema } from "effect"
+import { Cache, Duration, Effect, Exit, Fiber, Layer, Schema } from "effect"
 import {
   type GitHubHelperOperation,
   type GitHubRepository,
@@ -30,17 +30,6 @@ import {
 export const OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS = 5_000
 
 type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
-
-type OpenPullRequestCountCacheEntry =
-  | {
-      readonly kind: "inflight"
-      readonly deferred: Deferred.Deferred<number, GitHubServiceError>
-    }
-  | {
-      readonly kind: "success"
-      readonly count: number
-      readonly fetchedAtMs: number
-    }
 
 const openPullRequestCountCacheKey = (repository: GitHubRepository): string =>
   [
@@ -155,10 +144,9 @@ export const keymaxxerGitHubLayer = (options: {
   /**
    * Override the successful-count freshness window (tests and experiments).
    * Defaults to {@link OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS}.
+   * Expiry is driven by the Effect `Clock` (use `TestClock` in tests).
    */
   readonly openPullRequestCountFreshnessMs?: number
-  /** Injectable clock for freshness tests. Defaults to `Date.now`. */
-  readonly nowMs?: () => number
 }): Layer.Layer<GitHubService, never, KeymaxxerService> =>
   Layer.effect(
     GitHubService,
@@ -168,10 +156,6 @@ export const keymaxxerGitHubLayer = (options: {
       const countFreshnessMs =
         options.openPullRequestCountFreshnessMs ??
         OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS
-      const nowMs = options.nowMs ?? Date.now
-      const openPullRequestCountCache = yield* Ref.make(
-        new Map<string, OpenPullRequestCountCacheEntry>(),
-      )
       const ensureToken = Effect.fn("KeymaxxerGitHub.ensureToken")(
         (repository: GitHubRepository) =>
           keymaxxer.findSecret({
@@ -265,89 +249,48 @@ export const keymaxxerGitHubLayer = (options: {
 
       /**
        * Process-wide single-flight + short success cache per Repository.
-       * Concurrent callers share one Keymaxxer helper; failures are never
-       * stored as a successful zero.
+       * Concurrent callers share one Keymaxxer helper; failures expire
+       * immediately (TTL zero, not reused) so they cannot surface as a
+       * successful zero. Success TTL is driven by the Effect Clock
+       * (TestClock in tests). Lookup uses the original repository object
+       * (not a lowercased key reconstruction) for secret/helper casing.
        */
+      const repositoriesByCountCacheKey = new Map<string, GitHubRepository>()
+      const openPullRequestCountCache = yield* Cache.makeWith(
+        (key: string) => {
+          const repository = repositoriesByCountCacheKey.get(key)
+          if (repository === undefined) {
+            // Should not happen: callers register before Cache.get.
+            const [forge = "", forgeHost = "", projectPath = ""] =
+              key.split("\0")
+            return fetchOpenNonDraftPullRequestCount({
+              forge,
+              forgeHost,
+              projectPath,
+            })
+          }
+          return fetchOpenNonDraftPullRequestCount(repository)
+        },
+        {
+          capacity: 256,
+          timeToLive: (exit) =>
+            Exit.isSuccess(exit)
+              ? Duration.millis(countFreshnessMs)
+              : Duration.zero,
+        },
+      )
+
       const countOpenNonDraftPullRequestsCoalesced = Effect.fn(
         "KeymaxxerGitHub.countOpenNonDraftPullRequests",
       )(function* (repository: GitHubRepository) {
         const key = openPullRequestCountCacheKey(repository)
-        const candidate = yield* Deferred.make<number, GitHubServiceError>()
-
-        type Claim =
-          | { readonly role: "owner" }
-          | {
-              readonly role: "join"
-              readonly deferred: Deferred.Deferred<number, GitHubServiceError>
-            }
-          | { readonly role: "cached"; readonly count: number }
-
-        const claim = yield* Ref.modify(
-          openPullRequestCountCache,
-          (cache): [Claim, Map<string, OpenPullRequestCountCacheEntry>] => {
-            const current = cache.get(key)
-            const observedAt = nowMs()
-            if (
-              current?.kind === "success" &&
-              observedAt - current.fetchedAtMs < countFreshnessMs
-            ) {
-              return [{ role: "cached", count: current.count }, cache]
-            }
-            if (current?.kind === "inflight") {
-              return [{ role: "join", deferred: current.deferred }, cache]
-            }
-            const next = new Map(cache)
-            next.set(key, { kind: "inflight", deferred: candidate })
-            return [{ role: "owner" }, next]
-          },
+        repositoriesByCountCacheKey.set(key, repository)
+        // Fork into the layer scope so canceling one requester cannot abort
+        // a shared in-flight helper for concurrent joiners.
+        const fiber = yield* Cache.get(openPullRequestCountCache, key).pipe(
+          Effect.forkIn(layerScope),
         )
-
-        if (claim.role === "cached") {
-          return claim.count
-        }
-        if (claim.role === "join") {
-          return yield* Deferred.await(claim.deferred)
-        }
-
-        // Use Exit (not Effect.result) so interrupt/defect also settles the
-        // shared Deferred and clears inflight; otherwise joiners could hang.
-        // Settle is uninterruptible so layer teardown cannot leave joiners
-        // waiting after the fetch Exit is already known.
-        yield* fetchOpenNonDraftPullRequestCount(repository).pipe(
-          Effect.exit,
-          Effect.flatMap((exit) =>
-            Effect.uninterruptible(
-              Effect.gen(function* () {
-                yield* Ref.update(openPullRequestCountCache, (cache) => {
-                  const next = new Map(cache)
-                  const current = next.get(key)
-                  if (
-                    current?.kind !== "inflight" ||
-                    current.deferred !== candidate
-                  ) {
-                    return cache
-                  }
-                  if (Exit.isSuccess(exit)) {
-                    next.set(key, {
-                      kind: "success",
-                      count: exit.value,
-                      fetchedAtMs: nowMs(),
-                    })
-                  } else {
-                    // Failures / interrupt must not leave a permanent inflight
-                    // entry or be stored as a successful zero.
-                    next.delete(key)
-                  }
-                  return next
-                })
-                yield* Deferred.done(candidate, exit)
-              }),
-            ),
-          ),
-          Effect.forkIn(layerScope, { startImmediately: true }),
-        )
-
-        return yield* Deferred.await(candidate)
+        return yield* Fiber.join(fiber)
       })
 
       const service: GitHubServiceShape = {

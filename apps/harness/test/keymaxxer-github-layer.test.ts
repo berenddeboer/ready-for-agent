@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime } from "effect"
+import { TestClock } from "effect/testing"
 import {
   GitHubRequestError,
   GitHubService,
@@ -437,7 +438,6 @@ describe("Keymaxxer-backed GitHub layer", () => {
     () =>
       Effect.gen(function* () {
         const runs: RunWithSecretsInput[] = []
-        let clock = 50_000
         const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
           initialize: Effect.void,
           findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -455,8 +455,10 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const layer = keymaxxerGitHubLayer({
           workspaceRoot: "/workspace",
           openPullRequestCountFreshnessMs: 60_000,
-          nowMs: () => clock,
-        }).pipe(Layer.provide(keymaxxerLayer))
+        }).pipe(
+          Layer.provide(keymaxxerLayer),
+          Layer.provideMerge(TestClock.layer()),
+        )
 
         yield* Effect.gen(function* () {
           const github = yield* GitHubService
@@ -465,7 +467,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           )
           expect(Exit.isFailure(first)).toBe(true)
 
-          clock += 10
+          // Failure TTL is zero; no clock advance needed for a retry.
           const second =
             yield* github.countOpenNonDraftPullRequests(acmeWidgets)
           expect(second).toBe(3)
@@ -775,7 +777,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
   })
 
   // Real wall-clock coordination: hold the helper open so concurrent callers
-  // join one in-flight Deferred rather than racing TestClock.
+  // join one in-flight Cache lookup rather than racing TestClock.
   it.live(
     "concurrent count requests for one Repository share one Keymaxxer helper",
     () =>
@@ -825,6 +827,63 @@ describe("Keymaxxer-backed GitHub layer", () => {
         expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
       }),
   )
+
+  it("concurrent count joiners survive cancel of the cache owner fiber", async () => {
+    // Cache.get is forked into the layer scope: aborting one waiter must not
+    // cancel the shared helper or fail a concurrent joiner.
+    const runs: RunWithSecretsInput[] = []
+    let releaseHelper: (() => void) | undefined
+    const helperHeld = new Promise<void>((resolve) => {
+      releaseHelper = resolve
+    })
+    let helperStarts = 0
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) =>
+        Effect.gen(function* () {
+          runs.push(input)
+          helperStarts += 1
+          yield* Effect.promise(() => helperHeld)
+          return { exitCode: 0, stdout: "7", stderr: "" }
+        }),
+    })
+    const runtime = ManagedRuntime.make(
+      keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+        Layer.provide(keymaxxerLayer),
+      ),
+    )
+    await runtime.context()
+
+    const countOnce = Effect.gen(function* () {
+      const github = yield* GitHubService
+      return yield* github.countOpenNonDraftPullRequests(acmeWidgets)
+    })
+
+    const ownerController = new AbortController()
+    const owner = runtime
+      .runPromise(countOnce, { signal: ownerController.signal })
+      .catch(() => undefined)
+    const joiner = runtime.runPromise(countOnce)
+
+    for (let i = 0; i < 100 && helperStarts < 1; i += 1) {
+      await Bun.sleep(5)
+    }
+    expect(helperStarts).toBe(1)
+    ownerController.abort()
+    await owner
+    releaseHelper?.()
+
+    try {
+      expect(await joiner).toBe(7)
+      expect(runs).toHaveLength(1)
+    } finally {
+      await runtime.dispose()
+    }
+  })
 
   it.effect(
     "count requests for different Repositories never share credentials or results",
@@ -877,7 +936,6 @@ describe("Keymaxxer-backed GitHub layer", () => {
     () =>
       Effect.gen(function* () {
         const runs: RunWithSecretsInput[] = []
-        let clock = 1_000
         const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
           initialize: Effect.void,
           findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -896,13 +954,15 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const layer = keymaxxerGitHubLayer({
           workspaceRoot: "/workspace",
           openPullRequestCountFreshnessMs: 5_000,
-          nowMs: () => clock,
-        }).pipe(Layer.provide(keymaxxerLayer))
+        }).pipe(
+          Layer.provide(keymaxxerLayer),
+          Layer.provideMerge(TestClock.layer()),
+        )
 
         const counts = yield* Effect.gen(function* () {
           const github = yield* GitHubService
           const first = yield* github.countOpenNonDraftPullRequests(acmeWidgets)
-          clock += 1_000
+          yield* TestClock.adjust(1_000)
           const second =
             yield* github.countOpenNonDraftPullRequests(acmeWidgets)
           return [first, second] as const
@@ -918,7 +978,6 @@ describe("Keymaxxer-backed GitHub layer", () => {
     () =>
       Effect.gen(function* () {
         const runs: RunWithSecretsInput[] = []
-        let clock = 10_000
         const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
           initialize: Effect.void,
           findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -937,13 +996,15 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const layer = keymaxxerGitHubLayer({
           workspaceRoot: "/workspace",
           openPullRequestCountFreshnessMs: 5_000,
-          nowMs: () => clock,
-        }).pipe(Layer.provide(keymaxxerLayer))
+        }).pipe(
+          Layer.provide(keymaxxerLayer),
+          Layer.provideMerge(TestClock.layer()),
+        )
 
         const counts = yield* Effect.gen(function* () {
           const github = yield* GitHubService
           const first = yield* github.countOpenNonDraftPullRequests(acmeWidgets)
-          clock += 5_000
+          yield* TestClock.adjust(5_000)
           const second =
             yield* github.countOpenNonDraftPullRequests(acmeWidgets)
           return [first, second] as const
@@ -959,7 +1020,6 @@ describe("Keymaxxer-backed GitHub layer", () => {
     () =>
       Effect.gen(function* () {
         const runs: RunWithSecretsInput[] = []
-        let clock = 100
         const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
           initialize: Effect.void,
           findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -984,8 +1044,10 @@ describe("Keymaxxer-backed GitHub layer", () => {
         const layer = keymaxxerGitHubLayer({
           workspaceRoot: "/workspace",
           openPullRequestCountFreshnessMs: 60_000,
-          nowMs: () => clock,
-        }).pipe(Layer.provide(keymaxxerLayer))
+        }).pipe(
+          Layer.provide(keymaxxerLayer),
+          Layer.provideMerge(TestClock.layer()),
+        )
 
         yield* Effect.gen(function* () {
           const github = yield* GitHubService
@@ -995,7 +1057,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           )
           expect(Exit.isFailure(requestFailure)).toBe(true)
 
-          clock += 10
+          // Failure TTL is zero — retries must not see a cached zero.
           const unavailable = yield* Effect.exit(
             github.countOpenNonDraftPullRequests(acmeWidgets),
           )
@@ -1006,11 +1068,9 @@ describe("Keymaxxer-backed GitHub layer", () => {
             expect(String(error)).toContain("GitHubRepositoryUnavailableError")
           }
 
-          clock += 10
           const zero = yield* github.countOpenNonDraftPullRequests(acmeWidgets)
           expect(zero).toBe(0)
 
-          clock += 10
           // Genuine zero is success-cached; failures above must not have been.
           const cachedZero =
             yield* github.countOpenNonDraftPullRequests(acmeWidgets)
