@@ -1,5 +1,4 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
@@ -453,11 +452,38 @@ function KanbanJobsBoard() {
                     <aside className={ui.queueHint}>
                       <span className={ui.queueHintTag}>Queue</span>
                       <p className={ui.queueHintText}>
-                        Feed the queue — work starts at your repos.
+                        Feed the queue — label issues with{" "}
+                        <code className={ui.queueHintCode}>
+                          ready-for-agent
+                        </code>
+                        . When they show up in your repos, click{" "}
+                        <strong className={ui.queueHintAction}>
+                          Implement now
+                        </strong>
+                        .
                       </p>
-                      <Link to="/repos" className={ui.queueHintLink}>
-                        Manage repos →
-                      </Link>
+                      <div className={ui.queueHintMenuIllus} aria-hidden="true">
+                        <span className={ui.queueHintMenuKebab}>
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          >
+                            <circle cx="12" cy="5" r="1.75" />
+                            <circle cx="12" cy="12" r="1.75" />
+                            <circle cx="12" cy="19" r="1.75" />
+                          </svg>
+                        </span>
+                        <div className={ui.queueHintMenuPanel}>
+                          <span className={ui.queueHintMenuItem}>
+                            Implement now
+                          </span>
+                          <span className={ui.queueHintMenuItem}>
+                            Implement locally
+                          </span>
+                        </div>
+                      </div>
                     </aside>
                   )}
                 </section>

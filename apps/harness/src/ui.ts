@@ -588,8 +588,28 @@ export const ui = {
   queueHintText:
     "m-0 font-display text-[0.9rem] font-medium leading-[1.35] text-[#151515]",
 
-  queueHintLink:
-    "justify-self-start font-mono text-[0.68rem] font-bold tracking-[0.08em] uppercase text-[#151515] underline decoration-[1.5px] underline-offset-[3px] hover:bg-[#151515] hover:text-lane-queue hover:no-underline",
+  /** Inline mono chip for the ready-for-agent label name. */
+  queueHintCode:
+    "rounded-none border border-[#151515] bg-[#151515] px-[0.28rem] py-[0.05rem] font-mono text-[0.72rem] font-bold tracking-[0.02em] text-lane-queue",
+
+  /** Emphasize the Implement now control name inside the hint body. */
+  queueHintAction: "font-semibold not-italic",
+
+  /**
+   * Compact static mock of the repos issue ⋮ menu (Implement now /
+   * Implement locally) — decorative, under the hint copy. Matches the
+   * industrial menu chrome (ink border, mono uppercase items, ⋮ trigger).
+   */
+  queueHintMenuIllus: "mt-[0.1rem] flex w-fit flex-col items-end gap-[0.2rem]",
+
+  queueHintMenuKebab:
+    "inline-flex h-6 w-6 shrink-0 items-center justify-center border border-[#151515] bg-[var(--panel,#ffffff)] text-[#151515]",
+
+  queueHintMenuPanel:
+    "min-w-[9.5rem] border-2 border-[#151515] bg-[var(--panel,#ffffff)] py-0.5 shadow-none",
+
+  queueHintMenuItem:
+    "block px-2.5 py-1.5 font-mono text-[0.62rem] font-bold tracking-[0.08em] uppercase text-[#151515]",
 
   jobTicket: cx(
     "relative grid min-w-0 gap-[0.4rem] rounded-none border-[1.5px] border-ink",
