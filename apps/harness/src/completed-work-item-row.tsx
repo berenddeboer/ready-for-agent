@@ -189,11 +189,7 @@ export function CompletedWorkItemRow({
             >
               {sessionId}
             </button>{" "}
-            <Copy
-              value={sessionId}
-              className="inline-flex shrink-0"
-              showValue={false}
-            />
+            <Copy value={sessionId} showValue={false} className="shrink-0" />
           </>
         ) : (
           " — No session"

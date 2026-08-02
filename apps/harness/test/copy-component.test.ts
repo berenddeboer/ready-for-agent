@@ -22,4 +22,18 @@ describe("Copy component", () => {
     expect(textIndex).toBeGreaterThan(-1)
     expect(buttonIndex).toBeGreaterThan(textIndex)
   })
+
+  test("shrinks long values and keeps the copy control visible (issue #733)", () => {
+    const source = readFileSync(
+      join(import.meta.dir, "../src/copy.tsx"),
+      "utf8",
+    )
+    // inline-flex: safe in archive meta paragraphs and ticket flex/grid rows.
+    expect(source).toContain(
+      '"inline-flex min-w-0 max-w-full items-center gap-1"',
+    )
+    // Value shrinks; copy glyph does not.
+    expect(source).toContain('"min-w-0 flex-1 truncate"')
+    expect(source).toMatch(/ui\.iconBtnBare,\s*"shrink-0"/)
+  })
 })

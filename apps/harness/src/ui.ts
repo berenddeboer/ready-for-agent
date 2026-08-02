@@ -281,7 +281,8 @@ export const ui = {
    * Journey-leg chips — board density floor (0.56rem) is the shared base.
    * Completed archive composes `archiveLeg` for a larger relaxed size.
    */
-  leg: "inline-flex items-center whitespace-nowrap border-[1.5px] border-ink bg-transparent px-[0.38rem] py-[0.16rem] font-mono text-[0.56rem] tracking-[0.06em] text-ink-2 no-underline",
+  // max-w-full + truncate: long lifecycle labels stay inside ticket columns.
+  leg: "inline-flex max-w-full min-w-0 items-center overflow-hidden text-ellipsis whitespace-nowrap border-[1.5px] border-ink bg-transparent px-[0.38rem] py-[0.16rem] font-mono text-[0.56rem] tracking-[0.06em] text-ink-2 no-underline",
 
   /**
    * Completed-card journey legs — readable body-adjacent mono (board is
@@ -574,7 +575,7 @@ export const ui = {
     "m-0 font-display text-[1.2rem] font-[950] leading-[0.85] tracking-[-0.04em] uppercase",
 
   laneStack:
-    "m-0 grid flex-[1_1_auto] list-none content-start gap-[0.55rem] p-[0.55rem]",
+    "m-0 grid min-w-0 flex-[1_1_auto] list-none content-start gap-[0.55rem] p-[0.55rem]",
 
   laneEmpty:
     "m-2 border-t border-dashed border-[rgb(21_21_21/0.35)] pt-4 font-mono text-[0.7rem] font-bold leading-[1.4] tracking-[0.08em] uppercase text-[#4a4a4a]",
@@ -612,7 +613,9 @@ export const ui = {
     "block px-2.5 py-1.5 font-mono text-[0.62rem] font-bold tracking-[0.08em] uppercase text-[#151515]",
 
   jobTicket: cx(
-    "relative grid min-w-0 gap-[0.4rem] rounded-none border-[1.5px] border-ink",
+    // minmax(0,1fr): single column may shrink below long mono min-content so
+    // runtime lines / chips ellipsize inside the ticket instead of overflowing.
+    "relative grid min-w-0 grid-cols-[minmax(0,1fr)] gap-[0.4rem] rounded-none border-[1.5px] border-ink",
     // Warm cream slip (lane-bed mix) — not pure white, not brushed metal.
     // Same parchment fill in every lane so Build/Review/PR match Merged.
     "bg-[var(--ticket-fill)]",
@@ -622,27 +625,27 @@ export const ui = {
   ),
 
   jobTicketRepo:
-    "m-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.68rem] font-normal leading-[1.2] tracking-[0.1em] uppercase text-ink-faint",
+    "m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.68rem] font-normal leading-[1.2] tracking-[0.1em] uppercase text-ink-faint",
 
   jobTicketTitle:
-    "m-0 block font-display text-[1.06rem] font-semibold leading-[1.3] text-ink no-underline [overflow-wrap:anywhere]",
+    "m-0 block min-w-0 max-w-full font-display text-[1.06rem] font-semibold leading-[1.3] text-ink no-underline [overflow-wrap:anywhere]",
 
   jobTicketTitleLink:
     "hover:text-ink hover:underline hover:decoration-signal hover:decoration-2 hover:underline-offset-[3px]",
 
   jobTicketNum: "font-mono text-[0.8rem] text-ink-2",
 
-  jobTicketStatus: "flex items-center justify-between gap-[0.4rem]",
+  jobTicketStatus: "flex min-w-0 items-center justify-between gap-[0.4rem]",
 
-  jobTicketState: "m-0 inline-block",
+  jobTicketState: "m-0 min-w-0 max-w-full truncate",
 
-  jobTicketRuntime: "mt-0 grid gap-[0.2rem] border-t-0 pt-0",
+  jobTicketRuntime: "mt-0 grid min-w-0 max-w-full gap-[0.2rem] border-t-0 pt-0",
 
   jobTicketRuntimeLine:
-    "m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.8rem] leading-[1.4] tracking-[0.04em] text-ink-faint",
+    "m-0 min-w-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.8rem] leading-[1.4] tracking-[0.04em] text-ink-faint",
 
   jobTicketSession:
-    "cursor-pointer border-0 bg-transparent p-0 font-inherit text-ink-2 underline underline-offset-2 hover:text-ink",
+    "min-w-0 max-w-full cursor-pointer border-0 bg-transparent p-0 text-left font-inherit text-ink-2 underline underline-offset-2 hover:text-ink",
 
   pipelineList:
     "mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] border-2 border-ink bg-panel p-3",
@@ -678,8 +681,9 @@ export const ui = {
 
   // Base is layout/type only — each tone owns border/fill/ink so Tailwind
   // cascade does not leave plain `bg-transparent` winning over alarm fill.
+  // max-w-full + truncate keeps long labels inside narrow kanban tickets.
   statusTag:
-    "inline-flex items-center whitespace-nowrap border-[1.5px] px-[0.4rem] py-[0.18rem] font-mono text-[0.66rem] font-bold leading-[1.2] tracking-[0.12em] uppercase no-underline",
+    "inline-flex max-w-full min-w-0 items-center overflow-hidden text-ellipsis whitespace-nowrap border-[1.5px] px-[0.4rem] py-[0.18rem] font-mono text-[0.66rem] font-bold leading-[1.2] tracking-[0.12em] uppercase no-underline",
 
   statusTagAlarm: "border-lane-attention bg-lane-attention text-[#151515]",
 
@@ -700,8 +704,8 @@ export const ui = {
   /* ---------- Journey-leg chips (board §5.2) — see also `leg*` above ---------- */
 
   legSummary: cx(
-    "inline-flex max-w-full cursor-pointer items-center gap-[0.35rem]",
-    "border-[1.5px] border-ink bg-[var(--leg-lane,var(--lane-build))] px-[0.38rem] py-[0.16rem]",
+    "inline-flex max-w-full min-w-0 cursor-pointer items-center gap-[0.35rem]",
+    "overflow-hidden border-[1.5px] border-ink bg-[var(--leg-lane,var(--lane-build))] px-[0.38rem] py-[0.16rem]",
     "font-mono text-[0.56rem] font-bold tracking-[0.06em] uppercase whitespace-nowrap text-[var(--leg-on,#fff)]",
     "hover:brightness-105",
   ),
@@ -886,7 +890,7 @@ export const ui = {
   ),
 
   lifecycleInset:
-    "mt-2 mb-0 ml-[2.95rem] border-[1.5px] border-ink bg-panel px-[0.65rem] py-[0.55rem]",
+    "mt-2 mb-0 ml-[2.95rem] min-w-0 max-w-full border-[1.5px] border-ink bg-panel px-[0.65rem] py-[0.55rem]",
 
   blankSlate:
     "grid justify-items-center border-2 border-dashed border-ink bg-panel px-6 pt-[2.4rem] pb-[2.2rem] text-center sm:px-10 sm:pt-[2.8rem] sm:pb-10",

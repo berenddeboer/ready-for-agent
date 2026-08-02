@@ -3526,13 +3526,18 @@ export function WorkItemLifecycleStatus({
       chipLane !== null
         ? (lifecycleLaneCssVars(chipLane) as CSSProperties)
         : undefined
-    const duration = displayDurationMs !== null && (
-      <span className="ml-1 opacity-90">
-        · {formatDuration(displayDurationMs)}
-      </span>
-    )
+    const duration =
+      displayDurationMs !== null ? (
+        <span className="ml-1 shrink-0 opacity-90">
+          · {formatDuration(displayDurationMs)}
+        </span>
+      ) : null
+    const chipTitle =
+      displayDurationMs !== null
+        ? `${lifecycleLabel.label} · ${formatDuration(displayDurationMs)}`
+        : lifecycleLabel.label
     return (
-      <li key={lifecycleLabel.phase}>
+      <li key={lifecycleLabel.phase} className="min-w-0 max-w-full">
         {linkToPullRequest ? (
           <a
             className={`${chipClassName} hover:underline`}
@@ -3540,14 +3545,15 @@ export function WorkItemLifecycleStatus({
             target="_blank"
             rel="noopener noreferrer"
             aria-label={`${openPullRequestLabel}: ${lifecycleLabel.label}`}
+            title={chipTitle}
             style={chipStyle}
           >
-            {lifecycleLabel.label}
+            <span className="min-w-0 truncate">{lifecycleLabel.label}</span>
             {duration}
           </a>
         ) : (
-          <span className={chipClassName} style={chipStyle}>
-            {lifecycleLabel.label}
+          <span className={chipClassName} style={chipStyle} title={chipTitle}>
+            <span className="min-w-0 truncate">{lifecycleLabel.label}</span>
             {duration}
           </span>
         )}
@@ -3565,7 +3571,8 @@ export function WorkItemLifecycleStatus({
     <ol
       id={options?.id}
       className={
-        options?.className ?? "mt-2 mb-0 flex list-none flex-wrap gap-1 p-0"
+        options?.className ??
+        "mt-2 mb-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0"
       }
       aria-label={options?.ariaLabel ?? "Lifecycle steps"}
     >
@@ -3574,7 +3581,9 @@ export function WorkItemLifecycleStatus({
   )
 
   return (
-    <div className={compact ? "mt-2" : ui.lifecycleInset}>
+    <div
+      className={cx(compact ? "mt-2" : ui.lifecycleInset, "min-w-0 max-w-full")}
+    >
       {/*
        * Non-compact (repos): same runtime lines as kanban tickets — agent
        * backend, session id (Session usage + copy), worktree path + copy.
@@ -3589,20 +3598,20 @@ export function WorkItemLifecycleStatus({
             <div
               className={cx(
                 ui.jobTicketRuntimeLine,
-                "flex min-w-0 items-center gap-1",
+                "flex min-w-0 max-w-full items-center gap-1",
               )}
             >
               {onOpenSession !== undefined ? (
                 <button
                   type="button"
-                  className={cx(ui.jobTicketSession, "min-w-0 truncate")}
+                  className={cx(ui.jobTicketSession, "min-w-0 flex-1 truncate")}
                   title={sessionId}
                   onClick={() => onOpenSession(workItem.id, sessionId)}
                 >
                   {sessionId}
                 </button>
               ) : (
-                <span className="min-w-0 truncate" title={sessionId}>
+                <span className="min-w-0 flex-1 truncate" title={sessionId}>
                   {sessionId}
                 </span>
               )}
@@ -3673,7 +3682,7 @@ export function WorkItemLifecycleStatus({
                       renderChipList(block.chips, {
                         id: chipsId,
                         className:
-                          "mt-1 mb-0 flex list-none flex-wrap gap-1 p-0",
+                          "mt-1 mb-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
                         ariaLabel: `${block.laneLabel} lifecycle steps`,
                       })}
                   </div>
@@ -3682,9 +3691,10 @@ export function WorkItemLifecycleStatus({
               if (block.kind === "focus-lane") {
                 if (block.chips.length === 0) return null
                 return (
-                  <div key="focus-lane">
+                  <div key="focus-lane" className="min-w-0 max-w-full">
                     {renderChipList(block.chips, {
-                      className: "m-0 flex list-none flex-wrap gap-1 p-0",
+                      className:
+                        "m-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
                       ariaLabel: "Current lifecycle steps",
                     })}
                   </div>

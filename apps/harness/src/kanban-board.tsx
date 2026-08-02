@@ -195,6 +195,7 @@ function PipelineTicket({
               ui.jobTicketState,
               statusBadgeClassNameForStatus(workItem.status),
             )}
+            title={workItem.stateLabel}
           >
             {workItem.stateLabel}
           </span>
@@ -207,12 +208,12 @@ function PipelineTicket({
           <div
             className={cx(
               ui.jobTicketRuntimeLine,
-              "flex min-w-0 items-center gap-1",
+              "flex min-w-0 max-w-full items-center gap-1",
             )}
           >
             <button
               type="button"
-              className={cx(ui.jobTicketSession, "min-w-0 truncate")}
+              className={cx(ui.jobTicketSession, "min-w-0 flex-1 truncate")}
               title={sessionId}
               onClick={() => onOpenSession(workItem.id, sessionId)}
             >

@@ -42,11 +42,16 @@ export function Copy({
 
   return (
     <span
-      className={`inline-flex min-w-0 max-w-full items-center gap-1 ${className ?? ""}`}
+      className={cx(
+        // inline-flex: stays on one line in archive meta paragraphs, and still
+        // shrinks inside ticket flex/grid rows when min-w-0 max-w-full apply.
+        "inline-flex min-w-0 max-w-full items-center gap-1",
+        className,
+      )}
     >
       {showValue ? (
         <span
-          className={`min-w-0 truncate ${textClassName ?? ""}`}
+          className={cx("min-w-0 flex-1 truncate", textClassName)}
           title={value}
         >
           {value}
@@ -54,7 +59,7 @@ export function Copy({
       ) : null}
       <button
         type="button"
-        className={cx(ui.iconBtnBare, copied && ui.iconBtnCopied)}
+        className={cx(ui.iconBtnBare, "shrink-0", copied && ui.iconBtnCopied)}
         onClick={() => {
           void handleCopy()
         }}
