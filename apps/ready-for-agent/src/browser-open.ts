@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process"
+import { Data, Effect, Schedule } from "effect"
 
 export type BrowserOpenEnv = Partial<
   Record<"NO_BROWSER" | "PORT", string | undefined>
@@ -6,8 +7,10 @@ export type BrowserOpenEnv = Partial<
 
 const DEFAULT_UI_PORT = 6056
 const DEFAULT_UI_HOST = "127.0.0.1"
-const DEFAULT_READY_TIMEOUT_MS = 60_000
-const DEFAULT_POLL_INTERVAL_MS = 250
+/** Overall deadline for the readiness poll (Effect.timeout). */
+const DEFAULT_READY_TIMEOUT = "60 seconds" as const
+/** Delay between failed probe attempts (Schedule.spaced). */
+const DEFAULT_POLL_INTERVAL = "250 millis" as const
 
 /** Minimal child surface used by the detached browser launcher (testable). */
 type DetachedBrowserChild = {
@@ -102,79 +105,64 @@ export const launchDetachedBrowser = (
   }
 }
 
+/** One probe attempt failed (connection refused, non-positive status, etc.). */
+class UiNotReady extends Data.TaggedError("UiNotReady")<{
+  readonly url: string
+}> {}
+
 export type OpenBrowserWhenReadyOptions = {
-  readonly signal?: AbortSignal
+  /** Override for tests; production uses `globalThis.fetch`. */
   readonly fetch?: (
     input: string,
     init?: RequestInit,
   ) => Promise<Pick<Response, "status" | "body">>
-  readonly sleep?: (ms: number) => Promise<void>
+  /** Override for tests; production uses `launchDetachedBrowser`. */
   readonly launch?: (platform: string, url: string) => void
-  readonly now?: () => number
-  readonly timeoutMs?: number
-  readonly pollIntervalMs?: number
 }
 
 /**
  * Poll until the UI URL responds, then launch the platform opener once.
  *
- * Owned by the caller: pass an `AbortSignal` (e.g. from Effect.tryPromise) so
- * the poll stops when startup completes, fails, or is interrupted. The browser
- * process itself is not canceled on abort.
+ * Best-effort by construction (`Effect.ignore`): never fails the caller.
+ * Interrupt the fiber (e.g. via `Effect.forkScoped` when the scope closes) to
+ * stop the poll — including an in-flight fetch when the probe observes the
+ * fiber's `AbortSignal`. The browser process itself is not owned or canceled.
  */
 export const openBrowserWhenReady = (
   platform: string,
   url: string,
   options: OpenBrowserWhenReadyOptions = {},
-): Promise<void> => {
-  const signal = options.signal
+): Effect.Effect<void> => {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis)
-  const sleep =
-    options.sleep ?? ((ms: number) => Bun.sleep(ms) as Promise<void>)
   const launch = options.launch ?? launchDetachedBrowser
-  const now = options.now ?? Date.now
-  const timeoutMs = options.timeoutMs ?? DEFAULT_READY_TIMEOUT_MS
-  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
-  const deadline = now() + timeoutMs
 
-  const aborted = (): boolean => signal?.aborted === true
-
-  const poll = async (): Promise<void> => {
-    while (now() < deadline) {
-      if (aborted()) {
-        return
+  const probeUi = Effect.tryPromise({
+    try: async (signal) => {
+      const response = await fetchImpl(url, {
+        redirect: "manual",
+        signal,
+      })
+      void response.body?.cancel?.()
+      if (!(response.status > 0)) {
+        throw new Error("UI not ready")
       }
+    },
+    catch: () => new UiNotReady({ url }),
+  })
 
-      try {
-        const response = await fetchImpl(url, {
-          redirect: "manual",
-          signal,
-        })
-        void response.body?.cancel?.()
-        if (response.status > 0) {
-          if (aborted()) {
-            return
-          }
-          try {
-            launch(platform, url)
-          } catch {
-            // Opener failure is best-effort.
-          }
-          return
-        }
-      } catch {
-        if (aborted()) {
-          return
-        }
-        // Port not ready yet, or fetch aborted.
-      }
-
-      if (aborted()) {
-        return
-      }
-      await sleep(pollIntervalMs)
+  return Effect.gen(function* () {
+    yield* probeUi.pipe(
+      Effect.retry(Schedule.spaced(DEFAULT_POLL_INTERVAL)),
+      Effect.timeout(DEFAULT_READY_TIMEOUT),
+    )
+    // Clock-backed interrupt checkpoint after readiness (same role as the old
+    // post-readiness AbortSignal check). Parks on Effect Clock so a closing
+    // scope can cancel launch, and tests can assert with TestClock + interrupt.
+    yield* Effect.sleep("1 millis")
+    try {
+      launch(platform, url)
+    } catch {
+      // Opener failure is best-effort.
     }
-  }
-
-  return poll()
+  }).pipe(Effect.ignore)
 }

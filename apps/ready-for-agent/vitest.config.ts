@@ -77,6 +77,10 @@ export default defineConfig({
     conditions: ["@ready-for-agent/source", "import", "module", "default"],
   },
   test: {
-    include: ["src/cli.test.ts", "src/services/application-config.test.ts"],
+    include: [
+      "src/browser-open.test.ts",
+      "src/cli.test.ts",
+      "src/services/application-config.test.ts",
+    ],
   },
 })
