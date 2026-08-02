@@ -51,7 +51,8 @@ const LIFECYCLE_JOB_VISIBILITY_GRACE = Duration.minutes(1)
 const JOB_IDLE_POLL_INTERVAL = Duration.millis(1500)
 const ORPHAN_RECOVERY_INTERVAL = Duration.seconds(30)
 const REFRESH_REPOSITORY_TAG = "refresh-repository"
-const POLLING_AUTO_HEAL_TAG = "polling-auto-heal"
+/** Modest concurrency for credential probes (Keymaxxer / GitLab). */
+const CREDENTIAL_CHECK_CONCURRENCY = 4
 
 /**
  * Process-global generation so HMR/runtime restarts retire zombie workers that
@@ -85,6 +86,9 @@ const RefreshRepositoryJob = Schema.TaggedStruct("refresh-repository", {
 })
 
 const PollingAutoHealJob = Schema.TaggedStruct("polling-auto-heal", {})
+
+/** High-priority refresh-queue payloads (manual refresh + Auto-heal). */
+const RefreshQueueJob = Schema.Union([RefreshRepositoryJob, PollingAutoHealJob])
 
 export const enqueueRefreshRepositoryJob = Effect.fn(
   "JobWorker.enqueueRefreshRepositoryJob",
@@ -134,14 +138,12 @@ const repositoryHasCredential = Effect.fn("JobWorker.repositoryHasCredential")(
 const listCredentialedRepositoryIds = Effect.gen(function* () {
   const db = yield* DbService
   const repositories = yield* db.listRepositories
-  const credentialed: string[] = []
-  for (const repository of repositories) {
-    const hasCredential = yield* repositoryHasCredential(repository)
-    if (hasCredential) {
-      credentialed.push(repository.id)
-    }
-  }
-  return credentialed
+  const credentialed = yield* Effect.filter(
+    repositories,
+    repositoryHasCredential,
+    { concurrency: CREDENTIAL_CHECK_CONCURRENCY },
+  )
+  return credentialed.map((repository) => repository.id)
 })
 
 const runPollingAutoHeal = Effect.fn("JobWorker.runPollingAutoHeal")(function* (
@@ -311,18 +313,6 @@ const finalizeScheduledRefresh = <A, E>(
     yield* queue.postponeKeyed(jobId, delay)
   })
 
-const payloadTag = (payload: unknown): string | undefined => {
-  if (
-    typeof payload === "object" &&
-    payload !== null &&
-    "_tag" in payload &&
-    typeof (payload as { _tag: unknown })._tag === "string"
-  ) {
-    return (payload as { _tag: string })._tag
-  }
-  return undefined
-}
-
 /**
  * One dedicated polling worker: always claim high-priority manual work before
  * scheduled recurring entries. Never interrupts a running reconciliation.
@@ -340,42 +330,41 @@ const claimAndRunRefreshJob = (
     )
     if (Option.isSome(highPriorityRaw)) {
       const job = highPriorityRaw.value
-      const tag = payloadTag(job.payload)
-
-      if (tag === POLLING_AUTO_HEAL_TAG) {
-        const decoded = yield* Schema.decodeUnknownEffect(PollingAutoHealJob)(
-          job.payload,
-        ).pipe(Effect.result)
-        if (decoded._tag === "Failure") {
-          yield* queue.fail(job.jobId, { retryable: false })
-          return "busy" as const
-        }
-        const result = yield* Effect.result(runPollingAutoHeal(sampleDelay))
-        yield* finalizePollingAutoHeal(job.jobId, result, sampleAutoHealBackoff)
+      const decoded = yield* Schema.decodeUnknownEffect(RefreshQueueJob)(
+        job.payload,
+      ).pipe(Effect.result)
+      if (decoded._tag === "Failure") {
+        // Undecodable payload or unknown tag — fail non-retryable once.
+        yield* queue.fail(job.jobId, { retryable: false })
         return "busy" as const
       }
 
-      if (tag === REFRESH_REPOSITORY_TAG) {
-        const decoded = yield* Schema.decodeUnknownEffect(RefreshRepositoryJob)(
-          job.payload,
-        ).pipe(Effect.result)
-        if (decoded._tag === "Failure") {
-          yield* queue.fail(job.jobId, { retryable: false })
+      switch (decoded.success._tag) {
+        case "polling-auto-heal": {
+          const result = yield* Effect.result(runPollingAutoHeal(sampleDelay))
+          yield* finalizePollingAutoHeal(
+            job.jobId,
+            result,
+            sampleAutoHealBackoff,
+          )
           return "busy" as const
         }
-        const result = yield* Effect.result(
-          refreshRepository(decoded.success.repositoryId),
-        )
-        yield* finalizeManualRefresh(
-          job.jobId,
-          result,
-          decoded.success.repositoryId,
-        )
-        return "busy" as const
+        case "refresh-repository": {
+          const result = yield* Effect.result(
+            refreshRepository(decoded.success.repositoryId),
+          )
+          yield* finalizeManualRefresh(
+            job.jobId,
+            result,
+            decoded.success.repositoryId,
+          )
+          return "busy" as const
+        }
+        default: {
+          const _exhaustive: never = decoded.success
+          return _exhaustive
+        }
       }
-
-      yield* queue.fail(job.jobId, { retryable: false })
-      return "busy" as const
     }
 
     const scheduled = yield* claimRefreshJob(
@@ -525,18 +514,15 @@ const runLifecycleClaimLoop = (
       if (!leaseExtended) continue
 
       yield* Ref.update(activeRuns, (n) => n + 1)
-      yield* Effect.gen(function* () {
-        const result = yield* Effect.result(
-          lifecycle.runStep(job.payload.stepRunId),
-        )
-        if (result._tag === "Failure") {
-          yield* Effect.logError("Work Item Lifecycle Job failed", {
+      yield* lifecycle.runStep(job.payload.stepRunId).pipe(
+        Effect.tapError((error) =>
+          Effect.logError("Work Item Lifecycle Job failed", {
             jobId: job.jobId,
             stepRunId: job.payload.stepRunId,
-            error: formatLogError(result.failure),
-          })
-        }
-      }).pipe(
+            error: formatLogError(error),
+          }),
+        ),
+        Effect.ignore,
         Effect.ensuring(Ref.update(activeRuns, (n) => Math.max(0, n - 1))),
         Effect.forkDetach({ startImmediately: true }),
       )
