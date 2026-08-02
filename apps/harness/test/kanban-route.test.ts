@@ -152,9 +152,13 @@ describe("kanban home board", () => {
     expect(source).not.toContain("lane-number")
     expect(source).not.toContain("lane-count")
     expect(source).toContain("ui.queueHint")
-    expect(source).toContain("Feed the queue — work starts at your repos.")
-    expect(source).toContain("Manage repos →")
-    expect(source).toContain('to="/repos"')
+    expect(source).toContain("Feed the queue — label issues with")
+    expect(source).toContain("ready-for-agent")
+    expect(source).toContain("Implement now")
+    expect(source).toContain("Implement locally")
+    expect(source).toContain("ui.queueHintMenuIllus")
+    expect(source).not.toContain("Manage repos →")
+    expect(source).not.toContain("work starts at your repos")
   })
 
   test("Jobs strip + repository filters are sticky root chrome", () => {
@@ -442,6 +446,9 @@ describe("kanban home board", () => {
     // Lane switcher hidden on desktop, grid on mobile.
     expect(ui).toMatch(/laneSwitcher:[\s\S]*?hidden/)
     expect(ui).toContain("queueHint:")
+    expect(ui).toContain("queueHintMenuIllus:")
+    expect(ui).toContain("queueHintMenuItem:")
+    expect(ui).not.toContain("queueHintLink:")
     // Counts live in route roundels; header keeps title only.
     expect(ui).not.toContain("laneNumber:")
     expect(ui).not.toContain("laneCount:")

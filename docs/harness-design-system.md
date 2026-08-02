@@ -573,14 +573,18 @@ Stamps mark exceptions only — defaults go unstamped.
 ## 6. Queue discoverability hint ("Feed the queue")
 
 A permanent fixture at the **foot of the Queue platform**, always rendered
-(not only when the lane is empty), linking to `/repos`:
+(not only when the lane is empty):
 
 - **Panel**: `--lane-queue` fill, 2px ink border, 0.6–0.7rem padding.
 - **Tag**: solid ink fill, Queue-yellow mono uppercase text ("Queue").
-- **Copy** (plain words, per #695): "Feed the queue — work starts at your
-  repos."
-- **Link**: mono 0.62rem/700 uppercase, ink, 1.5px underline offset 3px —
-  "Manage repos →"; hover = ink fill, Queue-yellow text, no underline.
+- **Copy** (plain words; workflow per #730): "Feed the queue — label issues
+  with `ready-for-agent`. When they show up in your repos, click
+  **Implement now**." Prefer neutral "issues" over a forge brand name.
+- **Illustration**: compact static mock of the repos issue ⋮ menu showing
+  **Implement now** and **Implement locally** (decorative, `aria-hidden`)
+  so operators recognize the control on Repos.
+- No primary "Manage repos" CTA — keep the hint focused on label → Implement
+  now.
 - No transit glyphs (no ⇄), no "Transfer" wording anywhere.
 
 ## 7. Accessibility
@@ -600,7 +604,7 @@ A permanent fixture at the **foot of the Queue platform**, always rendered
 The metaphor stays visual; the words are plain. Banned vocabulary (from
 #695): "Transfer / change here", "system map", "Network key", "Departed",
 "Six-stop work network — all lines running", "Service board". Plain
-replacements: "Feed the queue — work starts at your repos", "Merged PR
+replacements: "Feed the queue — label issues with ready-for-agent…", "Merged PR
 throughput", "Clanker Harness" (masthead status under “Ready for Agent”),
 "Full archive". Roundels,
 route lines, and lane numbers (01–06) stay as pure graphics with
