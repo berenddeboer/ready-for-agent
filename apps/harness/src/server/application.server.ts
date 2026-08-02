@@ -186,45 +186,48 @@ export const createApplication = async (
   // selected backend as selectedBackendId so the process-wide proxy follows
   // the harness default even when other backends are also Active.
   // GraphQL Save paths re-sync via setSelectedOrInUse after settings changes.
-  const bootBackends = await Effect.runPromise(
+  //
+  // Boot read lives in the layer graph (not a pre-runtime Effect.runPromise)
+  // so it shares ManagedRuntime's databaseLayer memoization. Typed recovery
+  // (orElseSucceed) falls back on expected DB errors only; defects stay
+  // visible. Seeding failure must not prevent startup.
+  const resolveRuntime = makeResolveRuntime(platformLayer, sidecarUrl)
+  const defaultActiveBackendSeed = {
+    selectedBackendId: AGENT_BACKEND_IDS.opencode,
+    initialBackendIds: [
+      AGENT_BACKEND_IDS.opencode,
+    ] as ReadonlyArray<AgentBackendId>,
+  }
+  const activeLayer = Layer.unwrap(
     Effect.gen(function* () {
       const db = yield* DbService
-      const [config, selectedOrInUse] = yield* Effect.all([
-        db.getConfig,
-        db.listSelectedOrInUseBackendIds,
-      ])
-      return {
-        selectedAgentBackend: config.selectedAgentBackend,
-        selectedOrInUse,
-      }
-    }).pipe(Effect.provide(databaseLayer)),
-  )
-    .then(({ selectedAgentBackend, selectedOrInUse }) => {
-      const selectable = selectedOrInUse.filter((id): id is AgentBackendId =>
-        isSelectableAgentBackendId(id),
-      )
-      const selectedBackendId = isSelectableAgentBackendId(selectedAgentBackend)
-        ? (selectedAgentBackend as AgentBackendId)
-        : AGENT_BACKEND_IDS.opencode
-      return {
-        selectedBackendId,
-        initialBackendIds:
-          selectable.length > 0
-            ? selectable
-            : ([selectedBackendId] as AgentBackendId[]),
-      }
-    })
-    .catch(() => ({
-      selectedBackendId: AGENT_BACKEND_IDS.opencode,
-      initialBackendIds: [AGENT_BACKEND_IDS.opencode] as AgentBackendId[],
-    }))
+      const boot = yield* Effect.gen(function* () {
+        const [config, selectedOrInUse] = yield* Effect.all([
+          db.getConfig,
+          db.listSelectedOrInUseBackendIds,
+        ])
+        const selectable = selectedOrInUse.filter((id): id is AgentBackendId =>
+          isSelectableAgentBackendId(id),
+        )
+        const selectedBackendId = isSelectableAgentBackendId(
+          config.selectedAgentBackend,
+        )
+          ? config.selectedAgentBackend
+          : AGENT_BACKEND_IDS.opencode
+        return {
+          selectedBackendId,
+          initialBackendIds:
+            selectable.length > 0 ? selectable : [selectedBackendId],
+        }
+      }).pipe(Effect.orElseSucceed(() => defaultActiveBackendSeed))
 
-  const resolveRuntime = makeResolveRuntime(platformLayer, sidecarUrl)
-  const activeLayer = ActiveAgentBackendLive({
-    initialBackendIds: bootBackends.initialBackendIds,
-    selectedBackendId: bootBackends.selectedBackendId,
-    resolveRuntime,
-  })
+      return ActiveAgentBackendLive({
+        initialBackendIds: boot.initialBackendIds,
+        selectedBackendId: boot.selectedBackendId,
+        resolveRuntime,
+      })
+    }),
+  ).pipe(Layer.provide(databaseLayer))
 
   const lifecycleLayer = WorkItemLifecycleLive.pipe(
     Layer.provideMerge(LifecycleStepsLive),
