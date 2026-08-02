@@ -4,6 +4,7 @@ set -uo pipefail
 
 conditions="@ready-for-agent/source"
 effect_ignore=(
+  "**/browser-open.test.ts"
   "**/cli.test.ts"
   "**/services/application-config.test.ts"
 )

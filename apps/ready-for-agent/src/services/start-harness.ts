@@ -148,14 +148,10 @@ export class StartHarness extends Context.Service<
               })
             ) {
               const url = resolveUiUrl(config.browserEnv)
-              // Best-effort: never fail start; AbortSignal cancels the poll only.
-              yield* Effect.promise(async (signal) => {
-                try {
-                  await openBrowserWhenReady(config.platform, url, { signal })
-                } catch {
-                  // Opener / poll failures must not surface as fiber failures.
-                }
-              }).pipe(Effect.forkScoped({ startImmediately: true }))
+              // Best-effort Effect (retry/timeout/ignore); scope interrupt stops the poll.
+              yield* openBrowserWhenReady(config.platform, url).pipe(
+                Effect.forkScoped({ startImmediately: true }),
+              )
             }
 
             const code = yield* spawner.exitCode(
