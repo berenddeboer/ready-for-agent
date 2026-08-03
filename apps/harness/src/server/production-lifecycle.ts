@@ -1,8 +1,21 @@
-import { spawn } from "node:child_process"
 import { resolve } from "node:path"
-import { createInterface } from "node:readline"
 import { fileURLToPath } from "node:url"
-import { Effect, Layer } from "effect"
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Scope,
+  Stream,
+  pipe,
+} from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
 import { DatabaseLive, runConfiguredMigrations } from "@ready-for-agent/db"
 import {
   KEYMAXXER_SIDECAR_URL_PREFIX,
@@ -125,6 +138,53 @@ const defaultServerEntryPath = fileURLToPath(
   new URL("../../dist/server/server.js", import.meta.url),
 )
 
+/**
+ * Map a multi-reason Scope-close Cause into the disposal contract tests and
+ * operators expect: a single error, or AggregateError when several finalizers
+ * failed. Effect's runPromise squash only surfaces the first reason, so multi
+ * finalizer defects are collapsed into one AggregateError defect first.
+ */
+const disposalErrorFromCause = (cause: Cause.Cause<unknown>): unknown => {
+  const errors: unknown[] = []
+  for (const reason of cause.reasons) {
+    if (Cause.isFailReason(reason)) {
+      errors.push(reason.error)
+    } else if (Cause.isDieReason(reason)) {
+      errors.push(reason.defect)
+    }
+  }
+  if (errors.length === 0) {
+    return new Error("Production lifecycle disposal failed")
+  }
+  if (errors.length === 1) {
+    return errors[0]
+  }
+  return new AggregateError(errors, "Production lifecycle disposal failed")
+}
+
+/** Release helpers must be `E = never` for acquireRelease; rejections die. */
+const releasePromise = (run: () => Promise<void> | void): Effect.Effect<void> =>
+  Effect.promise(async () => {
+    await run()
+  })
+
+const releaseSync = (run: () => void): Effect.Effect<void> => Effect.sync(run)
+
+const dieMessage = (message: string): Effect.Effect<never> =>
+  Effect.die(new Error(message))
+
+const sanitizeEnv = (
+  environment: NodeJS.ProcessEnv,
+): Record<string, string> => {
+  const env: Record<string, string> = {}
+  for (const [key, value] of Object.entries(environment)) {
+    if (value !== undefined) {
+      env[key] = value
+    }
+  }
+  return env
+}
+
 export const resolveKeymaxxerMode = (
   environment: NodeJS.ProcessEnv,
   keymaxxerAvailable: (
@@ -165,67 +225,255 @@ const applyProductionMigrations = async (
   )
 }
 
+/**
+ * How long to wait after SIGTERM before escalating to SIGKILL for an owned
+ * Sidecar. Platform `forceKillAfter` only times out *sending* the signal, not
+ * awaiting exit — hang safety is implemented in `terminateOwnedSidecar`.
+ */
+const SIDECAR_FORCE_KILL_AFTER = Duration.seconds(2)
+
+/** Brief grace after SIGKILL before giving up on exit observation. */
+const SIDECAR_SIGKILL_WAIT = Duration.seconds(1)
+
+/** Platform exitCode fails on signal death with this message shape (on cause). */
+const SIGNAL_FROM_EXIT_MESSAGE =
+  /Process interrupted due to receipt of signal: '([^']+)'/
+
+/**
+ * Collect messages from an error and nested cause/reason chain.
+ * PlatformError.message is a SystemError summary; the signal text lives on cause.
+ */
+const collectErrorMessages = (error: unknown): string => {
+  const parts: string[] = []
+  const seen = new Set<unknown>()
+  let current: unknown = error
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current)
+    if (typeof current === "string") {
+      parts.push(current)
+      break
+    }
+    if (current instanceof Error) {
+      parts.push(current.message)
+      current = current.cause
+      continue
+    }
+    if (typeof current === "object") {
+      const record = current as {
+        message?: unknown
+        cause?: unknown
+        reason?: unknown
+      }
+      if (typeof record.message === "string") {
+        parts.push(record.message)
+      }
+      if (record.cause !== undefined) {
+        current = record.cause
+        continue
+      }
+      if (record.reason !== undefined) {
+        current = record.reason
+        continue
+      }
+    }
+    break
+  }
+  return parts.join("\n")
+}
+
+const parseSignalFromExitError = (error: unknown): NodeJS.Signals | null => {
+  const match = SIGNAL_FROM_EXIT_MESSAGE.exec(collectErrorMessages(error))
+  if (match === null || match[1] === undefined) {
+    return null
+  }
+  return match[1] as NodeJS.Signals
+}
+
+const sendSignal = (pid: number, signal: NodeJS.Signals): Effect.Effect<void> =>
+  Effect.sync(() => {
+    try {
+      process.kill(pid, signal)
+    } catch {
+      // Already exited or unsignallable.
+    }
+  })
+
+/**
+ * Hang-safe Sidecar teardown: SIGTERM, wait up to SIDECAR_FORCE_KILL_AFTER,
+ * then SIGKILL. Does not use handle.kill (platform forceKillAfter does not
+ * bound Deferred.await(exit)).
+ */
+const terminateOwnedSidecar = (
+  handle: ChildProcessHandle,
+): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const running = yield* handle.isRunning.pipe(Effect.orDie)
+    if (!running) {
+      return
+    }
+    const pid = Number(handle.pid)
+    yield* sendSignal(pid, "SIGTERM")
+    // exitCode succeeds on numeric exit; fails on signal death — both mean gone.
+    yield* handle.exitCode.pipe(
+      Effect.ignore,
+      Effect.timeout(SIDECAR_FORCE_KILL_AFTER),
+      Effect.catchTag("TimeoutError", () =>
+        sendSignal(pid, "SIGKILL").pipe(
+          Effect.andThen(
+            handle.exitCode.pipe(
+              Effect.ignore,
+              Effect.timeout(SIDECAR_SIGKILL_WAIT),
+              Effect.ignore,
+            ),
+          ),
+        ),
+      ),
+    )
+  })
+
+/** Fire-and-forget Effect on the Promise host without unhandled rejections. */
+const runDetached = (effect: Effect.Effect<void>): void => {
+  void Effect.runPromise(effect).catch(() => {})
+}
+
+/**
+ * Adapt a ChildProcessHandle to the Promise-side OwnedChildProcess surface used
+ * by the child-exit watchdog and test fakes.
+ *
+ * Platform `exitCode` succeeds only when Node reports a numeric code; signal
+ * deaths fail with PlatformError. The watchdog must treat both as termination.
+ *
+ * Teardown ownership lives on the ambient Scope finalizer (hang-safe terminate);
+ * `kill` is best-effort only for callers that still invoke it.
+ */
+const ownedChildFromHandle = (
+  handle: ChildProcessHandle,
+): OwnedChildProcess => ({
+  kill: (_signal = "SIGTERM") => {
+    runDetached(terminateOwnedSidecar(handle))
+    return true
+  },
+  on: (event, listener) => {
+    if (event !== "exit") return
+    runDetached(
+      handle.exitCode.pipe(
+        Effect.matchEffect({
+          onSuccess: (code) =>
+            Effect.sync(() => {
+              listener(Number(code), null)
+            }),
+          onFailure: (error) =>
+            Effect.sync(() => {
+              listener(null, parseSignalFromExitError(error))
+            }),
+        }),
+      ),
+    )
+  },
+})
+
+/**
+ * Spawn the owned Keymaxxer Sidecar, wait for the bootstrap URL (timeout + race
+ * against early exit). Immediately unrefs the platform-owned process so the
+ * spawner Scope finalizer never unbounded-awaits exit; hang-safe terminate is
+ * the sole teardown path (finalizer + bootstrap-failure cleanup).
+ */
 const startOwnedSidecar = (input: {
   readonly environment: NodeJS.ProcessEnv
   readonly spawn: SidecarChildSpawn
   readonly bootstrapTimeoutMs: number
   readonly logError?: (message: string) => void
-}): Promise<{
-  readonly url: string
-  readonly child: OwnedChildProcess
-}> =>
-  new Promise((resolvePromise, reject) => {
-    const sidecar = spawn(input.spawn.command, [...input.spawn.args], {
-      env: input.environment,
-      stdio: ["ignore", "pipe", "inherit"],
-    })
+}): Effect.Effect<
+  {
+    readonly url: string
+    readonly child: OwnedChildProcess
+  },
+  never,
+  Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.gen(function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const command = ChildProcess.make(
+      input.spawn.command,
+      [...input.spawn.args],
+      {
+        env: sanitizeEnv(input.environment),
+        extendEnv: false,
+        // Match prior node:child_process.spawn (non-detached); lifecycle owns the child.
+        detached: false,
+        killSignal: "SIGTERM",
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "inherit",
+      },
+    )
 
-    let settled = false
-    const fail = (message: string) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      input.logError?.(message)
-      sidecar.kill("SIGTERM")
-      reject(new Error(message))
+    const handle = yield* spawner.spawn(command).pipe(Effect.orDie)
+
+    // Own teardown before bootstrap wait so failure Scope.close cannot hang in
+    // the platform finalizer (unref no-ops it; we terminate hang-safely ourselves).
+    // Discard Reref — we never re-attach the child to the process refcount.
+    yield* handle.unref.pipe(Effect.asVoid, Effect.orDie)
+    yield* Effect.addFinalizer(() => terminateOwnedSidecar(handle))
+
+    const bootstrapUrl = pipe(
+      Stream.decodeText(handle.stdout),
+      Stream.splitLines,
+      Stream.filter((line) => line.startsWith(KEYMAXXER_SIDECAR_URL_PREFIX)),
+      Stream.map((line) =>
+        line.slice(KEYMAXXER_SIDECAR_URL_PREFIX.length).trim(),
+      ),
+      Stream.take(1),
+      Stream.runHead,
+      Effect.orDie,
+      Effect.flatMap((url) =>
+        Option.isSome(url)
+          ? Effect.succeed(url.value)
+          : dieMessage("Keymaxxer Sidecar stdout closed before bootstrap URL"),
+      ),
+    )
+
+    // exitCode fails on signal death; map both outcomes to the same bootstrap fail.
+    const earlyExit = handle.exitCode.pipe(
+      Effect.matchEffect({
+        onSuccess: (code) =>
+          dieMessage(
+            `Keymaxxer Sidecar exited before bootstrap (code ${Number(code)})`,
+          ),
+        onFailure: (error) => {
+          const signal = parseSignalFromExitError(error)
+          return dieMessage(
+            signal !== null
+              ? `Keymaxxer Sidecar exited before bootstrap (code ?, signal ${signal})`
+              : "Keymaxxer Sidecar exited before bootstrap (code ?)",
+          )
+        },
+      }),
+    )
+
+    // raceFirst: first completion wins (including earlyExit Die). Effect.race is
+    // first-success only, so a dying Sidecar would not fail-fast until timeout/EOF.
+    const url = yield* Effect.raceFirst(bootstrapUrl, earlyExit).pipe(
+      Effect.timeout(Duration.millis(input.bootstrapTimeoutMs)),
+      Effect.catchTag("TimeoutError", () =>
+        dieMessage("Timed out waiting for Keymaxxer Sidecar bootstrap URL"),
+      ),
+      Effect.tapCause((cause) =>
+        Effect.gen(function* () {
+          const defect = Cause.squash(cause)
+          const message =
+            defect instanceof Error ? defect.message : String(defect)
+          yield* Effect.sync(() => input.logError?.(message))
+          // Immediate hang-safe kill; Scope finalizer will no-op if already dead.
+          yield* terminateOwnedSidecar(handle)
+        }),
+      ),
+    )
+
+    return {
+      url,
+      child: ownedChildFromHandle(handle),
     }
-
-    const timeout = setTimeout(() => {
-      fail("Timed out waiting for Keymaxxer Sidecar bootstrap URL")
-    }, input.bootstrapTimeoutMs)
-
-    if (sidecar.stdout === null) {
-      fail("Keymaxxer Sidecar stdout was not captured")
-      return
-    }
-
-    const lines = createInterface({ input: sidecar.stdout })
-    lines.on("line", (line) => {
-      if (!line.startsWith(KEYMAXXER_SIDECAR_URL_PREFIX)) return
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      lines.close()
-      const url = line.slice(KEYMAXXER_SIDECAR_URL_PREFIX.length).trim()
-      resolvePromise({
-        url,
-        child: sidecar,
-      })
-    })
-
-    sidecar.on("exit", (code) => {
-      if (!settled) {
-        fail(`Keymaxxer Sidecar exited before bootstrap (code ${code ?? "?"})`)
-      }
-    })
-
-    sidecar.on("error", (error) => {
-      fail(
-        error instanceof Error
-          ? error.message
-          : "Keymaxxer Sidecar failed to start",
-      )
-    })
   })
 
 const openDefaultBrowser = (url: string) => {
@@ -290,8 +538,10 @@ const defaultInstallSignalHandlers = (
 
 /**
  * Intentional Promise host boundary for Bun HTTP, process signals, detached
- * browser launch, owned Sidecar bootstrap, dynamic imports, and shutdown.
- * Effect owns the application runtime and migrations inside this outer host.
+ * browser launch, and shutdown triggers. Inside this boundary, resource
+ * orchestration (migrations → sidecar → application → HTTP) uses Effect Scope
+ * + acquireRelease so teardown is reverse-order, memoized on dispose, and
+ * partial acquisition cleans up automatically. See ADR 0045.
  */
 export const startProductionLifecycle = async (
   options: ProductionLifecycleOptions = {},
@@ -318,15 +568,7 @@ export const startProductionLifecycle = async (
 
   const applyMigrations = options.applyMigrations ?? applyProductionMigrations
   const resolveMode = options.resolveKeymaxxerMode ?? resolveKeymaxxerMode
-  const startSidecar =
-    options.startSidecar ??
-    ((env) =>
-      startOwnedSidecar({
-        environment: env,
-        spawn: sidecarSpawn,
-        bootstrapTimeoutMs,
-        logError,
-      }))
+  const customStartSidecar = options.startSidecar
   const createApp = options.createApplication ?? createApplication
   const loadStartHandler =
     options.loadStartHandler ??
@@ -345,96 +587,172 @@ export const startProductionLifecycle = async (
   onEvent("database-ready")
 
   const mode = resolveMode(environment)
-  let ownedChild: OwnedChildProcess | undefined
-  let applicationEnv: NodeJS.ProcessEnv = { ...environment }
+  const scope = await Effect.runPromise(Scope.make("sequential"))
 
-  if (mode.kind === "disabled") {
-    applicationEnv = { ...environment, KEYMAXXER_ENABLED: "false" }
-    delete applicationEnv.KEYMAXXER_SIDECAR_URL
-  } else if (mode.kind === "existing-url") {
-    applicationEnv = {
-      ...environment,
-      KEYMAXXER_SIDECAR_URL: mode.url,
-    }
-    onEvent("sidecar-ready")
-  } else {
-    const started = await startSidecar(environment)
-    ownedChild = started.child
-    applicationEnv = {
-      ...environment,
-      KEYMAXXER_SIDECAR_URL: started.url,
-    }
-    onEvent("sidecar-ready")
-  }
-
-  let application: Application | undefined
-  let server: HttpServerHandle | undefined
   let shuttingDown = false
   let removeSignalHandlers = () => {}
   let childFailed = false
   /** Shared disposal promise so concurrent callers await the same cleanup. */
   let disposePromise: Promise<void> | undefined
 
-  const runDisposal = async (): Promise<void> => {
-    onEvent("shutdown-start")
-    removeSignalHandlers()
-
-    const failures: unknown[] = []
-
-    if (server !== undefined) {
-      try {
-        await server.stop(true)
-      } catch (error) {
-        failures.push(error)
-      }
-    }
-
-    if (application !== undefined) {
-      try {
-        await application.dispose()
-      } catch (error) {
-        failures.push(error)
-      }
-    }
-
-    try {
-      ownedChild?.kill("SIGTERM")
-    } catch (error) {
-      failures.push(error)
-    }
-
-    onEvent("shutdown-complete")
-
-    if (failures.length === 1) {
-      throw failures[0]
-    }
-    if (failures.length > 1) {
-      throw new AggregateError(failures, "Production lifecycle disposal failed")
-    }
-  }
-
   const dispose = (): Promise<void> => {
     if (disposePromise !== undefined) {
       return disposePromise
     }
     shuttingDown = true
-    disposePromise = runDisposal()
+    disposePromise = Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Effect.sync(() => {
+          onEvent("shutdown-start")
+          removeSignalHandlers()
+        })
+        const closeExit = yield* Effect.exit(Scope.close(scope, Exit.void))
+        yield* Effect.sync(() => {
+          onEvent("shutdown-complete")
+        })
+        if (Exit.isFailure(closeExit)) {
+          return yield* Effect.die(disposalErrorFromCause(closeExit.cause))
+        }
+      }),
+    )
     return disposePromise
   }
 
-  try {
-    application = await createApp(applicationEnv)
-    onEvent("application-ready")
+  const processLayer = BunChildProcessSpawner.layer.pipe(
+    Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
+  )
 
-    const handler = await loadStartHandler()
-    server = await serveHttp({
-      hostname,
-      port,
-      clientDirectory,
-      embeddedClientAssets,
-      handler,
-      context: application.context,
-    })
+  // Sidecar acquisition is outside the app/HTTP try/catch: a refused or
+  // timed-out sidecar must fail startup without dispose/shutdown events.
+  // On failure we still close the Scope so ChildProcessSpawner finalizers run
+  // (process already SIGTERM'd on bootstrap failure) without onEvent hooks.
+  let applicationEnv: NodeJS.ProcessEnv
+  let ownedChild: OwnedChildProcess | undefined
+  try {
+    const sidecarPhase = await Effect.runPromise(
+      Scope.provide(scope)(
+        Effect.gen(function* () {
+          if (mode.kind === "disabled") {
+            const disabledEnv: NodeJS.ProcessEnv = {
+              ...environment,
+              KEYMAXXER_ENABLED: "false",
+            }
+            delete disabledEnv.KEYMAXXER_SIDECAR_URL
+            return {
+              applicationEnv: disabledEnv,
+              ownedChild: undefined as OwnedChildProcess | undefined,
+            }
+          }
+
+          if (mode.kind === "existing-url") {
+            yield* Effect.sync(() => {
+              onEvent("sidecar-ready")
+            })
+            return {
+              applicationEnv: {
+                ...environment,
+                KEYMAXXER_SIDECAR_URL: mode.url,
+              },
+              ownedChild: undefined as OwnedChildProcess | undefined,
+            }
+          }
+
+          // Custom/test fakes need an outer kill; the default spawn path owns
+          // hang-safe terminate via Scope finalizer after unref (no double kill).
+          const useCustomSidecar = customStartSidecar !== undefined
+          const started = yield* Effect.acquireRelease(
+            useCustomSidecar
+              ? Effect.promise(() => customStartSidecar(environment))
+              : startOwnedSidecar({
+                  environment,
+                  spawn: sidecarSpawn,
+                  bootstrapTimeoutMs,
+                  logError,
+                }),
+            ({ child }) =>
+              useCustomSidecar
+                ? releaseSync(() => {
+                    child.kill("SIGTERM")
+                  })
+                : Effect.void,
+          )
+
+          yield* Effect.sync(() => {
+            onEvent("sidecar-ready")
+          })
+
+          return {
+            applicationEnv: {
+              ...environment,
+              KEYMAXXER_SIDECAR_URL: started.url,
+            },
+            ownedChild: started.child as OwnedChildProcess | undefined,
+          }
+        }),
+      ).pipe(Effect.provide(processLayer)),
+    )
+    applicationEnv = sidecarPhase.applicationEnv
+    ownedChild = sidecarPhase.ownedChild
+  } catch (error) {
+    // Prefer the original startup error (sidecar refused / bootstrap timeout).
+    // Scope.close must not replace it if finalizers fail.
+    try {
+      await Effect.runPromise(Scope.close(scope, Exit.void))
+    } catch (cleanupError) {
+      logError(
+        `Production lifecycle disposal failed during startup recovery: ${
+          cleanupError instanceof Error
+            ? cleanupError.message
+            : String(cleanupError)
+        }`,
+      )
+    }
+    throw error
+  }
+
+  let listenUrl: string
+  let listenPort: number
+
+  try {
+    const startedHttp = await Effect.runPromise(
+      Scope.provide(scope)(
+        Effect.gen(function* () {
+          const application = yield* Effect.acquireRelease(
+            Effect.promise(() => createApp(applicationEnv)).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  onEvent("application-ready")
+                }),
+              ),
+            ),
+            (app) => releasePromise(() => app.dispose()),
+          )
+
+          const handler = yield* Effect.promise(() => loadStartHandler())
+
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              serveHttp({
+                hostname,
+                port,
+                clientDirectory,
+                embeddedClientAssets,
+                handler,
+                context: application.context,
+              }),
+            ),
+            (httpServer) => releasePromise(() => httpServer.stop(true)),
+          )
+
+          return {
+            listenUrl: `http://${hostname}:${server.port}/`,
+            listenPort: server.port,
+          }
+        }),
+      ).pipe(Effect.provide(processLayer)),
+    )
+    listenUrl = startedHttp.listenUrl
+    listenPort = startedHttp.listenPort
   } catch (error) {
     try {
       await dispose()
@@ -451,7 +769,6 @@ export const startProductionLifecycle = async (
     throw error
   }
 
-  const listenUrl = `http://${hostname}:${server.port}/`
   const releaseVersion = options.version ?? READY_FOR_AGENT_VERSION
   logInfo(
     `Ready for Agent v${releaseVersion} listening on ${listenUrl.slice(0, -1)}`,
@@ -463,7 +780,7 @@ export const startProductionLifecycle = async (
       noOpenFlag: hasNoOpenFlag(argv),
       env: {
         NO_BROWSER: environment.NO_BROWSER,
-        PORT: String(server.port),
+        PORT: String(listenPort),
       },
     })
   ) {
