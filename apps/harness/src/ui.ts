@@ -13,13 +13,25 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 
 /**
  * Rivet-plate background images (stamped industrial chrome).
- * Multi-layer radial gradients at the corners.
+ * Multi-layer radial gradients at the top corners.
+ *
+ * Right-edge positions must use `calc(100% - Npx)` (spaces around `-`).
+ * Tailwind arbitrary values encode those spaces as `_`, so write
+ * `calc(100%_-_Npx)`. Bare `calc(100%-Npx)` is invalid CSS and drops the
+ * right-hand rivet entirely.
  */
 const mastPlateRivets =
-  "[background-image:radial-gradient(circle_1.6px_at_7px_7px,var(--mast-plate-rivet)_1.6px,transparent_2.1px),radial-gradient(circle_1.6px_at_calc(100%-7px)_7px,var(--mast-plate-rivet)_1.6px,transparent_2.1px)]"
+  "[background-image:radial-gradient(circle_1.6px_at_7px_7px,var(--mast-plate-rivet)_1.6px,transparent_2.1px),radial-gradient(circle_1.6px_at_calc(100%_-_7px)_7px,var(--mast-plate-rivet)_1.6px,transparent_2.1px)]"
 
 const plateMiniRivets =
-  "[background-image:radial-gradient(circle_1.4px_at_6px_6px,var(--plate-rivet)_1.4px,transparent_1.9px),radial-gradient(circle_1.4px_at_calc(100%-6px)_6px,var(--plate-rivet)_1.4px,transparent_1.9px)]"
+  "[background-image:radial-gradient(circle_1.4px_at_6px_6px,var(--plate-rivet)_1.4px,transparent_1.9px),radial-gradient(circle_1.4px_at_calc(100%_-_6px)_6px,var(--plate-rivet)_1.4px,transparent_1.9px)]"
+
+/**
+ * Active Jobs tab rivets: paper-colored dots contrast on `bg-ink` in both
+ * themes. Full static string (variant + property) so Tailwind can scan it.
+ */
+const pipelineTabActiveRivets =
+  "aria-[current=page]:[background-image:radial-gradient(circle_1.4px_at_6px_6px,var(--paper)_1.4px,transparent_1.9px),radial-gradient(circle_1.4px_at_calc(100%_-_6px)_6px,var(--paper)_1.4px,transparent_1.9px)]"
 
 const laneSwitchRivets = plateMiniRivets
 
@@ -67,8 +79,8 @@ export const ui = {
     "hover:bg-[var(--mast-plate-hover)] hover:text-[var(--mast-ink)]",
     "aria-[current=page]:bg-[var(--mast-plate-active)] aria-[current=page]:text-[var(--mast-plate-active-ink)]",
     "aria-[current=page]:shadow-[inset_0_1px_0_rgb(255_255_255/0.65),inset_0_-2px_0_rgb(16_19_18/0.12)]",
-    // active rivets via arbitrary variant on same element
-    "aria-[current=page]:[background-image:radial-gradient(circle_1.6px_at_7px_7px,var(--mast-plate-active-rivet)_1.6px,transparent_2.1px),radial-gradient(circle_1.6px_at_calc(100%-7px)_7px,var(--mast-plate-active-rivet)_1.6px,transparent_2.1px)]",
+    // Active rivets via arbitrary variant on same element (valid calc for right edge).
+    "aria-[current=page]:[background-image:radial-gradient(circle_1.6px_at_7px_7px,var(--mast-plate-active-rivet)_1.6px,transparent_2.1px),radial-gradient(circle_1.6px_at_calc(100%_-_7px)_7px,var(--mast-plate-active-rivet)_1.6px,transparent_2.1px)]",
     "[&_svg]:h-[0.9rem] [&_svg]:w-[0.9rem] [&_svg]:shrink-0",
   ),
 
@@ -514,10 +526,14 @@ export const ui = {
   pipelineTab: cx(
     "relative inline-flex appearance-none items-center gap-[0.4rem]",
     "-ml-0.5 border-2 border-ink bg-paper px-4 py-2 first:ml-0",
+    // Shared mini-plate rivets (top-left + top-right) — same recipe as plateMini.
+    plateMiniRivets,
     "cursor-pointer font-display text-[0.72rem] font-bold tracking-[0.14em] uppercase text-ink-2 no-underline",
     "hover:text-ink",
     // Active route — navigation list (aria-current), not ARIA tabs (aria-selected).
     "aria-[current=page]:bg-ink aria-[current=page]:text-paper",
+    // Keep right-hand rivets visible on the inverted ink fill (both themes).
+    pipelineTabActiveRivets,
     "[&_svg]:h-[0.85rem] [&_svg]:w-[0.85rem] [&_svg]:shrink-0",
   ),
 
