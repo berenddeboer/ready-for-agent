@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
-import { Effect, Layer, type Layer as LayerType } from "effect"
+import { Effect, FileSystem, Layer, type Layer as LayerType } from "effect"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
@@ -86,6 +86,47 @@ const stubGitLab = (
     ...overrides,
   } satisfies GitLabServiceShape)
 
+/**
+ * FileSystem layer that fails residual `remove` for a sticky path so Local
+ * cleanup's residual postcondition can be forced after retries.
+ * - `noop`: pretends success while leaving the path (path recreated race).
+ * - `throw`: fails like ENOTEMPTY/EBUSY while a concurrent writer holds the tree.
+ */
+const stickyResidualRemoveLayer = (
+  stickyPath: string,
+  attempts: { count: number },
+  mode: "noop" | "throw" = "noop",
+): Layer.Layer<FileSystem.FileSystem, never, FileSystem.FileSystem> =>
+  Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const base = yield* FileSystem.FileSystem
+      const normalizedSticky = stickyPath.replace(/[/\\]+$/, "")
+      return {
+        ...base,
+        remove: (
+          path: string,
+          options?: { readonly recursive?: boolean; readonly force?: boolean },
+        ) => {
+          const normalized = path.replace(/[/\\]+$/, "")
+          if (
+            normalized === normalizedSticky ||
+            normalized.startsWith(`${normalizedSticky}/`)
+          ) {
+            attempts.count += 1
+            if (mode === "throw") {
+              return Effect.fail(
+                new Error(`EBUSY: directory busy: ${path}`),
+              ) as ReturnType<typeof base.remove>
+            }
+            return Effect.void
+          }
+          return base.remove(path, options)
+        },
+      }
+    }),
+  )
+
 const run = <A, E>(
   effect: Effect.Effect<
     A,
@@ -97,16 +138,27 @@ const run = <A, E>(
   >,
   keymaxxerLayer: Layer.Layer<KeymaxxerService> = stubKeymaxxer(),
   gitlabLayer: Layer.Layer<GitLabService> = stubGitLab(),
-): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(
-      Effect.provide(DbServiceLive),
-      Effect.provide(DatabaseTest),
-      Effect.provide(keymaxxerLayer),
-      Effect.provide(gitlabLayer),
-      Effect.provide(PlatformLayer),
-    ),
+  fileSystemOverlay?: Layer.Layer<
+    FileSystem.FileSystem,
+    never,
+    FileSystem.FileSystem
+  >,
+): Promise<A> => {
+  const withServices = effect.pipe(
+    Effect.provide(DbServiceLive),
+    Effect.provide(DatabaseTest),
+    Effect.provide(keymaxxerLayer),
+    Effect.provide(gitlabLayer),
   )
+  const withPlatform =
+    fileSystemOverlay === undefined
+      ? withServices.pipe(Effect.provide(PlatformLayer))
+      : withServices.pipe(
+          Effect.provide(fileSystemOverlay),
+          Effect.provide(PlatformLayer),
+        )
+  return Effect.runPromise(withPlatform)
+}
 
 const git = async (cwd: string, args: ReadonlyArray<string>) => {
   const proc = Bun.spawn(["git", "-c", "commit.gpgsign=false", ...args], {
@@ -160,6 +212,9 @@ const realGitPath = async (): Promise<string> => {
  * Install a `git` shim first on PATH that fails the first N
  * `worktree remove --force` calls with "Directory not empty", then delegates
  * to the real git. Returns restore + attempt counter helpers.
+ *
+ * The shim fails *before* invoking real Git, so registration remains present
+ * and a second `worktree remove` is still a valid Git command.
  */
 const installWorktreeRemoveFailShim = async (
   root: string,
@@ -191,6 +246,63 @@ for arg in "$@"; do
       echo "error: failed to delete '$path': Directory not empty" >&2
       exit 255
     fi
+    break
+  fi
+  prev="$arg"
+done
+exec "$REAL_GIT" "$@"
+`
+  await writeFile(shimPath, shim)
+  await chmod(shimPath, 0o755)
+  const previousPath = process.env.PATH ?? ""
+  process.env.PATH = `${binDir}:${previousPath}`
+  return {
+    removeAttempts: async () =>
+      Number.parseInt(await readFile(stateFile, "utf8"), 10),
+    restore: () => {
+      process.env.PATH = previousPath
+    },
+  }
+}
+
+/**
+ * Model the production partial-removal race: Git unregisters the worktree
+ * (and deletes its files), a concurrent writer leaves residual `.nx` content,
+ * and Git then reports "Directory not empty". A second `worktree remove` is
+ * invalid once registration is gone ("not a working tree").
+ */
+const installPartialWorktreeRemoveShim = async (root: string) => {
+  const realGit = await realGitPath()
+  const binDir = join(root, "git-shim-partial-bin")
+  const stateFile = join(root, "git-shim-partial-remove-attempts")
+  await mkdir(binDir, { recursive: true })
+  await writeFile(stateFile, "0")
+  const shimPath = join(binDir, "git")
+  const shim = `#!/usr/bin/env bash
+set -euo pipefail
+REAL_GIT=${JSON.stringify(realGit)}
+STATE=${JSON.stringify(stateFile)}
+is_force_remove=0
+prev=""
+for arg in "$@"; do
+  if [[ "$prev" == "worktree" && "$arg" == "remove" ]]; then
+    is_force_remove=1
+  fi
+  if [[ "$arg" == "--force" && "$is_force_remove" -eq 1 ]]; then
+    count=$(cat "$STATE")
+    next=$((count + 1))
+    echo "$next" > "$STATE"
+    path="\${@: -1}"
+    if [[ "$count" -eq 0 ]]; then
+      # Real Git removes registration (and the tree); then leave residual files.
+      "$REAL_GIT" "$@"
+      mkdir -p "$path/.nx/workspace-data"
+      echo "residual" > "$path/.nx/workspace-data/nx_files.nxt"
+      echo "error: failed to delete '$path': Directory not empty" >&2
+      exit 255
+    fi
+    # Further force-removes must not be required; delegate so a mistaken
+    # retry surfaces as "not a working tree".
     break
   fi
   prev="$arg"
@@ -677,6 +789,182 @@ describe("removeWorktree", () => {
       expect(await shim.removeAttempts()).toBe(2)
     } finally {
       shim.restore()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("recovers when Git unregisters the worktree but leaves residual .nx files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-partial-"))
+    const shim = await installPartialWorktreeRemoveShim(root)
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+
+      const { path, branch } = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          const context = baseContext({
+            workItemId,
+            repositoryId: repository.id,
+          })
+          const created = yield* createWorktree(context)
+          yield* localCleanup({
+            ...context,
+            worktreePath: created.worktreePath,
+          })
+          return {
+            path: created.worktreePath,
+            branch: workItemBranchName({
+              projectPath: "acme/widgets",
+              issueNumber: 42,
+              workItemId,
+            }),
+          }
+        }),
+      )
+
+      // Residual directory fully removed in the same Step Run.
+      expect(
+        await Bun.file(join(path, ".nx/workspace-data/nx_files.nxt")).exists(),
+      ).toBe(false)
+      expect(await Bun.file(path).exists()).toBe(false)
+      expect(await git(bare, ["branch", "--list", branch])).toBe("")
+      const worktrees = await git(bare, ["worktree", "list", "--porcelain"])
+      expect(worktrees.includes(path)).toBe(false)
+      // Must not re-issue worktree remove after registration is gone.
+      expect(await shim.removeAttempts()).toBe(1)
+    } finally {
+      shim.restore()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("fails Local cleanup when residual directory survives recursive remove retries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-residual-stuck-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      const residualPath = workItemWorktreePath({
+        localPath: bare,
+        isBare: true,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
+        workItemId,
+      })
+      await mkdir(join(residualPath, ".nx/workspace-data"), { recursive: true })
+      await writeFile(
+        join(residualPath, ".nx/workspace-data/nx_files.nxt"),
+        "sticky\n",
+      )
+      const attempts = { count: 0 }
+
+      const error = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          return yield* localCleanup(
+            baseContext({
+              workItemId,
+              repositoryId: repository.id,
+            }),
+          ).pipe(Effect.flip)
+        }),
+        stubKeymaxxer(),
+        stubGitLab(),
+        stickyResidualRemoveLayer(residualPath, attempts),
+      )
+
+      expect(error._tag).toBe("GitCommandError")
+      expect(error.message).toContain("Residual worktree directory remains")
+      if (error._tag === "GitCommandError") {
+        expect(error.command).toBe("rm")
+        expect(error.args).toEqual(["-rf", residualPath])
+        expect(error.stderr).toContain(
+          "path still exists after recursive remove",
+        )
+      }
+      // First residual remove + one automatic retry.
+      expect(attempts.count).toBe(2)
+      // Residual intentionally left for the postcondition failure.
+      expect(
+        await Bun.file(
+          join(residualPath, ".nx/workspace-data/nx_files.nxt"),
+        ).exists(),
+      ).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("retries residual remove when the first filesystem remove throws", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-residual-throw-"))
+    try {
+      const bare = await initBareRepository(root)
+      const workItemId = makeWorkItemId()
+      const residualPath = workItemWorktreePath({
+        localPath: bare,
+        isBare: true,
+        forge: "github",
+        forgeHost: "github.com",
+        projectPath: "acme/widgets",
+        issueNumber: 42,
+        workItemId,
+      })
+      await mkdir(join(residualPath, ".nx/workspace-data"), { recursive: true })
+      await writeFile(
+        join(residualPath, ".nx/workspace-data/nx_files.nxt"),
+        "busy\n",
+      )
+      const attempts = { count: 0 }
+
+      const error = await run(
+        Effect.gen(function* () {
+          const db = yield* DbService
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: bare,
+            isBare: true,
+          })
+          return yield* localCleanup(
+            baseContext({
+              workItemId,
+              repositoryId: repository.id,
+            }),
+          ).pipe(Effect.flip)
+        }),
+        stubKeymaxxer(),
+        stubGitLab(),
+        stickyResidualRemoveLayer(residualPath, attempts, "throw"),
+      )
+
+      expect(error._tag).toBe("GitCommandError")
+      expect(error.message).toContain("Residual worktree directory remains")
+      if (error._tag === "GitCommandError") {
+        expect(error.command).toBe("rm")
+        expect(error.stderr).toContain(
+          "path still exists after recursive remove",
+        )
+      }
+      // First remove throws, sleep, second remove throws, then residual fails.
+      expect(attempts.count).toBe(2)
+    } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
