@@ -166,9 +166,13 @@ describe("kanban home board", () => {
     expect(route).toContain("ui.laneFurnaceSmokePuff")
     expect(route).toContain("laneItemsAssignmentKey")
     expect(route).toContain("ROUTE_FED_MS")
-    expect(route).toContain("ROUTE_SMOKE_MS")
+    expect(route).toContain("smokeDurationMs")
+    expect(route).toContain("furnaceFireLit")
+    expect(route).toContain("useLingeringSmoke")
     expect(route).toMatch(/jobs in \$\{lane\.label\}/)
     expect(route).toContain("prefers-reduced-motion")
+    // Attention stays cold even when occupied.
+    expect(route).toContain("furnaceFireLit(lane.id, count)")
     expect(source).toContain("<MetalLaneHeader")
     expect(metalHeader).toContain("ui.laneHeader")
     expect(metalHeader).toContain("ui.laneTitle")
@@ -499,22 +503,42 @@ describe("kanban home board", () => {
     // Desktop layout lives on recipe strings (no separate media block).
     expect(ui).toContain("pipelineBoard:")
     expect(ui).toContain("pipelineRoute:")
-    // Route spine uses before: pseudo utilities.
-    expect(ui).toMatch(/pipelineRoute:[\s\S]*?before:/)
+    // Brass pneumatic tube spine (not a plain ink hairline).
+    expect(ui).toContain("pipelineRouteSpine:")
+    expect(ui).toContain("pipelineRouteSpineBore:")
     expect(ui).toContain("laneRoundel:")
     // Pot-belly furnace chrome (issue #737).
     expect(ui).toContain("laneFurnaceStack:")
     expect(ui).toContain("laneFurnaceBody:")
+    expect(ui).toContain("laneFurnaceBand:")
     expect(ui).toContain("laneFurnaceMouth:")
+    expect(ui).toContain("laneFurnaceFire:")
+    expect(ui).toContain("laneFurnaceEmber:")
+    expect(ui).toContain("laneFurnaceFlame:")
     expect(ui).toContain("laneFurnaceGlow:")
     expect(ui).toContain("laneFurnaceSmokePuff:")
-    expect(ui).toContain("laneFurnaceSmokePuffAlt:")
+    expect(stylesSource()).toContain("@keyframes furnace-fire-flame")
+    expect(stylesSource()).toContain("@keyframes furnace-fire-ember")
+    // Queue flames use per-tongue delays (no blanket lockstep override).
+    expect(stylesSource()).toContain(
+      '.lane-furnace[data-lane="queue"] .lane-furnace-flame[data-i="0"]',
+    )
+    expect(stylesSource()).not.toContain("--flame-base-delay")
     expect(ui).toContain("routeTraveler:")
+    expect(ui).toContain("jobTicketDeparting:")
     // Phase durations come from ROUTE_*_MS via inline style, not Tailwind literals.
     expect(ui).toContain("ROUTE_TRANSITION_MS")
     expect(stylesSource()).toContain("@keyframes furnace-eject")
     expect(stylesSource()).toContain("@keyframes furnace-absorb")
+    expect(stylesSource()).toContain("@keyframes furnace-smoke-puff")
     expect(stylesSource()).toContain("@keyframes route-travel")
+    // Eject/enter must not rotate (avoids phase-handoff snaps).
+    expect(stylesSource()).toMatch(
+      /@keyframes route-traveler-eject\s*\{[^}]*scale\(0\.12\)[^}]*\}/s,
+    )
+    expect(stylesSource()).not.toMatch(
+      /@keyframes route-traveler-eject\s*\{[^}]*rotate\(/s,
+    )
     expect(ui).toContain("pipelineLanes:")
     expect(ui).toContain("grid-cols-6")
     expect(ui).toContain("gap-0.5")

@@ -15,7 +15,8 @@
       "!!**/.nx",
       "!!**/generated",
       "!!**/routeTree.gen.ts",
-      "!!**/drizzle"
+      "!!**/drizzle",
+      "!!**/prototypes/**"
     ]
   },
   "formatter": {
