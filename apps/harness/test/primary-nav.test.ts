@@ -209,6 +209,49 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(ui).toMatch(/mastPlate:[\s\S]*?aria-\[current=page\]/)
   })
 
+  test("mast plates and Jobs tabs share right-side rivet treatment", () => {
+    const ui = uiSource()
+    const root = rootSource()
+    const switcher = switcherSource()
+
+    // Valid CSS calc spacing for the right-edge rivet (Tailwind `_` → space).
+    // Bare `calc(100%-Npx)` is invalid and drops the right-hand rivet.
+    expect(ui).toContain("calc(100%_-_7px)")
+    expect(ui).toContain("calc(100%_-_6px)")
+    expect(ui).not.toMatch(/calc\(100%-\d+px\)/)
+
+    // Shared recipes use theme rivet tokens (no image assets).
+    expect(ui).toMatch(
+      /mastPlateRivets[\s\S]*?--mast-plate-rivet[\s\S]*?calc\(100%_-_7px\)/,
+    )
+    expect(ui).toMatch(
+      /plateMiniRivets[\s\S]*?--plate-rivet[\s\S]*?calc\(100%_-_6px\)/,
+    )
+    // Mast plate recipe consumes the mast rivet recipe.
+    expect(ui).toMatch(/mastPlate:[\s\S]*?mastPlateRivets/)
+    // Active mast plate keeps right-hand rivets via active token.
+    expect(ui).toMatch(
+      /mastPlate:[\s\S]*?aria-\[current=page\]:\[background-image:[\s\S]*?--mast-plate-active-rivet[\s\S]*?calc\(100%_-_7px\)/,
+    )
+
+    // Jobs mode tabs reuse mini-plate rivets + active override on ink fill.
+    expect(ui).toMatch(/pipelineTab:[\s\S]*?plateMiniRivets/)
+    expect(ui).toMatch(
+      /pipelineTab:[\s\S]*?pipelineTabActiveRivets|pipelineTab:[\s\S]*?aria-\[current=page\]:\[background-image:[\s\S]*?--paper/,
+    )
+    expect(ui).toMatch(
+      /pipelineTabActiveRivets[\s\S]*?--paper[\s\S]*?calc\(100%_-_6px\)/,
+    )
+
+    // Theme + Settings share mastPlate; Jobs tabs share pipelineTab — no
+    // per-control decorative rivet DOM.
+    expect(root).toContain("const mastPlateClassName = ui.mastPlate")
+    expect(root).toContain("<ThemeTogglePlate />")
+    expect(switcher).toContain("className={ui.pipelineTab}")
+    expect(switcher).not.toMatch(/rivet/i)
+    expect(root).not.toMatch(/className=\{[^}]*rivet/i)
+  })
+
   test("shared Jobs switcher lives in root chrome above Outlet", () => {
     const source = rootSource()
     const chrome = source.slice(source.indexOf("function SettingsChrome("))
