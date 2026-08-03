@@ -718,7 +718,6 @@ function SettingsChrome() {
         <header className={ui.mast}>
           <div>
             <p className={ui.brandKicker}>
-              Ready for Agent · Operator board ·{" "}
               <b
                 className={ui.brandKickerB}
                 title={`Ready for Agent ${READY_FOR_AGENT_VERSION_LABEL}`}
