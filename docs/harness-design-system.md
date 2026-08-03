@@ -258,9 +258,10 @@ brand left and nav right, items baseline-aligned.
 - **Forged field**: ornamental wrought-iron rails span the full width behind
   both brand and controls. Black shadow, charcoal body, and a faint upper-edge
   highlight create forged depth; the ornament is decorative and `aria-hidden`.
-- **Brand block**: mono kicker (`--mast-faint`, product · "Operator board" ·
-  version in `--mast-dim`), wordmark link in display 800 uppercase white
-  (hover: `--signal`), mono sub-line with live status fragment in `--signal`.
+- **Brand block**: mono kicker with version only (`--mast-dim`; product name
+  and "Operator board" are not repeated here), wordmark link in display 800
+  uppercase white (hover: `--signal`), mono sub-line with live status fragment
+  in `--signal`.
 - **Primary nav** — B's flush stamped plates, replacing D's system-map stops:
   Home, Repos, Completed, Settings (button, `aria-haspopup="dialog"`), plus
   the theme-toggle plate. Plate anatomy (§5.3): 2px black border, rivet dots,
