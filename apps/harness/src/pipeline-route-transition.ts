@@ -17,7 +17,7 @@ export type PlannedTransition = {
 export type FlightPhase = "eject" | "travel" | "enter" | "absorb"
 
 /** True while the traveler is still en route (not yet the absorb handoff). */
-export function isPreAbsorbPhase(phase: FlightPhase): boolean {
+function isPreAbsorbPhase(phase: FlightPhase): boolean {
   return phase !== "absorb"
 }
 
