@@ -1117,7 +1117,7 @@ export const ui = {
  *    — ::backdrop is not available as a Tailwind variant on the dialog element
  *      in a portable way; keep in styles.css.
  *
- * 2. @keyframes skeleton-pulse, furnace-*, route-travel, route-traveler-*
+ * 2. @keyframes skeleton-pulse, furnace-*, route-*, work-item-reset-*
  *    — Keyframes stay in styles.css; utilities reference
  *      animate-[skeleton-pulse_1.2s_ease-in-out_infinite]. Furnace / traveler
  *      motion for #737 uses inline style.animation with ROUTE_*_MS durations.

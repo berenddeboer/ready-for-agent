@@ -561,6 +561,69 @@
   }
 }
 
+/* Compact copper Work Item reset control. Repeats only while reset is pending. */
+@keyframes work-item-reset-lid {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+  18%,
+  64% {
+    transform: translate(0.05rem, -0.3rem) rotate(27deg);
+  }
+  78% {
+    transform: translate(0.02rem, -0.05rem) rotate(4deg);
+  }
+}
+
+@keyframes work-item-reset-ticket {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translateY(-0.35rem) rotate(8deg) scale(1);
+  }
+  22% {
+    opacity: 1;
+  }
+  58% {
+    opacity: 1;
+    transform: translateY(0.95rem) rotate(-13deg) scale(0.72);
+  }
+  68%,
+  100% {
+    opacity: 0;
+    transform: translateY(1.2rem) rotate(-20deg) scale(0.3);
+  }
+}
+
+@keyframes work-item-reset-bin {
+  0%,
+  55%,
+  100% {
+    transform: scale(1);
+  }
+  66% {
+    transform: scale(1.04, 0.94);
+  }
+  75% {
+    transform: scale(0.98, 1.03);
+  }
+}
+
+@keyframes work-item-reset-steam {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.35);
+  }
+  25% {
+    opacity: 0.52;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(0.2rem, -0.65rem) scale(1.6);
+  }
+}
+
 /* Native <dialog> backdrop — no Tailwind equivalent for ::backdrop on dialog */
 @utility dialog-backdrop {
   &::backdrop {

@@ -74,6 +74,7 @@ import {
   statusMessageClassNameForStatus,
 } from "../work-item-progress-chrome.js"
 import { workItemPullRequestUrl } from "../work-item-pull-request-url.js"
+import { WorkItemResetButton } from "../work-item-reset-button.js"
 
 // Re-export for callers that still import from the home route module.
 export type { Repository } from "../repositories-query.js"
@@ -3717,55 +3718,11 @@ export function WorkItemLifecycleStatus({
       {(canReset || canRetry) && (
         <div className="mt-2 flex flex-wrap gap-2">
           {canReset && (
-            <button
-              type="button"
-              className={cx(ui.iconBtn, ui.iconBtnArmed)}
+            <WorkItemResetButton
+              pending={reset.isPending}
               disabled={actionsPending}
-              onClick={() => reset.mutate()}
-              aria-label={reset.isPending ? "Resetting job" : "Reset job"}
-              title={reset.isPending ? "Resetting..." : "Reset"}
-            >
-              {reset.isPending ? (
-                <svg
-                  aria-hidden="true"
-                  className="animate-spin motion-reduce:animate-none"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="9"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                  />
-                  <path
-                    className="opacity-75"
-                    d="M12 3a9 9 0 0 1 9 9"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M3 6h18" />
-                  <path d="M8 6V4h8v2" />
-                  <path d="m19 6-1 14H6L5 6" />
-                  <path d="M10 11v5" />
-                  <path d="M14 11v5" />
-                </svg>
-              )}
-            </button>
+              onReset={() => reset.mutate()}
+            />
           )}
           {canRetry && (
             <button
