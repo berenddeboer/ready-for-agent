@@ -74,47 +74,29 @@ const makeResolveRuntime = (
   platformLayer: Layer.Layer<PlatformServices>,
   sidecarUrl: string | undefined,
 ): ResolveAgentBackendRuntime => {
+  const backendLayers = (backendId: AgentBackendId) => {
+    if (backendId === AGENT_BACKEND_IDS.grok) {
+      return Layer.mergeAll(
+        Grok.layer().pipe(Layer.provide(platformLayer)),
+        GrokSessionTelemetryLive(),
+      )
+    }
+    if (backendId === AGENT_BACKEND_IDS.codex) {
+      return Layer.mergeAll(
+        Codex.layer().pipe(Layer.provide(platformLayer)),
+        CodexSessionTelemetryLive(),
+      )
+    }
+    return Layer.mergeAll(
+      Opencode.layer({
+        ...(sidecarUrl === undefined ? {} : { keymaxxerMcpUrl: sidecarUrl }),
+      }).pipe(Layer.provide(platformLayer)),
+      OpencodeSessionTelemetryLive(),
+    )
+  }
+
   return (backendId: AgentBackendId) => {
     const registration = resolveActiveRegistration(backendId)
-
-    if (registration.descriptor.id === AGENT_BACKEND_IDS.grok) {
-      return Effect.gen(function* () {
-        const adapter = yield* AgentBackend
-        const telemetry = yield* SessionTelemetryProvider
-        return {
-          registration,
-          adapter,
-          telemetry,
-        }
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            Grok.layer().pipe(Layer.provide(platformLayer)),
-            GrokSessionTelemetryLive(),
-          ),
-        ),
-      )
-    }
-
-    if (registration.descriptor.id === AGENT_BACKEND_IDS.codex) {
-      return Effect.gen(function* () {
-        const adapter = yield* AgentBackend
-        const telemetry = yield* SessionTelemetryProvider
-        return {
-          registration,
-          adapter,
-          telemetry,
-        }
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            Codex.layer().pipe(Layer.provide(platformLayer)),
-            CodexSessionTelemetryLive(),
-          ),
-        ),
-      )
-    }
-
     return Effect.gen(function* () {
       const adapter = yield* AgentBackend
       const telemetry = yield* SessionTelemetryProvider
@@ -123,18 +105,7 @@ const makeResolveRuntime = (
         adapter,
         telemetry,
       }
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(
-          Opencode.layer({
-            ...(sidecarUrl === undefined
-              ? {}
-              : { keymaxxerMcpUrl: sidecarUrl }),
-          }).pipe(Layer.provide(platformLayer)),
-          OpencodeSessionTelemetryLive(),
-        ),
-      ),
-    )
+    }).pipe(Effect.provide(backendLayers(registration.descriptor.id)))
   }
 }
 

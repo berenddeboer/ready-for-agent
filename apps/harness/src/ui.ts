@@ -735,9 +735,6 @@ export const ui = {
   queueHint:
     "m-[0.55rem] mt-auto grid gap-[0.45rem] border-2 border-ink bg-lane-queue px-[0.7rem] py-[0.65rem] text-[#151515]",
 
-  queueHintTag:
-    "justify-self-start bg-[#151515] px-[0.4rem] py-[0.16rem] font-mono text-[0.62rem] font-bold tracking-[0.16em] uppercase text-lane-queue",
-
   queueHintText:
     "m-0 font-display text-[0.9rem] font-medium leading-[1.35] text-[#151515]",
 
@@ -745,8 +742,13 @@ export const ui = {
   queueHintCode:
     "rounded-none border border-[#151515] bg-[#151515] px-[0.28rem] py-[0.05rem] font-mono text-[0.72rem] font-bold tracking-[0.02em] text-lane-queue",
 
-  /** Emphasize the Implement now control name inside the hint body. */
-  queueHintAction: "font-semibold not-italic",
+  /**
+   * Inline nav link to /repos inside the queue empty-state hint ("your
+   * repos"). Underline + focus ring so it reads as a control on the yellow
+   * lane card.
+   */
+  queueHintLink:
+    "text-[#151515] underline underline-offset-2 hover:decoration-2 hover:decoration-signal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#151515]",
 
   /**
    * Compact static mock of the repos issue ⋮ menu (Implement now /

@@ -1,4 +1,5 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useMemo, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
@@ -462,17 +463,16 @@ function KanbanJobsBoard() {
                   )}
                   {lane.id === "queue" && (
                     <aside className={ui.queueHint}>
-                      <span className={ui.queueHintTag}>Queue</span>
                       <p className={ui.queueHintText}>
                         Feed the queue — label issues with{" "}
                         <code className={ui.queueHintCode}>
                           ready-for-agent
                         </code>
-                        . When they show up in your repos, click{" "}
-                        <strong className={ui.queueHintAction}>
-                          Implement now
-                        </strong>
-                        .
+                        . When they show up in{" "}
+                        <Link to="/repos" className={ui.queueHintLink}>
+                          your repos
+                        </Link>
+                        , click Implement now.
                       </p>
                       <div className={ui.queueHintMenuIllus} aria-hidden="true">
                         <span className={ui.queueHintMenuKebab}>

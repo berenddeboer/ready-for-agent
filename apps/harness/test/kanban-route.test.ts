@@ -184,6 +184,14 @@ describe("kanban home board", () => {
     expect(source).toContain("Implement now")
     expect(source).toContain("Implement locally")
     expect(source).toContain("ui.queueHintMenuIllus")
+    // Issue #742: no redundant Queue tag; "Implement now" is plain body text;
+    // "your repos" links to the Repos view.
+    expect(source).not.toContain("ui.queueHintTag")
+    expect(source).not.toContain("ui.queueHintAction")
+    expect(source).not.toContain("<strong")
+    expect(source).toContain('to="/repos"')
+    expect(source).toContain("ui.queueHintLink")
+    expect(source).toContain("your repos")
     expect(source).not.toContain("Manage repos →")
     expect(source).not.toContain("work starts at your repos")
   })
@@ -574,7 +582,10 @@ describe("kanban home board", () => {
     expect(ui).toContain("queueHint:")
     expect(ui).toContain("queueHintMenuIllus:")
     expect(ui).toContain("queueHintMenuItem:")
-    expect(ui).not.toContain("queueHintLink:")
+    expect(ui).toContain("queueHintLink:")
+    // Issue #742: tag chip and bold action emphasis removed from empty-state.
+    expect(ui).not.toContain("queueHintTag:")
+    expect(ui).not.toContain("queueHintAction:")
     // Counts live in route roundels; header keeps title only.
     expect(ui).not.toContain("laneNumber:")
     expect(ui).not.toContain("laneCount:")
