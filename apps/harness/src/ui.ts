@@ -789,6 +789,14 @@ export const ui = {
     "border-ink-faint shadow-[inset_6px_0_0_var(--ink-faint)]",
   ),
 
+  /**
+   * Destination ticket during absorb — marker only. All arrive motion stays on
+   * the `ticket-arrive` keyframe + inline duration (ROUTE_TRANSITION_MS.absorb).
+   * Do not add layout/transform utilities here; opacity-only is required so the
+   * lane stack is undisturbed. prefers-reduced-motion collapses the keyframe.
+   */
+  jobTicketArriving: "job-ticket-arriving",
+
   jobTicketRepo:
     "m-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[0.68rem] font-normal leading-[1.2] tracking-[0.1em] uppercase text-ink-faint",
 

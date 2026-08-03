@@ -526,10 +526,33 @@ describe("kanban home board", () => {
     expect(stylesSource()).not.toContain("--flame-base-delay")
     expect(ui).toContain("routeTraveler:")
     expect(ui).toContain("jobTicketDeparting:")
+    // Absorb-handoff destination fade (issue #750): opacity-only keyframe.
+    expect(ui).toContain("jobTicketArriving:")
     // Phase durations come from ROUTE_*_MS via inline style, not Tailwind literals.
     expect(ui).toContain("ROUTE_TRANSITION_MS")
     expect(stylesSource()).toContain("@keyframes furnace-eject")
     expect(stylesSource()).toContain("@keyframes furnace-absorb")
+    expect(stylesSource()).toContain("@keyframes ticket-arrive")
+    // Extract the ticket-arrive block only (nested braces in from/to).
+    const ticketArrive = stylesSource().match(
+      /@keyframes ticket-arrive\s*\{[\s\S]*?\n\}/,
+    )?.[0]
+    expect(ticketArrive).toBeDefined()
+    expect(ticketArrive).toContain("opacity: 0")
+    expect(ticketArrive).toContain("opacity: 1")
+    // Opacity only — no transform so the lane stack is undisturbed.
+    expect(ticketArrive).not.toContain("transform")
+    // Ticket wires arriving marker + absorb-duration opacity animation.
+    const ticket = boardSource().slice(
+      boardSource().indexOf("function PipelineTicket("),
+      boardSource().indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain('data-arriving={arriving ? "true" : undefined}')
+    expect(ticket).toContain("ui.jobTicketArriving")
+    expect(ticket).toContain("ticket-arrive")
+    expect(ticket).toContain("ROUTE_TRANSITION_MS.absorb")
+    // Transparent fade must not leave links focusable/clickable mid-arrival.
+    expect(ticket).toContain("departing || arriving ? { inert: true }")
     expect(stylesSource()).toContain("@keyframes furnace-smoke-puff")
     expect(stylesSource()).toContain("@keyframes route-travel")
     // Eject/enter must not rotate (avoids phase-handoff snaps).

@@ -18,7 +18,10 @@ import {
   pipelineLaneFor,
 } from "./pipeline-lanes.js"
 import { PipelineRoute, usePipelineRouteFlights } from "./pipeline-route.js"
-import { presentLaneColumnItems } from "./pipeline-route-transition.js"
+import {
+  ROUTE_TRANSITION_MS,
+  presentLaneColumnItems,
+} from "./pipeline-route-transition.js"
 import {
   JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
@@ -132,6 +135,7 @@ function PipelineTicket({
   issue,
   laneId,
   departing = false,
+  arriving = false,
   onOpenSession,
 }: {
   readonly workItem: WorkItem
@@ -140,6 +144,11 @@ function PipelineTicket({
   readonly laneId: PipelineLaneId
   /** In-flight on the route line — stay in source lane, greyed out. */
   readonly departing?: boolean
+  /**
+   * Destination lane during absorb — opacity fades from transparent to full
+   * over the absorb phase (no layout/transform motion).
+   */
+  readonly arriving?: boolean
   readonly onOpenSession: (workItemId: string, sessionId: string) => void
 }) {
   const repositoryLabel = repository?.projectPath ?? workItem.repositoryId
@@ -170,16 +179,31 @@ function PipelineTicket({
   )
   const lane = PIPELINE_LANES.find((candidate) => candidate.id === laneId)
   const isCompleteLane = laneId === "complete"
+  const ticketStyle = {
+    "--ticket-color": lane?.color ?? "#151515",
+    ...(arriving
+      ? {
+          // Opacity-only; duration tracks absorb so the card finishes with smoke.
+          animation: `ticket-arrive ${ROUTE_TRANSITION_MS.absorb}ms ease-out both`,
+        }
+      : {}),
+  } as CSSProperties
 
   return (
     <li
-      className={cx(ui.jobTicket, departing && ui.jobTicketDeparting)}
+      className={cx(
+        ui.jobTicket,
+        departing && ui.jobTicketDeparting,
+        arriving && ui.jobTicketArriving,
+      )}
       data-lane={laneId}
       data-departing={departing ? "true" : undefined}
-      aria-busy={departing || undefined}
+      data-arriving={arriving ? "true" : undefined}
+      aria-busy={departing || arriving || undefined}
       // inert blocks mouse and keyboard; pointer-events-none alone is not enough.
-      {...(departing ? { inert: true } : {})}
-      style={{ "--ticket-color": lane?.color ?? "#151515" } as CSSProperties}
+      // Arriving cards start fully transparent — keep them inert for the fade.
+      {...(departing || arriving ? { inert: true } : {})}
+      style={ticketStyle}
     >
       <p className={ui.jobTicketRepo} title={repositoryLabel}>
         {repositoryLabel}
@@ -345,7 +369,7 @@ function KanbanJobsBoard() {
     ]),
   )
 
-  // Route flights delay dest counts; tickets stay greyed in source until absorb.
+  // Route flights: grey source until absorb, then dest card fades in with smoke.
   const routeFlights = usePipelineRouteFlights(laneItems)
 
   const workItemById = useMemo(() => {
@@ -408,8 +432,7 @@ function KanbanJobsBoard() {
           />
           <div className={ui.pipelineLanes}>
             {PIPELINE_LANES.map((lane, laneIndex) => {
-              // Departing tickets stay greyed in the source lane; arrivals wait
-              // until the route traveler is absorbed before appearing in dest.
+              // Pre-absorb: grey source placeholder; absorb: dest card arrives.
               const items = presentLaneColumnItems({
                 laneId: lane.id,
                 laneItems: laneItems.get(lane.id) ?? [],
@@ -441,7 +464,7 @@ function KanbanJobsBoard() {
                     <p className={ui.laneEmpty}>Lane clear</p>
                   ) : (
                     <ul className={ui.laneStack}>
-                      {items.map(({ workItem, departing }) => (
+                      {items.map(({ workItem, departing, arriving }) => (
                         <PipelineTicket
                           key={workItem.id}
                           workItem={workItem}
@@ -454,6 +477,7 @@ function KanbanJobsBoard() {
                           )}
                           laneId={lane.id}
                           departing={departing}
+                          arriving={arriving}
                           onOpenSession={(workItemId, sessionId) =>
                             setSessionDialog({ workItemId, sessionId })
                           }
