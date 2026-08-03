@@ -541,11 +541,36 @@ export const ui = {
     "mt-[1.6rem] grid gap-[0.55rem] max-[900px]:mt-[0.85rem] max-[900px]:gap-0",
 
   /**
-   * Route spine + pot-belly furnace stops. Spine is centered on the furnace
-   * belly (not the stack). Stack sits above; mouth hangs on the belly bottom.
+   * Route spine + pot-belly furnace stops. Spine is a brass pneumatic tube
+   * (see pipelineRouteSpine) centered on the furnace belly; stack sits above
+   * and has room to vent smoke (overflow visible + top padding).
    */
-  pipelineRoute:
-    "relative grid min-h-[3.1rem] grid-cols-6 items-end pb-[0.15rem] before:pointer-events-none before:absolute before:top-[calc(100%-1.2rem)] before:right-[calc(100%/12)] before:left-[calc(100%/12)] before:h-1 before:-translate-y-1/2 before:bg-ink before:content-[''] max-[900px]:hidden",
+  pipelineRoute: cx(
+    "relative grid min-h-[3.6rem] grid-cols-6 items-end overflow-visible",
+    "pt-[1.1rem] pb-[0.2rem] max-[900px]:hidden",
+  ),
+
+  /** Brass tube with dark bore + rivets — replaces the plain ink hairline. */
+  pipelineRouteSpine: cx(
+    "pointer-events-none absolute top-[calc(100%-1.25rem)] right-[calc(100%/12)] left-[calc(100%/12)]",
+    "z-0 h-[0.7rem] -translate-y-1/2 rounded-[0.35rem]",
+    "border-2 border-ink",
+    "bg-[linear-gradient(180deg,#d4b483_0%,#b08d57_38%,#6b4f2a_100%)]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.35),inset_0_-2px_0_rgb(0_0_0/0.25)]",
+  ),
+
+  pipelineRouteSpineBore: cx(
+    "absolute top-[0.14rem] right-[0.28rem] bottom-[0.14rem] left-[0.28rem] rounded-[0.2rem]",
+    "border border-black/50",
+    "bg-[linear-gradient(180deg,#1a1a1a_0%,#2e2e2e_50%,#121212_100%)]",
+  ),
+
+  /** Sparse brass rivets along the tube (repeating dots). */
+  pipelineRouteSpineRivets: cx(
+    "absolute inset-0 rounded-[0.35rem] opacity-90",
+    "bg-[radial-gradient(circle,#d4b483_0_1.2px,transparent_1.4px)]",
+    "[background-size:1.15rem_100%] [background-position:0.35rem_50%] bg-repeat-x",
+  ),
 
   /**
    * Pot-belly furnace stop (idle + animated phases via data-phase).
@@ -553,65 +578,112 @@ export const ui = {
    * Phase motion durations are applied from ROUTE_TRANSITION_MS / ROUTE_FED_MS
    * in pipeline-route.tsx (inline style) so JS timers and CSS stay lockstep.
    */
-  laneRoundel:
-    "lane-furnace relative z-[1] mx-auto grid w-[2.1rem] justify-items-center",
+  laneRoundel: cx(
+    "lane-furnace relative z-[1] mx-auto grid w-[2.45rem] justify-items-center",
+    "origin-[50%_85%]",
+  ),
 
   laneFurnaceStack: cx(
-    "relative z-[2] mb-[-1px] h-[0.55rem] w-[0.42rem]",
-    "rounded-t-[1px] border border-b-0 border-[#2a2a2a] bg-[#3a3a3a]",
-    "before:absolute before:-top-[0.18rem] before:left-1/2 before:h-[0.2rem] before:w-[0.62rem]",
-    "before:-translate-x-1/2 before:rounded-[1px] before:border before:border-[#2a2a2a]",
-    "before:bg-[linear-gradient(180deg,#c9a227_0%,#8a7018_100%)] before:content-['']",
+    "relative z-[2] mb-[-2px] h-[0.7rem] w-[0.48rem]",
+    "border border-b-0 border-ink bg-[#3a3a3a]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]",
+    // Brass chimney lip
+    "before:absolute before:-top-[0.22rem] before:left-1/2 before:h-[0.26rem] before:w-[0.72rem]",
+    "before:-translate-x-1/2 before:border before:border-ink",
+    "before:bg-[linear-gradient(180deg,#d4b483_0%,#b08d57_45%,#6b4f2a_100%)] before:content-['']",
+    // Small soot rim under the lip
+    "after:absolute after:top-0 after:left-1/2 after:h-[0.12rem] after:w-[0.48rem]",
+    "after:-translate-x-1/2 after:bg-black/35 after:content-['']",
   ),
 
   laneFurnaceBody: cx(
-    "relative grid h-[2.1rem] w-[2.1rem] place-items-center rounded-full",
+    "relative grid h-[2.35rem] w-[2.35rem] place-items-center rounded-full",
     "border-2 border-ink bg-[var(--lane-color)]",
     "font-mono text-[0.78rem] font-extrabold leading-none tracking-[0.02em] tabular-nums text-[var(--lane-text,#fff)]",
+    // Belly shading — pot-belly depth
+    "shadow-[inset_0_-10px_14px_rgb(0_0_0/0.28),inset_0_3px_0_rgb(255_255_255/0.18)]",
     "data-[lane=complete]:border-white data-[lane=complete]:outline data-[lane=complete]:outline-2 data-[lane=complete]:outline-ink",
   ),
 
-  laneFurnaceCount: "relative z-[1] tabular-nums",
+  /** Faint dashed rivet band around the pot. */
+  laneFurnaceBand: cx(
+    "pointer-events-none absolute inset-[4px] z-0 rounded-full",
+    "border border-dashed border-black/20",
+  ),
+
+  laneFurnaceCount: "relative z-[1] -translate-y-[0.15rem] tabular-nums",
 
   /** Dark firebox mouth at the bottom of the belly — traveler enter/exit. */
   laneFurnaceMouth: cx(
-    "pointer-events-none absolute bottom-[0.12rem] left-1/2 z-[2] h-[0.38rem] w-[0.72rem]",
-    "-translate-x-1/2 rounded-[50%] border border-[#1a1a1a] bg-[#1a1a1a]",
-    "shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]",
-  ),
-
-  /** Coal glow in the mouth when the stop holds jobs. */
-  laneFurnaceGlow: cx(
-    "pointer-events-none absolute bottom-[0.16rem] left-1/2 z-[3] h-[0.22rem] w-[0.42rem]",
-    "-translate-x-1/2 rounded-[50%] bg-[radial-gradient(ellipse_at_center,#ff8a2a_0%,#ff4d1c_45%,transparent_75%)]",
-    "opacity-0 data-[lit=true]:opacity-90",
+    "pointer-events-none absolute bottom-[0.14rem] left-1/2 z-[2] h-[0.55rem] w-[1.1rem]",
+    "-translate-x-1/2 overflow-hidden rounded-[0.08rem_0.08rem_0.5rem_0.5rem]",
+    "border-[1.5px] border-ink",
+    "bg-[radial-gradient(ellipse_at_50%_30%,#3a2010_0%,#1a1410_70%)]",
+    "shadow-[inset_0_2px_4px_rgb(0_0_0/0.6)]",
   ),
 
   /**
-   * Stack smoke host. Duration applied from ROUTE_SMOKE_MS in pipeline-route
-   * when data-active; shared puff for eject and absorb.
+   * Slow fire simulation inside the mouth when the stop holds jobs.
+   * Layers: coal bed + 3 staggered flame tongues (keyframes in styles.css).
+   */
+  laneFurnaceFire: cx(
+    "pointer-events-none absolute inset-0 z-[1] opacity-0",
+    "data-[lit=true]:opacity-100",
+  ),
+
+  /** Warm coal bed — slow breathe under the tongues. */
+  laneFurnaceEmber: cx(
+    "lane-furnace-ember absolute bottom-0 left-[10%] right-[10%] h-[55%]",
+    "rounded-[40%] bg-[radial-gradient(ellipse_at_50%_80%,#ff8a2a_0%,#c04010_45%,transparent_75%)]",
+    "opacity-0 data-[lit=true]:opacity-100",
+  ),
+
+  /** Individual flame tongue — data-i staggers phase in styles.css. */
+  laneFurnaceFlame: cx(
+    "lane-furnace-flame absolute bottom-[10%] w-[28%] rounded-[40%_40%_20%_20%/60%_60%_30%_30%]",
+    "opacity-0 data-[lit=true]:opacity-100",
+    "bg-[radial-gradient(ellipse_at_50%_80%,#ffe08a_0%,#ff6a1a_40%,#c02808_75%,transparent_90%)]",
+    "mix-blend-screen",
+  ),
+
+  /**
+   * Soft bloom above the mouth into the belly — only when lit.
+   * Kept separate so the count stays readable.
+   */
+  laneFurnaceGlow: cx(
+    "pointer-events-none absolute bottom-[0.35rem] left-1/2 z-[0] h-[0.55rem] w-[0.85rem]",
+    "-translate-x-1/2 rounded-[50%]",
+    "bg-[radial-gradient(ellipse_at_center,rgb(255_100_30/0.55)_0%,transparent_70%)]",
+    "opacity-0 data-[lit=true]:opacity-100",
+    "data-[lit=true]:animate-[furnace-fire-bloom_5.5s_ease-in-out_infinite]",
+  ),
+
+  /**
+   * Stack smoke host — sits above the chimney lip. Puffs animate via
+   * furnace-smoke-puff keyframes; --smoke-ms set inline from ROUTE_SMOKE_MS.
    */
   laneFurnaceSmoke: cx(
-    "pointer-events-none absolute -top-[0.35rem] left-1/2 z-[3] h-[0.9rem] w-[0.7rem]",
-    "-translate-x-1/2 opacity-0",
+    "pointer-events-none absolute -top-[1.35rem] left-1/2 z-[5] h-[1.6rem] w-[1.4rem]",
+    "-translate-x-1/2 overflow-visible",
   ),
 
+  /** Stagger/offset via [data-i] rules in styles.css (furnace-smoke-puff). */
   laneFurnaceSmokePuff: cx(
-    "absolute bottom-0 left-1/2 h-[0.35rem] w-[0.35rem] -translate-x-1/2",
-    "rounded-full bg-[rgb(80_80_80/0.45)]",
-  ),
-
-  laneFurnaceSmokePuffAlt: cx(
-    "absolute bottom-[0.15rem] left-[35%] h-[0.28rem] w-[0.28rem]",
-    "rounded-full bg-[rgb(100_100_100/0.35)]",
+    "lane-furnace-smoke-puff absolute bottom-0 left-1/2 h-[0.55rem] w-[0.55rem]",
+    "rounded-full opacity-0",
+    "bg-[radial-gradient(circle,rgb(200_200_196/0.92)_0%,rgb(140_140_136/0.4)_55%,transparent_72%)]",
   ),
 
   /** Coal-lump traveler rolling along the route spine. */
   routeTraveler: cx(
-    "pointer-events-none absolute top-[calc(100%-1.2rem)] z-[4] h-[0.55rem] w-[0.55rem]",
-    "-translate-x-1/2 -translate-y-1/2 rounded-[45%_40%_50%_42%]",
-    "border border-[#2a1a0a] bg-[radial-gradient(circle_at_30%_30%,#5a3a1a_0%,#2a1808_70%,#1a1005_100%)]",
-    "shadow-[inset_1px_1px_0_rgb(255_255_255/0.12)]",
+    "pointer-events-none absolute top-[calc(100%-1.25rem)] z-[4] h-[0.65rem] w-[0.7rem]",
+    "-translate-x-1/2 -translate-y-1/2 rounded-[45%_55%_50%_50%]",
+    "border-[1.5px] border-ink",
+    "bg-[radial-gradient(circle_at_30%_30%,#5a4a3a_0%,#1a1410_70%)]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]",
+    // Ember highlight
+    "after:absolute after:top-[22%] after:left-[18%] after:h-[30%] after:w-[35%] after:rounded-full",
+    "after:bg-[rgb(255_100_30/0.45)] after:blur-[0.5px] after:content-['']",
   ),
 
   pipelineLanes:
@@ -702,6 +774,17 @@ export const ui = {
     "px-[0.65rem] py-[0.55rem] pr-[0.65rem] pb-[0.7rem] pl-[0.95rem]",
     "shadow-[inset_6px_0_0_var(--ticket-color,var(--ink))]",
     "data-[lane=complete]:shadow-[inset_6px_0_0_var(--ticket-color,var(--lane-merged)),inset_8px_0_0_var(--merged-halo)]",
+  ),
+
+  /**
+   * Ticket still parked in the source lane while the route traveler is en
+   * route — faded, desaturated. Pair with the HTML `inert` attribute on the
+   * ticket so keyboard focus cannot reach controls (pointer-events alone
+   * is not enough).
+   */
+  jobTicketDeparting: cx(
+    "pointer-events-none select-none opacity-40 grayscale",
+    "border-ink-faint shadow-[inset_6px_0_0_var(--ink-faint)]",
   ),
 
   jobTicketRepo:

@@ -10,13 +10,17 @@ import {
   createRouteFlight,
   displayLaneCount,
   displayLaneCounts,
+  furnaceFireLit,
   laneAssignmentFromLaneItems,
   laneCenterPercent,
   laneItemsAssignmentKey,
   nextFlightPhase,
   phaseDurationMs,
   planLaneTransitions,
+  presentLaneColumnItems,
   reconcileFlights,
+  smokeDurationMs,
+  sourceOrderIndexInLane,
   trueLaneCounts,
 } from "../src/pipeline-route-transition.js"
 import { describe, expect, test } from "bun:test"
@@ -98,24 +102,36 @@ describe("displayLaneCount / displayLaneCounts", () => {
     expect(displayLaneCount({ trueCount: 1, pendingArrivals: 1 })).toBe(0)
   })
 
+  test("keeps source count while departures are still in flight", () => {
+    expect(
+      displayLaneCount({
+        trueCount: 3,
+        pendingArrivals: 0,
+        pendingDepartures: 1,
+      }),
+    ).toBe(4)
+  })
+
   test("never shows a negative count", () => {
     expect(displayLaneCount({ trueCount: 0, pendingArrivals: 2 })).toBe(0)
   })
 
-  test("source matches true count when no pending arrivals there", () => {
+  test("source keeps departing job; dest holds arrival until absorb", () => {
+    // True data after move: build lost one, review gained one.
     const trueCounts = new Map<PipelineLaneId, number>([
       ["queue", 0],
-      ["build", 1],
-      ["review", 2],
+      ["build", 3],
+      ["review", 1],
       ["pr", 0],
       ["attention", 0],
       ["complete", 0],
     ])
-    const flights: Pick<RouteFlight, "to">[] = [{ to: "review" }]
+    const flights: Pick<RouteFlight, "from" | "to">[] = [
+      { from: "build", to: "review" },
+    ]
     const display = displayLaneCounts(trueCounts, flights)
-    // Source already decremented in true data; dest holds +1 until absorb.
-    expect(display.get("build")).toBe(1)
-    expect(display.get("review")).toBe(1)
+    expect(display.get("build")).toBe(4)
+    expect(display.get("review")).toBe(0)
   })
 
   test("overlapping arrivals stack without losing the final true count", () => {
@@ -127,14 +143,85 @@ describe("displayLaneCount / displayLaneCounts", () => {
       ["attention", 0],
       ["complete", 0],
     ])
-    const flights: Pick<RouteFlight, "to">[] = [
-      { to: "review" },
-      { to: "review" },
+    const flights: Pick<RouteFlight, "from" | "to">[] = [
+      { from: "build", to: "review" },
+      { from: "build", to: "review" },
     ]
     const mid = displayLaneCounts(trueCounts, flights)
     expect(mid.get("review")).toBe(1)
     const done = displayLaneCounts(trueCounts, [])
     expect(done.get("review")).toBe(3)
+  })
+})
+
+describe("presentLaneColumnItems", () => {
+  test("keeps departing ticket in source and holds it out of dest", () => {
+    const a = { id: "a" }
+    const b = { id: "b" }
+    const byId = new Map([
+      ["a", a],
+      ["b", b],
+    ])
+    // True data: a already moved to review; a was index 0, b remains alone.
+    const source = presentLaneColumnItems({
+      laneId: "build",
+      laneItems: [b],
+      flights: [
+        {
+          workItemId: "a",
+          from: "build",
+          to: "review",
+          sourceOrderIndex: 0,
+        },
+      ],
+      workItemById: byId,
+    })
+    expect(source).toEqual([
+      { workItem: a, departing: true },
+      { workItem: b, departing: false },
+    ])
+
+    const dest = presentLaneColumnItems({
+      laneId: "review",
+      laneItems: [a],
+      flights: [
+        {
+          workItemId: "a",
+          from: "build",
+          to: "review",
+          sourceOrderIndex: 0,
+        },
+      ],
+      workItemById: byId,
+    })
+    expect(dest).toEqual([])
+  })
+
+  test("inserts departing ticket at frozen sourceOrderIndex mid-stack", () => {
+    const a = { id: "a" }
+    const b = { id: "b" }
+    const c = { id: "c" }
+    const byId = new Map([
+      ["a", a],
+      ["b", b],
+      ["c", c],
+    ])
+    // Prior order was a, b, c; b left (index 1); a and c remain.
+    const source = presentLaneColumnItems({
+      laneId: "build",
+      laneItems: [a, c],
+      flights: [
+        {
+          workItemId: "b",
+          from: "build",
+          to: "review",
+          sourceOrderIndex: 1,
+        },
+      ],
+      workItemById: byId,
+    })
+    expect(source.map((entry) => entry.workItem.id)).toEqual(["a", "b", "c"])
+    expect(source[1]?.departing).toBe(true)
   })
 })
 
@@ -201,9 +288,14 @@ describe("laneItemsAssignmentKey", () => {
 })
 
 describe("ROUTE_* duration constants", () => {
-  test("fed and smoke durations stay aligned with the phase table", () => {
+  test("fed and smoke durations stay positive and total matches phases", () => {
     expect(ROUTE_FED_MS).toBeGreaterThan(0)
-    expect(ROUTE_SMOKE_MS).toBe(ROUTE_TRANSITION_MS.absorb)
+    // Smoke plume is longer than a single phase so puffs read clearly.
+    expect(ROUTE_SMOKE_MS).toBeGreaterThanOrEqual(ROUTE_TRANSITION_MS.absorb)
+    expect(smokeDurationMs("absorb")).toBe(ROUTE_SMOKE_MS)
+    expect(smokeDurationMs("eject")).toBeLessThanOrEqual(
+      ROUTE_TRANSITION_MS.eject + 200,
+    )
     expect(ROUTE_TRANSITION_MS.eject).toBeGreaterThan(0)
     expect(ROUTE_TRANSITION_MS.travel).toBeGreaterThan(0)
     expect(ROUTE_TRANSITION_MS.enter).toBeGreaterThan(0)
@@ -214,6 +306,49 @@ describe("ROUTE_* duration constants", () => {
         ROUTE_TRANSITION_MS.enter +
         ROUTE_TRANSITION_MS.absorb,
     )
+  })
+})
+
+describe("furnaceFireLit", () => {
+  test("lights occupied furnaces except attention", () => {
+    expect(furnaceFireLit("build", 1)).toBe(true)
+    expect(furnaceFireLit("review", 2)).toBe(true)
+    expect(furnaceFireLit("queue", 0)).toBe(false)
+    expect(furnaceFireLit("attention", 3)).toBe(false)
+    expect(furnaceFireLit("complete", 1)).toBe(true)
+  })
+})
+
+describe("sourceOrderIndexInLane", () => {
+  test("returns the index of the work item in the prior source order", () => {
+    const orderedIdsByLane = new Map<PipelineLaneId, readonly string[]>([
+      ["build", ["a", "b", "c"]],
+    ])
+    expect(
+      sourceOrderIndexInLane({
+        workItemId: "b",
+        laneId: "build",
+        orderedIdsByLane,
+      }),
+    ).toBe(1)
+    expect(
+      sourceOrderIndexInLane({
+        workItemId: "missing",
+        laneId: "build",
+        orderedIdsByLane,
+      }),
+    ).toBe(0)
+  })
+})
+
+describe("createRouteFlight", () => {
+  test("records sourceOrderIndex for mid-stack greying", () => {
+    const flight = createRouteFlight(
+      { workItemId: "a", from: "build", to: "review" },
+      2,
+    )
+    expect(flight.sourceOrderIndex).toBe(2)
+    expect(flight.phase).toBe("eject")
   })
 })
 

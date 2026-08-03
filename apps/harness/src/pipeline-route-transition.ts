@@ -21,30 +21,57 @@ export type RouteFlight = {
   readonly from: PipelineLaneId
   readonly to: PipelineLaneId
   readonly phase: FlightPhase
+  /**
+   * Index of the work item in the source lane’s order at departure time.
+   * Used so the greyed card stays mid-stack instead of jumping to the end.
+   */
+  readonly sourceOrderIndex: number
 }
 
-/** Choreography durations (ms). Kept modest so multi-step moves stay legible. */
+/**
+ * Choreography durations (ms). Intentionally unhurried (~3.9s total) so the
+ * furnace handoff reads on a real board. Concurrent mid-flight replans cancel
+ * and restart from the new edge — expected cost of the slower timing.
+ *
+ *   eject 700 + travel 1600 + enter 400 + absorb 1200 = 3900 ms
+ */
 export const ROUTE_TRANSITION_MS = {
-  eject: 320,
-  travel: 700,
-  enter: 280,
-  absorb: 450,
+  eject: 700,
+  travel: 1600,
+  enter: 400,
+  absorb: 1200,
 } as const satisfies Record<FlightPhase, number>
 
 /** Brief post-absorb “fed” glow on the destination furnace. */
-export const ROUTE_FED_MS = 300
+export const ROUTE_FED_MS = 500
 
 /**
- * Stack smoke duration (ms). Shared for eject and absorb — a short puff while
- * the furnace is active, not a distinct light/heavy pair.
+ * Stack smoke duration (ms). Plume is timer-driven and may outlast the
+ * eject/absorb phase so puffs finish rising after the furnace settles.
+ * Eject uses a shorter burst (see smokeDurationMs).
  */
-export const ROUTE_SMOKE_MS = ROUTE_TRANSITION_MS.absorb
+export const ROUTE_SMOKE_MS = 1400
 
 export const ROUTE_TRANSITION_TOTAL_MS =
   ROUTE_TRANSITION_MS.eject +
   ROUTE_TRANSITION_MS.travel +
   ROUTE_TRANSITION_MS.enter +
   ROUTE_TRANSITION_MS.absorb
+
+/** Smoke wall-clock for a given kind (decoupled from phase unmount). */
+export function smokeDurationMs(kind: "eject" | "absorb"): number {
+  return kind === "eject"
+    ? Math.min(ROUTE_SMOKE_MS, ROUTE_TRANSITION_MS.eject + 200)
+    : ROUTE_SMOKE_MS
+}
+
+/**
+ * Attention is a holding pen — cold mouth, no fire even when occupied.
+ * Shared so UI and tests agree.
+ */
+export function furnaceFireLit(laneId: PipelineLaneId, count: number): boolean {
+  return count > 0 && laneId !== "attention"
+}
 
 const LANE_INDEX = new Map<PipelineLaneId, number>(
   PIPELINE_LANES.map((lane, index) => [lane.id, index]),
@@ -142,14 +169,21 @@ export function countPendingArrivals(
 }
 
 /**
- * Presentation count for one stop. Never negative. Source already matches true
- * data when the traveler left; only destination is delayed.
+ * Presentation count for one stop. Never negative.
+ *
+ * - Destination stays flat until absorb (subtract pending arrivals).
+ * - Source keeps the departing job until the flight ends (add pending
+ *   departures) so furnace counts match greyed-out cards still in the lane.
  */
 export function displayLaneCount(args: {
   readonly trueCount: number
   readonly pendingArrivals: number
+  readonly pendingDepartures?: number
 }): number {
-  return Math.max(0, args.trueCount - args.pendingArrivals)
+  return Math.max(
+    0,
+    args.trueCount - args.pendingArrivals + (args.pendingDepartures ?? 0),
+  )
 }
 
 /**
@@ -157,22 +191,89 @@ export function displayLaneCount(args: {
  */
 export function displayLaneCounts(
   trueCounts: ReadonlyMap<PipelineLaneId, number>,
-  flights: readonly Pick<RouteFlight, "to">[],
+  flights: readonly Pick<RouteFlight, "from" | "to">[],
 ): Map<PipelineLaneId, number> {
-  const pendingByLane = new Map<PipelineLaneId, number>()
+  const pendingArrivals = new Map<PipelineLaneId, number>()
+  const pendingDepartures = new Map<PipelineLaneId, number>()
   for (const flight of flights) {
-    pendingByLane.set(flight.to, (pendingByLane.get(flight.to) ?? 0) + 1)
+    pendingArrivals.set(flight.to, (pendingArrivals.get(flight.to) ?? 0) + 1)
+    pendingDepartures.set(
+      flight.from,
+      (pendingDepartures.get(flight.from) ?? 0) + 1,
+    )
   }
   const display = new Map<PipelineLaneId, number>()
   for (const lane of PIPELINE_LANES) {
     const trueCount = trueCounts.get(lane.id) ?? 0
-    const pending = pendingByLane.get(lane.id) ?? 0
     display.set(
       lane.id,
-      displayLaneCount({ trueCount, pendingArrivals: pending }),
+      displayLaneCount({
+        trueCount,
+        pendingArrivals: pendingArrivals.get(lane.id) ?? 0,
+        pendingDepartures: pendingDepartures.get(lane.id) ?? 0,
+      }),
     )
   }
   return display
+}
+
+/**
+ * Tickets to render in a lane column during route flights.
+ *
+ * Real data already places a moved job in the destination lane. Presentation:
+ * - Keep it in the **source** lane while in flight (greyed “departing”),
+ *   inserted at `sourceOrderIndex` so mid-stack cards do not jump to the end.
+ * - Hold it out of the **destination** lane until absorb finishes.
+ */
+export function presentLaneColumnItems<
+  T extends { readonly id: string },
+>(args: {
+  readonly laneId: PipelineLaneId
+  readonly laneItems: readonly T[]
+  readonly flights: readonly Pick<
+    RouteFlight,
+    "workItemId" | "from" | "to" | "sourceOrderIndex"
+  >[]
+  readonly workItemById: ReadonlyMap<string, T>
+}): readonly { readonly workItem: T; readonly departing: boolean }[] {
+  const departing: {
+    workItemId: string
+    sourceOrderIndex: number
+  }[] = []
+  const arrivingIds = new Set<string>()
+  for (const flight of args.flights) {
+    if (flight.from === args.laneId) {
+      departing.push({
+        workItemId: flight.workItemId,
+        sourceOrderIndex: flight.sourceOrderIndex,
+      })
+    }
+    if (flight.to === args.laneId) arrivingIds.add(flight.workItemId)
+  }
+
+  const residents: { workItem: T; departing: boolean }[] = []
+  for (const item of args.laneItems) {
+    if (arrivingIds.has(item.id)) continue
+    residents.push({ workItem: item, departing: false })
+  }
+
+  // Insert greys at frozen source indices (stable mid-stack, not append-only).
+  const result = [...residents]
+  const seen = new Set(result.map((entry) => entry.workItem.id))
+  const sortedDeparting = departing
+    .slice()
+    .sort((left, right) => left.sourceOrderIndex - right.sourceOrderIndex)
+
+  for (const { workItemId, sourceOrderIndex } of sortedDeparting) {
+    if (seen.has(workItemId)) continue
+    const workItem = args.workItemById.get(workItemId)
+    if (workItem === undefined) continue
+    const insertAt = Math.min(Math.max(0, sourceOrderIndex), result.length)
+    result.splice(insertAt, 0, { workItem, departing: true })
+    seen.add(workItemId)
+  }
+
+  return result
 }
 
 /**
@@ -253,12 +354,31 @@ function createFlightId(workItemId: string): string {
   return `route-flight-${flightSeq}-${workItemId}`
 }
 
-export function createRouteFlight(transition: PlannedTransition): RouteFlight {
+export function createRouteFlight(
+  transition: PlannedTransition,
+  sourceOrderIndex = 0,
+): RouteFlight {
   return {
     id: createFlightId(transition.workItemId),
     workItemId: transition.workItemId,
     from: transition.from,
     to: transition.to,
     phase: "eject",
+    sourceOrderIndex: Math.max(0, sourceOrderIndex),
   }
+}
+
+/**
+ * Index of `workItemId` among items assigned to `lane` in a prior ordered
+ * id list (source lane snapshot at departure). Falls back to 0.
+ */
+export function sourceOrderIndexInLane(args: {
+  readonly workItemId: string
+  readonly laneId: PipelineLaneId
+  readonly orderedIdsByLane: ReadonlyMap<PipelineLaneId, readonly string[]>
+}): number {
+  const order = args.orderedIdsByLane.get(args.laneId)
+  if (order === undefined) return 0
+  const index = order.indexOf(args.workItemId)
+  return index < 0 ? 0 : index
 }

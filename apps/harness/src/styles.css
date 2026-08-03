@@ -268,40 +268,49 @@
 }
 
 /*
- * Pipeline route-line furnace choreography (issue #737).
+ * Pipeline route-line furnace choreography (issue #737, pot-belly A).
  * Longer motion is intentional for lane changes only; plate transitions stay 120ms.
  * Honored by the global prefers-reduced-motion base rule (durations collapse).
  */
 @keyframes furnace-eject {
   0% {
-    transform: scale(1);
+    transform: scale(1, 1);
   }
-  35% {
-    transform: scale(0.92, 1.06);
+  18% {
+    transform: scale(1.12, 0.9);
   }
-  70% {
-    transform: scale(1.06, 0.94);
+  42% {
+    transform: scale(0.88, 1.14);
+  }
+  68% {
+    transform: scale(1.06, 0.96);
   }
   100% {
-    transform: scale(1);
+    transform: scale(1, 1);
   }
 }
 
 @keyframes furnace-absorb {
   0% {
-    transform: scale(1);
+    transform: scale(1, 1);
   }
-  25% {
-    transform: scale(0.94, 1.04);
-  }
-  55% {
+  12% {
     transform: scale(1.08, 0.92);
   }
-  80% {
-    transform: scale(0.98, 1.03);
+  28% {
+    transform: scale(0.82, 1.12);
+  }
+  48% {
+    transform: scale(1.18, 0.88);
+  }
+  68% {
+    transform: scale(0.94, 1.06);
+  }
+  82% {
+    transform: scale(1.04, 0.98);
   }
   100% {
-    transform: scale(1);
+    transform: scale(1, 1);
   }
 }
 
@@ -310,42 +319,230 @@
     filter: brightness(1);
   }
   40% {
-    filter: brightness(1.18);
+    filter: brightness(1.28);
   }
   100% {
     filter: brightness(1);
   }
 }
 
-@keyframes furnace-smoke {
+/* Per-puff stack smoke — host mounts with a remount key so this restarts. */
+@keyframes furnace-smoke-puff {
   0% {
     opacity: 0;
-    transform: translate(-50%, 0.15rem) scale(0.4);
+    transform: translate(calc(-50% + var(--sx, 0px)), 0.1rem) scale(0.45);
   }
-  25% {
-    opacity: 0.55;
+  18% {
+    opacity: 0.92;
   }
   100% {
     opacity: 0;
-    transform: translate(-50%, -0.7rem) scale(1.15);
+    transform: translate(calc(-50% + var(--sx, 0px)), -1.35rem) scale(1.85);
   }
 }
 
+/*
+ * Smoke puffs: class is on each span; --smoke-ms comes from the host style.
+ * data-i staggers delay and horizontal drift.
+ */
+.lane-furnace-smoke-puff {
+  animation: furnace-smoke-puff var(--smoke-ms, 1.1s) ease-out forwards;
+  --sx: 0px;
+}
+.lane-furnace-smoke-puff[data-i="0"] {
+  --sx: -0.15rem;
+  animation-delay: 0ms;
+}
+.lane-furnace-smoke-puff[data-i="1"] {
+  --sx: 0.28rem;
+  width: 0.48rem;
+  height: 0.48rem;
+  animation-delay: 90ms;
+}
+.lane-furnace-smoke-puff[data-i="2"] {
+  --sx: -0.32rem;
+  width: 0.65rem;
+  height: 0.65rem;
+  animation-delay: 180ms;
+}
+.lane-furnace-smoke-puff[data-i="3"] {
+  --sx: 0.12rem;
+  width: 0.72rem;
+  height: 0.72rem;
+  animation-delay: 270ms;
+}
+.lane-furnace-smoke-puff[data-i="4"] {
+  --sx: 0.38rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  animation-delay: 360ms;
+}
+
+/*
+ * Slow fire simulation (lit furnaces only). Unhurried — reads as coals
+ * breathing, not a disco. Stagger via data-i / animation-delay on layers.
+ */
+@keyframes furnace-fire-ember {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scaleX(1) scaleY(0.85);
+    filter: brightness(0.85) saturate(0.95);
+  }
+  35% {
+    opacity: 0.9;
+    transform: scaleX(1.08) scaleY(1.05);
+    filter: brightness(1.15) saturate(1.1);
+  }
+  62% {
+    opacity: 0.7;
+    transform: scaleX(0.96) scaleY(0.92);
+    filter: brightness(1) saturate(1);
+  }
+}
+
+@keyframes furnace-fire-flame {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateX(-50%) scaleY(0.55) scaleX(0.9) rotate(-4deg);
+    filter: brightness(0.9);
+  }
+  22% {
+    opacity: 0.85;
+    transform: translateX(-50%) scaleY(1.05) scaleX(1) rotate(3deg);
+    filter: brightness(1.2);
+  }
+  48% {
+    opacity: 0.5;
+    transform: translateX(-50%) scaleY(0.7) scaleX(0.95) rotate(-2deg);
+    filter: brightness(1);
+  }
+  74% {
+    opacity: 0.95;
+    transform: translateX(-50%) scaleY(1.15) scaleX(1.05) rotate(5deg);
+    filter: brightness(1.25);
+  }
+}
+
+@keyframes furnace-fire-bloom {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateX(-50%) scale(0.9);
+  }
+  40% {
+    opacity: 0.55;
+    transform: translateX(-50%) scale(1.08);
+  }
+  70% {
+    opacity: 0.35;
+    transform: translateX(-50%) scale(0.95);
+  }
+}
+
+.lane-furnace-ember[data-lit="true"] {
+  animation: furnace-fire-ember 6.5s ease-in-out infinite;
+}
+
+.lane-furnace-flame[data-lit="true"] {
+  left: 50%;
+  height: 70%;
+  transform-origin: 50% 100%;
+  animation: furnace-fire-flame 4.8s ease-in-out infinite;
+}
+
+.lane-furnace-flame[data-i="0"] {
+  left: 32%;
+  width: 26%;
+  height: 65%;
+  animation-duration: 5.4s;
+  animation-delay: 0s;
+}
+
+.lane-furnace-flame[data-i="1"] {
+  left: 50%;
+  width: 30%;
+  height: 78%;
+  animation-duration: 4.6s;
+  animation-delay: -1.8s;
+}
+
+.lane-furnace-flame[data-i="2"] {
+  left: 68%;
+  width: 24%;
+  height: 60%;
+  animation-duration: 5.9s;
+  animation-delay: -3.2s;
+}
+
+/* Per-furnace phase offset so six mouths don't pulse in lockstep.
+   Each lane sets per-tongue delays (queue included — never blanket-override). */
+.lane-furnace[data-lane="queue"] .lane-furnace-flame[data-i="0"] {
+  animation-delay: -0.4s;
+}
+.lane-furnace[data-lane="queue"] .lane-furnace-flame[data-i="1"] {
+  animation-delay: -2.1s;
+}
+.lane-furnace[data-lane="queue"] .lane-furnace-flame[data-i="2"] {
+  animation-delay: -3.6s;
+}
+.lane-furnace[data-lane="build"] .lane-furnace-flame[data-i="0"] {
+  animation-delay: -0.9s;
+}
+.lane-furnace[data-lane="build"] .lane-furnace-flame[data-i="1"] {
+  animation-delay: -2.4s;
+}
+.lane-furnace[data-lane="build"] .lane-furnace-flame[data-i="2"] {
+  animation-delay: -3.8s;
+}
+.lane-furnace[data-lane="review"] .lane-furnace-flame[data-i="0"] {
+  animation-delay: -1.5s;
+}
+.lane-furnace[data-lane="review"] .lane-furnace-flame[data-i="1"] {
+  animation-delay: -0.3s;
+}
+.lane-furnace[data-lane="review"] .lane-furnace-flame[data-i="2"] {
+  animation-delay: -2.7s;
+}
+.lane-furnace[data-lane="pr"] .lane-furnace-flame[data-i="0"] {
+  animation-delay: -2.1s;
+}
+.lane-furnace[data-lane="pr"] .lane-furnace-flame[data-i="1"] {
+  animation-delay: -3.5s;
+}
+.lane-furnace[data-lane="pr"] .lane-furnace-flame[data-i="2"] {
+  animation-delay: -0.6s;
+}
+.lane-furnace[data-lane="complete"] .lane-furnace-flame[data-i="0"] {
+  animation-delay: -0.7s;
+}
+.lane-furnace[data-lane="complete"] .lane-furnace-flame[data-i="1"] {
+  animation-delay: -2.9s;
+}
+.lane-furnace[data-lane="complete"] .lane-furnace-flame[data-i="2"] {
+  animation-delay: -1.6s;
+}
+
+/*
+ * Traveler motion: roll only during travel. Eject/enter use scale + opacity
+ * only so phase handoffs do not snap orientation.
+ */
 @keyframes route-travel {
   from {
     left: var(--travel-from);
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) scale(1) rotate(0deg);
   }
   to {
     left: var(--travel-to);
-    transform: translate(-50%, -50%) scale(1);
+    transform: translate(-50%, -50%) scale(1) rotate(720deg);
   }
 }
 
 @keyframes route-traveler-eject {
   from {
-    transform: translate(-50%, -50%) scale(0.25);
-    opacity: 0.4;
+    transform: translate(-50%, -50%) scale(0.12);
+    opacity: 0.5;
   }
   to {
     transform: translate(-50%, -50%) scale(1);
@@ -359,8 +556,8 @@
     opacity: 1;
   }
   to {
-    transform: translate(-50%, -50%) scale(0.2);
-    opacity: 0.35;
+    transform: translate(-50%, -50%) scale(0.12);
+    opacity: 0;
   }
 }
 

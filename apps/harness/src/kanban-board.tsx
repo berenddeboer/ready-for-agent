@@ -1,5 +1,5 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
-import { type CSSProperties, Suspense, useState } from "react"
+import { type CSSProperties, Suspense, useMemo, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
 import { useJobsRepositoryFilter } from "./jobs-repository-filter.js"
@@ -16,7 +16,8 @@ import {
   type PipelineLaneId,
   pipelineLaneFor,
 } from "./pipeline-lanes.js"
-import { PipelineRoute } from "./pipeline-route.js"
+import { PipelineRoute, usePipelineRouteFlights } from "./pipeline-route.js"
+import { presentLaneColumnItems } from "./pipeline-route-transition.js"
 import {
   JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
@@ -129,12 +130,15 @@ function PipelineTicket({
   repository,
   issue,
   laneId,
+  departing = false,
   onOpenSession,
 }: {
   readonly workItem: WorkItem
   readonly repository: Repository | undefined
   readonly issue: { readonly title: string; readonly url: string } | undefined
   readonly laneId: PipelineLaneId
+  /** In-flight on the route line — stay in source lane, greyed out. */
+  readonly departing?: boolean
   readonly onOpenSession: (workItemId: string, sessionId: string) => void
 }) {
   const repositoryLabel = repository?.projectPath ?? workItem.repositoryId
@@ -168,8 +172,12 @@ function PipelineTicket({
 
   return (
     <li
-      className={ui.jobTicket}
+      className={cx(ui.jobTicket, departing && ui.jobTicketDeparting)}
       data-lane={laneId}
+      data-departing={departing ? "true" : undefined}
+      aria-busy={departing || undefined}
+      // inert blocks mouse and keyboard; pointer-events-none alone is not enough.
+      {...(departing ? { inert: true } : {})}
       style={{ "--ticket-color": lane?.color ?? "#151515" } as CSSProperties}
     >
       <p className={ui.jobTicketRepo} title={repositoryLabel}>
@@ -336,6 +344,17 @@ function KanbanJobsBoard() {
     ]),
   )
 
+  // Route flights delay dest counts; tickets stay greyed in source until absorb.
+  const routeFlights = usePipelineRouteFlights(laneItems)
+
+  const workItemById = useMemo(() => {
+    const map = new Map<string, WorkItem>()
+    for (const item of visiblePipelineItems) {
+      map.set(item.id, item)
+    }
+    return map
+  }, [visiblePipelineItems])
+
   if (loading && pipelineItems.length === 0) {
     return <JobsCardSkeleton />
   }
@@ -373,15 +392,29 @@ function KanbanJobsBoard() {
               }
             >
               <span className={ui.laneSwitchSwatch} aria-hidden="true" />
-              {lane.label} {laneItems.get(lane.id)?.length ?? 0}
+              {lane.label}{" "}
+              {routeFlights.displayCounts.get(lane.id) ??
+                laneItems.get(lane.id)?.length ??
+                0}
             </button>
           ))}
         </fieldset>
         <section className={ui.pipelineBoard} aria-label="Lifecycle pipeline">
-          <PipelineRoute laneItems={laneItems} />
+          <PipelineRoute
+            flights={routeFlights.flights}
+            fedLanes={routeFlights.fedLanes}
+            displayCounts={routeFlights.displayCounts}
+          />
           <div className={ui.pipelineLanes}>
             {PIPELINE_LANES.map((lane, laneIndex) => {
-              const items = laneItems.get(lane.id) ?? []
+              // Departing tickets stay greyed in the source lane; arrivals wait
+              // until the route traveler is absorbed before appearing in dest.
+              const items = presentLaneColumnItems({
+                laneId: lane.id,
+                laneItems: laneItems.get(lane.id) ?? [],
+                flights: routeFlights.flights,
+                workItemById,
+              })
               return (
                 <section
                   className={ui.pipelineLane}
@@ -407,7 +440,7 @@ function KanbanJobsBoard() {
                     <p className={ui.laneEmpty}>Lane clear</p>
                   ) : (
                     <ul className={ui.laneStack}>
-                      {items.map((workItem) => (
+                      {items.map(({ workItem, departing }) => (
                         <PipelineTicket
                           key={workItem.id}
                           workItem={workItem}
@@ -419,6 +452,7 @@ function KanbanJobsBoard() {
                             ),
                           )}
                           laneId={lane.id}
+                          departing={departing}
                           onOpenSession={(workItemId, sessionId) =>
                             setSessionDialog({ workItemId, sessionId })
                           }
