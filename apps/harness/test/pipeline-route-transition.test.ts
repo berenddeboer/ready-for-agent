@@ -310,12 +310,19 @@ describe("ROUTE_* duration constants", () => {
 })
 
 describe("furnaceFireLit", () => {
-  test("lights occupied furnaces except attention", () => {
+  test("lights only occupied active pipeline furnaces", () => {
+    expect(furnaceFireLit("queue", 1)).toBe(true)
     expect(furnaceFireLit("build", 1)).toBe(true)
     expect(furnaceFireLit("review", 2)).toBe(true)
+    expect(furnaceFireLit("pr", 1)).toBe(true)
     expect(furnaceFireLit("queue", 0)).toBe(false)
+    expect(furnaceFireLit("build", 0)).toBe(false)
+    expect(furnaceFireLit("review", 0)).toBe(false)
+    expect(furnaceFireLit("pr", 0)).toBe(false)
     expect(furnaceFireLit("attention", 3)).toBe(false)
-    expect(furnaceFireLit("complete", 1)).toBe(true)
+    expect(furnaceFireLit("attention", 0)).toBe(false)
+    expect(furnaceFireLit("complete", 1)).toBe(false)
+    expect(furnaceFireLit("complete", 0)).toBe(false)
   })
 })
 
