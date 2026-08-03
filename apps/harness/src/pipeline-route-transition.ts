@@ -66,11 +66,12 @@ export function smokeDurationMs(kind: "eject" | "absorb"): number {
 }
 
 /**
- * Attention is a holding pen — cold mouth, no fire even when occupied.
- * Shared so UI and tests agree.
+ * Fire lights only on the four active pipeline furnaces when occupied.
+ * Attention (holding pen) and Merged/`complete` stay cold even when they hold
+ * tickets. Shared so UI and tests agree.
  */
 export function furnaceFireLit(laneId: PipelineLaneId, count: number): boolean {
-  return count > 0 && laneId !== "attention"
+  return count > 0 && laneId !== "attention" && laneId !== "complete"
 }
 
 const LANE_INDEX = new Map<PipelineLaneId, number>(
