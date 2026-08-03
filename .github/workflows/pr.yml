@@ -29,7 +29,9 @@ jobs:
           # Built-in GITHUB_TOKEN only; pinact uses it for release/tag lookups.
           github_token: ${{ github.token }}
 
-  main:
+  # Quality gates + cheap harness slow-test (SSE idle-timeout). Parallel with
+  # `harness` (smoke + live e2e); no artifact handoff between the two.
+  quality-gates:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,6 +73,22 @@ jobs:
       # default suite can run with Bun --parallel. Keep the real heartbeat gate.
       - name: Harness slow tests
         run: bunx nx run harness:slow-test
+
+  # Dev smoke + live Gherkin e2e. Independent of quality-gates (parallel job).
+  # OpenCode CLI is not installed here: smoke/e2e do not invoke it.
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          filter: tree:0
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - run: bun install --no-cache --frozen-lockfile --linker=isolated && bun install --no-cache --frozen-lockfile --linker=isolated
 
       # Dev-path GraphQL smoke (Bun + Vite SSR); no Keymaxxer vault required.
       # Production live e2e below remains vault-backed and separate.

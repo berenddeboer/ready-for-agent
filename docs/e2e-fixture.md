@@ -213,17 +213,31 @@ These leave the developer's real Keymaxxer vault untouched.
 
 ## CI gating
 
-Live Gherkin e2e runs after lint/typecheck/unit tests on trusted pushes to
-`main` (`.github/workflows/ci-cd.yml`) and on pull requests
-(`.github/workflows/pr.yml`), with Playwright Chromium installed when the
-vault secret is available. Both workflows unlock the fixture vault with
-repository secret `E2E_KEYMAXXER_MASTER_KEY`.
+Live Gherkin e2e runs in a dedicated **`harness`** job (dev smoke + live e2e)
+in parallel with **`quality-gates`** (`lint` / `knip` / `test` / `typecheck`
+plus harness slow-test) on trusted pushes to `main`
+(`.github/workflows/ci-cd.yml`) and on pull requests
+(`.github/workflows/pr.yml`). Playwright Chromium is installed only when the
+vault secret is available (always on `main`; same-repo PRs only). Both
+workflows unlock the fixture vault with repository secret
+`E2E_KEYMAXXER_MASTER_KEY`.
 
 | Event | Secret available | Policy |
 | --- | --- | --- |
 | `push` to `main` | required | Fail closed if missing |
 | Same-repo PR | yes | Run live e2e |
-| Fork PR | no (secrets not exposed) | Skip live e2e (log + continue); quality gates still run |
+| Fork PR | no (secrets not exposed) | Skip live e2e only (log + continue); `harness` still runs smoke; quality-gates and pinact still run |
+
+Required status checks (after the former monolithic `main` job was split):
+
+| Workflow | Require |
+| --- | --- |
+| **PR** | `quality-gates`, `harness`, `pinact` |
+| **CI/CD** | `quality-gates`, `harness`, `packed-install`, `pinact` |
+
+If branch protection or a ruleset still names `main`, update it when this lands
+or merges can stall (stale check never completes) or under-gate e2e (if only
+`quality-gates` is re-added).
 
 See ADR 0021. GitHub and GitLab scenarios share that single
 `bunx nx run harness:e2e` step.
