@@ -267,6 +267,103 @@
   }
 }
 
+/*
+ * Pipeline route-line furnace choreography (issue #737).
+ * Longer motion is intentional for lane changes only; plate transitions stay 120ms.
+ * Honored by the global prefers-reduced-motion base rule (durations collapse).
+ */
+@keyframes furnace-eject {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(0.92, 1.06);
+  }
+  70% {
+    transform: scale(1.06, 0.94);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes furnace-absorb {
+  0% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(0.94, 1.04);
+  }
+  55% {
+    transform: scale(1.08, 0.92);
+  }
+  80% {
+    transform: scale(0.98, 1.03);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes furnace-fed {
+  0% {
+    filter: brightness(1);
+  }
+  40% {
+    filter: brightness(1.18);
+  }
+  100% {
+    filter: brightness(1);
+  }
+}
+
+@keyframes furnace-smoke {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0.15rem) scale(0.4);
+  }
+  25% {
+    opacity: 0.55;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -0.7rem) scale(1.15);
+  }
+}
+
+@keyframes route-travel {
+  from {
+    left: var(--travel-from);
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    left: var(--travel-to);
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes route-traveler-eject {
+  from {
+    transform: translate(-50%, -50%) scale(0.25);
+    opacity: 0.4;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes route-traveler-enter {
+  from {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(0.2);
+    opacity: 0.35;
+  }
+}
+
 /* Native <dialog> backdrop — no Tailwind equivalent for ::backdrop on dialog */
 @utility dialog-backdrop {
   &::backdrop {

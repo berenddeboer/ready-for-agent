@@ -540,14 +540,78 @@ export const ui = {
   pipelineBoard:
     "mt-[1.6rem] grid gap-[0.55rem] max-[900px]:mt-[0.85rem] max-[900px]:gap-0",
 
+  /**
+   * Route spine + pot-belly furnace stops. Spine is centered on the furnace
+   * belly (not the stack). Stack sits above; mouth hangs on the belly bottom.
+   */
   pipelineRoute:
-    "relative grid min-h-[2.1rem] grid-cols-6 items-center before:pointer-events-none before:absolute before:top-1/2 before:right-[calc(100%/12)] before:left-[calc(100%/12)] before:h-1 before:-translate-y-1/2 before:bg-ink before:content-[''] max-[900px]:hidden",
+    "relative grid min-h-[3.1rem] grid-cols-6 items-end pb-[0.15rem] before:pointer-events-none before:absolute before:top-[calc(100%-1.2rem)] before:right-[calc(100%/12)] before:left-[calc(100%/12)] before:h-1 before:-translate-y-1/2 before:bg-ink before:content-[''] max-[900px]:hidden",
 
-  laneRoundel: cx(
-    "relative z-[1] mx-auto grid h-[2.1rem] min-w-[2.1rem] place-items-center rounded-full",
-    "border-2 border-ink bg-[var(--lane-color)] px-[0.4rem]",
+  /**
+   * Pot-belly furnace stop (idle + animated phases via data-phase).
+   * Outer shell keeps accessible name; chrome is aria-hidden.
+   * Phase motion durations are applied from ROUTE_TRANSITION_MS / ROUTE_FED_MS
+   * in pipeline-route.tsx (inline style) so JS timers and CSS stay lockstep.
+   */
+  laneRoundel:
+    "lane-furnace relative z-[1] mx-auto grid w-[2.1rem] justify-items-center",
+
+  laneFurnaceStack: cx(
+    "relative z-[2] mb-[-1px] h-[0.55rem] w-[0.42rem]",
+    "rounded-t-[1px] border border-b-0 border-[#2a2a2a] bg-[#3a3a3a]",
+    "before:absolute before:-top-[0.18rem] before:left-1/2 before:h-[0.2rem] before:w-[0.62rem]",
+    "before:-translate-x-1/2 before:rounded-[1px] before:border before:border-[#2a2a2a]",
+    "before:bg-[linear-gradient(180deg,#c9a227_0%,#8a7018_100%)] before:content-['']",
+  ),
+
+  laneFurnaceBody: cx(
+    "relative grid h-[2.1rem] w-[2.1rem] place-items-center rounded-full",
+    "border-2 border-ink bg-[var(--lane-color)]",
     "font-mono text-[0.78rem] font-extrabold leading-none tracking-[0.02em] tabular-nums text-[var(--lane-text,#fff)]",
     "data-[lane=complete]:border-white data-[lane=complete]:outline data-[lane=complete]:outline-2 data-[lane=complete]:outline-ink",
+  ),
+
+  laneFurnaceCount: "relative z-[1] tabular-nums",
+
+  /** Dark firebox mouth at the bottom of the belly — traveler enter/exit. */
+  laneFurnaceMouth: cx(
+    "pointer-events-none absolute bottom-[0.12rem] left-1/2 z-[2] h-[0.38rem] w-[0.72rem]",
+    "-translate-x-1/2 rounded-[50%] border border-[#1a1a1a] bg-[#1a1a1a]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]",
+  ),
+
+  /** Coal glow in the mouth when the stop holds jobs. */
+  laneFurnaceGlow: cx(
+    "pointer-events-none absolute bottom-[0.16rem] left-1/2 z-[3] h-[0.22rem] w-[0.42rem]",
+    "-translate-x-1/2 rounded-[50%] bg-[radial-gradient(ellipse_at_center,#ff8a2a_0%,#ff4d1c_45%,transparent_75%)]",
+    "opacity-0 data-[lit=true]:opacity-90",
+  ),
+
+  /**
+   * Stack smoke host. Duration applied from ROUTE_SMOKE_MS in pipeline-route
+   * when data-active; shared puff for eject and absorb.
+   */
+  laneFurnaceSmoke: cx(
+    "pointer-events-none absolute -top-[0.35rem] left-1/2 z-[3] h-[0.9rem] w-[0.7rem]",
+    "-translate-x-1/2 opacity-0",
+  ),
+
+  laneFurnaceSmokePuff: cx(
+    "absolute bottom-0 left-1/2 h-[0.35rem] w-[0.35rem] -translate-x-1/2",
+    "rounded-full bg-[rgb(80_80_80/0.45)]",
+  ),
+
+  laneFurnaceSmokePuffAlt: cx(
+    "absolute bottom-[0.15rem] left-[35%] h-[0.28rem] w-[0.28rem]",
+    "rounded-full bg-[rgb(100_100_100/0.35)]",
+  ),
+
+  /** Coal-lump traveler rolling along the route spine. */
+  routeTraveler: cx(
+    "pointer-events-none absolute top-[calc(100%-1.2rem)] z-[4] h-[0.55rem] w-[0.55rem]",
+    "-translate-x-1/2 -translate-y-1/2 rounded-[45%_40%_50%_42%]",
+    "border border-[#2a1a0a] bg-[radial-gradient(circle_at_30%_30%,#5a3a1a_0%,#2a1808_70%,#1a1005_100%)]",
+    "shadow-[inset_1px_1px_0_rgb(255_255_255/0.12)]",
   ),
 
   pipelineLanes:
@@ -952,9 +1016,10 @@ export const ui = {
  *    — ::backdrop is not available as a Tailwind variant on the dialog element
  *      in a portable way; keep in styles.css.
  *
- * 2. @keyframes skeleton-pulse
+ * 2. @keyframes skeleton-pulse, furnace-*, route-travel, route-traveler-*
  *    — Keyframes stay in styles.css; utilities reference
- *      animate-[skeleton-pulse_1.2s_ease-in-out_infinite].
+ *      animate-[skeleton-pulse_1.2s_ease-in-out_infinite]. Furnace / traveler
+ *      motion for #737 uses inline style.animation with ROUTE_*_MS durations.
  *
  * 3. Parent-only BEM modifiers that only style descendants
  *    (banner--alarm / banner--guidance → .banner-tag):

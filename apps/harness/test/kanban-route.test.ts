@@ -140,13 +140,28 @@ describe("kanban home board", () => {
 
   test("renders all six lifecycle lanes as an accessible pipeline", () => {
     const source = boardSource()
+    const route = readFileSync(
+      join(import.meta.dir, "../src/pipeline-route.tsx"),
+      "utf8",
+    )
     expect(source).toContain('aria-label="Lifecycle pipeline"')
     expect(source).toContain("pipelineLaneFor(workItem)")
     expect(source).toContain("Lane clear")
-    // Mobile switcher + route roundel aria-label + lane header each use {lane.label}.
-    expect(source.match(/\{lane\.label\}/g)).toHaveLength(3)
-    expect(source).toContain("ui.pipelineRoute")
-    expect(source).toContain("ui.laneRoundel")
+    // Mobile switcher + lane header use {lane.label}; route furnaces live in
+    // PipelineRoute (also {lane.label} in accessible names).
+    expect(source.match(/\{lane\.label\}/g)).toHaveLength(2)
+    expect(source).toContain("<PipelineRoute")
+    expect(source).toContain('from "./pipeline-route.js"')
+    expect(route).toContain("ui.pipelineRoute")
+    expect(route).toContain("ui.laneRoundel")
+    expect(route).toContain("ui.laneFurnaceStack")
+    expect(route).toContain("ui.laneFurnaceMouth")
+    expect(route).toContain("ui.laneFurnaceSmokePuff")
+    expect(route).toContain("laneItemsAssignmentKey")
+    expect(route).toContain("ROUTE_FED_MS")
+    expect(route).toContain("ROUTE_SMOKE_MS")
+    expect(route).toMatch(/jobs in \$\{lane\.label\}/)
+    expect(route).toContain("prefers-reduced-motion")
     expect(source).toContain("ui.laneHeader")
     expect(source).toContain("ui.laneTitle")
     expect(source).not.toContain("lane-number")
@@ -446,6 +461,19 @@ describe("kanban home board", () => {
     // Route spine uses before: pseudo utilities.
     expect(ui).toMatch(/pipelineRoute:[\s\S]*?before:/)
     expect(ui).toContain("laneRoundel:")
+    // Pot-belly furnace chrome (issue #737).
+    expect(ui).toContain("laneFurnaceStack:")
+    expect(ui).toContain("laneFurnaceBody:")
+    expect(ui).toContain("laneFurnaceMouth:")
+    expect(ui).toContain("laneFurnaceGlow:")
+    expect(ui).toContain("laneFurnaceSmokePuff:")
+    expect(ui).toContain("laneFurnaceSmokePuffAlt:")
+    expect(ui).toContain("routeTraveler:")
+    // Phase durations come from ROUTE_*_MS via inline style, not Tailwind literals.
+    expect(ui).toContain("ROUTE_TRANSITION_MS")
+    expect(stylesSource()).toContain("@keyframes furnace-eject")
+    expect(stylesSource()).toContain("@keyframes furnace-absorb")
+    expect(stylesSource()).toContain("@keyframes route-travel")
     expect(ui).toContain("pipelineLanes:")
     expect(ui).toContain("grid-cols-6")
     expect(ui).toContain("gap-0.5")
