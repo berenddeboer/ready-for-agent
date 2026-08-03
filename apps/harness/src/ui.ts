@@ -43,11 +43,45 @@ const laneSwitchRivets = plateMiniRivets
 const cardMetalLight =
   "in-[html[data-theme=light]]:bg-[linear-gradient(165deg,rgb(255_255_255/0.72)_0%,rgb(255_255_255/0.18)_42%,transparent_68%),linear-gradient(180deg,#f0f2f0_0%,#e3e7e4_55%,#dfe4e1_100%)]"
 
+const mastScrollworkStroke =
+  "[fill:none] [stroke-linecap:round] [stroke-linejoin:round]"
+
 export const ui = {
   /* ---------- Nav shell (§4.1) ---------- */
 
   // bg-mast-bg (not bg-[var(--mast-bg)]) so styles.css mast focus-ring selector matches.
-  mast: "flex flex-wrap items-end justify-between gap-x-10 gap-y-[1.2rem] bg-mast-bg px-[2.2rem] pt-6 pb-[1.35rem] text-[var(--mast-ink)] max-[900px]:px-[1.4rem] max-[900px]:pt-[1.2rem] max-[900px]:pb-[1.1rem]",
+  mast: cx(
+    "relative isolate flex flex-wrap items-end justify-between overflow-hidden",
+    "gap-x-10 gap-y-[1.2rem] bg-mast-bg px-[2.2rem] pt-6 pb-[1.35rem] text-[var(--mast-ink)]",
+    "[background-image:radial-gradient(ellipse_62%_180%_at_67%_38%,rgb(78_90_84/0.14),transparent_68%),linear-gradient(105deg,rgb(0_0_0/0.45),rgb(25_37_31/0.18)_54%,rgb(0_0_0/0.55))]",
+    "max-[900px]:px-[1.4rem] max-[900px]:pt-[1.2rem] max-[900px]:pb-[1.1rem]",
+  ),
+
+  mastContent: "relative z-20",
+
+  mastScrollworkGrain:
+    "pointer-events-none absolute inset-0 z-0 opacity-75 [background-image:repeating-linear-gradient(0deg,rgb(255_255_255/0.012)_0_1px,transparent_1px_3px)]",
+
+  mastScrollworkVignette:
+    "pointer-events-none absolute inset-0 z-0 [background:linear-gradient(90deg,rgb(0_0_0/0.64)_0%,rgb(0_0_0/0.28)_31%,transparent_55%,rgb(0_0_0/0.24)_100%)] shadow-[inset_0_1px_rgb(255_255_255/0.045),inset_0_-2px_rgb(0_0_0/0.72)]",
+
+  mastScrollworkOrnament:
+    "pointer-events-none absolute inset-0 z-10 h-full w-full opacity-52 max-[640px]:w-[165%] max-[640px]:opacity-[0.38]",
+
+  mastScrollworkShadow: cx(
+    mastScrollworkStroke,
+    "[translate:0_2px] [stroke:rgb(0_0_0/0.92)] [stroke-width:11px]",
+  ),
+
+  mastScrollworkBody: cx(
+    mastScrollworkStroke,
+    "[stroke:rgb(66_76_71/0.72)] [stroke-width:7px]",
+  ),
+
+  mastScrollworkHighlight: cx(
+    mastScrollworkStroke,
+    "[translate:0_-1px] [stroke:rgb(192_203_197/0.18)] [stroke-width:1.2px]",
+  ),
 
   brandKicker:
     "m-0 mb-2 font-mono text-[0.62rem] tracking-[0.22em] uppercase text-[var(--mast-faint)]",
@@ -66,7 +100,7 @@ export const ui = {
   /** Child `.ok` inside brand-sub */
   brandSubOk: "text-signal",
 
-  mastNav: "flex flex-wrap items-center gap-[0.55rem]",
+  mastNav: "relative z-20 flex flex-wrap items-center gap-[0.55rem]",
 
   mastPlate: cx(
     "inline-flex items-center gap-2 border-2 border-black",

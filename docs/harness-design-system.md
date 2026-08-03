@@ -126,6 +126,10 @@ keeps the light-mode platform grey rather than going lights-out.
 | `--mast-plate-active-ink` | `#101314` | `#101314` |
 | `--mast-plate-active-rivet` | `rgb(16 19 18 / 0.5)` | `rgb(16 19 18 / 0.5)` |
 
+The band carries a low-contrast, full-width forged-iron scrollwork rail behind
+the brand and controls. A matte grain, dark vignette, and bevel-highlighted
+iron strokes add depth without reducing foreground contrast.
+
 ### 2.4 Stamped plates on paper
 
 | Token | Light | Dark |
@@ -251,6 +255,9 @@ Named slots (rem), transcribed from the prototypes:
 **Masthead** — full-width dark supergraphic band (`--mast-bg`), flex with
 brand left and nav right, items baseline-aligned.
 
+- **Forged field**: ornamental wrought-iron rails span the full width behind
+  both brand and controls. Black shadow, charcoal body, and a faint upper-edge
+  highlight create forged depth; the ornament is decorative and `aria-hidden`.
 - **Brand block**: mono kicker with version only (`--mast-dim`; product name
   and "Operator board" are not repeated here), wordmark link in display 800
   uppercase white (hover: `--signal`), mono sub-line with live status fragment
