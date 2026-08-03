@@ -94,9 +94,10 @@ describe("Jobs Reset button wiring", () => {
     expect(lifecycle).toContain("isTerminal: workItem.isTerminal")
     expect(lifecycle).toContain('isNeedsHuman: status === "NEEDS_HUMAN"')
     expect(lifecycle).toContain("resetWorkItem")
-    expect(lifecycle).toContain(
-      'aria-label={reset.isPending ? "Resetting job" : "Reset job"}',
-    )
+    expect(lifecycle).toContain("<WorkItemResetButton")
+    expect(lifecycle).toContain("pending={reset.isPending}")
+    expect(lifecycle).toContain("disabled={actionsPending}")
+    expect(lifecycle).toContain("onReset={() => reset.mutate()}")
   })
 
   test("held Queue rows are not denylisted for Reset the way Retry is", () => {

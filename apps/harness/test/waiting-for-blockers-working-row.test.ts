@@ -71,9 +71,9 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(lifecycle).toContain("isTerminal: workItem.isTerminal")
     expect(lifecycle).toContain('isNeedsHuman: status === "NEEDS_HUMAN"')
     expect(lifecycle).toContain("resetWorkItem")
-    expect(lifecycle).toContain(
-      'aria-label={reset.isPending ? "Resetting job" : "Reset job"}',
-    )
+    expect(lifecycle).toContain("<WorkItemResetButton")
+    expect(lifecycle).toContain("pending={reset.isPending}")
+    expect(lifecycle).toContain("onReset={() => reset.mutate()}")
   })
 
   test("Issue kebab offers Queue and Implement actions from shared eligibility", () => {
