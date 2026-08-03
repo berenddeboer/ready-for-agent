@@ -314,6 +314,21 @@
   }
 }
 
+/*
+ * Destination work-item card fade at absorb handoff (issue #750).
+ * Opacity only — no transform/layout motion so the lane stack stays still.
+ * Duration is set inline from ROUTE_TRANSITION_MS.absorb (~1200ms) so the
+ * card is fully visible just before the 1400ms smoke plume clears.
+ */
+@keyframes ticket-arrive {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes furnace-fed {
   0% {
     filter: brightness(1);

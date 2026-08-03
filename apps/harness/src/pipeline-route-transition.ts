@@ -10,10 +10,16 @@ export type PlannedTransition = {
 }
 
 /**
- * Phases of a route-line furnace handoff. Destination display count stays
- * delayed until the flight is removed after `absorb` finishes.
+ * Phases of a route-line furnace handoff. Presentation handoff (source grey
+ * removed, destination card + counts catch up) happens when the flight enters
+ * `absorb` — the card fades in while the absorb smoke bellows.
  */
 export type FlightPhase = "eject" | "travel" | "enter" | "absorb"
+
+/** True while the traveler is still en route (not yet the absorb handoff). */
+function isPreAbsorbPhase(phase: FlightPhase): boolean {
+  return phase !== "absorb"
+}
 
 export type RouteFlight = {
   readonly id: string
@@ -154,16 +160,18 @@ export function trueLaneCounts(
 }
 
 /**
- * How many in-flight travelers are still waiting to be absorbed into `lane`.
+ * How many in-flight travelers are still waiting to hand off into `lane`.
  * While a flight is active its work item already lives in `to` in real data,
- * so the destination display must subtract these until absorb completes.
+ * so the destination display must subtract these until absorb starts.
+ * Flights already in `absorb` have handed off (counts catch up with the card).
  */
 export function countPendingArrivals(
-  flights: readonly Pick<RouteFlight, "to">[],
+  flights: readonly Pick<RouteFlight, "to" | "phase">[],
   lane: PipelineLaneId,
 ): number {
   let count = 0
   for (const flight of flights) {
+    if (!isPreAbsorbPhase(flight.phase)) continue
     if (flight.to === lane) count += 1
   }
   return count
@@ -173,8 +181,8 @@ export function countPendingArrivals(
  * Presentation count for one stop. Never negative.
  *
  * - Destination stays flat until absorb (subtract pending arrivals).
- * - Source keeps the departing job until the flight ends (add pending
- *   departures) so furnace counts match greyed-out cards still in the lane.
+ * - Source keeps the departing job until absorb (add pending departures)
+ *   so furnace counts match greyed-out cards still in the lane.
  */
 export function displayLaneCount(args: {
   readonly trueCount: number
@@ -189,14 +197,17 @@ export function displayLaneCount(args: {
 
 /**
  * Display counts for every pipeline lane given true counts and active flights.
+ * Pre-absorb flights pad the source and hold the destination; absorb is the
+ * handoff so both lanes show true counts for that traveler.
  */
 export function displayLaneCounts(
   trueCounts: ReadonlyMap<PipelineLaneId, number>,
-  flights: readonly Pick<RouteFlight, "from" | "to">[],
+  flights: readonly Pick<RouteFlight, "from" | "to" | "phase">[],
 ): Map<PipelineLaneId, number> {
   const pendingArrivals = new Map<PipelineLaneId, number>()
   const pendingDepartures = new Map<PipelineLaneId, number>()
   for (const flight of flights) {
+    if (!isPreAbsorbPhase(flight.phase)) continue
     pendingArrivals.set(flight.to, (pendingArrivals.get(flight.to) ?? 0) + 1)
     pendingDepartures.set(
       flight.from,
@@ -218,13 +229,23 @@ export function displayLaneCounts(
   return display
 }
 
+export type LaneColumnPresentationItem<T extends { readonly id: string }> = {
+  readonly workItem: T
+  /** Grey placeholder still parked in the source lane (pre-absorb). */
+  readonly departing: boolean
+  /** Real card in the destination lane fading in during absorb. */
+  readonly arriving: boolean
+}
+
 /**
  * Tickets to render in a lane column during route flights.
  *
  * Real data already places a moved job in the destination lane. Presentation:
- * - Keep it in the **source** lane while in flight (greyed “departing”),
- *   inserted at `sourceOrderIndex` so mid-stack cards do not jump to the end.
- * - Hold it out of the **destination** lane until absorb finishes.
+ * - **Pre-absorb** (`eject` / `travel` / `enter`): keep a grey “departing”
+ *   card in the **source** lane at `sourceOrderIndex`; hold the job out of
+ *   the **destination** lane.
+ * - **Absorb**: drop the source placeholder and show the real card in the
+ *   destination as `arriving` so opacity can fade in with the smoke bellow.
  */
 export function presentLaneColumnItems<
   T extends { readonly id: string },
@@ -233,29 +254,42 @@ export function presentLaneColumnItems<
   readonly laneItems: readonly T[]
   readonly flights: readonly Pick<
     RouteFlight,
-    "workItemId" | "from" | "to" | "sourceOrderIndex"
+    "workItemId" | "from" | "to" | "sourceOrderIndex" | "phase"
   >[]
   readonly workItemById: ReadonlyMap<string, T>
-}): readonly { readonly workItem: T; readonly departing: boolean }[] {
+}): readonly LaneColumnPresentationItem<T>[] {
   const departing: {
     workItemId: string
     sourceOrderIndex: number
   }[] = []
-  const arrivingIds = new Set<string>()
+  /** Destination suppress set: still en route (pre-absorb). */
+  const enRouteToLane = new Set<string>()
+  /** Destination absorb set: handoff started — render as arriving. */
+  const absorbingIntoLane = new Set<string>()
   for (const flight of args.flights) {
-    if (flight.from === args.laneId) {
+    if (flight.from === args.laneId && isPreAbsorbPhase(flight.phase)) {
       departing.push({
         workItemId: flight.workItemId,
         sourceOrderIndex: flight.sourceOrderIndex,
       })
     }
-    if (flight.to === args.laneId) arrivingIds.add(flight.workItemId)
+    if (flight.to === args.laneId) {
+      if (isPreAbsorbPhase(flight.phase)) {
+        enRouteToLane.add(flight.workItemId)
+      } else {
+        absorbingIntoLane.add(flight.workItemId)
+      }
+    }
   }
 
-  const residents: { workItem: T; departing: boolean }[] = []
+  const residents: LaneColumnPresentationItem<T>[] = []
   for (const item of args.laneItems) {
-    if (arrivingIds.has(item.id)) continue
-    residents.push({ workItem: item, departing: false })
+    if (enRouteToLane.has(item.id)) continue
+    residents.push({
+      workItem: item,
+      departing: false,
+      arriving: absorbingIntoLane.has(item.id),
+    })
   }
 
   // Insert greys at frozen source indices (stable mid-stack, not append-only).
@@ -270,7 +304,11 @@ export function presentLaneColumnItems<
     const workItem = args.workItemById.get(workItemId)
     if (workItem === undefined) continue
     const insertAt = Math.min(Math.max(0, sourceOrderIndex), result.length)
-    result.splice(insertAt, 0, { workItem, departing: true })
+    result.splice(insertAt, 0, {
+      workItem,
+      departing: true,
+      arriving: false,
+    })
     seen.add(workItemId)
   }
 
@@ -289,7 +327,8 @@ export function laneCenterPercent(laneId: PipelineLaneId): number {
 
 /**
  * Advance a flight to the next phase, or `null` when absorb is done and the
- * flight should be removed (destination count may then catch up).
+ * flight should be removed (card fade and counts already handed off at absorb
+ * start; removal only ends the flight bookkeeping and lingering traveler).
  */
 export function nextFlightPhase(phase: FlightPhase): FlightPhase | null {
   switch (phase) {

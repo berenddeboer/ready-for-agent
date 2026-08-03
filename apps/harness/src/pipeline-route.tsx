@@ -92,8 +92,8 @@ export type PipelineRouteFlights = {
 
 /**
  * Own route-line flight state from true lane assignment. Shared by the route
- * chrome and the board so furnace counts and greyed departing tickets stay
- * aligned with travelers.
+ * chrome and the board so furnace counts, greyed departing tickets, and the
+ * absorb-arrival fade stay aligned with travelers.
  */
 export function usePipelineRouteFlights(
   laneItems: ReadonlyMap<PipelineLaneId, readonly { readonly id: string }[]>,
@@ -353,7 +353,8 @@ function useLingeringSmoke(
 /**
  * Desktop route line: pot-belly furnace stops with optional coal-lump traveler
  * when a work item changes pipeline lane. Presentation only — real counts come
- * from the board’s work-item data; display counts are delayed until absorb.
+ * from the board’s work-item data; display counts stay delayed through
+ * pre-absorb phases and catch up when the flight enters absorb.
  */
 export function PipelineRoute({
   flights,

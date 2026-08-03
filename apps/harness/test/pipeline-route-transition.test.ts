@@ -116,7 +116,7 @@ describe("displayLaneCount / displayLaneCounts", () => {
     expect(displayLaneCount({ trueCount: 0, pendingArrivals: 2 })).toBe(0)
   })
 
-  test("source keeps departing job; dest holds arrival until absorb", () => {
+  test("pre-absorb: source keeps departing job; dest holds arrival", () => {
     // True data after move: build lost one, review gained one.
     const trueCounts = new Map<PipelineLaneId, number>([
       ["queue", 0],
@@ -126,12 +126,31 @@ describe("displayLaneCount / displayLaneCounts", () => {
       ["attention", 0],
       ["complete", 0],
     ])
-    const flights: Pick<RouteFlight, "from" | "to">[] = [
-      { from: "build", to: "review" },
+    for (const phase of ["eject", "travel", "enter"] as const) {
+      const flights: Pick<RouteFlight, "from" | "to" | "phase">[] = [
+        { from: "build", to: "review", phase },
+      ]
+      const display = displayLaneCounts(trueCounts, flights)
+      expect(display.get("build")).toBe(4)
+      expect(display.get("review")).toBe(0)
+    }
+  })
+
+  test("absorb handoff: source and dest expose true counts", () => {
+    const trueCounts = new Map<PipelineLaneId, number>([
+      ["queue", 0],
+      ["build", 3],
+      ["review", 1],
+      ["pr", 0],
+      ["attention", 0],
+      ["complete", 0],
+    ])
+    const flights: Pick<RouteFlight, "from" | "to" | "phase">[] = [
+      { from: "build", to: "review", phase: "absorb" },
     ]
     const display = displayLaneCounts(trueCounts, flights)
-    expect(display.get("build")).toBe(4)
-    expect(display.get("review")).toBe(0)
+    expect(display.get("build")).toBe(3)
+    expect(display.get("review")).toBe(1)
   })
 
   test("overlapping arrivals stack without losing the final true count", () => {
@@ -143,19 +162,26 @@ describe("displayLaneCount / displayLaneCounts", () => {
       ["attention", 0],
       ["complete", 0],
     ])
-    const flights: Pick<RouteFlight, "from" | "to">[] = [
-      { from: "build", to: "review" },
-      { from: "build", to: "review" },
+    const flights: Pick<RouteFlight, "from" | "to" | "phase">[] = [
+      { from: "build", to: "review", phase: "travel" },
+      { from: "build", to: "review", phase: "enter" },
     ]
     const mid = displayLaneCounts(trueCounts, flights)
     expect(mid.get("review")).toBe(1)
+    const oneAbsorbing: Pick<RouteFlight, "from" | "to" | "phase">[] = [
+      { from: "build", to: "review", phase: "absorb" },
+      { from: "build", to: "review", phase: "travel" },
+    ]
+    const mixed = displayLaneCounts(trueCounts, oneAbsorbing)
+    // One still pending, one already handed off.
+    expect(mixed.get("review")).toBe(2)
     const done = displayLaneCounts(trueCounts, [])
     expect(done.get("review")).toBe(3)
   })
 })
 
 describe("presentLaneColumnItems", () => {
-  test("keeps departing ticket in source and holds it out of dest", () => {
+  test("pre-absorb: keeps departing ticket in source and holds it out of dest", () => {
     const a = { id: "a" }
     const b = { id: "b" }
     const byId = new Map([
@@ -163,38 +189,68 @@ describe("presentLaneColumnItems", () => {
       ["b", b],
     ])
     // True data: a already moved to review; a was index 0, b remains alone.
+    for (const phase of ["eject", "travel", "enter"] as const) {
+      const flights = [
+        {
+          workItemId: "a",
+          from: "build" as const,
+          to: "review" as const,
+          sourceOrderIndex: 0,
+          phase,
+        },
+      ]
+      const source = presentLaneColumnItems({
+        laneId: "build",
+        laneItems: [b],
+        flights,
+        workItemById: byId,
+      })
+      expect(source).toEqual([
+        { workItem: a, departing: true, arriving: false },
+        { workItem: b, departing: false, arriving: false },
+      ])
+
+      const dest = presentLaneColumnItems({
+        laneId: "review",
+        laneItems: [a],
+        flights,
+        workItemById: byId,
+      })
+      expect(dest).toEqual([])
+    }
+  })
+
+  test("absorb: drops source placeholder and returns dest card as arriving", () => {
+    const a = { id: "a" }
+    const b = { id: "b" }
+    const byId = new Map([
+      ["a", a],
+      ["b", b],
+    ])
+    const flights = [
+      {
+        workItemId: "a",
+        from: "build" as const,
+        to: "review" as const,
+        sourceOrderIndex: 0,
+        phase: "absorb" as const,
+      },
+    ]
     const source = presentLaneColumnItems({
       laneId: "build",
       laneItems: [b],
-      flights: [
-        {
-          workItemId: "a",
-          from: "build",
-          to: "review",
-          sourceOrderIndex: 0,
-        },
-      ],
+      flights,
       workItemById: byId,
     })
-    expect(source).toEqual([
-      { workItem: a, departing: true },
-      { workItem: b, departing: false },
-    ])
+    expect(source).toEqual([{ workItem: b, departing: false, arriving: false }])
 
     const dest = presentLaneColumnItems({
       laneId: "review",
       laneItems: [a],
-      flights: [
-        {
-          workItemId: "a",
-          from: "build",
-          to: "review",
-          sourceOrderIndex: 0,
-        },
-      ],
+      flights,
       workItemById: byId,
     })
-    expect(dest).toEqual([])
+    expect(dest).toEqual([{ workItem: a, departing: false, arriving: true }])
   })
 
   test("inserts departing ticket at frozen sourceOrderIndex mid-stack", () => {
@@ -216,21 +272,63 @@ describe("presentLaneColumnItems", () => {
           from: "build",
           to: "review",
           sourceOrderIndex: 1,
+          phase: "travel",
         },
       ],
       workItemById: byId,
     })
     expect(source.map((entry) => entry.workItem.id)).toEqual(["a", "b", "c"])
     expect(source[1]?.departing).toBe(true)
+    expect(source[1]?.arriving).toBe(false)
+  })
+
+  test("multi-arrival: only absorb-phase dest cards mark arriving", () => {
+    const a = { id: "a" }
+    const b = { id: "b" }
+    const resident = { id: "resident" }
+    const byId = new Map([
+      ["a", a],
+      ["b", b],
+      ["resident", resident],
+    ])
+    const flights = [
+      {
+        workItemId: "a",
+        from: "build" as const,
+        to: "review" as const,
+        sourceOrderIndex: 0,
+        phase: "absorb" as const,
+      },
+      {
+        workItemId: "b",
+        from: "build" as const,
+        to: "review" as const,
+        sourceOrderIndex: 1,
+        phase: "travel" as const,
+      },
+    ]
+    const dest = presentLaneColumnItems({
+      laneId: "review",
+      // True data already has both arrivals plus a resident.
+      laneItems: [a, b, resident],
+      flights,
+      workItemById: byId,
+    })
+    // b still en route → suppressed; a absorbing → arriving; resident stays.
+    expect(dest).toEqual([
+      { workItem: a, departing: false, arriving: true },
+      { workItem: resident, departing: false, arriving: false },
+    ])
   })
 })
 
 describe("countPendingArrivals", () => {
-  test("counts only flights targeting the given lane", () => {
+  test("counts only pre-absorb flights targeting the given lane", () => {
     const flights = [
-      { to: "review" as const },
-      { to: "pr" as const },
-      { to: "review" as const },
+      { to: "review" as const, phase: "travel" as const },
+      { to: "pr" as const, phase: "enter" as const },
+      { to: "review" as const, phase: "eject" as const },
+      { to: "review" as const, phase: "absorb" as const },
     ]
     expect(countPendingArrivals(flights, "review")).toBe(2)
     expect(countPendingArrivals(flights, "pr")).toBe(1)
