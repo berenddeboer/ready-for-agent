@@ -4,7 +4,7 @@ import { GitLabService } from "@ready-for-agent/gitlab-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   CreateWorktreeRepositoryNotFoundError,
-  type GitCommandError,
+  GitCommandError,
 } from "./create-worktree-errors.js"
 import { type GitRepository, gitExitCode, runGit } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
@@ -77,6 +77,20 @@ const removeDirectoryIfPresent = (path: string) =>
     if (exists) {
       yield* fs.remove(path, { recursive: true, force: true })
     }
+  })
+
+/**
+ * Remove an unregistered residual worktree directory with one automatic retry.
+ * Concurrent writers (e.g. Nx) may cause the first `fs.remove` to throw
+ * (ENOTEMPTY/EBUSY) or to succeed while immediately recreating files; either
+ * case gets a brief wait and a second attempt before the caller postcondition.
+ */
+const removeResidualDirectoryWithRetry = (path: string) =>
+  Effect.gen(function* () {
+    yield* removeDirectoryIfPresent(path).pipe(Effect.ignore)
+    if (!(yield* pathExists(path))) return
+    yield* Effect.sleep(WORKTREE_REMOVE_RETRY_DELAY)
+    yield* removeDirectoryIfPresent(path).pipe(Effect.ignore)
   })
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
@@ -355,12 +369,15 @@ const removeLocalArtifacts = (
         ]).pipe(
           Effect.catchTag("GitCommandError", (error) =>
             Effect.gen(function* () {
-              // Git can remove the worktree before reporting a late cleanup error.
-              const [stillListed, stillPresent] = yield* Effect.all([
-                worktreeListContains(gitRepository, worktreePath),
-                pathExists(worktreePath),
-              ])
-              if (!stillListed && !stillPresent) return
+              // Git can drop registration before the directory is fully gone
+              // (e.g. Nx daemon recreates `.nx` mid-delete). Unregistered residual
+              // files are recoverable via recursive remove below — never retry
+              // `worktree remove` once the path is no longer listed.
+              const stillListed = yield* worktreeListContains(
+                gitRepository,
+                worktreePath,
+              )
+              if (!stillListed) return
               return yield* error
             }),
           ),
@@ -369,8 +386,8 @@ const removeLocalArtifacts = (
         yield* forceRemoveOnce.pipe(
           Effect.catchTag("GitCommandError", (error) =>
             Effect.gen(function* () {
-              // Transient "Directory not empty" often clears after a short wait;
-              // retry the git remove once before failing Local cleanup.
+              // Transient "Directory not empty" while still registered often
+              // clears after a short wait; retry the git remove once only.
               if (!isDirectoryNotEmptyError(error)) {
                 return yield* error
               }
@@ -383,8 +400,23 @@ const removeLocalArtifacts = (
 
       const stillPresent = yield* pathExists(worktreePath)
       if (stillPresent) {
-        yield* removeDirectoryIfPresent(worktreePath)
+        // Unregistered residual (e.g. Nx rewriting `.nx` after Git dropped
+        // registration) is removed via the filesystem, not a second
+        // `worktree remove`. One brief retry covers concurrent writers,
+        // including when the first remove throws ENOTEMPTY/EBUSY.
+        yield* removeResidualDirectoryWithRetry(worktreePath)
         yield* runGit(gitRepository, ["worktree", "prune"])
+        // Concurrent writers must not silently leave the path behind.
+        if (yield* pathExists(worktreePath)) {
+          return yield* new GitCommandError({
+            message: `Residual worktree directory remains after cleanup: ${worktreePath}`,
+            command: "rm",
+            args: ["-rf", worktreePath],
+            cwd: gitRepository.localPath,
+            exitCode: 1,
+            stderr: `path still exists after recursive remove: ${worktreePath}`,
+          })
+        }
       }
     }
 
