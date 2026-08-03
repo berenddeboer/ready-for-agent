@@ -289,16 +289,19 @@ Old-dashboard simplicity: what we merged, front and center. Five quantities
 **The network** (desktop, >1500px): six-column grid; a 4px ink **route
 line** runs column-centre to column-centre behind the roundels (visual motif
 only, `aria-hidden`); each lane carries a **roundel** (2.1rem disc, lane
-fill, 2px ink border, mono lane number) riding the line. Merged's black disc
+fill, 2px ink border, mono work-item count) riding the line. Merged's black disc
 gets a white border + ink outline so it reads on the black line.
 
 ≤1500px the route line is hidden and the roundel shrinks to a 1.4rem badge
 pinned on the nameboard. ≤900px the existing single-lane mobile behavior
 stays (lane switcher below) — this is a re-skin, not a behavior change.
 
-**Lane header = nameboard**: lane-color fill, on-lane ink, 2px ink border,
-display-800 uppercase lane name + tabular count right-aligned. Sticky-on-
-scroll behavior is preserved. Lane numbers ("01"…"06") live in the roundel.
+**Lane header = nameboard**: a brushed lane-color alloy sheet in a dark metal
+frame, fixed by four dome rivets. Specular, grain, bevel, and inset-shadow
+layers give the sheet depth without an image asset. The uppercase lane name
+uses the fixed on-lane ink; a small decorative `RFA / 01`…`06` serial is
+`aria-hidden`. Sticky-on-scroll behavior is preserved. Operational counts stay
+in the route roundels and mobile lane switcher.
 
 **Lane body = platform**: open white — 1.5px ink border, no top border, no
 fill, no grey. Empty lane: centered mono uppercase letterspaced "Lane clear"

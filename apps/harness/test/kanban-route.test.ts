@@ -1,9 +1,15 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { MetalLaneHeader } from "../src/metal-lane-header.js"
 import { describe, expect, test } from "bun:test"
 
 const boardSource = () =>
   readFileSync(join(import.meta.dir, "../src/kanban-board.tsx"), "utf8")
+
+const metalLaneHeaderSource = () =>
+  readFileSync(join(import.meta.dir, "../src/metal-lane-header.tsx"), "utf8")
 
 const homeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
@@ -144,10 +150,11 @@ describe("kanban home board", () => {
       join(import.meta.dir, "../src/pipeline-route.tsx"),
       "utf8",
     )
+    const metalHeader = metalLaneHeaderSource()
     expect(source).toContain('aria-label="Lifecycle pipeline"')
     expect(source).toContain("pipelineLaneFor(workItem)")
     expect(source).toContain("Lane clear")
-    // Mobile switcher + lane header use {lane.label}; route furnaces live in
+    // Mobile switcher + metal header use {lane.label}; route furnaces live in
     // PipelineRoute (also {lane.label} in accessible names).
     expect(source.match(/\{lane\.label\}/g)).toHaveLength(2)
     expect(source).toContain("<PipelineRoute")
@@ -162,8 +169,9 @@ describe("kanban home board", () => {
     expect(route).toContain("ROUTE_SMOKE_MS")
     expect(route).toMatch(/jobs in \$\{lane\.label\}/)
     expect(route).toContain("prefers-reduced-motion")
-    expect(source).toContain("ui.laneHeader")
-    expect(source).toContain("ui.laneTitle")
+    expect(source).toContain("<MetalLaneHeader")
+    expect(metalHeader).toContain("ui.laneHeader")
+    expect(metalHeader).toContain("ui.laneTitle")
     expect(source).not.toContain("lane-number")
     expect(source).not.toContain("lane-count")
     expect(source).toContain("ui.queueHint")
@@ -174,6 +182,31 @@ describe("kanban home board", () => {
     expect(source).toContain("ui.queueHintMenuIllus")
     expect(source).not.toContain("Manage repos →")
     expect(source).not.toContain("work starts at your repos")
+  })
+
+  test("mounts lane names on riveted metal sheets", () => {
+    const source = metalLaneHeaderSource()
+    const ui = uiSource()
+    const html = renderToStaticMarkup(
+      createElement(MetalLaneHeader, {
+        laneId: "attention",
+        label: "Attention",
+        titleId: "lane-attention",
+        ordinal: 5,
+      }),
+    )
+    expect(html).toContain('data-lane="attention"')
+    expect(html).toContain('id="lane-attention"')
+    expect(html).toContain(">Attention</h3>")
+    expect(html).toContain("RFA / 05")
+    expect(html.match(/h-\[9px\]/g)).toHaveLength(4)
+    expect(html.match(/aria-hidden="true"/g)).toHaveLength(6)
+    expect(source).toContain("RIVET_POSITION_CLASSES")
+    expect(source).toContain("ui.laneHeaderSheet")
+    expect(source).toContain("ui.laneHeaderRivet")
+    expect(ui).toContain("laneHeaderSheet:")
+    expect(ui).toContain("laneHeaderGrain:")
+    expect(ui).toContain("laneHeaderRivet:")
   })
 
   test("Jobs strip + repository filters are sticky root chrome", () => {

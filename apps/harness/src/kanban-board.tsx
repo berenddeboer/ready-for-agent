@@ -10,6 +10,7 @@ import {
   totalElapsedMs,
   useNowMs,
 } from "./live-duration.js"
+import { MetalLaneHeader } from "./metal-lane-header.js"
 import {
   PIPELINE_LANES,
   type PipelineLaneId,
@@ -379,7 +380,7 @@ function KanbanJobsBoard() {
         <section className={ui.pipelineBoard} aria-label="Lifecycle pipeline">
           <PipelineRoute laneItems={laneItems} />
           <div className={ui.pipelineLanes}>
-            {PIPELINE_LANES.map((lane) => {
+            {PIPELINE_LANES.map((lane, laneIndex) => {
               const items = laneItems.get(lane.id) ?? []
               return (
                 <section
@@ -396,16 +397,12 @@ function KanbanJobsBoard() {
                     } as CSSProperties
                   }
                 >
-                  <header
-                    className={cx(
-                      ui.laneHeader,
-                      lane.id === "complete" && ui.laneHeaderComplete,
-                    )}
-                  >
-                    <h3 className={ui.laneTitle} id={`lane-${lane.id}`}>
-                      {lane.label}
-                    </h3>
-                  </header>
+                  <MetalLaneHeader
+                    laneId={lane.id}
+                    label={lane.label}
+                    titleId={`lane-${lane.id}`}
+                    ordinal={laneIndex + 1}
+                  />
                   {items.length === 0 ? (
                     <p className={ui.laneEmpty}>Lane clear</p>
                   ) : (

@@ -71,8 +71,9 @@ The visual treatment follows the Interchange design system
 `styles.css`). The board is a dense industrial control surface: a route line
 of lane-colored roundels showing each lane’s work-item count, above flush
 six-column lanes on a grey bed with ink gutters, full-width colored headers
-(title only, same header height as before), and tickets sized to the
-Completed archive type floor.
+rendered as brushed alloy sheets in riveted dark-metal frames (lane title plus
+an `aria-hidden` serial, same header height as before), and tickets sized to
+the Completed archive type floor.
 
 ## Interaction Model
 
