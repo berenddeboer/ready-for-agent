@@ -28,6 +28,7 @@ import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
+import { MastheadScrollwork } from "../masthead-scrollwork.js"
 import { repositoriesQuery } from "../repositories-query.js"
 import appCss from "../styles.css?url"
 import {
@@ -716,7 +717,8 @@ function SettingsChrome() {
     <JobsRepositoryFilterProvider>
       <div className={ui.appChrome}>
         <header className={ui.mast}>
-          <div>
+          <MastheadScrollwork />
+          <div className={ui.mastContent}>
             <p className={ui.brandKicker}>
               Ready for Agent · Operator board ·{" "}
               <b
