@@ -1,4 +1,11 @@
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react"
+import {
+  type CSSProperties,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { PIPELINE_LANES, type PipelineLaneId } from "./pipeline-lanes.js"
 import {
   type FlightPhase,
@@ -139,8 +146,11 @@ export function usePipelineRouteFlights(
   const trueCounts = laneSnapshotRef.current.counts
   const nextOrderedIds = laneSnapshotRef.current.orderedIdsByLane
 
-  // Seed baseline on first paint; subsequent diffs schedule travelers.
-  useEffect(() => {
+  // Layout-synchronous: seed baseline / create route flights before paint so
+  // the first visible frame already shows departing + traveler (no dest flash).
+  // Phase timers stay in passive effects below — only this assignment handoff
+  // must complete before the browser paints the authoritative placement.
+  useLayoutEffect(() => {
     if (assignmentRef.current === null) {
       assignmentRef.current = nextAssignment
       orderedIdsByLaneRef.current = nextOrderedIds

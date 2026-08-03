@@ -481,6 +481,156 @@ describe("nextFlightPhase / phaseDurationMs", () => {
   })
 })
 
+describe("first-frame projection after layout-sync reconciliation", () => {
+  /**
+   * Mirrors the post-layout-effect commit for a Build → Review handoff: pure
+   * composition of reconcile + create + present + counts (issue #760).
+   */
+  test("pre-absorb first frame: departing source, withheld dest, eject traveler, held counts", () => {
+    const job = { id: "job-1" }
+    const resident = { id: "job-2" }
+    const byId = new Map([
+      ["job-1", job],
+      ["job-2", resident],
+    ])
+    const previous = assignment([
+      ["job-1", "build"],
+      ["job-2", "build"],
+    ])
+    const next = assignment([
+      ["job-1", "review"],
+      ["job-2", "build"],
+    ])
+    const priorOrder = new Map<PipelineLaneId, readonly string[]>([
+      ["build", ["job-1", "job-2"]],
+      ["review", []],
+      ["queue", []],
+      ["pr", []],
+      ["attention", []],
+      ["complete", []],
+    ])
+
+    const { flights: kept, newTransitions } = reconcileFlights({
+      previous,
+      next,
+      flights: [],
+    })
+    const flights = [
+      ...kept,
+      ...newTransitions.map((transition) =>
+        createRouteFlight(
+          transition,
+          sourceOrderIndexInLane({
+            workItemId: transition.workItemId,
+            laneId: transition.from,
+            orderedIdsByLane: priorOrder,
+          }),
+        ),
+      ),
+    ]
+
+    expect(flights).toHaveLength(1)
+    expect(flights[0]?.phase).toBe("eject")
+    expect(flights[0]?.from).toBe("build")
+    expect(flights[0]?.to).toBe("review")
+    expect(flights[0]?.sourceOrderIndex).toBe(0)
+
+    // True data after the move.
+    const buildItems = [resident]
+    const reviewItems = [job]
+
+    expect(
+      presentLaneColumnItems({
+        laneId: "build",
+        laneItems: buildItems,
+        flights,
+        workItemById: byId,
+      }),
+    ).toEqual([
+      { workItem: job, departing: true, arriving: false },
+      { workItem: resident, departing: false, arriving: false },
+    ])
+    expect(
+      presentLaneColumnItems({
+        laneId: "review",
+        laneItems: reviewItems,
+        flights,
+        workItemById: byId,
+      }),
+    ).toEqual([])
+
+    const trueCounts = new Map<PipelineLaneId, number>([
+      ["queue", 0],
+      ["build", 1],
+      ["review", 1],
+      ["pr", 0],
+      ["attention", 0],
+      ["complete", 0],
+    ])
+    const display = displayLaneCounts(trueCounts, flights)
+    expect(display.get("build")).toBe(2)
+    expect(display.get("review")).toBe(0)
+  })
+
+  test("absorb (not earlier): destination ticket and true counts appear together", () => {
+    const job = { id: "job-1" }
+    const byId = new Map([["job-1", job]])
+    const trueCounts = new Map<PipelineLaneId, number>([
+      ["queue", 0],
+      ["build", 0],
+      ["review", 1],
+      ["pr", 0],
+      ["attention", 0],
+      ["complete", 0],
+    ])
+
+    for (const phase of ["eject", "travel", "enter"] as const) {
+      const flights = [
+        createRouteFlight({ workItemId: "job-1", from: "build", to: "review" }),
+      ].map((flight) => ({ ...flight, phase }))
+      expect(
+        presentLaneColumnItems({
+          laneId: "review",
+          laneItems: [job],
+          flights,
+          workItemById: byId,
+        }),
+      ).toEqual([])
+      expect(displayLaneCounts(trueCounts, flights).get("review")).toBe(0)
+      expect(displayLaneCounts(trueCounts, flights).get("build")).toBe(1)
+    }
+
+    const absorbing = [
+      {
+        ...createRouteFlight({
+          workItemId: "job-1",
+          from: "build",
+          to: "review",
+        }),
+        phase: "absorb" as const,
+      },
+    ]
+    expect(
+      presentLaneColumnItems({
+        laneId: "build",
+        laneItems: [],
+        flights: absorbing,
+        workItemById: byId,
+      }),
+    ).toEqual([])
+    expect(
+      presentLaneColumnItems({
+        laneId: "review",
+        laneItems: [job],
+        flights: absorbing,
+        workItemById: byId,
+      }),
+    ).toEqual([{ workItem: job, departing: false, arriving: true }])
+    expect(displayLaneCounts(trueCounts, absorbing).get("review")).toBe(1)
+    expect(displayLaneCounts(trueCounts, absorbing).get("build")).toBe(0)
+  })
+})
+
 describe("reconcileFlights", () => {
   test("keeps flights still targeting the work item's current lane", () => {
     const flight = createRouteFlight({
