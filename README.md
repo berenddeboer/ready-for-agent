@@ -1,9 +1,9 @@
 # Ready for Agent: Clanker Harness for 150+ PRs a week
 
 Create issues in GitHub and use this harness to implement them, review
-the code, create a PR, and merge the PR if status checks succeed (if
-auto-merge is enabled). It's a different way of working: you talk to
-your agent to create GitHub issues, and this harness implements them.
+the code, create a PR, and merge the PR. It supports a different way
+of working: you talk to your agent to create GitHub issues, and this
+harness works on them.
 
 It's a loop based around issues labelled with `ready-for-agent`. The
 harness will only show these, you select the ones you want to work on,
