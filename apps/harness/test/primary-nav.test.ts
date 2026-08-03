@@ -132,6 +132,29 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(productLineIdx).toBeLessThan(source.indexOf('aria-label="Primary"'))
   })
 
+  // Issue #753: small kicker no longer duplicates product / board labels.
+  test("brand kicker shows version only; wordmark and Clanker Harness remain", () => {
+    const source = rootSource()
+    const brandBlock = source.slice(
+      source.indexOf("className={ui.mast}"),
+      source.indexOf('aria-label="Primary"'),
+    )
+    const kickerStart = brandBlock.indexOf("ui.brandKicker")
+    const wordmarkStart = brandBlock.indexOf("ui.brandWordmark")
+    expect(kickerStart).toBeGreaterThan(-1)
+    expect(wordmarkStart).toBeGreaterThan(kickerStart)
+    const kicker = brandBlock.slice(kickerStart, wordmarkStart)
+    expect(kicker).toContain("RFA {READY_FOR_AGENT_VERSION_LABEL}")
+    // Visible kicker text only — not the optional title= tooltip string.
+    expect(kicker).not.toMatch(/>\s*Ready for Agent/)
+    expect(kicker).not.toContain("Operator board")
+    expect(source).not.toContain("Ready for Agent · Operator board")
+    // Main wordmark + subtitle stay in the brand block.
+    expect(brandBlock).toContain("Ready for Agent\n")
+    expect(brandBlock).toContain("Clanker Harness")
+    expect(brandBlock).toContain("ui.brandSub")
+  })
+
   test("Jobs switcher and Settings use stroke icons", () => {
     const root = rootSource()
     const switcher = switcherSource()
