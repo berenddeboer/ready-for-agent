@@ -248,7 +248,7 @@ export function reconcileFlights(args: {
 let flightSeq = 0
 
 /** Stable-enough unique id for a route flight (client-only presentation). */
-export function createFlightId(workItemId: string): string {
+function createFlightId(workItemId: string): string {
   flightSeq += 1
   return `route-flight-${flightSeq}-${workItemId}`
 }
