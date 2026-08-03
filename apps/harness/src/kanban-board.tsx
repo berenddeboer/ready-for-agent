@@ -15,6 +15,7 @@ import {
   type PipelineLaneId,
   pipelineLaneFor,
 } from "./pipeline-lanes.js"
+import { PipelineRoute } from "./pipeline-route.js"
 import {
   JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
@@ -376,28 +377,7 @@ function KanbanJobsBoard() {
           ))}
         </fieldset>
         <section className={ui.pipelineBoard} aria-label="Lifecycle pipeline">
-          <div className={ui.pipelineRoute}>
-            {PIPELINE_LANES.map((lane) => {
-              const count = laneItems.get(lane.id)?.length ?? 0
-              return (
-                <span
-                  className={ui.laneRoundel}
-                  data-lane={lane.id}
-                  key={lane.id}
-                  role="img"
-                  aria-label={`${count} jobs in ${lane.label}`}
-                  style={
-                    {
-                      "--lane-color": lane.color,
-                      "--lane-text": lane.text,
-                    } as CSSProperties
-                  }
-                >
-                  {count}
-                </span>
-              )
-            })}
-          </div>
+          <PipelineRoute laneItems={laneItems} />
           <div className={ui.pipelineLanes}>
             {PIPELINE_LANES.map((lane) => {
               const items = laneItems.get(lane.id) ?? []
