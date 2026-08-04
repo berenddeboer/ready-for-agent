@@ -72,7 +72,11 @@ import {
   stubGitHubServiceLayer,
   stubGitLabServiceLayer,
 } from "../src/index.js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, setDefaultTimeout } from "bun:test"
+
+// File-backed bun:sqlite under nx parallel CI load can exceed the 5s default
+// (restart tests open a temp DB twice via makeRestartTestLayer).
+setDefaultTimeout(15_000)
 
 describe("WorkItemLifecycle", () => {
   const settledTiming = {
