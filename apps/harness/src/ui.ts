@@ -1108,9 +1108,8 @@ export const ui = {
   parentIssueChevronOpen: "rotate-180",
 
   parentIssueChildren: cx(
-    "relative m-0 grid list-none gap-0 border-t border-line-ghost",
+    "m-0 grid list-none gap-0 border-t border-line-ghost",
     "px-[0.65rem] pt-[0.15rem] pb-[0.55rem]",
-    "before:absolute before:top-[0.35rem] before:bottom-[0.45rem] before:left-0 before:w-0.5 before:bg-line-soft before:content-['']",
   ),
 
   lifecycleInset:

@@ -172,7 +172,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-ink/)
   })
 
-  test("parent issue groups use details card and 2px line-soft child rule", () => {
+  test("parent issue groups use an aligned details card", () => {
     const parent = sliceBetweenMarkers(
       homeSource(),
       "function ParentIssueGroup(",
@@ -199,10 +199,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/parentIssueChevron:[\s\S]*?group-open:rotate-180/)
     expect(ui).toContain("parentIssueChildren:")
     expect(ui).toMatch(/parentIssueChildren:[\s\S]*?px-\[0\.65rem\]/)
-    // Child rule is a before: pseudo on the children recipe.
-    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:/)
-    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:w-0\.5/)
-    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:bg-line-soft/)
+    expect(ui).not.toContain("before:absolute before:top-[0.35rem]")
     expect(ui).toContain("parentIssueError:")
   })
 
