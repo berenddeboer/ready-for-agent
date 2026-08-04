@@ -567,9 +567,21 @@ export const LIFECYCLE_TRANSITIONS = [
   },
   {
     from: "needs_human",
+    to: "resolve_pr_merge_conflict",
+    guard: "refresh_observed_merge_conflict",
+    reasonCode: "native",
+  },
+  {
+    from: "needs_human",
     to: "review",
     guard: "retry_review_fix_limit",
     reasonCode: "handler_failed",
+  },
+  {
+    from: "needs_human",
+    to: "watch_pr_status_checks",
+    guard: "refresh_observed_merge_conflict_cleared",
+    reasonCode: "native",
   },
   {
     from: "pre_commit",

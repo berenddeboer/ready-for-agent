@@ -14,7 +14,7 @@
     "The Ready for Agent domain vocabulary and Work Item lifecycle model."@en ;
   dcterms:source
     <https://github.com/berenddeboer/ready-for-agent/blob/main/CONTEXT.md> ;
-  owl:versionInfo "0.4.1" .
+  owl:versionInfo "0.4.2" .
 
 rfa:ContextTerm
   a owl:Class ;
@@ -557,6 +557,8 @@ rfa:NeedsHumanAbandonedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman
 rfa:FailedRetryChecksTransition a rfa:Transition ; rfa:fromStep rfa:Failed ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "retry_unresolved_status_checks" ; rfa:reasonCode rfa:PrStatusChecksUnresolvedReason .
 rfa:NeedsHumanRetryInvestigationTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:InvestigatePrStatusChecks ; rfa:guard "retry_status_check_handoff" ; rfa:reasonCode rfa:HandlerFailedReason .
 rfa:NeedsHumanRetryReviewTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:Review ; rfa:guard "retry_review_fix_limit" ; rfa:reasonCode rfa:HandlerFailedReason .
+rfa:NeedsHumanRefreshConflictTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:ResolvePrMergeConflict ; rfa:guard "refresh_observed_merge_conflict" ; rfa:reasonCode rfa:NativeReason .
+rfa:NeedsHumanRefreshConflictClearedTransition a rfa:Transition ; rfa:fromStep rfa:NeedsHuman ; rfa:toStep rfa:WatchPrStatusChecks ; rfa:guard "refresh_observed_merge_conflict_cleared" ; rfa:reasonCode rfa:NativeReason .
 
 # Refresh may observe a merge while any PR-owning unfinished state is current.
 rfa:CreateWorktreeRefreshMergedTransition a rfa:Transition ; rfa:fromStep rfa:CreateWorktree ; rfa:toStep rfa:LocalCleanup ; rfa:guard "refresh_observed_merged_work_item_pr" ; rfa:reasonCode rfa:PrMergedReason .
