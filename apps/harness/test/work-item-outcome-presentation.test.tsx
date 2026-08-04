@@ -74,4 +74,45 @@ describe("WorkItemOutcomePresentation", () => {
     expect(html).not.toContain('aria-label="Completion summary"')
     expect(html).toContain("Running")
   })
+
+  test("omits the PR badge when showPullRequestBadge is false (Kanban promotion)", () => {
+    const html = renderToStaticMarkup(
+      <WorkItemOutcomePresentation
+        state="DECIDE_PR_MERGE"
+        statusLabel="Needs Human"
+        statusBadgeClassName={statusBadgeClassNameForStatus("NEEDS_HUMAN")}
+        pullRequestNumber={2418}
+        pullRequestUrl="https://github.com/acme/widgets/pull/2418"
+        completionSummary={null}
+        issueUrl="https://github.com/acme/widgets/issues/2410"
+        showPullRequestBadge={false}
+      />,
+    )
+
+    // Single Needs Human alarm; status still links to the PR when URL exists.
+    expect(html).toContain("Needs Human")
+    expect(html).not.toContain("PR #2418 ↗")
+    expect(html).not.toContain("PR #")
+    expect(html).toContain('href="https://github.com/acme/widgets/pull/2418"')
+    expect(html).toContain('aria-label="Open pull request #2418: Needs Human"')
+  })
+
+  test("keeps a status-only outcome when Needs Human has no PR", () => {
+    const html = renderToStaticMarkup(
+      <WorkItemOutcomePresentation
+        state="DECIDE_PR_MERGE"
+        statusLabel="Needs Human"
+        statusBadgeClassName={statusBadgeClassNameForStatus("NEEDS_HUMAN")}
+        pullRequestNumber={null}
+        pullRequestUrl={null}
+        completionSummary={null}
+        issueUrl="https://github.com/acme/widgets/issues/2410"
+      />,
+    )
+
+    expect(html).toContain("Needs Human")
+    expect(html).not.toContain("PR #")
+    expect(html).not.toContain("Open pull request")
+    expect(html).not.toContain('href="https://github.com')
+  })
 })

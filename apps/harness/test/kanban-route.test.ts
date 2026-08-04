@@ -325,6 +325,40 @@ describe("kanban home board", () => {
     expect(completeBranch).toContain("<WorkItemLifecycleStatus")
   })
 
+  test("Needs Human + PR promotes PR control to top status row (issue #764)", () => {
+    // Drop duplicate top NEEDS HUMAN stateLabel; one PR control up top, one
+    // Needs Human badge in outcome chrome (showPullRequestBadge false).
+    const source = boardSource()
+    const ticket = source.slice(
+      source.indexOf("function PipelineTicket("),
+      source.indexOf("function KanbanJobsBoard()"),
+    )
+    expect(ticket).toContain("kanbanPullRequestBadgePlacement")
+    expect(ticket).toContain('prBadgePlacement === "header"')
+    expect(ticket).toContain("promotePrToHeader")
+    // Header PR reuses shared badge recipe + accessible open-in-new-tab name.
+    expect(ticket).toContain("prBadgeClassName")
+    // Escaped so the assertion matches source template text without Biome
+    // noTemplateCurlyInString on a plain string literal.
+    expect(ticket).toContain(`Open pull request #\${prNumber}`)
+    expect(ticket).toContain("PR #{prNumber} ↗")
+    expect(ticket).toContain('target="_blank"')
+    // Outcome row omits the second PR badge when the control was promoted.
+    expect(ticket).toContain("showPullRequestBadge={!promotePrToHeader}")
+    // Pause stays in the top status row with the promoted PR (or stateLabel).
+    expect(ticket).toContain("ui.jobTicketStatus")
+    expect(ticket).toContain("<WorkItemPauseButton workItem={workItem} />")
+    // Non-promoted tickets still render stateLabel in that row.
+    expect(ticket).toContain("{workItem.stateLabel}")
+    // Lifecycle still receives pullRequestUrl so Decide PR merge chips link.
+    const lifecycleCall = ticket.slice(
+      ticket.indexOf("<WorkItemLifecycleStatus"),
+      ticket.indexOf("/>", ticket.indexOf("<WorkItemLifecycleStatus")) + 2,
+    )
+    expect(lifecycleCall).toContain("pullRequestUrl={pullRequestUrl}")
+    expect(lifecycleCall).toContain("showPullRequestBadge={!promotePrToHeader}")
+  })
+
   test("Kanban tickets opt into earlier-lane lifecycle chip collapse", () => {
     // Issue #679: collapse earlier lanes on board tickets; repos reuses it.
     const source = boardSource()

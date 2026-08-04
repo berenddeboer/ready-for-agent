@@ -4,6 +4,10 @@ import { prBadgeClassName } from "./work-item-progress-chrome.js"
 /**
  * Presentational outcome chrome for a Work Item: PR links for changed work, or
  * the distinct No-Change Outcome message, Issue link, and completion summary.
+ *
+ * `showPullRequestBadge` defaults true. Kanban tickets that promote the PR
+ * control into the top status row pass false so the outcome row keeps only the
+ * status badge (still linked to the PR when a URL exists).
  */
 export function WorkItemOutcomePresentation({
   state,
@@ -13,6 +17,7 @@ export function WorkItemOutcomePresentation({
   pullRequestUrl,
   completionSummary,
   issueUrl,
+  showPullRequestBadge = true,
 }: {
   state: string
   statusLabel: string
@@ -21,6 +26,7 @@ export function WorkItemOutcomePresentation({
   pullRequestUrl: string | null
   completionSummary: string | null
   issueUrl: string | null
+  showPullRequestBadge?: boolean
 }) {
   const isNoChangeComplete =
     state === "COMPLETE" &&
@@ -35,7 +41,8 @@ export function WorkItemOutcomePresentation({
   return (
     <>
       <span className="flex flex-wrap items-center justify-end gap-1">
-        {!isNoChangeComplete &&
+        {showPullRequestBadge &&
+          !isNoChangeComplete &&
           pullRequestUrl !== null &&
           prNumber !== null && (
             <a

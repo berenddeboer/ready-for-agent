@@ -1,6 +1,7 @@
 import { cx, ui } from "../src/ui.js"
 import {
   isStatusMessageAlarm,
+  kanbanPullRequestBadgePlacement,
   lifecycleStepChipClassName,
   lifecycleStepChipClassNameForStatus,
   prBadgeClassName,
@@ -103,5 +104,45 @@ describe("work-item-progress-chrome", () => {
     expect(isStatusMessageAlarm("NEEDS_HUMAN_REVIEW")).toBe(true)
     expect(isStatusMessageAlarm("QUEUED")).toBe(false)
     expect(isStatusMessageAlarm("RUNNING")).toBe(false)
+  })
+
+  test("promotes PR badge to Kanban header only for Needs Human with a PR", () => {
+    expect(
+      kanbanPullRequestBadgePlacement({
+        status: "NEEDS_HUMAN",
+        pullRequestNumber: 2418,
+        pullRequestUrl: "https://github.com/acme/widgets/pull/2418",
+      }),
+    ).toBe("header")
+    // No PR yet — keep top status badge; do not leave empty PR chrome.
+    expect(
+      kanbanPullRequestBadgePlacement({
+        status: "NEEDS_HUMAN",
+        pullRequestNumber: null,
+        pullRequestUrl: null,
+      }),
+    ).toBe("outcome")
+    // Non–Needs Human tickets keep outcome PR placement.
+    expect(
+      kanbanPullRequestBadgePlacement({
+        status: "RUNNING",
+        pullRequestNumber: 17,
+        pullRequestUrl: "https://github.com/acme/widgets/pull/17",
+      }),
+    ).toBe("outcome")
+    expect(
+      kanbanPullRequestBadgePlacement({
+        status: "NEEDS_HUMAN_REVIEW",
+        pullRequestNumber: 17,
+        pullRequestUrl: "https://github.com/acme/widgets/pull/17",
+      }),
+    ).toBe("outcome")
+    expect(
+      kanbanPullRequestBadgePlacement({
+        status: "COMPLETE",
+        pullRequestNumber: 17,
+        pullRequestUrl: "https://github.com/acme/widgets/pull/17",
+      }),
+    ).toBe("outcome")
   })
 })
