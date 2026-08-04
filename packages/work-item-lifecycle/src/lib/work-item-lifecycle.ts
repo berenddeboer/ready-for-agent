@@ -603,7 +603,11 @@ export type AbandonError =
   | AcknowledgeError
   | JobNotFoundError
 
-export type HumanPrOutcome = "merged" | "closed_unmerged"
+export type HumanPrOutcome =
+  | "merged"
+  | "closed_unmerged"
+  | "merge_conflict"
+  | "merge_conflict_cleared"
 
 export type ContinueAfterHumanPrOutcomeError =
   | WorkItemNotFoundError
@@ -757,8 +761,11 @@ export interface WorkItemLifecycleShape {
    * Items paused for closed Issue + open/indeterminate PR) that owns a Work
    * Item PR: interrupt/cancel active Step Runs, clear pause and operator
    * reason, re-acquire a Worker Slot (or wait if none free), then local
-   * cleanup toward Complete. `closed_unmerged` remains limited to merge-related
-   * Needs Human handoffs.
+   * cleanup toward Complete. `closed_unmerged` Abandons Decide/Merge/Resolve
+   * Needs Human handoffs. `merge_conflict` advances Decide/Merge Needs Human
+   * to Resolve PR Merge Conflict; `merge_conflict_cleared` advances Resolve
+   * Needs Human to Watch PR Status Checks. Both re-acquire a Worker Slot
+   * (or wait if none free) like other Needs Human exits.
    */
   readonly continueAfterHumanPrOutcome: (
     workItemId: string,
@@ -4140,6 +4147,22 @@ export const makeWorkItemLifecycleLive = (
         row.pull_request_number !== null &&
         (latestStep === "decide_pr_merge" || latestStep === "merge_pr")
 
+      const isResolveNeedsHumanHandoff = (
+        row: WorkItemRow,
+        latestStep: OperationalLifecycleStep | null,
+      ): boolean =>
+        row.state === "needs_human" &&
+        row.pull_request_number !== null &&
+        latestStep === "resolve_pr_merge_conflict"
+
+      /** Closed-unmerged Abandon eligibility (ADR 0039 / 0046). */
+      const isClosedUnmergedAbandonHandoff = (
+        row: WorkItemRow,
+        latestStep: OperationalLifecycleStep | null,
+      ): boolean =>
+        isMergeNeedsHumanHandoff(row, latestStep) ||
+        isResolveNeedsHumanHandoff(row, latestStep)
+
       const loadLatestStep = (
         workItemId: string,
       ): Effect.Effect<
@@ -4458,11 +4481,11 @@ export const makeWorkItemLifecycleLive = (
 
         if (outcome === "closed_unmerged") {
           const latestStep = yield* loadLatestStep(workItemId)
-          if (!isMergeNeedsHumanHandoff(workItem, latestStep)) {
+          if (!isClosedUnmergedAbandonHandoff(workItem, latestStep)) {
             return yield* new NeedsHumanHandoffNotEligibleError({
               workItemId,
               reason:
-                "Work Item is not a merge-related Needs Human handoff with a Work Item PR",
+                "Work Item is not a Decide/Merge/Resolve Needs Human handoff with a Work Item PR",
             })
           }
           return yield* abandon(workItemId).pipe(
@@ -4480,6 +4503,116 @@ export const makeWorkItemLifecycleLive = (
               })
             }),
           )
+        }
+
+        if (
+          outcome === "merge_conflict" ||
+          outcome === "merge_conflict_cleared"
+        ) {
+          const latestStep = yield* loadLatestStep(workItemId)
+          const eligible =
+            outcome === "merge_conflict"
+              ? isMergeNeedsHumanHandoff(workItem, latestStep)
+              : isResolveNeedsHumanHandoff(workItem, latestStep)
+          if (!eligible) {
+            return yield* new NeedsHumanHandoffNotEligibleError({
+              workItemId,
+              reason:
+                outcome === "merge_conflict"
+                  ? "Work Item is not a Decide/Merge Needs Human handoff with a Work Item PR"
+                  : "Work Item is not a Resolve PR Merge Conflict Needs Human handoff with a Work Item PR",
+            })
+          }
+
+          const nextState =
+            outcome === "merge_conflict"
+              ? ("resolve_pr_merge_conflict" as const)
+              : ("watch_pr_status_checks" as const)
+
+          const now = yield* Clock.currentTimeMillis
+
+          yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const current = yield* loadWorkItemRow(workItemId)
+                if (!current) {
+                  return yield* new WorkItemNotFoundError({ workItemId })
+                }
+                const currentLatest = yield* loadLatestStep(workItemId)
+                const stillEligible =
+                  outcome === "merge_conflict"
+                    ? isMergeNeedsHumanHandoff(current, currentLatest)
+                    : isResolveNeedsHumanHandoff(current, currentLatest)
+                if (!stillEligible) {
+                  return yield* new NeedsHumanHandoffNotEligibleError({
+                    workItemId,
+                    reason:
+                      "Work Item is no longer eligible for mergeability advance",
+                  })
+                }
+
+                const updated = (yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET state = ?,
+                       state_ready_at = ?,
+                       failure_code = NULL,
+                       failure_message = NULL,
+                       updated_at = ?
+                   WHERE id = ?
+                     AND state = 'needs_human'
+                   RETURNING id`,
+                  [nextState, now, now, workItemId],
+                )) as readonly { readonly id: string }[]
+
+                if (!updated[0]) {
+                  return yield* new NeedsHumanHandoffNotEligibleError({
+                    workItemId,
+                    reason:
+                      "Work Item is no longer eligible for mergeability advance",
+                  })
+                }
+
+                const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+                if (!acquired) {
+                  return true
+                }
+
+                const stillActive = (yield* sql.unsafe(
+                  `SELECT id FROM step_run
+                   WHERE work_item_id = ?
+                     AND status IN ('queued', 'running')
+                   LIMIT 1`,
+                  [workItemId],
+                )) as readonly { readonly id: string }[]
+                if (stillActive[0]) {
+                  return true
+                }
+
+                yield* enqueueStepRunForWorkItem(workItemId, nextState, now)
+                return true
+              }).pipe((mutation) =>
+                applyLifecycleTransition(
+                  workItemId,
+                  nextState,
+                  mutation,
+                  (applied) => applied === true,
+                ),
+              ),
+            )
+            .pipe(Effect.catch(mapContinueAfterHumanPrOutcomeTransactionError))
+
+          const advanced = yield* getWorkItem(workItemId).pipe(
+            Effect.catchTag(
+              "WorkItemNotFoundError",
+              (error) =>
+                new WorkItemLifecycleDatabaseError({
+                  message: `Work Item missing after mergeability advance: ${error.workItemId}`,
+                  cause: error,
+                }),
+            ),
+          )
+          yield* notifyWorkItemsChanged(advanced.repositoryId)
+          return advanced
         }
 
         // Merged: supersede any unfinished Work Item that owns a Work Item PR.

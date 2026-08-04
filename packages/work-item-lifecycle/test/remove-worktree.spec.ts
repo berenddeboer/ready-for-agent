@@ -32,7 +32,11 @@ import {
   workItemBranchName,
   workItemWorktreePath,
 } from "../src/index.js"
-import { describe, expect, it } from "bun:test"
+import { describe, expect, it, setDefaultTimeout } from "bun:test"
+
+// Real git + worktree-remove shims under nx parallel CI load can exceed the
+// default 5s (Directory-not-empty retry cases create a bare repo and worktree).
+setDefaultTimeout(15_000)
 
 const PlatformLayer = BunServices.layer
 
