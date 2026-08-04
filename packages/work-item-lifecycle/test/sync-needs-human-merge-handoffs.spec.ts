@@ -69,7 +69,14 @@ describe("syncNeedsHumanMergeHandoffs", () => {
     removeWorktree: () => Effect.void,
   }
 
-  const githubWith = (getStatus: () => PullRequestLifecycleStatus) =>
+  type Mergeability = "mergeable" | "conflicting" | "unknown"
+  type CheckStatusTag = "succeeded" | "closed"
+
+  const githubWith = (
+    getStatus: () => PullRequestLifecycleStatus,
+    getMergeability: () => Mergeability = () => "mergeable",
+    getCheckStatusTag: () => CheckStatusTag = () => "succeeded",
+  ) =>
     Layer.succeed(GitHubService, {
       getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
       listReadyIssues: () => Effect.succeed([]),
@@ -78,16 +85,28 @@ describe("syncNeedsHumanMergeHandoffs", () => {
       createDraftPullRequest: () => Effect.succeed(1),
       countOpenNonDraftPullRequests: () => Effect.succeed(0),
       getPullRequestCheckStatus: () =>
-        Effect.succeed({
-          _tag: "succeeded",
-          terminalChecks: [],
-          mergeability: "mergeable",
-          baseRefName: "main",
-          headPushedAt: null,
-          headSha: null,
-          createdAt: null,
-          isDraft: null,
-        }),
+        Effect.succeed(
+          getCheckStatusTag() === "closed"
+            ? {
+                _tag: "closed" as const,
+                mergeability: getMergeability(),
+                baseRefName: "main",
+                headPushedAt: null,
+                headSha: null,
+                createdAt: null,
+                isDraft: null,
+              }
+            : {
+                _tag: "succeeded" as const,
+                terminalChecks: [],
+                mergeability: getMergeability(),
+                baseRefName: "main",
+                headPushedAt: null,
+                headSha: null,
+                createdAt: null,
+                isDraft: null,
+              },
+        ),
       getPrStatusCheckDiagnostics: () => Effect.succeed([]),
       observeAutomatedReviewEvidence: () =>
         Effect.succeed({
@@ -104,17 +123,30 @@ describe("syncNeedsHumanMergeHandoffs", () => {
   const makeLayer = (
     status: PullRequestLifecycleStatus,
     steps: LifecycleStepsShape = successfulSteps,
-  ) => makeLayerWithStatus(() => status, steps)
+    mergeability: Mergeability = "mergeable",
+    checkStatusTag: CheckStatusTag = "succeeded",
+  ) =>
+    makeLayerWithStatus(
+      () => status,
+      steps,
+      {},
+      () => mergeability,
+      () => checkStatusTag,
+    )
 
   const makeLayerWithStatus = (
     getStatus: () => PullRequestLifecycleStatus,
     steps: LifecycleStepsShape = successfulSteps,
     gitlab: Parameters<typeof stubGitLabServiceLayer>[0] = {},
+    getMergeability: () => Mergeability = () => "mergeable",
+    getCheckStatusTag: () => CheckStatusTag = () => "succeeded",
   ) =>
     WorkItemLifecycleLive.pipe(
       Layer.provideMerge(stubActiveAgentBackendLayer()),
       // githubWith controls GitHub PR lifecycle for syncNeedsHumanMergeHandoffs.
-      Layer.provideMerge(githubWith(getStatus)),
+      Layer.provideMerge(
+        githubWith(getStatus, getMergeability, getCheckStatusTag),
+      ),
       Layer.provideMerge(stubGitLabServiceLayer(gitlab)),
       Layer.provideMerge(
         Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
@@ -684,6 +716,231 @@ describe("syncNeedsHumanMergeHandoffs", () => {
         expect(completed.holdsWorkerSlot).toBe(false)
         expect(completed.worktreePath).toBeNull()
       }).pipe(Effect.provide(makeLayerWithStatus(() => prStatus, steps))),
+    )
+  })
+
+  const resolveNeedsHumanSteps: LifecycleStepsShape = {
+    ...successfulSteps,
+    watchPrStatusChecks: () =>
+      Effect.succeed({
+        _tag: "conflict" as const,
+        retiredCheckIds: [],
+        createdAt: new Date(0),
+        headSha: "conflict-head",
+        headPushedAt: new Date(0),
+        isDraft: false,
+      }),
+    resolvePrMergeConflict: () =>
+      Effect.succeed({
+        _tag: "needs_human",
+        reason: "Merge conflict requires human resolution",
+      }),
+  }
+
+  const driveToResolveNeedsHuman = Effect.gen(function* () {
+    const db = yield* DbService
+    const lifecycle = yield* WorkItemLifecycle
+    yield* db.updateConfig({
+      selectedAgentBackend: "opencode",
+      defaultModel: "opencode/deepseek-v4-flash-free",
+      defaultThinkingLevel: "low",
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      maxConcurrentAgentTurns: 2,
+      maxConcurrentWorkItems: 5,
+    })
+    const repository = yield* db.addRepository({
+      forge: "github",
+      forgeHost: "github.com",
+      projectPath: "acme/widgets",
+      localPath: "/repos/acme/widgets.git",
+      isBare: true,
+    })
+    yield* db.storeIssue({
+      repositoryId: repository.id,
+      issueNumber: 42,
+      title: "Implement feature",
+      body: "Issue body",
+      url: "https://github.com/acme/widgets/issues/42",
+      state: "OPEN",
+      githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+      issueAuthor: null,
+      parent: null,
+      parentPosition: null,
+      hasChildren: false,
+      blockedBy: [],
+    })
+    const created = yield* lifecycle.implementNow(repository.id, 42)
+    // create…create_pr (8) + watch→resolve + resolve→needs_human
+    for (let index = 0; index < 10; index += 1) {
+      yield* makeQueuedJobsAvailable
+      yield* claimAndRunPending
+    }
+    const needsHuman = yield* lifecycle.getWorkItem(created.id)
+    expect(needsHuman.state).toBe("needs_human")
+    expect(needsHuman.stepRuns.at(-1)?.step).toBe("resolve_pr_merge_conflict")
+    return { repository, created, lifecycle }
+  })
+
+  it("advances Decide Needs Human to Resolve when Refresh sees a conflicting open PR", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } = yield* driveToNeedsHuman()
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("resolve_pr_merge_conflict")
+        expect(advanced.failureCode).toBeNull()
+        expect(advanced.failureMessage).toBeNull()
+        expect(advanced.holdsWorkerSlot).toBe(true)
+        expect(
+          advanced.stepRuns.some(
+            (run) =>
+              run.step === "resolve_pr_merge_conflict" &&
+              run.status === "queued",
+          ),
+        ).toBe(true)
+      }).pipe(
+        Effect.provide(
+          makeLayer({ _tag: "open" }, successfulSteps, "conflicting"),
+        ),
+      ),
+    )
+  })
+
+  it("advances Merge Needs Human to Resolve when Refresh sees a conflicting open PR", async () => {
+    const steps: LifecycleStepsShape = {
+      ...successfulSteps,
+      decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
+      mergePr: () =>
+        Effect.succeed({
+          _tag: "needs_human",
+          reason: "merge_rejected",
+          message: "GitHub rejected the unchanged mergeable pull request",
+        }),
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } = yield* driveToMergeNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("resolve_pr_merge_conflict")
+        expect(advanced.holdsWorkerSlot).toBe(true)
+      }).pipe(
+        Effect.provide(makeLayer({ _tag: "open" }, steps, "conflicting")),
+      ),
+    )
+  })
+
+  it("advances Resolve Needs Human to Watch when Refresh sees mergeability recovered", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToResolveNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("watch_pr_status_checks")
+        expect(advanced.failureCode).toBeNull()
+        expect(advanced.holdsWorkerSlot).toBe(true)
+        expect(
+          advanced.stepRuns.some(
+            (run) =>
+              run.step === "watch_pr_status_checks" && run.status === "queued",
+          ),
+        ).toBe(true)
+      }).pipe(
+        Effect.provide(
+          makeLayer({ _tag: "open" }, resolveNeedsHumanSteps, "mergeable"),
+        ),
+      ),
+    )
+  })
+
+  it("leaves Resolve Needs Human parked when the open PR is still conflicting", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToResolveNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        const still = yield* lifecycle.getWorkItem(created.id)
+        expect(still.state).toBe("needs_human")
+        expect(still.stepRuns.at(-1)?.step).toBe("resolve_pr_merge_conflict")
+      }).pipe(
+        Effect.provide(
+          makeLayer({ _tag: "open" }, resolveNeedsHumanSteps, "conflicting"),
+        ),
+      ),
+    )
+  })
+
+  it("does not transition Needs Human when mergeability is unknown", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } = yield* driveToNeedsHuman()
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        const still = yield* lifecycle.getWorkItem(created.id)
+        expect(still.state).toBe("needs_human")
+        expect(still.stepRuns.at(-1)?.step).toBe("decide_pr_merge")
+      }).pipe(
+        Effect.provide(makeLayer({ _tag: "open" }, successfulSteps, "unknown")),
+      ),
+    )
+  })
+
+  it("does not advance Resolve Needs Human when check-status reports closed after lifecycle open (TOCTOU)", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToResolveNeedsHuman
+        // Lifecycle still open; check-status already closed+mergeable must not
+        // clear to Watch (would leave non-abandonable watch Needs Human).
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(0)
+        const still = yield* lifecycle.getWorkItem(created.id)
+        expect(still.state).toBe("needs_human")
+        expect(still.stepRuns.at(-1)?.step).toBe("resolve_pr_merge_conflict")
+      }).pipe(
+        Effect.provide(
+          makeLayer(
+            { _tag: "open" },
+            resolveNeedsHumanSteps,
+            "mergeable",
+            "closed",
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("abandons Resolve Needs Human when Refresh sees the PR closed unmerged", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToResolveNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const abandoned = yield* lifecycle.getWorkItem(created.id)
+        expect(abandoned.state).toBe("abandoned")
+        expect(abandoned.worktreePath).toBeNull()
+      }).pipe(
+        Effect.provide(
+          makeLayer({ _tag: "closed" }, resolveNeedsHumanSteps, "conflicting"),
+        ),
+      ),
+    )
+  })
+
+  it("merged still supersedes Resolve Needs Human", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { repository, created, lifecycle } =
+          yield* driveToResolveNeedsHuman
+        expect(yield* syncNeedsHumanMergeHandoffs(repository.id)).toBe(1)
+        const advanced = yield* lifecycle.getWorkItem(created.id)
+        expect(advanced.state).toBe("local_cleanup")
+        expect(advanced.failureCode).toBeNull()
+      }).pipe(
+        Effect.provide(
+          makeLayer({ _tag: "merged" }, resolveNeedsHumanSteps, "conflicting"),
+        ),
+      ),
     )
   })
 

@@ -2,6 +2,7 @@ import { Effect } from "effect"
 import { DbService } from "@ready-for-agent/db-service"
 import {
   GitHubService,
+  type PullRequestCheckStatus,
   type PullRequestLifecycleStatus,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
@@ -11,8 +12,11 @@ import { workItemBranchName } from "./worktree-names.js"
 /**
  * After Issue reconciliation, advance Work Items whose Work Item PR was merged
  * (any unfinished operational step or Needs Human with a Work Item PR) to local
- * cleanup, and Abandon merge-related Needs Human when the PR was closed
- * unmerged. Forge lookup failures are skipped so Refresh still succeeds.
+ * cleanup, Abandon merge-related Needs Human when the PR was closed unmerged,
+ * and for open-PR Needs Human handoffs observe mergeability (ADR 0046):
+ * Decide/Merge Needs Human + conflicting → Resolve PR Merge Conflict;
+ * Resolve Needs Human + no longer conflicting → Watch PR Status Checks.
+ * Forge lookup failures are skipped so Refresh still succeeds.
  */
 export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
   Effect.gen(function* () {
@@ -49,6 +53,12 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         latest !== undefined &&
         (latest.step === "decide_pr_merge" || latest.step === "merge_pr") &&
         latest.status === "succeeded"
+      const isResolveNeedsHuman =
+        workItem.state === "needs_human" &&
+        latest !== undefined &&
+        latest.step === "resolve_pr_merge_conflict" &&
+        latest.status === "succeeded"
+      const isClosedUnmergedEligible = isMergeNeedsHuman || isResolveNeedsHuman
 
       const headRefName = workItemBranchName({
         projectPath: repository.projectPath,
@@ -99,8 +109,8 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
         continue
       }
 
-      // Closed-unmerged outside merge-related Needs Human is out of scope.
-      if (status._tag === "closed" && isMergeNeedsHuman) {
+      // Closed-unmerged: Decide/Merge/Resolve Needs Human only (ADR 0039 / 0046).
+      if (status._tag === "closed" && isClosedUnmergedEligible) {
         const didAdvance = yield* lifecycle
           .continueAfterHumanPrOutcome(workItem.id, "closed_unmerged")
           .pipe(
@@ -117,6 +127,94 @@ export const syncNeedsHumanMergeHandoffs = (repositoryId: string) =>
           )
         if (didAdvance) {
           advanced += 1
+        }
+        continue
+      }
+
+      // Open PR: mergeability for Decide/Merge or Resolve Needs Human (ADR 0046).
+      // Reuse Watch's check-status path as the mergeability source of truth.
+      if (
+        status._tag === "open" &&
+        (isMergeNeedsHuman || isResolveNeedsHuman)
+      ) {
+        const checkStatusLookup: Effect.Effect<
+          PullRequestCheckStatus,
+          unknown
+        > =
+          repository.forge === "gitlab"
+            ? gitlab.getPullRequestCheckStatus(repository, headRefName)
+            : github.getPullRequestCheckStatus(repository, headRefName)
+
+        const checkStatus = yield* checkStatusLookup.pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "Skipping Needs Human mergeability: PR check status lookup failed",
+              {
+                workItemId: workItem.id,
+                repositoryId,
+                error: String(error),
+              },
+            ).pipe(Effect.as(null)),
+          ),
+        )
+
+        if (checkStatus === null) {
+          continue
+        }
+
+        // Lifecycle said open, but check-status can still see closed (TOCTOU).
+        // Do not trust mergeability alone: Watch prioritizes closed first, and a
+        // false merge_conflict_cleared advance leaves Resolve NH stuck as
+        // watch_pr_status_checks Needs Human (not closed-unmerged eligible).
+        // Skip so the next Refresh re-reads lifecycle and abandons/merges.
+        if (checkStatus._tag === "closed") {
+          continue
+        }
+
+        // Unknown mergeability is a no-op; still-conflicting Resolve stays parked.
+        if (checkStatus.mergeability === "unknown") {
+          continue
+        }
+
+        if (isMergeNeedsHuman && checkStatus.mergeability === "conflicting") {
+          const didAdvance = yield* lifecycle
+            .continueAfterHumanPrOutcome(workItem.id, "merge_conflict")
+            .pipe(
+              Effect.as(true),
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  "Failed to advance Decide/Merge Needs Human after observed merge conflict",
+                  {
+                    workItemId: workItem.id,
+                    error: String(error),
+                  },
+                ).pipe(Effect.as(false)),
+              ),
+            )
+          if (didAdvance) {
+            advanced += 1
+          }
+          continue
+        }
+
+        if (isResolveNeedsHuman && checkStatus.mergeability === "mergeable") {
+          const didAdvance = yield* lifecycle
+            .continueAfterHumanPrOutcome(workItem.id, "merge_conflict_cleared")
+            .pipe(
+              Effect.as(true),
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  "Failed to advance Resolve Needs Human after merge conflict cleared",
+                  {
+                    workItemId: workItem.id,
+                    error: String(error),
+                  },
+                ).pipe(Effect.as(false)),
+              ),
+            )
+          if (didAdvance) {
+            advanced += 1
+          }
         }
       }
     }
