@@ -1087,7 +1087,8 @@ export const ui = {
 
   parentIssueError: "mx-[0.65rem] mt-[0.45rem] mb-[0.55rem]",
 
-  parentIssue: "my-[0.35rem] min-w-0 border-[1.5px] border-ink bg-panel",
+  parentIssue:
+    "group mx-[calc(-0.65rem-1.5px)] my-[0.35rem] min-w-0 border-[1.5px] border-ink bg-panel",
 
   parentIssueSummary:
     "grid cursor-pointer list-none grid-cols-[2.4rem_minmax(0,1fr)_auto] items-start gap-x-[0.55rem] gap-y-[0.45rem] px-[0.65rem] py-[0.55rem] [&::-webkit-details-marker]:hidden",
@@ -1098,7 +1099,7 @@ export const ui = {
   parentIssueSummaryActions: "flex shrink-0 items-center gap-[0.4rem]",
 
   parentIssueChevron:
-    "h-[0.85rem] w-[0.85rem] text-ink transition-transform duration-100 ease-in-out",
+    "h-[0.85rem] w-[0.85rem] text-ink transition-transform duration-100 ease-in-out group-open:rotate-180",
 
   /**
    * Rotate chevron when details is open.
@@ -1108,7 +1109,7 @@ export const ui = {
 
   parentIssueChildren: cx(
     "relative m-0 grid list-none gap-0 border-t border-line-ghost",
-    "px-[0.65rem] pt-[0.15rem] pr-[0.65rem] pb-[0.55rem] pl-[0.85rem]",
+    "px-[0.65rem] pt-[0.15rem] pb-[0.55rem]",
     "before:absolute before:top-[0.35rem] before:bottom-[0.45rem] before:left-0 before:w-0.5 before:bg-line-soft before:content-['']",
   ),
 

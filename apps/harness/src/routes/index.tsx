@@ -2762,7 +2762,7 @@ function ParentIssueGroup({
   return (
     <li className="min-w-0">
       <details className={ui.parentIssue} open>
-        <summary>
+        <summary className={ui.parentIssueSummary}>
           <span className={ui.repoIssueNum}>#{parent.issueNumber}</span>
           <span className="min-w-0">
             <a

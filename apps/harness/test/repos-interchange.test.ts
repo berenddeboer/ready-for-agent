@@ -179,6 +179,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssueRow(",
     )
     expect(parent).toContain("ui.parentIssue")
+    expect(parent).toContain("ui.parentIssueSummary")
     expect(parent).toContain("ui.parentIssueChildren")
     expect(parent).toContain("ui.parentIssueClosedCount")
     expect(parent).toContain("ui.repoIssueTitle")
@@ -192,7 +193,12 @@ describe("Interchange phase 4: repos page + blank slate", () => {
 
     const ui = uiSource()
     expect(ui).toContain("parentIssue:")
+    expect(ui).toMatch(/parentIssue:[\s\S]*?"group /)
+    expect(ui).toContain("mx-[calc(-0.65rem-1.5px)]")
+    expect(ui).toMatch(/parentIssueSummary:[\s\S]*?px-\[0\.65rem\]/)
+    expect(ui).toMatch(/parentIssueChevron:[\s\S]*?group-open:rotate-180/)
     expect(ui).toContain("parentIssueChildren:")
+    expect(ui).toMatch(/parentIssueChildren:[\s\S]*?px-\[0\.65rem\]/)
     // Child rule is a before: pseudo on the children recipe.
     expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:/)
     expect(ui).toMatch(/parentIssueChildren:[\s\S]*?before:w-0\.5/)
