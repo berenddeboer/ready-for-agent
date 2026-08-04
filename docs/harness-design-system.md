@@ -337,6 +337,14 @@ Anatomy (top to bottom):
 3. **Title link**: display 0.9rem/500 ink; `#nn` prefix in mono dim. Hover:
    2px underline, offset 3px, `--signal` underline color.
 4. **Status row**: status tag (§5.1) + pause/start icon button (§5.4).
+   **Needs Human exception (Kanban only, #764):** when the Work Item is
+   terminal Needs Human **and** a PR number/URL exists, the top status tag is
+   **omitted** and the PR badge (§5.5) moves into this row instead (primary
+   open-PR action). The outcome chrome below keeps a single Needs Human
+   status badge and does **not** also render a PR badge. Needs Human without
+   a PR keeps the top status tag (no empty PR slot). Non–Needs Human tickets
+   and repository issue rows keep the normal top status tag + outcome PR
+   layout. Pause stays in the status row in all cases.
 5. **Runtime lines**: mono 0.8rem `--ink-faint` — each on its own line:
    backend label; session id (underlined button + copy); worktree when set.
    (Title stays at relaxed card size; only meta under the title is larger.)
@@ -572,7 +580,9 @@ Mono 0.62–0.68rem/700 (archive uses `archiveLeg` size), **outline**: 1.5px
 ink border, transparent fill, ink text — quieter than a solid black stamp.
 0.2–0.24rem/0.5–0.55rem padding, "PR #n ↗". Hover: `--lane-pr` fill + white
 text. When the PR URL exists, the status tag links to the PR (existing
-behavior).
+behavior). On Kanban tickets in terminal Needs Human with a PR, the badge
+sits in the top status row instead of the outcome row so the card never
+shows two PR controls or two title-adjacent Needs Human tags (§4.4).
 
 ### 5.6 Stamps
 

@@ -11,6 +11,30 @@ export const statusBadgeBaseClassName = ui.statusTag
 
 export const prBadgeClassName = ui.prBadge
 
+/**
+ * Where the Kanban ticket PR control lives.
+ *
+ * Terminal Needs Human with a PR promotes the PR badge into the top status
+ * row (replacing the duplicate stateLabel) so the outcome row keeps a single
+ * Needs Human alarm badge. All other tickets keep the PR in outcome chrome.
+ */
+export type KanbanPullRequestBadgePlacement = "header" | "outcome"
+
+export function kanbanPullRequestBadgePlacement(input: {
+  readonly status: string
+  readonly pullRequestNumber: number | null
+  readonly pullRequestUrl: string | null
+}): KanbanPullRequestBadgePlacement {
+  if (
+    input.status === "NEEDS_HUMAN" &&
+    input.pullRequestNumber !== null &&
+    input.pullRequestUrl !== null
+  ) {
+    return "header"
+  }
+  return "outcome"
+}
+
 const LANE_STYLE: Record<
   LifecyclePipelineLaneId,
   { readonly lane: string; readonly on: string }

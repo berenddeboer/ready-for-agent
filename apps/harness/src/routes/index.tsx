@@ -3391,6 +3391,12 @@ export function WorkItemLifecycleStatus({
   collapseEarlierLanes = false,
   pullRequestUrl = null,
   issueUrl = null,
+  /**
+   * When false, outcome chrome omits the PR badge (Kanban promotes it into
+   * the top status row for Needs Human + PR). Default true keeps repository
+   * rows and non-promoted tickets unchanged.
+   */
+  showPullRequestBadge = true,
   onOpenSession,
 }: {
   workItem: WorkItem
@@ -3398,6 +3404,7 @@ export function WorkItemLifecycleStatus({
   collapseEarlierLanes?: boolean
   pullRequestUrl?: string | null
   issueUrl?: string | null
+  showPullRequestBadge?: boolean
   /** Opens Session usage for a session id (repos / non-compact chrome). */
   onOpenSession?: (workItemId: string, sessionId: string) => void
 }) {
@@ -3646,6 +3653,7 @@ export function WorkItemLifecycleStatus({
           pullRequestUrl={pullRequestUrl}
           completionSummary={workItem.completionSummary}
           issueUrl={issueUrl}
+          showPullRequestBadge={showPullRequestBadge}
         />
       </div>
       {workItem.lifecycleLabels.length > 0 &&

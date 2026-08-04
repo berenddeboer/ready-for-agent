@@ -40,6 +40,7 @@ import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
 import {
+  kanbanPullRequestBadgePlacement,
   prBadgeClassName,
   statusBadgeClassNameForStatus,
 } from "./work-item-progress-chrome.js"
@@ -173,6 +174,16 @@ function PipelineTicket({
           repository.projectPath,
           workItem.pullRequestNumber,
         )
+  const prNumber = workItem.pullRequestNumber
+  const openPullRequestLabel =
+    prNumber === null ? null : `Open pull request #${prNumber}`
+  // Needs Human + PR: PR control in top status row; outcome keeps one alarm badge.
+  const prBadgePlacement = kanbanPullRequestBadgePlacement({
+    status: workItem.status,
+    pullRequestNumber: prNumber,
+    pullRequestUrl,
+  })
+  const promotePrToHeader = prBadgePlacement === "header"
   const { sessionId, worktreePath } = sessionWorktreeParts(
     workItem.sessionId,
     workItem.worktreePath,
@@ -225,15 +236,30 @@ function PipelineTicket({
       {/* Merged-lane: status is the lane itself — no COMPLETE tag or pause. */}
       {isCompleteLane ? null : (
         <div className={ui.jobTicketStatus}>
-          <span
-            className={cx(
-              ui.jobTicketState,
-              statusBadgeClassNameForStatus(workItem.status),
-            )}
-            title={workItem.stateLabel}
-          >
-            {workItem.stateLabel}
-          </span>
+          {promotePrToHeader &&
+          pullRequestUrl !== null &&
+          prNumber !== null &&
+          openPullRequestLabel !== null ? (
+            <a
+              className={prBadgeClassName}
+              href={pullRequestUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={openPullRequestLabel}
+            >
+              PR #{prNumber} ↗
+            </a>
+          ) : (
+            <span
+              className={cx(
+                ui.jobTicketState,
+                statusBadgeClassNameForStatus(workItem.status),
+              )}
+              title={workItem.stateLabel}
+            >
+              {workItem.stateLabel}
+            </span>
+          )}
           <WorkItemPauseButton workItem={workItem} />
         </div>
       )}
@@ -277,6 +303,7 @@ function PipelineTicket({
           collapseEarlierLanes
           issueUrl={issueUrl}
           pullRequestUrl={pullRequestUrl}
+          showPullRequestBadge={!promotePrToHeader}
         />
       )}
     </li>
