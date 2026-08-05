@@ -5,6 +5,8 @@ export const AGENT_BACKEND_IDS = {
   opencode: "opencode",
   grok: "grok",
   codex: "codex",
+  /** Claude Code adapter package (ADR 0047). Selectable once registered in #779. */
+  claude: "claude",
 } as const
 
 export type AgentBackendId =
