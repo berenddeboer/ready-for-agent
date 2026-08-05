@@ -72,6 +72,20 @@ describe("parseClaudeAuthStatus", () => {
     ).toEqual({ kind: "malformed" })
   })
 
+  it("classifies Bedrock loggedIn false as unauthenticated with bedrock provider", () => {
+    // Issue #802 inspect maps this shape to Bedrock/AWS Unavailable copy.
+    expect(
+      parseClaudeAuthStatus(
+        JSON.stringify({
+          loggedIn: false,
+          authMethod: "third_party",
+          apiProvider: "bedrock",
+        }),
+        1,
+      ),
+    ).toEqual({ kind: "unauthenticated", provider: "bedrock" })
+  })
+
   it("recognizes loggedIn false JSON as unauthenticated", () => {
     expect(
       parseClaudeAuthStatus(JSON.stringify({ loggedIn: false }), 1),

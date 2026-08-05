@@ -24,6 +24,7 @@ import {
   isSuccessfulClaudeTurn,
 } from "./parse-stream.js"
 import {
+  CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE,
   CLAUDE_STATIC_CATALOG,
   CLAUDE_UNAUTHENTICATED_MESSAGE,
   type ClaudeLayerOptions,
@@ -94,8 +95,13 @@ export class Claude {
             .join("\n")
           const status = parseClaudeAuthStatus(statusOutput, result.exitCode)
           if (status.kind === "unauthenticated") {
+            // Bedrock third-party unusable readiness must not point at
+            // `claude auth login` / first-party API key alone (#802).
             return yield* new AgentBackendConfigError({
-              message: CLAUDE_UNAUTHENTICATED_MESSAGE,
+              message:
+                status.provider === "bedrock"
+                  ? CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE
+                  : CLAUDE_UNAUTHENTICATED_MESSAGE,
             })
           }
           if (status.kind === "failed") {
