@@ -984,7 +984,7 @@ function AddRepositoryGuidance({
           <fieldset className={ui.blankSlateFieldset}>
             <legend>Confirm forge identity</legend>
             <label className={ui.blankSlateField}>
-              Forge
+              Forge:
               <select
                 value={inspection.forge}
                 onChange={(event) =>
@@ -999,7 +999,7 @@ function AddRepositoryGuidance({
               </select>
             </label>
             <label className={ui.blankSlateField}>
-              Forge host
+              Forge host:
               <input
                 required
                 value={inspection.forgeHost}
@@ -1012,7 +1012,7 @@ function AddRepositoryGuidance({
               />
             </label>
             <label className={ui.blankSlateField}>
-              Project path
+              Project path:
               <input
                 required
                 value={inspection.projectPath}
@@ -1891,7 +1891,7 @@ function RepositoryCard({
             <fieldset className={ui.dialogFieldset}>
               <legend>Forge identity</legend>
               <label className={ui.dialogField}>
-                Forge
+                Forge:
                 <select
                   className={ui.dialogInput}
                   value={forge}
@@ -1904,7 +1904,7 @@ function RepositoryCard({
                 </select>
               </label>
               <label className={ui.dialogField}>
-                Forge host
+                Forge host:
                 <input
                   className={cx(ui.dialogInput, ui.dialogInputMono)}
                   required
@@ -1913,7 +1913,7 @@ function RepositoryCard({
                 />
               </label>
               <label className={ui.dialogField}>
-                Project path
+                Project path:
                 <input
                   className={cx(ui.dialogInput, ui.dialogInputMono)}
                   required
