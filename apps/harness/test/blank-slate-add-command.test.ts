@@ -82,6 +82,10 @@ describe("blank-slate add repository command", () => {
     expect(guidance).toContain("ui.platePrimary")
     expect(guidance).toContain("ui.blankSlateFieldset")
     expect(guidance).toContain("Confirm forge identity")
+    // Issue #771: label-then-colon so field name vs value is obvious.
+    expect(guidance).toContain("Forge:")
+    expect(guidance).toContain("Forge host:")
+    expect(guidance).toContain("Project path:")
     expect(guidance).toContain("ui.guidanceCode")
     expect(guidance).toContain('tone="alarm"')
     expect(guidance).toContain('role="alert"')

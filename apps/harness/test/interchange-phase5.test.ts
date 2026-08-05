@@ -75,6 +75,11 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(dialog).toContain("ui.dialogInput")
     expect(dialog).toContain("ui.platePrimary")
     expect(dialog).toContain("ui.plateMini")
+    // Issue #771: Forge identity fields use label-then-colon presentation.
+    expect(dialog).toContain("Forge identity")
+    expect(dialog).toContain("Forge:")
+    expect(dialog).toContain("Forge host:")
+    expect(dialog).toContain("Project path:")
     expect(dialog).not.toContain("font-serif")
     expect(dialog).not.toContain("oxblood")
     expect(dialog).not.toContain("shadow-[")
