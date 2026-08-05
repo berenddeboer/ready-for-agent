@@ -166,12 +166,12 @@ Claude Code with `claude auth login` or `ANTHROPIC_API_KEY` before Recheck /
 Agent Turns. For **Amazon Bedrock**, set `CLAUDE_CODE_USE_BEDROCK=1` plus AWS
 credentials/region on the harness process instead of first-party login; see
 [Claude Code on Amazon Bedrock](docs/claude-code-amazon-bedrock.md) (Ready vs
-Unavailable, optional model pins, and MVP Settings limits). Harness-launched
-Claude processes disable auto-update for that session (`DISABLE_AUTOUPDATER`).
-Claude Code Agent Turns do not integrate Keymaxxer; Session Telemetry is
-unsupported in v1. Opt-in live adapter tests use `GROK_INTEGRATION=1` /
-`OPENCODE_INTEGRATION=1` / `CODEX_INTEGRATION=1` / `CLAUDE_INTEGRATION=1`;
-normal CI does not need paid model credentials.
+Unavailable, hybrid model selection: catalog aliases, Settings free-text, and
+optional env pins). Harness-launched Claude processes disable auto-update for
+that session (`DISABLE_AUTOUPDATER`). Claude Code Agent Turns do not integrate
+Keymaxxer; Session Telemetry is unsupported in v1. Opt-in live adapter tests
+use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` / `CODEX_INTEGRATION=1` /
+`CLAUDE_INTEGRATION=1`; normal CI does not need paid model credentials.
 
 # KeyMaxxer
 
@@ -201,10 +201,11 @@ backend.
 2. Can I run Claude Code through Amazon Bedrock?
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
-harness process, select Claude Code, then Recheck. Settings still lists
-floating aliases only; pin Bedrock inference profiles via Claude env vars.
-First-party login failures and Bedrock/AWS failures show different Unavailable
-messages. Details:
+harness process, select Claude Code, then Recheck. For models, pick a catalog
+alias (`haiku` / `sonnet` / `opus` / `fable`), enter a free-text Bedrock
+inference profile ID or ARN as build/review Agent Model, and/or optionally pin
+aliases with `ANTHROPIC_DEFAULT_*_MODEL`. First-party login failures and
+Bedrock/AWS failures show different Unavailable messages. Details:
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
 3. Does the harness support a Forge other than GitHub?

@@ -489,6 +489,36 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
     )
   })
 
+  it("passes free-text / Bedrock model ids through as --model on turns (issue #806)", async () => {
+    const freeText =
+      "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-profile"
+    await withExecutable(
+      [
+        'case " $* " in *" --model "*) ;; *) exit 50 ;; esac',
+        // Exact free-text id must reach argv without alias rewrite.
+        `case " $* " in *" --model ${freeText} "*) ;; *) exit 51 ;; esac`,
+        'case " $* " in *" --effort max "*) ;; *) exit 52 ;; esac',
+        captureSessionScript,
+        successfulTurnStream(),
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.startTurn({
+              cwd: process.cwd(),
+              prompt: "bedrock free-text model",
+              model: freeText,
+              thinkingLevel: "max",
+              timeout: "2 seconds",
+            })
+          }).pipe(Effect.provide(provide(binary))),
+        )
+        expect(result.assistantText).toBe("ok")
+      },
+    )
+  })
+
   it("prefixes /review into the prompt on continueTurn", async () => {
     await withExecutable(
       [
