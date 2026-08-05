@@ -254,9 +254,19 @@ export type LifecycleChipPresentationBlock =
     }
 
 /**
- * Plan Kanban (or full) chip presentation. When collapse is off or focus is
- * unknown, returns a single full-list block. Expanded earlier lanes are those
- * present in `expandedEarlierLanes` (ephemeral UI set).
+ * Plan Kanban / repos chip presentation. When collapse is off or focus is
+ * unknown (and not collapse-all), returns a single full-list block.
+ *
+ * Modes when `collapseEarlierLanes` is on:
+ * - **Focus lane** (default): earlier Build/Review/PR lanes collapse into
+ *   expandable summaries; the focus lane stays a full chip list.
+ * - **All reached** (`collapseAllReachedLanes`): every reached lifecycle lane
+ *   collapses — used for terminal COMPLETE repos chrome so PR is not left as
+ *   a permanent expanded strip (`docs/harness-design-system.md` §4.6).
+ *
+ * Expanded collapsed lanes are those present in `expandedEarlierLanes`
+ * (ephemeral UI set). Optional `prLaneLabel` overrides the PR-lane summary
+ * text (e.g. "MR" on GitLab).
  */
 export function planLifecycleChipPresentation(
   labels: readonly LifecycleLabelChip[],
@@ -264,12 +274,21 @@ export function planLifecycleChipPresentation(
     readonly collapseEarlierLanes: boolean
     readonly focusLane: LifecyclePipelineLaneId | null
     readonly expandedEarlierLanes: ReadonlySet<LifecyclePipelineLaneId>
+    /**
+     * Collapse every reached lifecycle lane (BUILD / REVIEW / PR|MR) as
+     * expandable journey-style summaries. Used for terminal COMPLETE work
+     * items under repos chrome. When true, `focusLane` is ignored.
+     */
+    readonly collapseAllReachedLanes?: boolean
+    /** Label for the PR lifecycle lane summary (default "PR"; use "MR" on GitLab). */
+    readonly prLaneLabel?: string
   },
 ): readonly LifecycleChipPresentationBlock[] {
+  const collapseAll = options.collapseAllReachedLanes === true
   if (
     !options.collapseEarlierLanes ||
-    options.focusLane === null ||
-    labels.length === 0
+    labels.length === 0 ||
+    (!collapseAll && options.focusLane === null)
   ) {
     return [{ kind: "full-list", chips: labels }]
   }
@@ -290,23 +309,57 @@ export function planLifecycleChipPresentation(
     }
   }
 
+  const laneSummaryLabel = (lane: LifecyclePipelineLaneId): string => {
+    if (lane === "pr" && options.prLaneLabel !== undefined) {
+      return options.prLaneLabel
+    }
+    return lifecycleLaneLabel(lane)
+  }
+
+  const collapsedLaneBlock = (
+    lane: LifecyclePipelineLaneId,
+    chips: readonly LifecycleLabelChip[],
+  ): LifecycleChipPresentationBlock => ({
+    kind: "earlier-lane",
+    lane,
+    laneLabel: laneSummaryLabel(lane),
+    durationMs: sumLaneDurationMs(chips),
+    expanded: options.expandedEarlierLanes.has(lane),
+    chips,
+  })
+
+  // COMPLETE journey: every reached lane is a condensed expandable leg.
+  if (collapseAll) {
+    const blocks: LifecycleChipPresentationBlock[] = []
+    for (const lane of LIFECYCLE_PIPELINE_LANE_ORDER) {
+      const chips = byLane.get(lane)
+      if (chips === undefined || chips.length === 0) continue
+      blocks.push(collapsedLaneBlock(lane, chips))
+    }
+    if (ungrouped.length > 0) {
+      blocks.push({ kind: "focus-lane", lane: null, chips: ungrouped })
+    }
+    if (blocks.length === 0) {
+      return [{ kind: "full-list", chips: labels }]
+    }
+    return blocks
+  }
+
+  const focusLane = options.focusLane
+  if (focusLane === null) {
+    return [{ kind: "full-list", chips: labels }]
+  }
+
   const blocks: LifecycleChipPresentationBlock[] = []
-  for (const earlier of earlierLifecycleLanes(options.focusLane)) {
+  for (const earlier of earlierLifecycleLanes(focusLane)) {
     const chips = byLane.get(earlier)
     if (chips === undefined || chips.length === 0) continue
-    blocks.push({
-      kind: "earlier-lane",
-      lane: earlier,
-      laneLabel: lifecycleLaneLabel(earlier),
-      durationMs: sumLaneDurationMs(chips),
-      expanded: options.expandedEarlierLanes.has(earlier),
-      chips,
-    })
+    blocks.push(collapsedLaneBlock(earlier, chips))
   }
 
   // Focus-lane chips always expanded. Also surface any later-lane chips (and
   // ungrouped phases) so a focus that lags retained history never drops steps.
-  const focusIndex = LIFECYCLE_PIPELINE_LANE_ORDER.indexOf(options.focusLane)
+  const focusIndex = LIFECYCLE_PIPELINE_LANE_ORDER.indexOf(focusLane)
   const laterChips: LifecycleLabelChip[] = []
   for (const lane of LIFECYCLE_PIPELINE_LANE_ORDER.slice(focusIndex + 1)) {
     const chips = byLane.get(lane)
@@ -315,14 +368,14 @@ export function planLifecycleChipPresentation(
     }
   }
   const focusChips = [
-    ...(byLane.get(options.focusLane) ?? []),
+    ...(byLane.get(focusLane) ?? []),
     ...laterChips,
     ...ungrouped,
   ]
   if (focusChips.length > 0 || blocks.length === 0) {
     blocks.push({
       kind: "focus-lane",
-      lane: options.focusLane,
+      lane: focusLane,
       chips: focusChips,
     })
   }

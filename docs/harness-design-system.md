@@ -437,7 +437,13 @@ prototype, so this spec governs:
 - **Latest work item** renders the standard lifecycle chrome (§4.4) inside a
   bordered inset panel (`--panel`, 1.5px): runtime lines (agent backend,
   session + copy, worktree + copy), STARTED / status, and earlier-lane
-  collapse for step chips (same as Kanban).
+  collapse for step chips (same as Kanban). For **terminal COMPLETE**, every
+  reached lifecycle lane (BUILD, REVIEW, and **PR** on GitHub / **MR** on
+  GitLab) collapses by default into expandable journey-style legs — PR is not
+  left as a permanent full chip strip just because focus falls back to the
+  last phase. Duration on each leg is the sum of that lane’s chip
+  `durationMs` (same rules as earlier-lane summaries / archive legs §4.5).
+  Non-complete work still expands only the current focus lane.
 - **Parent issue groups**: `<details>` card, 1.5px border — summary with
   parent link, "n/m closed" mono, chevron, parent actions menu; children
   with a 2px `--line-soft` left rule.

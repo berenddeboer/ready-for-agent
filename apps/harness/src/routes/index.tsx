@@ -23,6 +23,7 @@ import { Banner, BannerActionButton } from "../banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "../card-collapse.js"
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
 import { Copy } from "../copy.js"
+import { forgeChangeRequestShort } from "../forge-change-request.js"
 import {
   type GraphqlWorkItemState,
   issueActionEligibility,
@@ -3029,6 +3030,7 @@ function RepositoryIssueRow({
         <WorkItemLifecycleStatus
           workItem={latestWorkItem}
           collapseEarlierLanes
+          forge={repository.forge}
           issueUrl={
             issue.url !== ""
               ? issue.url
@@ -3386,9 +3388,15 @@ export function WorkItemLifecycleStatus({
   /**
    * Collapse earlier Build/Review/PR lane chips into summary rows (▸ BUILD ·
    * 5m). Used on Kanban tickets and repos issue chrome; leave off for full
-   * lists.
+   * lists. Terminal COMPLETE also collapses the PR|MR lane (all reached
+   * journey legs) so finished runs match archive-style condensed chrome.
    */
   collapseEarlierLanes = false,
+  /**
+   * Repository forge for PR vs MR lane summary labels on collapsed COMPLETE
+   * chrome. Optional; defaults to GitHub wording.
+   */
+  forge = null,
   pullRequestUrl = null,
   issueUrl = null,
   /**
@@ -3402,6 +3410,7 @@ export function WorkItemLifecycleStatus({
   workItem: WorkItem
   compact?: boolean
   collapseEarlierLanes?: boolean
+  forge?: string | null
   pullRequestUrl?: string | null
   issueUrl?: string | null
   showPullRequestBadge?: boolean
@@ -3490,13 +3499,24 @@ export function WorkItemLifecycleStatus({
     prNumber === null &&
     workItem.completionSummary !== null &&
     workItem.completionSummary.trim() !== ""
-  const focusLane = collapseEarlierLanes
-    ? lifecycleFocusLaneFor(workItem)
-    : null
+  // Terminal COMPLETE only: collapse every reached lane (including PR|MR), not
+  // only earlier-than-focus. Do not use status === "SUCCEEDED" — that is the
+  // latest step-run outcome and can appear mid-lifecycle while state is still
+  // operational (repos would then hide the focus strip). Non-complete work
+  // keeps focus-lane chips expanded.
+  const collapseAllReachedLanes =
+    collapseEarlierLanes &&
+    (status === "COMPLETE" || workItem.state === "COMPLETE")
+  const focusLane =
+    collapseEarlierLanes && !collapseAllReachedLanes
+      ? lifecycleFocusLaneFor(workItem)
+      : null
   const chipBlocks = planLifecycleChipPresentation(workItem.lifecycleLabels, {
     collapseEarlierLanes,
     focusLane,
     expandedEarlierLanes,
+    collapseAllReachedLanes,
+    prLaneLabel: forgeChangeRequestShort(forge),
   })
   const toggleEarlierLane = (lane: LifecyclePipelineLaneId) => {
     setExpandedEarlierLanes((current) => {
