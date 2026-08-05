@@ -12,6 +12,7 @@ import {
   type OnSessionId,
 } from "@ready-for-agent/agent-backend"
 import {
+  CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE,
   CLAUDE_STATIC_CATALOG,
   CLAUDE_UNAUTHENTICATED_MESSAGE,
   Claude,
@@ -249,6 +250,29 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           expect(error.message).toContain("claude auth login")
           expect(error.message).toContain("ANTHROPIC_API_KEY")
           expect(error.message.toLowerCase()).not.toContain("bedrock")
+        }
+      },
+    )
+  })
+
+  it("fails Bedrock readiness with AWS/Bedrock ConfigError (not claude auth login)", async () => {
+    // Issue #802: Bedrock provider path must not steer operators to first-party
+    // `claude auth login` when the readiness probe reports Bedrock unusable.
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":false,"authMethod":"third_party","apiProvider":"bedrock"}\'',
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toBe(CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE)
+          expect(error.message.toLowerCase()).toContain("bedrock")
+          expect(error.message).toMatch(/AWS|aws/)
+          expect(error.message).not.toContain("claude auth login")
+          expect(error.message).not.toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
         }
       },
     )

@@ -18,6 +18,15 @@ export interface ClaudeLayerOptions {
 export const CLAUDE_UNAUTHENTICATED_MESSAGE =
   "Claude Code is not authenticated. Run `claude auth login` (or set `ANTHROPIC_API_KEY`), then Recheck Agent Backend."
 
+/**
+ * Actionable readiness-failure copy when Claude reports Amazon Bedrock as the
+ * provider but readiness is unusable (credentials, region, or probe failure).
+ * Primary action is AWS credentials/region — this path already implies Bedrock
+ * mode — not first-party login (issue #802 / epic #799).
+ */
+export const CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE =
+  "Claude Code Amazon Bedrock is not ready. Ensure valid AWS credentials and region are available to the harness process (with CLAUDE_CODE_USE_BEDROCK=1), then Recheck Agent Backend."
+
 /** Official Thinking Levels for Claude Code v1 (ADR 0047). No `ultracode`. */
 export const CLAUDE_THINKING_LEVELS = [
   "low",
