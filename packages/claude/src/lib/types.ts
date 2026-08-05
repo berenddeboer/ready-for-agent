@@ -4,6 +4,11 @@ import type { AgentModel } from "@ready-for-agent/agent-backend"
 export interface ClaudeLayerOptions {
   readonly binary?: string
   readonly defaultTimeout?: Duration.Input
+  /**
+   * Override process environment for Claude inspect/turn spawns (tests).
+   * Production omits this so the harness process env is inherited.
+   */
+  readonly environment?: Readonly<Record<string, string | undefined>>
 }
 
 /**

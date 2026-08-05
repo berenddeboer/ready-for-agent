@@ -33,17 +33,27 @@ const withExecutable = async <A>(
   }
 }
 
-const provide = (binary: string) =>
-  Claude.layer({ binary }).pipe(Layer.provide(BunServices.layer))
+const provide = (
+  binary: string,
+  environment?: Readonly<Record<string, string | undefined>>,
+) =>
+  Claude.layer({
+    binary,
+    ...(environment !== undefined ? { environment } : {}),
+  }).pipe(Layer.provide(BunServices.layer))
 
-const inspect = (binary: string, timeout = "2 seconds") =>
+const inspect = (
+  binary: string,
+  timeout = "2 seconds",
+  environment?: Readonly<Record<string, string | undefined>>,
+) =>
   Effect.gen(function* () {
     const backend = yield* AgentBackend
     return yield* backend.inspect({
       cwd: process.cwd(),
       timeout,
     })
-  }).pipe(Effect.provide(provide(binary)))
+  }).pipe(Effect.provide(provide(binary, environment)))
 
 const captureSessionScript = [
   'sid=""',
@@ -68,6 +78,7 @@ const startTurn = (
   onSessionId?: OnSessionId,
   prompt = "test",
   thinkingLevel: string | null = "medium",
+  environment?: Readonly<Record<string, string | undefined>>,
 ) =>
   Effect.gen(function* () {
     const backend = yield* AgentBackend
@@ -79,7 +90,7 @@ const startTurn = (
       timeout,
       ...(onSessionId !== undefined ? { onSessionId } : {}),
     })
-  }).pipe(Effect.provide(provide(binary)))
+  }).pipe(Effect.provide(provide(binary, environment)))
 
 describe("Claude AgentBackend adapter (readiness inspection)", () => {
   it("inspects authenticated CLI via JSON auth status (real CLI shape)", async () => {
@@ -157,6 +168,49 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
             "max",
           ])
         }
+      },
+    )
+  })
+
+  it("forwards Bedrock and AWS env on inspect while forcing DISABLE_AUTOUPDATER", async () => {
+    // Issue #803: fake CLI proves layer-provided Bedrock/AWS vars reach the
+    // child, and auto-update stays disabled under Harness.
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'if [ "$DISABLE_AUTOUPDATER" != "1" ]; then exit 21; fi',
+        'if [ "$CLAUDE_CODE_USE_BEDROCK" != "1" ]; then exit 30; fi',
+        'if [ "$AWS_REGION" != "us-east-1" ]; then exit 31; fi',
+        'if [ "$AWS_ACCESS_KEY_ID" != "AKIAEXAMPLE" ]; then exit 32; fi',
+        'if [ "$AWS_SECRET_ACCESS_KEY" != "secret" ]; then exit 33; fi',
+        'if [ "$AWS_SESSION_TOKEN" != "session" ]; then exit 34; fi',
+        'if [ "$AWS_PROFILE" != "bedrock-op" ]; then exit 35; fi',
+        'if [ "$AWS_BEARER_TOKEN_BEDROCK" != "bedrock-bearer" ]; then exit 36; fi',
+        'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}\'',
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            PATH: process.env.PATH,
+            CLAUDE_CODE_USE_BEDROCK: "1",
+            AWS_REGION: "us-east-1",
+            AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+            AWS_SECRET_ACCESS_KEY: "secret",
+            AWS_SESSION_TOKEN: "session",
+            AWS_PROFILE: "bedrock-op",
+            AWS_BEARER_TOKEN_BEDROCK: "bedrock-bearer",
+          }),
+        )
+        expect(result.backend).toEqual({
+          id: "claude",
+          label: "Claude Code",
+        })
+        expect(result.models.map((m) => m.id)).toEqual([
+          "haiku",
+          "sonnet",
+          "opus",
+          "fable",
+        ])
       },
     )
   })
@@ -265,6 +319,34 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
         expect(result.sessionId).toMatch(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
         )
+      },
+    )
+  })
+
+  it("forwards Bedrock and AWS env on turns while forcing DISABLE_AUTOUPDATER", async () => {
+    // Issue #803: same env preservation as inspect for Agent Turn spawns.
+    await withExecutable(
+      [
+        'case " $* " in *" -p "*) ;; *) exit 20 ;; esac',
+        'if [ "$DISABLE_AUTOUPDATER" != "1" ]; then exit 27; fi',
+        'if [ "$CLAUDE_CODE_USE_BEDROCK" != "1" ]; then exit 40; fi',
+        'if [ "$AWS_REGION" != "eu-west-1" ]; then exit 41; fi',
+        'if [ "$AWS_ACCESS_KEY_ID" != "AKIAEXAMPLE" ]; then exit 42; fi',
+        'if [ "$AWS_DEFAULT_REGION" != "eu-west-1" ]; then exit 43; fi',
+        captureSessionScript,
+        successfulTurnStream(),
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          startTurn(binary, "2 seconds", undefined, "test", "medium", {
+            PATH: process.env.PATH,
+            CLAUDE_CODE_USE_BEDROCK: "1",
+            AWS_REGION: "eu-west-1",
+            AWS_DEFAULT_REGION: "eu-west-1",
+            AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+          }),
+        )
+        expect(result.assistantText).toBe("ok")
       },
     )
   })
