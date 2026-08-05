@@ -665,6 +665,28 @@ rfa:CodexBuild
   rfa:avoidanceRationale "as the config ID"@en ;
 ] .
 
+rfa:ClaudeCode
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Claude Code"@en ;
+  skos:definition "The supported Anthropic coding Agent Backend with the stable ID `claude`. Distinct from a Claude Agent Model."@en ;
+  skos:hiddenLabel "Claude"@en, "claude-code"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ClaudeCode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Claude"@en ;
+  rfa:avoidanceRationale "when referring to the backend"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:ClaudeCode ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "claude-code"@en ;
+  rfa:avoidanceRationale "as the config ID"@en ;
+] .
+
 rfa:AgentBackendUnavailable
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Agent Backend Unavailable"@en ;

@@ -49,6 +49,9 @@
       "path": "./packages/codex"
     },
     {
+      "path": "./packages/claude"
+    },
+    {
       "path": "./packages/github-service"
     },
     {
