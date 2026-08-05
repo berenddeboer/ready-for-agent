@@ -46,14 +46,22 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(dialog).toContain("ui.dialogKicker")
     expect(dialog).toContain("ui.dialogTitle")
     expect(dialog).toContain("ui.dialogLede")
-    expect(dialog).toContain("ui.dialogBody")
+    expect(dialog).toContain("ui.dialogBodySectioned")
+    expect(dialog).toContain("ui.dialogSection")
+    expect(dialog).toContain("ui.dialogSectionHead")
+    expect(dialog).toContain("ui.dialogSectionTitle")
     expect(dialog).toContain("ui.dialogFooter")
     expect(dialog).toContain("ui.dialogField")
+    expect(dialog).toContain("ui.dialogInput")
     expect(dialog).toContain("ui.dialogStatusRow")
     expect(dialog).toContain("ui.plateMini")
     expect(dialog).toContain("ui.platePrimary")
     expect(dialog).toContain("Save settings")
     expect(dialog).toContain("Cancel")
+    // Prototype D section cards
+    expect(dialog).toContain("Agent backend")
+    expect(dialog).toContain("Models")
+    expect(dialog).toContain("Concurrency")
     // Compact banners replace oxblood wash callouts.
     expect(dialog).toContain("ui.bannerCompact")
     expect(dialog).not.toContain("font-serif")
@@ -70,7 +78,9 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(dialog).toContain("ui.dialogHeader")
     expect(dialog).toContain("ui.dialogKicker")
     expect(dialog).toContain("ui.dialogTitle")
-    expect(dialog).toContain("ui.dialogFieldset")
+    expect(dialog).toContain("ui.dialogBodySectioned")
+    expect(dialog).toContain("ui.dialogSection")
+    expect(dialog).toContain("ui.dialogSectionHead")
     expect(dialog).toContain("ui.dialogCheck")
     expect(dialog).toContain("ui.dialogInput")
     expect(dialog).toContain("ui.platePrimary")
@@ -80,6 +90,11 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(dialog).toContain("Forge:")
     expect(dialog).toContain("Forge host:")
     expect(dialog).toContain("Project path:")
+    expect(dialog).toContain("Agent backend")
+    expect(dialog).toContain("Models")
+    expect(dialog).toContain("Options")
+    expect(dialog).toContain("ui.dialogCheckInput")
+    expect(dialog).toContain("ui.dialogCheckHint")
     expect(dialog).not.toContain("font-serif")
     expect(dialog).not.toContain("oxblood")
     expect(dialog).not.toContain("shadow-[")
@@ -87,6 +102,14 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(ui).toContain("dialogCheck:")
     expect(ui).toContain("dialogCheckInput:")
     expect(ui).toMatch(/dialogCheckInput:[\s\S]*?accent-signal/)
+    expect(ui).toContain("dialogBodySectioned:")
+    expect(ui).toMatch(/dialogBodySectioned:[\s\S]*?bg-dialog-stage/)
+    expect(ui).toContain("dialogSection:")
+    expect(ui).toMatch(/dialogInput:[\s\S]*?--plate/)
+    expect(ui).toMatch(/dialogFieldHint:[\s\S]*?text-ink-2/)
+    const styles = stylesSource()
+    expect(styles).toContain("--dialog-stage:")
+    expect(styles).toContain("--color-dialog-stage:")
   })
 
   test("session usage dialog is narrow shell with table and telemetry banners", () => {
@@ -158,6 +181,22 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
     expect(ui).not.toMatch(/dialogInput:[\s\S]*?outline-none/)
     expect(ui).toMatch(/dialogInput:[\s\S]*?focus-visible:outline/)
     expect(ui).toMatch(/dialogInput:[\s\S]*?focus-visible:outline-ink/)
+    // Primary is riveted plate twin of mini (not solid-ink fill).
+    // Slice each recipe so later recipes with bottom bevels don't false-match.
+    const platePrimaryBlock = ui.slice(
+      ui.indexOf("platePrimary:"),
+      ui.indexOf("/* ---------- Stamps"),
+    )
+    const plateMiniBlock = ui.slice(
+      ui.indexOf("plateMini:"),
+      ui.indexOf("bannerCompact:"),
+    )
+    expect(platePrimaryBlock).toContain("--plate")
+    expect(platePrimaryBlock).toContain("plateMiniRivets")
+    expect(platePrimaryBlock).toContain("inset_0_1px_0_var(--plate-hi)")
+    expect(platePrimaryBlock).not.toContain("inset_0_-2px")
+    expect(plateMiniBlock).toContain("inset_0_1px_0_var(--plate-hi)")
+    expect(plateMiniBlock).not.toContain("inset_0_-2px")
     expect(ui).toMatch(/platePrimary:[\s\S]*?disabled:aria-busy:cursor-wait/)
     expect(ui).toMatch(/platePrimary:[\s\S]*?disabled:cursor-not-allowed/)
     const root = rootSource()

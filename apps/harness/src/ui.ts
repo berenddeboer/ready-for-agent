@@ -192,11 +192,17 @@ export const ui = {
 
   bannerAction: "ml-auto",
 
+  /**
+   * Stamped mini plate. Top-left + top-right rivets; top inset highlight only
+   * (no bottom `-2px` strip — that reads as an extra bar under wider plates
+   * in dark mode, esp. Save / dialog actions). Shared by Cancel, Recheck,
+   * pagination, banner actions, and platePrimary (riveted twin).
+   */
   plateMini: cx(
     "inline-flex items-center gap-[0.4rem] border-2 border-ink",
     "bg-[var(--plate)] text-[var(--plate-ink)]",
     plateMiniRivets,
-    "shadow-[inset_0_1px_0_var(--plate-hi),inset_0_-2px_0_var(--plate-lo)]",
+    "shadow-[inset_0_1px_0_var(--plate-hi)]",
     "px-[0.85rem] py-[0.46rem]",
     "font-mono text-[0.68rem] font-bold tracking-[0.12em] uppercase no-underline",
     "cursor-pointer transition-[background-color,color] duration-100 ease-in-out",
@@ -428,6 +434,12 @@ export const ui = {
 
   dialogBody: "grid gap-[1.15rem] px-6 py-5",
 
+  /**
+   * Sectioned settings body (prototype D): muted stage behind bordered
+   * section cards. Token: `--dialog-stage` (not plain `--panel`).
+   */
+  dialogBodySectioned: "grid gap-[0.85rem] bg-dialog-stage px-5 py-[1.15rem]",
+
   dialogBodyCompact: "px-5 py-4",
 
   dialogFooter:
@@ -435,14 +447,43 @@ export const ui = {
 
   dialogFooterCompact: "px-5 py-3",
 
-  dialogField:
-    "grid min-w-0 gap-[0.4rem] font-display text-[0.88rem] font-semibold text-ink",
+  /**
+   * Stamped-plate section card: hard ink border, paper fill, stacked fields.
+   * Pair with dialogSectionHead / Title / Meta.
+   */
+  dialogSection: cx(
+    "grid gap-[0.95rem] border-[1.5px] border-ink bg-paper",
+    "px-[1.1rem] pt-4 pb-[1.1rem]",
+  ),
 
+  dialogSectionHead: cx(
+    "flex items-baseline justify-between gap-2",
+    "border-b-2 border-ink pb-[0.55rem]",
+  ),
+
+  dialogSectionTitle:
+    "m-0 font-display text-[0.78rem] font-extrabold tracking-[0.06em] uppercase text-ink",
+
+  dialogSectionMeta:
+    "font-mono text-[0.58rem] tracking-[0.1em] uppercase text-ink-faint",
+
+  /**
+   * Field label on paper — medium weight, ink-dim — distinct from the plate
+   * control value (bold plate-ink).
+   */
+  dialogField:
+    "grid min-w-0 gap-[0.4rem] font-display text-[0.8rem] font-semibold text-ink-2",
+
+  /**
+   * Physical plate control (select / number input): plate fill, ink border,
+   * bold value, top inset highlight. Apply on the control element.
+   */
   dialogInput: cx(
-    "w-full min-w-0 border-[1.5px] border-ink bg-paper px-[0.7rem] py-2",
-    "text-[0.88rem] font-normal text-ink",
+    "w-full min-w-0 border-[1.5px] border-ink",
+    "bg-[var(--plate)] px-[0.75rem] py-[0.6rem] text-[0.95rem] font-bold text-[var(--plate-ink)]",
+    "shadow-[inset_0_1px_0_var(--plate-hi),inset_0_-1px_0_var(--plate-lo)]",
     "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink",
-    "disabled:cursor-not-allowed disabled:text-ink-faint disabled:opacity-70",
+    "disabled:cursor-not-allowed disabled:opacity-70",
   ),
 
   dialogInputMono: "font-mono",
@@ -450,8 +491,11 @@ export const ui = {
   dialogFieldMono:
     "[&>select]:font-mono [&>input:not([type=checkbox])]:font-mono",
 
+  /**
+   * Readable body-size hint (not mono microcopy). ~0.82rem display, ink-dim.
+   */
   dialogFieldHint:
-    "font-mono text-[0.68rem] font-normal tracking-[0.02em] text-ink-faint",
+    "font-display text-[0.82rem] font-normal leading-[1.45] text-ink-2",
 
   dialogCheck:
     "flex flex-wrap items-center gap-3 font-display text-[0.88rem] font-semibold text-ink-2",
@@ -467,13 +511,26 @@ export const ui = {
   dialogStatusLabel:
     "m-0 font-mono text-[0.62rem] font-bold tracking-[0.12em] uppercase text-ink-faint",
 
-  dialogStatusRow:
-    "flex flex-wrap items-center justify-between gap-2 border border-line-ghost bg-panel px-3 py-2 font-mono text-[0.72rem] text-ink-2",
+  /**
+   * Backend status row as a plate inset (matches section control language).
+   */
+  dialogStatusRow: cx(
+    "flex flex-wrap items-center justify-between gap-2",
+    "border border-ink bg-[var(--plate)] px-3 py-2",
+    "font-mono text-[0.72rem] text-[var(--plate-ink)]",
+    "shadow-[inset_0_1px_0_var(--plate-hi)]",
+  ),
 
   dialogStatusRowStrong: "font-bold text-ink",
 
-  dialogFieldset:
-    "m-0 grid gap-3 border-[1.5px] border-ink px-4 pt-[0.9rem] pb-4",
+  /**
+   * Fieldset shell aligned with dialogSection (identity / grouped options).
+   * Prefer dialogSection + dialogSectionHead for new sectioned settings.
+   */
+  dialogFieldset: cx(
+    "m-0 grid gap-[0.95rem] border-[1.5px] border-ink bg-paper",
+    "px-[1.1rem] pt-4 pb-[1.1rem]",
+  ),
 
   dialogFieldsetLegend:
     "px-[0.35rem] font-mono text-[0.62rem] font-bold tracking-[0.16em] uppercase text-ink-faint",
@@ -983,12 +1040,20 @@ export const ui = {
 
   /* ---------- Primary plate (§5.3) ---------- */
 
+  /**
+   * Riveted stamped-plate twin of plateMini (not solid-ink fill). Hierarchy is
+   * position/label only — Cancel and Save share the same plate recipe so
+   * dialogs cannot drift. Top highlight only (see plateMini).
+   */
   platePrimary: cx(
     "inline-flex items-center justify-center gap-[0.4rem] border-2 border-ink",
-    "bg-ink px-[0.95rem] py-[0.46rem] text-paper",
+    "bg-[var(--plate)] text-[var(--plate-ink)]",
+    plateMiniRivets,
+    "shadow-[inset_0_1px_0_var(--plate-hi)]",
+    "px-[0.95rem] py-[0.46rem]",
     "font-mono text-[0.68rem] font-bold tracking-[0.12em] uppercase no-underline",
     "cursor-pointer transition-[background-color,color] duration-100 ease-in-out",
-    "hover:bg-signal hover:text-[#151515]",
+    "hover:bg-[var(--plate-hover)]",
     "disabled:cursor-not-allowed disabled:opacity-55",
     "disabled:aria-busy:cursor-wait",
   ),

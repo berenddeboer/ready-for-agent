@@ -94,8 +94,9 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const ui = uiSource()
     expect(ui).toContain("platePrimary:")
     expect(ui).toContain("guidanceCode:")
-    expect(ui).toMatch(/platePrimary:[\s\S]*?bg-ink/)
-    expect(ui).toMatch(/platePrimary:[\s\S]*?hover:bg-signal/)
+    // Riveted stamped-plate twin of mini (not solid-ink primary).
+    expect(ui).toMatch(/platePrimary:[\s\S]*?--plate/)
+    expect(ui).toMatch(/platePrimary:[\s\S]*?hover:bg-\[var\(--plate-hover\)\]/)
   })
 
   test("relevant issues use ticket rows; Closed dashed stamp; Blocked Queue-yellow without wash", () => {

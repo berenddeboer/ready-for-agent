@@ -41,6 +41,8 @@
   color-scheme: light;
   --paper: #ffffff;
   --panel: #ffffff;
+  /* Muted stage behind sectioned settings dialogs (prototype D). */
+  --dialog-stage: #f3f5f3;
   --ink: #151515;
   --ink-dim: #4a4a4a;
   --ink-faint: #8b8b8b;
@@ -79,6 +81,7 @@
   color-scheme: dark;
   --paper: #3a3f44;
   --panel: #2a2f34;
+  --dialog-stage: #23272b;
   --ink: #f2f3f1;
   --ink-dim: #c6cac8;
   --ink-faint: #7f8583;
@@ -130,6 +133,7 @@
   color: #151515;
   --paper: #ffffff;
   --panel: #ffffff;
+  --dialog-stage: #f3f5f3;
   --ink: #151515;
   --ink-dim: #4a4a4a;
   --ink-faint: #8b8b8b;
@@ -152,6 +156,7 @@
   /* Tailwind @theme aliases — must re-bind so utilities re-resolve. */
   --color-paper: #ffffff;
   --color-panel: #ffffff;
+  --color-dialog-stage: #f3f5f3;
   --color-ink: #151515;
   --color-ink-2: #4a4a4a;
   --color-ink-soft: #4a4a4a;
@@ -176,6 +181,7 @@
 @theme {
   --color-paper: var(--paper);
   --color-panel: var(--panel);
+  --color-dialog-stage: var(--dialog-stage);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-dim);
   --color-ink-soft: var(--ink-dim);
