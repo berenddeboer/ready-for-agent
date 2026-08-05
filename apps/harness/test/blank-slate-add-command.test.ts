@@ -82,10 +82,15 @@ describe("blank-slate add repository command", () => {
     expect(guidance).toContain("ui.platePrimary")
     expect(guidance).toContain("ui.blankSlateFieldset")
     expect(guidance).toContain("Confirm forge identity")
-    // Issue #771: label-then-colon so field name vs value is obvious.
+    // Issue #771: label-then-colon + control chrome; same-line label/value.
+    // All three controls must carry blankSlateFieldControl (token-defined but
+    // unwired was the original regression after the Tailwind migration).
     expect(guidance).toContain("Forge:")
     expect(guidance).toContain("Forge host:")
     expect(guidance).toContain("Project path:")
+    expect(
+      guidance.match(/className=\{ui\.blankSlateFieldControl\}/g)?.length,
+    ).toBe(3)
     expect(guidance).toContain("ui.guidanceCode")
     expect(guidance).toContain('tone="alarm"')
     expect(guidance).toContain('role="alert"')

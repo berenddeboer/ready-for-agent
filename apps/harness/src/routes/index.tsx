@@ -987,6 +987,7 @@ function AddRepositoryGuidance({
             <label className={ui.blankSlateField}>
               Forge:
               <select
+                className={ui.blankSlateFieldControl}
                 value={inspection.forge}
                 onChange={(event) =>
                   setInspection({
@@ -1002,6 +1003,7 @@ function AddRepositoryGuidance({
             <label className={ui.blankSlateField}>
               Forge host:
               <input
+                className={ui.blankSlateFieldControl}
                 required
                 value={inspection.forgeHost}
                 onChange={(event) =>
@@ -1015,6 +1017,7 @@ function AddRepositoryGuidance({
             <label className={ui.blankSlateField}>
               Project path:
               <input
+                className={ui.blankSlateFieldControl}
                 required
                 value={inspection.projectPath}
                 onChange={(event) =>
