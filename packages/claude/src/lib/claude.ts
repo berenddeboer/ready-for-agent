@@ -66,7 +66,11 @@ export class Claude {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
-        const environment = makeClaudeEnvironment()
+        const environment = makeClaudeEnvironment(
+          options.environment !== undefined
+            ? { environment: options.environment }
+            : {},
+        )
 
         const inspect = Effect.fn("Claude.inspect")(function* (
           input: InspectInput,
