@@ -816,33 +816,38 @@ export const ui = {
   laneHeader: cx(
     "sticky top-0 z-[5] isolate flex min-h-[5.25rem] overflow-hidden border-b-2 border-ink",
     "bg-[#252827] p-[3px] text-[var(--lane-text,#fff)]",
-    "[background-image:linear-gradient(90deg,#151817,#4a4e4b_48%,#1c1f1e)]",
-    "shadow-[inset_0_1px_0_rgb(255_255_255/0.45),inset_0_-1px_0_rgb(0_0_0/0.8)]",
+    "[background-image:linear-gradient(90deg,#111413,#4c524f_48%,#151817)]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.52),inset_0_-2px_2px_#000]",
     "max-[900px]:static max-[900px]:min-h-16",
   ),
 
   laneHeaderSheet: cx(
-    "relative flex min-w-0 flex-1 items-end overflow-hidden border border-black/70",
+    "relative flex min-w-0 flex-1 items-end overflow-hidden border border-black/80",
     "bg-[var(--lane-color)] pt-[0.72rem] pr-[1.15rem] pb-[0.72rem] pl-[1.15rem]",
-    "[background-image:linear-gradient(112deg,transparent_0_24%,rgb(255_255_255/0.06)_28%,rgb(255_255_255/0.34)_34%,rgb(255_255_255/0.05)_40%,transparent_45%_100%),repeating-linear-gradient(0deg,rgb(255_255_255/0.055)_0_1px,rgb(0_0_0/0.035)_1px_2px,transparent_2px_4px),linear-gradient(180deg,rgb(255_255_255/0.28)_0%,transparent_38%,rgb(0_0_0/0.17)_100%)]",
-    "[background-blend-mode:screen,overlay,normal]",
-    "shadow-[inset_0_1px_0_rgb(255_255_255/0.55),inset_0_-3px_4px_rgb(0_0_0/0.28),inset_1px_0_0_rgb(255_255_255/0.15),0_1px_2px_rgb(0_0_0/0.8)]",
+    "[background-image:radial-gradient(ellipse_at_21%_-14%,rgb(255_255_255/0.34),transparent_43%),radial-gradient(ellipse_at_78%_118%,rgb(0_0_0/0.3),transparent_47%),linear-gradient(105deg,transparent_0_26%,rgb(255_255_255/0.32)_34%,transparent_43%),linear-gradient(180deg,rgb(255_255_255/0.2),transparent_35%,rgb(0_0_0/0.27))]",
+    "[background-blend-mode:soft-light,multiply,screen,normal]",
+    "shadow-[inset_0_1px_0_rgb(255_255_255/0.62),inset_0_-3px_5px_rgb(0_0_0/0.42),inset_1px_0_0_rgb(255_255_255/0.16),0_1px_2px_#000]",
   ),
 
-  laneHeaderGrain:
-    "pointer-events-none absolute inset-0 z-[1] bg-[length:160px_120px] opacity-20 mix-blend-soft-light [background-image:repeating-linear-gradient(97deg,transparent_0_2px,rgb(255_255_255/0.1)_2px_3px,transparent_3px_7px),repeating-linear-gradient(3deg,rgb(0_0_0/0.055)_0_1px,transparent_1px_5px)]",
+  laneHeaderSurface:
+    "pointer-events-none absolute inset-0 z-[1] h-full w-full opacity-[0.31] mix-blend-soft-light",
+
+  laneHeaderInnerEdge:
+    "pointer-events-none absolute inset-[2px] z-[2] border border-white/12 shadow-[inset_0_0_7px_rgb(0_0_0/0.2)]",
+
+  laneHeaderDent: "pointer-events-none absolute z-[3] overflow-visible",
 
   laneHeaderCode:
-    "absolute top-[0.48rem] left-[1.25rem] z-[3] font-mono text-[0.48rem] font-bold tracking-[0.14em] opacity-55",
+    "absolute top-[0.48rem] left-[1.25rem] z-[5] font-mono text-[0.45rem] font-bold tracking-[0.15em] opacity-55 [text-shadow:0_1px_0_rgb(255_255_255/0.18)]",
 
   laneHeaderRivet: cx(
-    "absolute z-[4] h-[9px] w-[9px] rounded-full",
-    "[background-image:radial-gradient(circle_at_31%_25%,#fff_0_7%,transparent_8%),radial-gradient(circle_at_36%_30%,#d8ddda_0_16%,#89908c_38%,#343837_67%,#aeb4b1_88%)]",
-    "shadow-[0_0_0_1px_rgb(0_0_0/0.7),0_1px_1px_rgb(0_0_0/0.75),inset_-1px_-1px_1px_rgb(0_0_0/0.55)]",
+    "absolute z-[7] h-[10px] w-[10px] rounded-full",
+    "[background-image:radial-gradient(circle_at_28%_22%,#fff_0_5%,transparent_7%),radial-gradient(circle_at_34%_29%,#f5f8f6_0_12%,#aeb5b1_29%,#555c59_54%,#222625_71%,#9fa6a2_89%,#333735_100%)]",
+    "shadow-[0_0_0_1px_rgb(0_0_0/0.86),0_2px_2px_rgb(0_0_0/0.72),inset_-1px_-1px_1px_rgb(0_0_0/0.72)]",
   ),
 
   laneTitle:
-    "relative z-[3] m-0 whitespace-nowrap font-display text-[clamp(0.82rem,1.05vw,1.18rem)] font-[950] leading-[0.86] tracking-[-0.035em] uppercase text-[var(--lane-text,#fff)] [text-shadow:0_1px_0_rgb(255_255_255/0.25),0_-1px_0_rgb(0_0_0/0.3),0_2px_3px_rgb(0_0_0/0.12)] max-[900px]:text-[1.18rem]",
+    "relative z-[5] m-0 max-w-full overflow-hidden whitespace-nowrap font-display text-[clamp(0.82rem,1.05vw,1.18rem)] font-[950] leading-[0.86] tracking-[-0.035em] uppercase text-[var(--lane-text,#fff)] [text-shadow:0_1px_0_rgb(255_255_255/0.3),0_-1px_0_rgb(0_0_0/0.45),0_2px_3px_rgb(0_0_0/0.3)] max-[900px]:text-[1.18rem]",
 
   laneStack:
     "m-0 grid min-w-0 flex-[1_1_auto] list-none content-start gap-[0.55rem] p-[0.55rem]",
