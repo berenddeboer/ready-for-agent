@@ -13,68 +13,141 @@ const lifecycleStatusSource = (): string => {
   return source.slice(start)
 }
 
-/** Scenario labels document projected GraphQL status; the gate keys on isTerminal. */
+/**
+ * Scenario labels document projected GraphQL status; the gate keys on isTerminal,
+ * isNeedsHuman, and isFailed (not free-form status denylists).
+ */
 const cases = [
   {
     name: "terminal COMPLETE history",
-    args: { compact: true, isTerminal: true, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: true,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: false,
   },
   {
     name: "terminal ABANDONED history",
-    args: { compact: true, isTerminal: true, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: true,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: false,
   },
   {
     name: "terminal FAILED history",
-    args: { compact: true, isTerminal: true, isNeedsHuman: false },
-    show: false,
+    args: {
+      compact: true,
+      isTerminal: true,
+      isNeedsHuman: false,
+      isFailed: true,
+    },
+    show: true,
   },
   {
     name: "held WAITING_FOR_BLOCKERS (non-terminal)",
-    args: { compact: true, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: true,
   },
   {
     name: "held WAITING_FOR_WORKER_SLOT (non-terminal)",
-    args: { compact: true, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: true,
   },
   {
     name: "RUNNING (non-terminal)",
-    args: { compact: true, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: true,
   },
   {
     // Step-level failure while the Work Item is still operational: GraphQL status
     // can be FAILED/INTERRUPTED with isTerminal false. Must still show Reset.
     name: "step-level FAILED status on non-terminal work item",
-    args: { compact: true, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: true,
+    },
     show: true,
   },
   {
     name: "step-level INTERRUPTED status on non-terminal work item",
-    args: { compact: true, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: true,
   },
   {
     name: "paused NEEDS_HUMAN_REVIEW (non-terminal Working)",
-    args: { compact: true, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: true,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: true,
   },
   {
     name: "terminal NEEDS_HUMAN Working handoff",
-    args: { compact: true, isTerminal: true, isNeedsHuman: true },
+    args: {
+      compact: true,
+      isTerminal: true,
+      isNeedsHuman: true,
+      isFailed: false,
+    },
     show: true,
   },
   {
     name: "non-compact issue row (held)",
-    args: { compact: false, isTerminal: false, isNeedsHuman: false },
+    args: {
+      compact: false,
+      isTerminal: false,
+      isNeedsHuman: false,
+      isFailed: false,
+    },
     show: false,
   },
   {
     name: "non-compact issue row (Needs Human)",
-    args: { compact: false, isTerminal: true, isNeedsHuman: true },
+    args: {
+      compact: false,
+      isTerminal: true,
+      isNeedsHuman: true,
+      isFailed: false,
+    },
+    show: false,
+  },
+  {
+    name: "non-compact issue row (terminal Failed)",
+    args: {
+      compact: false,
+      isTerminal: true,
+      isNeedsHuman: false,
+      isFailed: true,
+    },
     show: false,
   },
 ] as const
@@ -93,6 +166,7 @@ describe("Jobs Reset button wiring", () => {
     expect(lifecycle).toContain("canShowWorkItemResetAction({")
     expect(lifecycle).toContain("isTerminal: workItem.isTerminal")
     expect(lifecycle).toContain('isNeedsHuman: status === "NEEDS_HUMAN"')
+    expect(lifecycle).toContain('isFailed: status === "FAILED"')
     expect(lifecycle).toContain("resetWorkItem")
     expect(lifecycle).toContain("<WorkItemResetButton")
     expect(lifecycle).toContain("pending={reset.isPending}")
@@ -110,6 +184,8 @@ describe("Jobs Reset button wiring", () => {
     )
     expect(lifecycle).not.toContain("canReset = compact && !heldForBlockers")
     // Gate must not denylist projected FAILED status strings (step failures).
+    // Terminal Failed is allowed via isFailed; non-terminal step FAILED uses the
+    // non-terminal branch. Neither path filters with status !== "FAILED".
     expect(lifecycle).not.toMatch(
       /canShowWorkItemResetAction[\s\S]*?status\s*!==\s*"FAILED"/,
     )

@@ -9542,26 +9542,66 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
-    it("deletes terminal Work Items including Complete and Abandoned", () =>
+    it("deletes terminal Abandoned and Failed Work Items", () =>
       runTest(
         Effect.gen(function* () {
           const lifecycle = yield* WorkItemLifecycle
+          const sql = yield* SqlClient.SqlClient
           const { repository, issue } = yield* seedActionableIssue
 
-          const created = yield* lifecycle.implementNow(
+          const abandoned = yield* lifecycle.implementNow(
             repository.id,
             issue.issueNumber,
           )
-          yield* lifecycle.abandon(created.id)
+          yield* lifecycle.abandon(abandoned.id)
 
-          const deletedId = yield* lifecycle.reset(created.id)
-          expect(deletedId).toBe(created.id)
+          const deletedAbandoned = yield* lifecycle.reset(abandoned.id)
+          expect(deletedAbandoned).toBe(abandoned.id)
 
-          const listed = yield* lifecycle.listWorkItemsForIssue(
+          const afterAbandoned = yield* lifecycle.listWorkItemsForIssue(
             repository.id,
             issue.issueNumber,
           )
-          expect(listed).toHaveLength(0)
+          expect(afterAbandoned).toHaveLength(0)
+
+          const failed = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          const now = Date.now()
+          yield* sql.unsafe(`DELETE FROM job_queue`)
+          yield* sql.unsafe(
+            `UPDATE step_run
+             SET status = 'failed', started_at = ?, finished_at = ?, updated_at = ?
+             WHERE id = ?`,
+            [now, now, now, failed.stepRuns[0]!.id],
+          )
+          yield* sql.unsafe(
+            `UPDATE work_item
+             SET state = 'failed',
+                 failure_code = 'issue_not_found',
+                 failure_message = 'Issue is no longer present in the Issue store',
+                 holds_worker_slot = 0,
+                 updated_at = ?
+             WHERE id = ?`,
+            [now, failed.id],
+          )
+          expect((yield* lifecycle.getWorkItem(failed.id)).state).toBe("failed")
+          expect(
+            (yield* lifecycle.getWorkItem(failed.id)).stepRuns,
+          ).toHaveLength(1)
+
+          const deletedFailed = yield* lifecycle.reset(failed.id)
+          expect(deletedFailed).toBe(failed.id)
+
+          const missing = yield* Effect.flip(lifecycle.getWorkItem(failed.id))
+          expect(missing).toBeInstanceOf(WorkItemNotFoundError)
+
+          const afterFailed = yield* lifecycle.listWorkItemsForIssue(
+            repository.id,
+            issue.issueNumber,
+          )
+          expect(afterFailed).toHaveLength(0)
         }),
       ))
 

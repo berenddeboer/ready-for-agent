@@ -3496,12 +3496,14 @@ export function WorkItemLifecycleStatus({
     (workItem.canRetry &&
       workItem.lifecycleLabels.at(-1)?.phase === "GITHUB_STATUS_CHECKS")
   // Reset cancels/deletes a Work Item (history + worktree). Compact non-terminal
-  // cards (held Queue and other unfinished work) keep it; Completed/Failed
-  // terminal history never does. Needs Human stays on Working and keeps cancel.
+  // cards (held Queue and other unfinished work) keep it; Complete/Abandoned
+  // terminal history never does. Terminal Failed Attention cards keep delete so
+  // obsolete failures can be cleared. Needs Human stays on Working and keeps cancel.
   const canReset = canShowWorkItemResetAction({
     compact,
     isTerminal: workItem.isTerminal,
     isNeedsHuman: status === "NEEDS_HUMAN",
+    isFailed: status === "FAILED",
   })
   const dataUpdatedAt = queryClient
     .getQueriesData({ queryKey: ["work-items", workItem.repositoryId] })
