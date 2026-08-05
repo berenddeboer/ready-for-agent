@@ -351,11 +351,15 @@ Anatomy (top to bottom):
 6. **Via lines**: mono uppercase faint, 2px `--line-soft` left border,
    padding-left ("Via Build — 14 min").
 7. **Journey legs** (§5.2): earlier-lane collapse is shared by **Kanban
-   tickets and repos lifecycle chrome** — collapsed summary rows are
-   **consistently lane-colored** (per #695): in the Review lane the Build
-   summary is a Build-blue chip with white text ("▸ BUILD · 14m"); likewise
-   everywhere, name + summed duration only. Expansion replaces the summary
-   with that lane's chips; ephemeral local state (behavior per
+   tickets and repos lifecycle chrome** — collapsed summary chips are
+   **consistently lane-colored** (per #695) and sit on **one horizontal wrap
+   row** (per #784), not stacked as separate lines: in the Review lane the
+   Build summary is a Build-blue chip with white text ("▸ BUILD · 14m");
+   likewise everywhere, name + summed duration only. Multiple collapsed
+   legs (e.g. BUILD + REVIEW on a PR-focus ticket, or BUILD + REVIEW +
+   PR|MR on terminal COMPLETE) share that single wrap line. Expanding a
+   leg keeps the summary row intact and reveals that lane's fine-grained
+   chips as a full-width strip beneath; ephemeral local state (behavior per
    `docs/kanban.md`, unchanged).
 8. **Merged-lane variant**: no per-step legs on the board; mono lines for
    **Started** and **Elapsed** separately; PR badge (§5.5). Fill is the same
@@ -441,9 +445,14 @@ prototype, so this spec governs:
   reached lifecycle lane (BUILD, REVIEW, and **PR** on GitHub / **MR** on
   GitLab) collapses by default into expandable journey-style legs — PR is not
   left as a permanent full chip strip just because focus falls back to the
-  last phase. Duration on each leg is the sum of that lane’s chip
-  `durationMs` (same rules as earlier-lane summaries / archive legs §4.5).
-  Non-complete work still expands only the current focus lane.
+  last phase. Collapsed legs share **one horizontal wrap row** (same density
+  language as archive footer legs §4.5; not one vertical line per leg).
+  Expanding a leg leaves the summary row in place and shows that lane’s
+  fine-grained chips in a strip under the row. Duration on each leg is the
+  sum of that lane’s chip `durationMs` (same rules as earlier-lane summaries
+  / archive legs §4.5). Non-complete work still expands only the current
+  focus lane; when multiple earlier-lane summaries are present they use the
+  same single-line wrap treatment.
 - **Parent issue groups**: `<details>` card, 1.5px border — summary with
   parent link, "n/m closed" mono, chevron, parent actions menu; children
   with a 2px `--line-soft` left rule.
@@ -545,6 +554,14 @@ fill color, never small text on white — body-text contrast stays ≥ 4.5:1).
 
 Mono 0.56rem (board) / 0.85rem (archive), 1.5px ink border; board padding
 0.16–0.2rem/0.38–0.44rem, archive legs 0.4rem/0.7rem. Whitespace-nowrap.
+
+**Collapsed multi-leg layout (Kanban tickets, repos lifecycle chrome, archive
+footer):** summary legs share one `flex flex-wrap` row (`ui.legRow` /
+`ui.archiveFoot`). They wrap only when card/column width requires it — never
+stacked as one vertical line per leg by default (#784). Expanded detail is a
+full-width chip strip under that row (summary buttons stay on the row with
+▸/▾). Keep `aria-expanded` / `aria-controls` on each expandable leg button.
+
 Five states:
 
 | State | Treatment | Example |
