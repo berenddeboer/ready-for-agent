@@ -19,6 +19,14 @@ import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
   JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
 } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
+import {
+  type AgentModelOption,
+  allowsClaudeFreeTextModels,
+  formatVariantLabel,
+  isUnavailableCatalogModel,
+  reconcileVariantForModel,
+  thinkingLevelsForModel,
+} from "../agent-model-settings.js"
 import { Banner, BannerActionButton } from "../banner.js"
 import { repositoryCardCollapseId, useCardCollapsed } from "../card-collapse.js"
 import { CardCollapseToggle } from "../card-collapse-toggle.js"
@@ -107,11 +115,6 @@ const configQuery = {
   },
 }
 
-type AgentModelOption = {
-  id: string
-  thinkingLevels: readonly string[]
-}
-
 type AgentBackendInfo = {
   id: string
   label: string
@@ -198,23 +201,6 @@ const formatSessionInstant = (value: string | null | undefined): string => {
 
 const formatTokenCount = (value: number): string =>
   new Intl.NumberFormat(undefined).format(value)
-
-const variantsForModel = (
-  models: readonly AgentModelOption[] | undefined,
-  modelId: string,
-): readonly string[] => {
-  if (modelId.length === 0 || models === undefined) return []
-  return models.find((model) => model.id === modelId)?.thinkingLevels ?? []
-}
-
-const formatVariantLabel = (variant: string): string =>
-  `${variant[0]?.toUpperCase() ?? ""}${variant.slice(1)}`
-
-const reconcileVariantForModel = (
-  variant: string,
-  modelVariants: readonly string[],
-): string =>
-  variant.length > 0 && modelVariants.includes(variant) ? variant : ""
 
 /**
  * Dedicated cache identity for GitHub open non-draft Pull Request counts.
@@ -1200,12 +1186,12 @@ function RepositoryCard({
   }
 
   const currentDraftModelPrefs = (): DraftModelPrefs => ({
-    defaultModel: defaultModel.trim() === "" ? null : defaultModel,
+    defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
     defaultThinkingLevel:
-      defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
-    reviewModel: reviewModel.trim() === "" ? null : reviewModel,
+      defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel.trim(),
+    reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
     reviewThinkingLevel:
-      reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
+      reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
   })
 
   const draftEffectiveBackend = (
@@ -1318,12 +1304,12 @@ function RepositoryCard({
       projectPath: projectPath.trim(),
       paused,
       selectedAgentBackend,
-      defaultModel: defaultModel.trim() === "" ? null : defaultModel,
+      defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
       defaultThinkingLevel:
-        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel,
-      reviewModel: reviewModel.trim() === "" ? null : reviewModel,
+        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel.trim(),
+      reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
       reviewThinkingLevel:
-        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel,
+        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
       autoMerge,
       includeAllIssueAuthors,
       waitForReadyForReviewChecks,
@@ -1482,6 +1468,8 @@ function RepositoryCard({
   const catalogModels: readonly AgentModelOption[] | undefined =
     usesPreviewCatalog ? (previewModels ?? undefined) : models.data
   const modelIds = (catalogModels ?? []).map((model) => model.id)
+  const modelBackendId = draftEffective
+  const claudeFreeTextModels = allowsClaudeFreeTextModels(modelBackendId)
   const harnessBuildForSource =
     harnessDefaultModel !== "not configured" ? harnessDefaultModel : ""
   const harnessReviewForSource = !harnessReviewModel.startsWith("Build (")
@@ -1497,21 +1485,39 @@ function RepositoryCard({
         : harnessReviewForSource.length > 0
           ? harnessReviewForSource
           : harnessBuildForSource
-  const buildVariants = variantsForModel(catalogModels, buildVariantSourceModel)
-  const reviewThinkingLevels = variantsForModel(
+  const buildVariants = thinkingLevelsForModel(
+    modelBackendId,
+    catalogModels,
+    buildVariantSourceModel,
+  )
+  const reviewThinkingLevels = thinkingLevelsForModel(
+    modelBackendId,
     catalogModels,
     reviewThinkingLevelSourceModel,
   )
-  const hasUnavailableBuildModel =
-    defaultModel.length > 0 && !modelIds.includes(defaultModel)
-  const hasUnavailableReviewModel =
-    reviewModel.length > 0 && !modelIds.includes(reviewModel)
-  const buildVariantSourceUnavailable =
-    buildVariantSourceModel.length > 0 &&
-    !modelIds.includes(buildVariantSourceModel)
-  const reviewThinkingLevelSourceUnavailable =
-    reviewThinkingLevelSourceModel.length > 0 &&
-    !modelIds.includes(reviewThinkingLevelSourceModel)
+  // Catalog-absent models block Save only for catalog-constrained backends.
+  // Claude free-text (Bedrock profile IDs/ARNs, custom ids) is allowed (#806).
+  const hasUnavailableBuildModel = isUnavailableCatalogModel({
+    backendId: modelBackendId,
+    modelId: defaultModel,
+    catalogModelIds: modelIds,
+  })
+  const hasUnavailableReviewModel = isUnavailableCatalogModel({
+    backendId: modelBackendId,
+    modelId: reviewModel,
+    catalogModelIds: modelIds,
+  })
+  // Effort source may be the override or an inherited harness model string.
+  const buildVariantSourceUnavailable = isUnavailableCatalogModel({
+    backendId: modelBackendId,
+    modelId: buildVariantSourceModel,
+    catalogModelIds: modelIds,
+  })
+  const reviewThinkingLevelSourceUnavailable = isUnavailableCatalogModel({
+    backendId: modelBackendId,
+    modelId: reviewThinkingLevelSourceModel,
+    catalogModelIds: modelIds,
+  })
   const hasCustomBuildVariant =
     defaultThinkingLevel.length > 0 &&
     (buildVariantSourceUnavailable ||
@@ -1529,7 +1535,8 @@ function RepositoryCard({
       : models.isPending || config.isPending || agentBackends.isPending)
   // Only enforce "model not in catalog" when a catalog actually loaded.
   // Failed/pending override preview leaves modelIds empty and must not block
-  // non-model saves for the current effective backend.
+  // non-model saves for the current effective backend. Claude free-text is
+  // never blocked by catalog membership (#806).
   const catalogReadyForModelValidation = usesPreviewCatalog
     ? !previewPending && previewError === null && previewModels !== null
     : !models.isPending && !models.isError && models.data !== undefined
@@ -2124,57 +2131,123 @@ function RepositoryCard({
                 </Banner>
               ) : (
                 <>
-                  <label className={ui.dialogField}>
-                    Build model
-                    <select
-                      className={cx(ui.dialogInput, ui.dialogInputMono)}
-                      value={defaultModel}
-                      disabled={modelsDisabled}
-                      onChange={(event) => {
-                        const nextModel = event.target.value
-                        setDefaultModel(nextModel)
-                        const sourceModel =
-                          nextModel.length > 0
-                            ? nextModel
-                            : harnessBuildForSource
-                        const nextVariants = variantsForModel(
-                          catalogModels,
-                          sourceModel,
-                        )
-                        setDefaultVariant((current) =>
-                          reconcileVariantForModel(current, nextVariants),
-                        )
-                        if (reviewModel.length === 0) {
-                          const reviewSource =
+                  {claudeFreeTextModels ? (
+                    <label className={ui.dialogField}>
+                      Build model
+                      <input
+                        className={cx(ui.dialogInput, ui.dialogInputMono)}
+                        list={`repo-claude-build-models-${repository.id}`}
+                        value={defaultModel}
+                        disabled={modelsDisabled}
+                        onChange={(event) => {
+                          const nextModel = event.target.value
+                          setDefaultModel(nextModel)
+                          const sourceModel =
                             nextModel.length > 0
                               ? nextModel
-                              : harnessReviewForSource.length > 0
-                                ? harnessReviewForSource
-                                : harnessBuildForSource
-                          setReviewVariant((current) =>
-                            reconcileVariantForModel(
-                              current,
-                              variantsForModel(catalogModels, reviewSource),
-                            ),
+                              : harnessBuildForSource
+                          const nextVariants = thinkingLevelsForModel(
+                            modelBackendId,
+                            catalogModels,
+                            sourceModel,
                           )
-                        }
-                      }}
-                    >
-                      <option value="">
-                        Harness default ({harnessDefaultModel})
-                      </option>
-                      {hasUnavailableBuildModel && (
-                        <option value={defaultModel}>
-                          {defaultModel} (not in Agent Model catalog)
+                          setDefaultVariant((current) =>
+                            reconcileVariantForModel(current, nextVariants),
+                          )
+                          if (reviewModel.length === 0) {
+                            const reviewSource =
+                              nextModel.length > 0
+                                ? nextModel
+                                : harnessReviewForSource.length > 0
+                                  ? harnessReviewForSource
+                                  : harnessBuildForSource
+                            setReviewVariant((current) =>
+                              reconcileVariantForModel(
+                                current,
+                                thinkingLevelsForModel(
+                                  modelBackendId,
+                                  catalogModels,
+                                  reviewSource,
+                                ),
+                              ),
+                            )
+                          }
+                        }}
+                        placeholder={`Harness default (${harnessDefaultModel})`}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <datalist
+                        id={`repo-claude-build-models-${repository.id}`}
+                      >
+                        {(catalogModels ?? []).map((model) => (
+                          <option key={model.id} value={model.id} />
+                        ))}
+                      </datalist>
+                      <span className={ui.dialogFieldHint}>
+                        Empty inherits harness default. Otherwise catalog alias
+                        or any Claude-accepted model string (Bedrock profile
+                        ID/ARN).
+                      </span>
+                    </label>
+                  ) : (
+                    <label className={ui.dialogField}>
+                      Build model
+                      <select
+                        className={cx(ui.dialogInput, ui.dialogInputMono)}
+                        value={defaultModel}
+                        disabled={modelsDisabled}
+                        onChange={(event) => {
+                          const nextModel = event.target.value
+                          setDefaultModel(nextModel)
+                          const sourceModel =
+                            nextModel.length > 0
+                              ? nextModel
+                              : harnessBuildForSource
+                          const nextVariants = thinkingLevelsForModel(
+                            modelBackendId,
+                            catalogModels,
+                            sourceModel,
+                          )
+                          setDefaultVariant((current) =>
+                            reconcileVariantForModel(current, nextVariants),
+                          )
+                          if (reviewModel.length === 0) {
+                            const reviewSource =
+                              nextModel.length > 0
+                                ? nextModel
+                                : harnessReviewForSource.length > 0
+                                  ? harnessReviewForSource
+                                  : harnessBuildForSource
+                            setReviewVariant((current) =>
+                              reconcileVariantForModel(
+                                current,
+                                thinkingLevelsForModel(
+                                  modelBackendId,
+                                  catalogModels,
+                                  reviewSource,
+                                ),
+                              ),
+                            )
+                          }
+                        }}
+                      >
+                        <option value="">
+                          Harness default ({harnessDefaultModel})
                         </option>
-                      )}
-                      {(catalogModels ?? []).map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                        {hasUnavailableBuildModel && (
+                          <option value={defaultModel}>
+                            {defaultModel} (not in Agent Model catalog)
+                          </option>
+                        )}
+                        {(catalogModels ?? []).map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {buildVariantSourceModel.length > 0 &&
                   buildVariantSourceUnavailable ? (
                     <Banner
@@ -2225,46 +2298,94 @@ function RepositoryCard({
                       </select>
                     </label>
                   )}
-                  <label className={ui.dialogField}>
-                    Review model
-                    <select
-                      className={cx(ui.dialogInput, ui.dialogInputMono)}
-                      value={reviewModel}
-                      disabled={modelsDisabled}
-                      onChange={(event) => {
-                        const nextModel = event.target.value
-                        setReviewModel(nextModel)
-                        const sourceModel =
-                          nextModel.length > 0
-                            ? nextModel
-                            : defaultModel.length > 0
-                              ? defaultModel
-                              : harnessReviewForSource.length > 0
-                                ? harnessReviewForSource
-                                : harnessBuildForSource
-                        setReviewVariant((current) =>
-                          reconcileVariantForModel(
-                            current,
-                            variantsForModel(catalogModels, sourceModel),
-                          ),
-                        )
-                      }}
-                    >
-                      <option value="">
-                        Harness default ({harnessReviewModel})
-                      </option>
-                      {hasUnavailableReviewModel && (
-                        <option value={reviewModel}>
-                          {reviewModel} (not in Agent Model catalog)
+                  {claudeFreeTextModels ? (
+                    <label className={ui.dialogField}>
+                      Review model
+                      <input
+                        className={cx(ui.dialogInput, ui.dialogInputMono)}
+                        list={`repo-claude-review-models-${repository.id}`}
+                        value={reviewModel}
+                        disabled={modelsDisabled}
+                        onChange={(event) => {
+                          const nextModel = event.target.value
+                          setReviewModel(nextModel)
+                          const sourceModel =
+                            nextModel.length > 0
+                              ? nextModel
+                              : defaultModel.length > 0
+                                ? defaultModel
+                                : harnessReviewForSource.length > 0
+                                  ? harnessReviewForSource
+                                  : harnessBuildForSource
+                          setReviewVariant((current) =>
+                            reconcileVariantForModel(
+                              current,
+                              thinkingLevelsForModel(
+                                modelBackendId,
+                                catalogModels,
+                                sourceModel,
+                              ),
+                            ),
+                          )
+                        }}
+                        placeholder={`Harness default (${harnessReviewModel})`}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                      <datalist
+                        id={`repo-claude-review-models-${repository.id}`}
+                      >
+                        {(catalogModels ?? []).map((model) => (
+                          <option key={`review-${model.id}`} value={model.id} />
+                        ))}
+                      </datalist>
+                    </label>
+                  ) : (
+                    <label className={ui.dialogField}>
+                      Review model
+                      <select
+                        className={cx(ui.dialogInput, ui.dialogInputMono)}
+                        value={reviewModel}
+                        disabled={modelsDisabled}
+                        onChange={(event) => {
+                          const nextModel = event.target.value
+                          setReviewModel(nextModel)
+                          const sourceModel =
+                            nextModel.length > 0
+                              ? nextModel
+                              : defaultModel.length > 0
+                                ? defaultModel
+                                : harnessReviewForSource.length > 0
+                                  ? harnessReviewForSource
+                                  : harnessBuildForSource
+                          setReviewVariant((current) =>
+                            reconcileVariantForModel(
+                              current,
+                              thinkingLevelsForModel(
+                                modelBackendId,
+                                catalogModels,
+                                sourceModel,
+                              ),
+                            ),
+                          )
+                        }}
+                      >
+                        <option value="">
+                          Harness default ({harnessReviewModel})
                         </option>
-                      )}
-                      {(catalogModels ?? []).map((model) => (
-                        <option key={`review-${model.id}`} value={model.id}>
-                          {model.id}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                        {hasUnavailableReviewModel && (
+                          <option value={reviewModel}>
+                            {reviewModel} (not in Agent Model catalog)
+                          </option>
+                        )}
+                        {(catalogModels ?? []).map((model) => (
+                          <option key={`review-${model.id}`} value={model.id}>
+                            {model.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevelSourceUnavailable ? (
                     <Banner

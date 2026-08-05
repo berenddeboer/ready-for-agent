@@ -103,4 +103,34 @@ describe("buildRunArgs", () => {
     })
     expect(args.at(-1)).toBe("/review\nbody")
   })
+
+  it("passes free-text Bedrock inference profile ids through as --model (issue #806)", () => {
+    const freeText =
+      "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-profile"
+    const args = buildRunArgs({
+      prompt: "implement",
+      model: freeText,
+      thinkingLevel: "high",
+      sessionId: "11111111-1111-4111-8111-111111111111",
+    })
+    const modelFlag = args.indexOf("--model")
+    expect(modelFlag).toBeGreaterThan(0)
+    expect(args[modelFlag + 1]).toBe(freeText)
+    expect(args).toContain("--effort")
+    expect(args).toContain("high")
+  })
+
+  it("passes bare Bedrock profile ids through as --model without alias rewrite", () => {
+    const freeText = "us.anthropic.claude-sonnet-4-6"
+    const args = buildRunArgs({
+      prompt: "work",
+      model: freeText,
+      thinkingLevel: null,
+      sessionId: "11111111-1111-4111-8111-111111111111",
+    })
+    expect(args).toContain("--model")
+    expect(args[args.indexOf("--model") + 1]).toBe(freeText)
+    // Floating alias must not replace the free-text id.
+    expect(args.filter((arg) => arg === "sonnet")).toEqual([])
+  })
 })

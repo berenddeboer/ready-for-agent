@@ -111,6 +111,27 @@ describe("resolveAgentModelSelection", () => {
     })
   })
 
+  it("passes Claude free-text / Bedrock model ids through as opaque preference strings (issue #806)", () => {
+    const freeText =
+      "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-profile"
+    expect(
+      resolveAgentModelSelection(
+        {
+          defaultModel: freeText,
+          defaultThinkingLevel: "high",
+          reviewModel: "us.anthropic.claude-opus-4-6",
+          reviewThinkingLevel: "max",
+        },
+        harness,
+      ),
+    ).toEqual({
+      model: freeText,
+      thinkingLevel: "high",
+      reviewModel: "us.anthropic.claude-opus-4-6",
+      reviewThinkingLevel: "max",
+    })
+  })
+
   it("falls back review model to build model when unset", () => {
     expect(resolveAgentModelSelection(null, harness)).toEqual({
       model: "anthropic/claude-sonnet-4-5",

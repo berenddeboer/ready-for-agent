@@ -2,8 +2,9 @@
 
 Operator note for running the **Claude Code** Agent Backend through
 [Amazon Bedrock](https://code.claude.com/docs/en/amazon-bedrock) under Ready for
-Agent. This is about readiness and process environment—not a redesign of
-Settings model pickers (see [Model selection (MVP)](#model-selection-mvp)).
+Agent. Covers readiness, process environment, and hybrid model selection
+(catalog aliases, Settings free-text, optional env pins — see
+[Model selection](#model-selection)).
 
 Upstream Claude Code setup (IAM, wizard, inference profiles, troubleshooting)
 lives in Anthropic’s docs:
@@ -72,14 +73,14 @@ Optional Claude/Bedrock-related vars (passed through when set) include pins
 below, `ANTHROPIC_BEDROCK_BASE_URL`, and others documented upstream. The
 harness does not invent a separate AWS secret store for this MVP.
 
-## Optional model pins
+## Optional model pins (complementary)
 
-Settings still offers only Claude Code’s **floating aliases** (`haiku`,
-`sonnet`, `opus`, `fable`). On Bedrock, those aliases resolve via Claude
-Code’s defaults unless you pin them.
+Env pins map **catalog aliases** to Bedrock inference profiles process-wide.
+They are complementary to Settings free-text (below), not the only selection
+path.
 
-Pin aliases to inference profile IDs (or ARNs) with Claude’s env vars, for
-example:
+When you select aliases (`haiku` / `sonnet` / `opus` / `fable`) in Settings, pin
+them with Claude’s env vars if Bedrock defaults are not what you want:
 
 ```bash
 export ANTHROPIC_DEFAULT_OPUS_MODEL='us.anthropic.claude-opus-4-8'
@@ -95,8 +96,10 @@ application inference profile ARNs, GovCloud prefixes, and so on). See
 and [model configuration](https://code.claude.com/docs/en/model-config#pin-models-for-third-party-deployments)
 for the full pin variable list (including Fable).
 
-Keep using **aliases** in Harness Settings for build/review models; pins map
-those aliases when Claude Code runs under Bedrock.
+Prefer **Settings free-text** when you need a specific Bedrock profile ID or
+ARN stored as the build/review Agent Model (multi-repo, visible prefs, no
+re-export). Prefer **pins** when operators stay on aliases and share one
+process-wide mapping.
 
 ## Ready vs Unavailable
 
@@ -122,39 +125,45 @@ the parent shell).
 First-party failures and Bedrock/AWS failures use **distinct** Unavailable
 copy so you know which stack to fix.
 
-## Model selection (MVP)
+## Model selection
 
-**In scope today**
+Hybrid selection for the **Claude Code** Agent Backend (Harness Config and
+per-Repository prefs; same backend-scoped model fields as other backends):
 
-- Ready/Unavailable for Bedrock vs first-party as above.
-- Static Settings catalog: `haiku`, `sonnet`, `opus`, `fable` only.
-- Alias resolution and Bedrock inference profile / ARN pins via Claude env
-  (or Claude’s own settings), not via free-text fields in the harness UI.
+| Path | What you do | Notes |
+| --- | --- | --- |
+| **Catalog alias** | Pick `haiku`, `sonnet`, `opus`, or `fable` | Default UX; first-party and typical Bedrock |
+| **Free-text** | Enter a non-empty Claude-accepted model string (Bedrock inference profile ID, application inference profile ARN, dated model id, etc.) as build and/or review Agent Model | Allowed even when absent from the static catalog; no ARN shape check at Save |
+| **Env pins** | Optionally pin aliases via `ANTHROPIC_DEFAULT_*_MODEL` | Maps aliases process-wide; complementary, not required for free-text |
 
-**Not in Settings yet**
+Resolved model strings are passed through as Claude `--model` on Agent Turns.
+Thinking Level / effort for free-text uses the same Claude effort set as
+aliases (`low` … `max`); unsupported model×effort combinations fail at turn
+time. Free-text is **not** gated on Bedrock readiness or `apiProvider` — the
+same Claude prefs may hold an alias or custom id on first-party or Bedrock.
 
-- Free-text Bedrock inference profile IDs or application inference profile
-  ARNs as the selected Agent Model.
+Empty / whitespace-only model values remain invalid. Invalid ids fail at turn
+time as ordinary Step Run / CLI failures (no Save-time provider validation).
+
+**Out of scope**
+
 - Dynamic listing of Bedrock models from AWS or Claude.
-
-If you need operator-chosen Bedrock model IDs stored in harness Config /
-Repository prefs, that is the follow-up: GitHub issue
-[#800](https://github.com/berenddeboer/ready-for-agent/issues/800) (*Claude
-Code: Bedrock model selection in Settings*). Until then, pin aliases with
-env (or Claude settings) and keep selecting aliases in Settings.
+- Free-text expansion for non-Claude Agent Backends (those stay
+  catalog-constrained unless already free-form by design).
 
 ## Quick checklist
 
 1. `claude` on `PATH`.
 2. `CLAUDE_CODE_USE_BEDROCK=1` (and region) available to the harness process.
 3. Valid AWS credentials for Bedrock in that same process environment.
-4. Optional: `ANTHROPIC_DEFAULT_*_MODEL` pins for aliases you use in Settings.
-5. Settings → Claude Code → Recheck Agent Backend → Ready.
-6. Build/review prefs use catalog aliases; pins handle Bedrock resolution.
+4. Settings → Claude Code → Recheck Agent Backend → Ready.
+5. Build/review prefs: catalog alias **or** free-text Bedrock profile ID/ARN
+   (stored in Harness Config / Repository model prefs).
+6. Optional: `ANTHROPIC_DEFAULT_*_MODEL` pins when you keep using aliases.
 
 ## Related
 
 - Main operator install and Agent Backend requirements: [README.md](../README.md)
 - Claude Code Agent Backend decision: [ADR 0047](adr/0047-claude-code-agent-backend.md)
 - Bedrock readiness MVP epic: [issue #799](https://github.com/berenddeboer/ready-for-agent/issues/799)
-- Model selection follow-up: [issue #800](https://github.com/berenddeboer/ready-for-agent/issues/800)
+- Model selection (hybrid aliases + free-text): [issue #800](https://github.com/berenddeboer/ready-for-agent/issues/800) / [issue #806](https://github.com/berenddeboer/ready-for-agent/issues/806)
