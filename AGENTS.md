@@ -1,5 +1,12 @@
 ## Agent skills
 
+Skill content lives under `.agents/skills/<name>/SKILL.md` — the shared,
+multi-agent source of truth. Claude Code only discovers skills under
+`.claude/skills/`, so every skill directory there is a symlink back into
+`.agents/skills/` (e.g. `.claude/skills/tdd -> ../../.agents/skills/tdd`).
+When adding a new skill under `.agents/skills/`, add the matching symlink:
+`ln -s ../../.agents/skills/<name> .claude/skills/<name>`.
+
 ### Issue tracker
 
 Issues live in GitHub Issues for berenddeboer/ready-for-agent (via `gh`). See `docs/agents/issue-tracker.md`.
