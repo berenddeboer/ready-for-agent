@@ -24,12 +24,12 @@ ready-for-agent, and show up immediately in the harness. Install his
 [Skills for Real Engineers](https://github.com/mattpocock/skills) to
 get started with this kind of workflow.
 
-Steps 1 to 3 are you. Steps 4 and 5 are the harness.
+Steps 1 to 3 is you. Steps 4 and 5 are done by this harness.
 
 <img src="docs/way-of-working.png" alt="Way of Working" width="40%" />
 
-But as long as an issue has the `ready-for-agent` label, this tool can
-work on it.
+Using Matt Pocock's skills is nice, but not required. As long as an
+issue has the `ready-for-agent` label, this tool can work on it.
 
 ## How it works
 
