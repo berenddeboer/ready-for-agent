@@ -1225,11 +1225,17 @@ export const ui = {
   blankSlateFieldsetLegend:
     "px-[0.35rem] font-mono text-[0.62rem] font-bold tracking-[0.16em] uppercase text-ink-faint",
 
+  /**
+   * Label + control on one row (Label: [value]). Label text is the first
+   * child; apply blankSlateFieldControl on the select/input.
+   */
   blankSlateField:
-    "grid gap-[0.35rem] font-display text-[0.85rem] font-semibold text-ink-2",
+    "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-display text-[0.85rem] font-semibold text-ink-2",
 
-  blankSlateFieldControl:
-    "border-[1.5px] border-ink bg-paper px-[0.65rem] py-2 font-mono text-[0.85rem] font-normal text-ink",
+  blankSlateFieldControl: cx(
+    "min-w-0 flex-1 border-[1.5px] border-ink bg-paper px-[0.65rem] py-2",
+    "font-mono text-[0.85rem] font-normal text-ink",
+  ),
 
   blankSlateHint:
     "m-0 font-mono text-[0.62rem] tracking-[0.04em] text-ink-faint",

@@ -267,6 +267,12 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toContain("blankSlateTitle:")
     expect(ui).toContain("blankSlateFieldset:")
     expect(ui).toContain("blankSlateDivider:")
+    // Confirm forge identity: same-line label + control chrome (issue #771).
+    expect(ui).toMatch(/blankSlateField:[\s\S]*?\bflex\b/)
+    expect(ui).toMatch(/blankSlateField:[\s\S]*?items-center/)
+    expect(ui).toContain("blankSlateFieldControl:")
+    expect(ui).toMatch(/blankSlateFieldControl:[\s\S]*?flex-1/)
+    expect(ui).toMatch(/blankSlateFieldControl:[\s\S]*?border-\[1\.5px\]/)
     expect(ui).toContain("platePrimary:")
   })
 })
