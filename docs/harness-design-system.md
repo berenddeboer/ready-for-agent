@@ -77,6 +77,7 @@ Light (`:root`, `[data-theme="light"]`):
 | --- | --- | --- |
 | `--paper` | `#ffffff` | page background |
 | `--panel` | `#ffffff` | card/archive bodies |
+| `--dialog-stage` | `#f3f5f3` | muted stage behind sectioned settings dialogs |
 | `--ink` | `#151515` | text, borders, route line |
 | `--ink-dim` | `#4a4a4a` | secondary text, chip text |
 | `--ink-faint` | `#8b8b8b` | meta text, empty states |
@@ -91,6 +92,7 @@ Dark (`[data-theme="dark"]`):
 | --- | --- |
 | `--paper` | `#3a3f44` |
 | `--panel` | `#2a2f34` |
+| `--dialog-stage` | `#23272b` |
 | `--ink` | `#f2f3f1` |
 | `--ink-dim` | `#c6cac8` |
 | `--ink-faint` | `#7f8583` |
@@ -207,12 +209,13 @@ prototypes.)
   `--line-soft` / `--line-ghost` separators, filter buttons.
 - **Radius: none.** The only circles are roundels and nav dots
   (`border-radius: 50%`).
-- **Shadows: inset only.** Plate bevel
-  (`inset 0 1px 0 var(--plate-hi), inset 0 -2px 0 var(--plate-lo)`), ticket
-  lane bar (`inset 6px 0 0 var(--lane)`), active-filter underline
-  (`inset 0 -3px 0 var(--ink)`). **No offset block shadows and no drop
-  shadows anywhere** — the Ledger `5px 5px 0` / `2px 2px 0` blocks and the
-  menu drop shadow are gone; elevation reads through the hard border.
+- **Shadows: inset only.** Plate bevels are inset-only: mini/primary plates
+  use **top highlight only** (`inset 0 1px 0 var(--plate-hi)`) so wide
+  buttons do not grow a dark bottom bar; mast plates may still use a bottom
+  strip. Ticket lane bar (`inset 6px 0 0 var(--lane)`), active-filter
+  underline (`inset 0 -3px 0 var(--ink)`). **No offset block shadows and no
+  drop shadows anywhere** — the Ledger `5px 5px 0` / `2px 2px 0` blocks and
+  the menu drop shadow are gone; elevation reads through the hard border.
 
 ### 2.8 Spacing
 
@@ -465,8 +468,8 @@ prototype, so this spec governs:
 - Signal kicker tag ("Setup"), display heading "No repositories configured".
 - Add-repo form: mono path input (1.5px ink border, focus = global ink
   outline), "Browse…" mini plate (when available), primary submit plate
-  (solid ink, label cycles Inspect → Inspecting… → Confirm and add →
-  Adding…).
+  (riveted plate twin of mini — same recipe as dialog Save; label cycles
+  Inspect → Inspecting… → Confirm and add → Adding…).
 - "Confirm forge identity" fieldset: 1.5px ink border, mono uppercase legend.
 - Divider: hairline + mono "or"; operator-binary hint with a mono `<code>`
   command chip.
@@ -497,17 +500,33 @@ Shared shell (native `<dialog>`):
   themes.
 - **Header**: mono kicker (signal tag or plain mono eyebrow), display title,
   lede in `--ink-dim`. Guidance/alarm callouts = compact banners (§4.8).
-- **Fields**: label grid; inputs/selects 1.5px ink border, paper fill, mono
-  or display per content; focus = global `:focus-visible`; disabled dims to
-  `--ink-faint`; helper lines mono `--ink-faint`. Checkboxes keep native
-  control, accent-color `--signal`.
-- **Status rows** (backend health): `--panel` inset boxes, mono status text.
-- **Footer**: hairline top border, `--panel` fill, right-aligned — Cancel
-  (stamped mini plate) + Save (solid ink plate, white uppercase mono label,
-  "Saving…" pending).
-- **Session usage table**: borderless; row labels display, values mono
-  tabular; telemetry-state boxes (UNSUPPORTED/MISSING/UNAVAILABLE) as compact
-  guidance banners.
+- **Sectioned settings body** (harness + repo settings — prototype D stamped
+  plates): muted stage behind cards (`--dialog-stage`: `#f3f5f3` light /
+  `#23272b` dark).
+  **Section cards** use 1.5px ink border, `--paper` fill, heavy 2px ink head
+  rule with display title (0.78rem/800 uppercase) + optional mono meta
+  (0.58rem faint). Groups: Agent backend / Models / Concurrency (harness);
+  Forge identity / Options / Agent backend / Models (repo). Full-width stacked
+  field rows — do not side-by-side effort fields.
+- **Fields**: label on paper — display 0.8rem/600 `--ink-dim` (not the same
+  weight/color as the control value). **Controls** (selects / number inputs)
+  are physical plate objects: `--plate` fill, 1.5px ink border, bold
+  `--plate-ink` value text (~0.95rem), inset top highlight (and light bottom
+  plate-lo line); mono for model IDs. Focus = global `:focus-visible`;
+  disabled dims opacity. **Hints** readable body size (~0.82rem display,
+  `--ink-dim`) — not mono microcopy. Checkboxes keep native control,
+  accent-color `--signal`.
+- **Status rows** (backend health): plate-fill inset boxes (ink border, top
+  highlight), mono status text; Recheck actions use mini plates.
+- **Footer**: hairline top border, `--panel` fill, right-aligned — **all
+  buttons** are riveted stamped plates (Cancel + Save share the same plate
+  recipe as Recheck / mini plates; no solid-ink primary). Save pending =
+  label swap ("Saving…"), no spinner. Top inset highlight only on plates —
+  no bottom `-2px` strip (reads as an extra bar under wider buttons in dark
+  mode).
+- **Session usage table**: plain body (not sectioned stage); borderless
+  table; row labels display, values mono tabular; telemetry-state boxes
+  (UNSUPPORTED/MISSING/UNAVAILABLE) as compact guidance banners.
 
 ### 4.10 Menus
 
@@ -581,13 +600,14 @@ underline).
   (radial-gradient 1.6px at top corners), bevel
   (`inset 0 1px 0 hi, inset 0 -2px 0 rgb(0 0 0 / 0.3)`), mono 0.7rem/700
   uppercase; hover `--mast-plate-hover`; active = light plate.
-- **Mini plate** (pagination, banner actions, Browse, Cancel): 2px ink
-  border, `--plate` fill, same rivet/bevel pattern (1.4px dots), mono
-  0.68rem/700 uppercase; hover `--plate-hover`.
-- **Primary plate** (Save, Inspect/Confirm, credential CTAs): solid `--ink`
-  fill, `--paper` uppercase mono label, 2px ink border; hover inverts to
-  `--signal` fill / `#151515` text. Pending state = label swap ("Saving…"),
-  no spinner.
+- **Mini plate** (pagination, banner actions, Browse, Cancel, Recheck): 2px
+  ink border, `--plate` fill, top-left + top-right rivets (1.4px dots),
+  **top inset highlight only** (`inset 0 1px 0 var(--plate-hi)` — no bottom
+  `-2px` strip), mono 0.68rem/700 uppercase; hover `--plate-hover`.
+- **Primary plate** (Save, credential CTAs, other dialog actions): **riveted
+  stamped-plate twin of mini** — same `--plate` fill, rivets, and top-only
+  bevel (not solid-ink fill). Hierarchy is position/label only so Cancel and
+  Save cannot drift. Pending state = label swap ("Saving…"), no spinner.
 
 ### 5.4 Icon buttons (pause/start, reset, refresh, collapse, copy)
 

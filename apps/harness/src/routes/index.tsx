@@ -1888,9 +1888,20 @@ function RepositoryCard({
               Backend.
             </p>
           </div>
-          <div className={ui.dialogBody}>
-            <fieldset className={ui.dialogFieldset}>
-              <legend>Forge identity</legend>
+          <div className={ui.dialogBodySectioned}>
+            <section
+              className={ui.dialogSection}
+              aria-labelledby={`repo-sec-identity-${repository.id}`}
+            >
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id={`repo-sec-identity-${repository.id}`}
+                  className={ui.dialogSectionTitle}
+                >
+                  Forge identity
+                </h3>
+                <span className={ui.dialogSectionMeta}>Path</span>
+              </div>
               <label className={ui.dialogField}>
                 Forge:
                 <select
@@ -1926,336 +1937,385 @@ function RepositoryCard({
                 GitLab identities are verified before Save. Identity changes are
                 blocked after this Repository has any Work Item.
               </span>
-            </fieldset>
-            <label className={ui.dialogCheck}>
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={paused}
-                onChange={(event) => setPaused(event.target.checked)}
-              />
-              Paused
-              <span className={ui.dialogFieldHint}>
-                Skip autonomous work selection
-              </span>
-            </label>
-            <label className={ui.dialogCheck}>
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={autoMerge}
-                onChange={(event) => setAutoMerge(event.target.checked)}
-              />
-              Auto-merge
-              <span className={ui.dialogFieldHint}>
-                Allow clanker merge when risk is low
-              </span>
-            </label>
-            <label className={ui.dialogCheck}>
-              <input
-                type="checkbox"
-                className="size-4"
-                checked={includeAllIssueAuthors}
-                onChange={(event) =>
-                  setIncludeAllIssueAuthors(event.target.checked)
-                }
-              />
-              Include all Issue Authors
-              <span className={ui.dialogFieldHint}>
-                Relevant Issues from every author after Refresh
-              </span>
-            </label>
-            <label className={ui.dialogField}>
-              <span className="flex items-center gap-3">
+            </section>
+
+            <section
+              className={ui.dialogSection}
+              aria-labelledby={`repo-sec-options-${repository.id}`}
+            >
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id={`repo-sec-options-${repository.id}`}
+                  className={ui.dialogSectionTitle}
+                >
+                  Options
+                </h3>
+                <span className={ui.dialogSectionMeta}>Repo preferences</span>
+              </div>
+              <label className={ui.dialogCheck}>
                 <input
                   type="checkbox"
-                  className="size-4"
-                  checked={waitForReadyForReviewChecks}
+                  className={ui.dialogCheckInput}
+                  checked={paused}
+                  onChange={(event) => setPaused(event.target.checked)}
+                />
+                Paused
+                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                  Skip autonomous work selection
+                </span>
+              </label>
+              <label className={ui.dialogCheck}>
+                <input
+                  type="checkbox"
+                  className={ui.dialogCheckInput}
+                  checked={autoMerge}
+                  onChange={(event) => setAutoMerge(event.target.checked)}
+                />
+                Auto-merge
+                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                  Allow clanker merge when risk is low
+                </span>
+              </label>
+              <label className={ui.dialogCheck}>
+                <input
+                  type="checkbox"
+                  className={ui.dialogCheckInput}
+                  checked={includeAllIssueAuthors}
                   onChange={(event) =>
-                    setWaitForReadyForReviewChecks(event.target.checked)
+                    setIncludeAllIssueAuthors(event.target.checked)
                   }
                 />
-                Wait for checks to start after ready for review
-              </span>
-              <span className={ui.dialogFieldHint}>
-                Wait up to 90 seconds for workflows that start after a PR is
-                marked ready for review. If this repository has no such
-                workflows, turn off this setting to skip the wait.
-              </span>
-            </label>
+                Include all Issue Authors
+                <span className={cx(ui.dialogFieldHint, ui.dialogCheckHint)}>
+                  Relevant Issues from every author after Refresh
+                </span>
+              </label>
+              <label className={ui.dialogField}>
+                <span className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    className={ui.dialogCheckInput}
+                    checked={waitForReadyForReviewChecks}
+                    onChange={(event) =>
+                      setWaitForReadyForReviewChecks(event.target.checked)
+                    }
+                  />
+                  Wait for checks to start after ready for review
+                </span>
+                <span className={ui.dialogFieldHint}>
+                  Wait up to 90 seconds for workflows that start after a PR is
+                  marked ready for review. If this repository has no such
+                  workflows, turn off this setting to skip the wait.
+                </span>
+              </label>
+            </section>
 
-            <label className={ui.dialogField}>
-              Agent Backend
-              <select
-                className={ui.dialogInput}
-                name="selectedAgentBackend"
-                value={selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE}
-                disabled={
-                  backendChangeBlocked ||
-                  updateSettings.isPending ||
-                  agentBackends.isPending
-                }
-                onChange={(event) => {
-                  applyAgentBackendSelection(event.target.value)
-                }}
-              >
-                <option value={HARNESS_DEFAULT_BACKEND_VALUE}>
-                  Harness default ({harnessDefaultBackendLabel})
-                </option>
-                {selectedAgentBackend !== null &&
-                  !(agentBackends.data ?? []).some(
-                    (backend) => backend.id === selectedAgentBackend,
-                  ) && (
-                    <option value={selectedAgentBackend}>
-                      {selectedAgentBackend}
-                    </option>
-                  )}
-                {(agentBackends.data ?? []).map((backend) => (
-                  <option key={backend.id} value={backend.id}>
-                    {backend.label}
+            <section
+              className={ui.dialogSection}
+              aria-labelledby={`repo-sec-agent-${repository.id}`}
+            >
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id={`repo-sec-agent-${repository.id}`}
+                  className={ui.dialogSectionTitle}
+                >
+                  Agent backend
+                </h3>
+                <span className={ui.dialogSectionMeta}>Override</span>
+              </div>
+              <label className={ui.dialogField}>
+                Agent Backend
+                <select
+                  className={ui.dialogInput}
+                  name="selectedAgentBackend"
+                  value={selectedAgentBackend ?? HARNESS_DEFAULT_BACKEND_VALUE}
+                  disabled={
+                    backendChangeBlocked ||
+                    updateSettings.isPending ||
+                    agentBackends.isPending
+                  }
+                  onChange={(event) => {
+                    applyAgentBackendSelection(event.target.value)
+                  }}
+                >
+                  <option value={HARNESS_DEFAULT_BACKEND_VALUE}>
+                    Harness default ({harnessDefaultBackendLabel})
                   </option>
-                ))}
-              </select>
-              <span className={ui.dialogFieldHint}>
-                {backendChangeBlocked
-                  ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
-                      repository.blockingUnfinishedWorkItemCount === 1
-                        ? ""
-                        : "s"
-                    } on this Repository — finish or abandon them before changing Agent Backend.`
-                  : "Harness default inherits the global selection. Override activates on Save when the effective backend changes. Model fields in this dialog are stashed per backend while open; empty means inherit harness for that effective backend."}
-              </span>
-            </label>
+                  {selectedAgentBackend !== null &&
+                    !(agentBackends.data ?? []).some(
+                      (backend) => backend.id === selectedAgentBackend,
+                    ) && (
+                      <option value={selectedAgentBackend}>
+                        {selectedAgentBackend}
+                      </option>
+                    )}
+                  {(agentBackends.data ?? []).map((backend) => (
+                    <option key={backend.id} value={backend.id}>
+                      {backend.label}
+                    </option>
+                  ))}
+                </select>
+                <span className={ui.dialogFieldHint}>
+                  {backendChangeBlocked
+                    ? `${repository.blockingUnfinishedWorkItemCount} unfinished Work Item${
+                        repository.blockingUnfinishedWorkItemCount === 1
+                          ? ""
+                          : "s"
+                      } on this Repository — finish or abandon them before changing Agent Backend.`
+                    : "Harness default inherits the global selection. Override activates on Save when the effective backend changes. Model fields in this dialog are stashed per backend while open; empty means inherit harness for that effective backend."}
+                </span>
+              </label>
 
-            {agentBackends.isError && (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Error"
-                role="alert"
-              >
-                Agent Backends list could not be loaded. You can still inherit
-                the harness default; override options may be incomplete.
-              </Banner>
-            )}
+              {agentBackends.isError && (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  Agent Backends list could not be loaded. You can still inherit
+                  the harness default; override options may be incomplete.
+                </Banner>
+              )}
 
-            {usesPreviewCatalog && previewError !== null && (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Error"
-                role="alert"
-              >
-                Preview failed: {previewError}. Model fields stay disabled until
-                preview succeeds.
-                {backendDraftChanging
-                  ? " Changing the effective backend cannot be saved until preview succeeds."
-                  : " Non-model settings can still be saved."}
-              </Banner>
-            )}
+              {usesPreviewCatalog && previewError !== null && (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  Preview failed: {previewError}. Model fields stay disabled
+                  until preview succeeds.
+                  {backendDraftChanging
+                    ? " Changing the effective backend cannot be saved until preview succeeds."
+                    : " Non-model settings can still be saved."}
+                </Banner>
+              )}
+            </section>
 
-            {modelsLoading ? (
-              <p className={ui.dialogLoading}>Loading models...</p>
-            ) : !usesPreviewCatalog && models.isError ? (
-              <Banner
-                className={ui.bannerCompact}
-                tone="alarm"
-                tag="Error"
-                role="alert"
-              >
-                Models could not be loaded.
-              </Banner>
-            ) : (
-              <>
-                <label className={ui.dialogField}>
-                  Build model
-                  <select
-                    className={cx(ui.dialogInput, ui.dialogInputMono)}
-                    value={defaultModel}
-                    disabled={modelsDisabled}
-                    onChange={(event) => {
-                      const nextModel = event.target.value
-                      setDefaultModel(nextModel)
-                      const sourceModel =
-                        nextModel.length > 0 ? nextModel : harnessBuildForSource
-                      const nextVariants = variantsForModel(
-                        catalogModels,
-                        sourceModel,
-                      )
-                      setDefaultVariant((current) =>
-                        reconcileVariantForModel(current, nextVariants),
-                      )
-                      if (reviewModel.length === 0) {
-                        const reviewSource =
+            <section
+              className={ui.dialogSection}
+              aria-labelledby={`repo-sec-models-${repository.id}`}
+            >
+              <div className={ui.dialogSectionHead}>
+                <h3
+                  id={`repo-sec-models-${repository.id}`}
+                  className={ui.dialogSectionTitle}
+                >
+                  Models
+                </h3>
+                <span className={ui.dialogSectionMeta}>Build · Review</span>
+              </div>
+
+              {modelsLoading ? (
+                <p className={ui.dialogLoading}>Loading models...</p>
+              ) : !usesPreviewCatalog && models.isError ? (
+                <Banner
+                  className={ui.bannerCompact}
+                  tone="alarm"
+                  tag="Error"
+                  role="alert"
+                >
+                  Models could not be loaded.
+                </Banner>
+              ) : (
+                <>
+                  <label className={ui.dialogField}>
+                    Build model
+                    <select
+                      className={cx(ui.dialogInput, ui.dialogInputMono)}
+                      value={defaultModel}
+                      disabled={modelsDisabled}
+                      onChange={(event) => {
+                        const nextModel = event.target.value
+                        setDefaultModel(nextModel)
+                        const sourceModel =
                           nextModel.length > 0
                             ? nextModel
-                            : harnessReviewForSource.length > 0
-                              ? harnessReviewForSource
-                              : harnessBuildForSource
+                            : harnessBuildForSource
+                        const nextVariants = variantsForModel(
+                          catalogModels,
+                          sourceModel,
+                        )
+                        setDefaultVariant((current) =>
+                          reconcileVariantForModel(current, nextVariants),
+                        )
+                        if (reviewModel.length === 0) {
+                          const reviewSource =
+                            nextModel.length > 0
+                              ? nextModel
+                              : harnessReviewForSource.length > 0
+                                ? harnessReviewForSource
+                                : harnessBuildForSource
+                          setReviewVariant((current) =>
+                            reconcileVariantForModel(
+                              current,
+                              variantsForModel(catalogModels, reviewSource),
+                            ),
+                          )
+                        }
+                      }}
+                    >
+                      <option value="">
+                        Harness default ({harnessDefaultModel})
+                      </option>
+                      {hasUnavailableBuildModel && (
+                        <option value={defaultModel}>
+                          {defaultModel} (not in Agent Model catalog)
+                        </option>
+                      )}
+                      {(catalogModels ?? []).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {buildVariantSourceModel.length > 0 &&
+                  buildVariantSourceUnavailable ? (
+                    <Banner
+                      className={ui.bannerCompact}
+                      tone="alarm"
+                      tag="Error"
+                      role="alert"
+                    >
+                      Build effort (thinking) override is unavailable — the
+                      selected model is not in the Agent Model catalog. Use
+                      harness default or pick another model.
+                    </Banner>
+                  ) : buildVariantSourceModel.length > 0 &&
+                    buildVariants.length === 0 ? (
+                    <p className={ui.dialogNote}>
+                      Build effort (thinking) override is unavailable — this
+                      model has no effort (thinking) options. Use harness
+                      default or pick another model.
+                    </p>
+                  ) : (
+                    <label className={ui.dialogField}>
+                      Build effort (thinking)
+                      <select
+                        className={ui.dialogInput}
+                        value={defaultThinkingLevel}
+                        onChange={(event) =>
+                          setDefaultVariant(event.target.value)
+                        }
+                        disabled={
+                          modelsDisabled ||
+                          (buildVariantSourceModel.length > 0 &&
+                            buildVariants.length === 0)
+                        }
+                      >
+                        <option value="">
+                          Harness default ({harnessDefaultVariant})
+                        </option>
+                        {hasCustomBuildVariant && (
+                          <option value={defaultThinkingLevel}>
+                            {formatVariantLabel(defaultThinkingLevel)}
+                          </option>
+                        )}
+                        {buildVariants.map((variant) => (
+                          <option key={variant} value={variant}>
+                            {formatVariantLabel(variant)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className={ui.dialogField}>
+                    Review model
+                    <select
+                      className={cx(ui.dialogInput, ui.dialogInputMono)}
+                      value={reviewModel}
+                      disabled={modelsDisabled}
+                      onChange={(event) => {
+                        const nextModel = event.target.value
+                        setReviewModel(nextModel)
+                        const sourceModel =
+                          nextModel.length > 0
+                            ? nextModel
+                            : defaultModel.length > 0
+                              ? defaultModel
+                              : harnessReviewForSource.length > 0
+                                ? harnessReviewForSource
+                                : harnessBuildForSource
                         setReviewVariant((current) =>
                           reconcileVariantForModel(
                             current,
-                            variantsForModel(catalogModels, reviewSource),
+                            variantsForModel(catalogModels, sourceModel),
                           ),
                         )
-                      }
-                    }}
-                  >
-                    <option value="">
-                      Harness default ({harnessDefaultModel})
-                    </option>
-                    {hasUnavailableBuildModel && (
-                      <option value={defaultModel}>
-                        {defaultModel} (not in Agent Model catalog)
-                      </option>
-                    )}
-                    {(catalogModels ?? []).map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {buildVariantSourceModel.length > 0 &&
-                buildVariantSourceUnavailable ? (
-                  <Banner
-                    className={ui.bannerCompact}
-                    tone="alarm"
-                    tag="Error"
-                    role="alert"
-                  >
-                    Build effort (thinking) override is unavailable — the
-                    selected model is not in the Agent Model catalog. Use
-                    harness default or pick another model.
-                  </Banner>
-                ) : buildVariantSourceModel.length > 0 &&
-                  buildVariants.length === 0 ? (
-                  <p className={ui.dialogNote}>
-                    Build effort (thinking) override is unavailable — this model
-                    has no effort (thinking) options. Use harness default or
-                    pick another model.
-                  </p>
-                ) : (
-                  <label className={ui.dialogField}>
-                    Build effort (thinking)
-                    <select
-                      className={ui.dialogInput}
-                      value={defaultThinkingLevel}
-                      onChange={(event) =>
-                        setDefaultVariant(event.target.value)
-                      }
-                      disabled={
-                        modelsDisabled ||
-                        (buildVariantSourceModel.length > 0 &&
-                          buildVariants.length === 0)
-                      }
+                      }}
                     >
                       <option value="">
-                        Harness default ({harnessDefaultVariant})
+                        Harness default ({harnessReviewModel})
                       </option>
-                      {hasCustomBuildVariant && (
-                        <option value={defaultThinkingLevel}>
-                          {formatVariantLabel(defaultThinkingLevel)}
+                      {hasUnavailableReviewModel && (
+                        <option value={reviewModel}>
+                          {reviewModel} (not in Agent Model catalog)
                         </option>
                       )}
-                      {buildVariants.map((variant) => (
-                        <option key={variant} value={variant}>
-                          {formatVariantLabel(variant)}
+                      {(catalogModels ?? []).map((model) => (
+                        <option key={`review-${model.id}`} value={model.id}>
+                          {model.id}
                         </option>
                       ))}
                     </select>
                   </label>
-                )}
-                <label className={ui.dialogField}>
-                  Review model
-                  <select
-                    className={cx(ui.dialogInput, ui.dialogInputMono)}
-                    value={reviewModel}
-                    disabled={modelsDisabled}
-                    onChange={(event) => {
-                      const nextModel = event.target.value
-                      setReviewModel(nextModel)
-                      const sourceModel =
-                        nextModel.length > 0
-                          ? nextModel
-                          : defaultModel.length > 0
-                            ? defaultModel
-                            : harnessReviewForSource.length > 0
-                              ? harnessReviewForSource
-                              : harnessBuildForSource
-                      setReviewVariant((current) =>
-                        reconcileVariantForModel(
-                          current,
-                          variantsForModel(catalogModels, sourceModel),
-                        ),
-                      )
-                    }}
-                  >
-                    <option value="">
-                      Harness default ({harnessReviewModel})
-                    </option>
-                    {hasUnavailableReviewModel && (
-                      <option value={reviewModel}>
-                        {reviewModel} (not in Agent Model catalog)
-                      </option>
-                    )}
-                    {(catalogModels ?? []).map((model) => (
-                      <option key={`review-${model.id}`} value={model.id}>
-                        {model.id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {reviewThinkingLevelSourceModel.length > 0 &&
-                reviewThinkingLevelSourceUnavailable ? (
-                  <Banner
-                    className={ui.bannerCompact}
-                    tone="alarm"
-                    tag="Error"
-                    role="alert"
-                  >
-                    Review effort (thinking) override is unavailable — the
-                    selected model is not in the Agent Model catalog. Use
-                    harness default or pick another model.
-                  </Banner>
-                ) : reviewThinkingLevelSourceModel.length > 0 &&
-                  reviewThinkingLevels.length === 0 ? (
-                  <p className={ui.dialogNote}>
-                    Review effort (thinking) override is unavailable — this
-                    model has no effort (thinking) options. Use harness default
-                    or pick another model.
-                  </p>
-                ) : (
-                  <label className={ui.dialogField}>
-                    Review effort (thinking)
-                    <select
-                      className={ui.dialogInput}
-                      value={reviewThinkingLevel}
-                      onChange={(event) => setReviewVariant(event.target.value)}
-                      disabled={
-                        modelsDisabled ||
-                        (reviewThinkingLevelSourceModel.length > 0 &&
-                          reviewThinkingLevels.length === 0)
-                      }
+                  {reviewThinkingLevelSourceModel.length > 0 &&
+                  reviewThinkingLevelSourceUnavailable ? (
+                    <Banner
+                      className={ui.bannerCompact}
+                      tone="alarm"
+                      tag="Error"
+                      role="alert"
                     >
-                      <option value="">
-                        Harness default ({harnessReviewVariant})
-                      </option>
-                      {hasCustomReviewVariant && (
-                        <option value={reviewThinkingLevel}>
-                          {formatVariantLabel(reviewThinkingLevel)}
+                      Review effort (thinking) override is unavailable — the
+                      selected model is not in the Agent Model catalog. Use
+                      harness default or pick another model.
+                    </Banner>
+                  ) : reviewThinkingLevelSourceModel.length > 0 &&
+                    reviewThinkingLevels.length === 0 ? (
+                    <p className={ui.dialogNote}>
+                      Review effort (thinking) override is unavailable — this
+                      model has no effort (thinking) options. Use harness
+                      default or pick another model.
+                    </p>
+                  ) : (
+                    <label className={ui.dialogField}>
+                      Review effort (thinking)
+                      <select
+                        className={ui.dialogInput}
+                        value={reviewThinkingLevel}
+                        onChange={(event) =>
+                          setReviewVariant(event.target.value)
+                        }
+                        disabled={
+                          modelsDisabled ||
+                          (reviewThinkingLevelSourceModel.length > 0 &&
+                            reviewThinkingLevels.length === 0)
+                        }
+                      >
+                        <option value="">
+                          Harness default ({harnessReviewVariant})
                         </option>
-                      )}
-                      {reviewThinkingLevels.map((variant) => (
-                        <option key={`review-${variant}`} value={variant}>
-                          {formatVariantLabel(variant)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </>
-            )}
+                        {hasCustomReviewVariant && (
+                          <option value={reviewThinkingLevel}>
+                            {formatVariantLabel(reviewThinkingLevel)}
+                          </option>
+                        )}
+                        {reviewThinkingLevels.map((variant) => (
+                          <option key={`review-${variant}`} value={variant}>
+                            {formatVariantLabel(variant)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </>
+              )}
+            </section>
+
             {updateSettings.isError && (
               <Banner
                 className={ui.bannerCompact}

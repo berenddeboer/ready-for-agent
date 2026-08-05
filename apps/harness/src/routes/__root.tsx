@@ -859,7 +859,7 @@ function SettingsChrome() {
               )}
           </div>
 
-          <div className={ui.dialogBody}>
+          <div className={ui.dialogBodySectioned}>
             {config.isPending || modelsLoading ? (
               <p className={ui.dialogLoading}>Loading settings...</p>
             ) : config.isError ||
@@ -875,329 +875,393 @@ function SettingsChrome() {
               </Banner>
             ) : (
               <>
-                <label className={ui.dialogField}>
-                  Default Agent Backend
-                  <select
-                    name="selectedAgentBackend"
-                    value={selectedAgentBackend}
-                    disabled={backendChangeBlocked || updateConfig.isPending}
-                    onChange={(event) => {
-                      void applyAgentBackendSelection(event.target.value)
-                    }}
-                  >
-                    {(backendStatus.data?.agentBackends ?? []).map(
-                      (backend) => (
-                        <option key={backend.id} value={backend.id}>
-                          {backend.label}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                  <span className={ui.dialogFieldHint}>
-                    {backendChangeBlocked
-                      ? `${blockingUnfinishedWorkItemCount} unfinished Work Item${
-                          blockingUnfinishedWorkItemCount === 1 ? "" : "s"
-                        } on Repositories inheriting the harness default — finish or abandon them before changing the default Agent Backend.${
-                          unfinishedWorkItemCount >
-                          blockingUnfinishedWorkItemCount
-                            ? ` (${unfinishedWorkItemCount} unfinished fleet-wide.)`
-                            : ""
-                        }`
-                      : "Activates immediately on Save when no inheriting Work Items are unfinished. Model prefs are remembered per backend. Repository overrides are independent."}
-                  </span>
-                </label>
-
-                <div className={ui.dialogStatusBlock}>
-                  <div className={ui.dialogStatusHead}>
-                    <p className={ui.dialogStatusLabel}>
-                      Active Agent Backends
-                    </p>
-                    <button
-                      type="button"
-                      className={ui.plateMini}
-                      disabled={recheckBusy || backendChanging}
-                      onClick={() => {
-                        void recheckAllBackends()
+                <section
+                  className={ui.dialogSection}
+                  aria-labelledby="settings-sec-agent"
+                >
+                  <div className={ui.dialogSectionHead}>
+                    <h3
+                      id="settings-sec-agent"
+                      className={ui.dialogSectionTitle}
+                    >
+                      Agent backend
+                    </h3>
+                    <span className={ui.dialogSectionMeta}>
+                      Session default
+                    </span>
+                  </div>
+                  <label className={ui.dialogField}>
+                    Default Agent Backend
+                    <select
+                      className={ui.dialogInput}
+                      name="selectedAgentBackend"
+                      value={selectedAgentBackend}
+                      disabled={backendChangeBlocked || updateConfig.isPending}
+                      onChange={(event) => {
+                        void applyAgentBackendSelection(event.target.value)
                       }}
                     >
-                      {recheckAllPending ? "Rechecking all…" : "Recheck all"}
-                    </button>
-                  </div>
-                  {(statuses.length > 0
-                    ? statuses
-                    : defaultStatus !== undefined
-                      ? [defaultStatus as AgentBackendStatusRow]
-                      : []
-                  ).map((row) => {
-                    const isDefault = row.backend.id === savedAgentBackend
-                    const rowRechecking = recheckingBackendId === row.backend.id
-                    return (
-                      <div key={row.backend.id} className={ui.dialogStatusRow}>
-                        <p className="m-0">
-                          <strong>{row.backend.label}</strong>
-                          {isDefault ? " · Default" : null}
-                          {row.kind === "READY" ? " · Ready" : " · Unavailable"}
-                          {backendChanging &&
-                          row.backend.id === selectedAgentBackend
-                            ? " · Previewing selection"
-                            : null}
-                          {row.kind === "UNAVAILABLE" && row.reason !== null
-                            ? ` — ${row.reason}`
-                            : null}
-                        </p>
-                        <button
-                          type="button"
-                          className={ui.plateMini}
-                          disabled={recheckBusy || backendChanging}
-                          onClick={() => {
-                            setRecheckAllFailures([])
-                            recheckBackend.mutate(row.backend.id)
-                          }}
+                      {(backendStatus.data?.agentBackends ?? []).map(
+                        (backend) => (
+                          <option key={backend.id} value={backend.id}>
+                            {backend.label}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                    <span className={ui.dialogFieldHint}>
+                      {backendChangeBlocked
+                        ? `${blockingUnfinishedWorkItemCount} unfinished Work Item${
+                            blockingUnfinishedWorkItemCount === 1 ? "" : "s"
+                          } on Repositories inheriting the harness default — finish or abandon them before changing the default Agent Backend.${
+                            unfinishedWorkItemCount >
+                            blockingUnfinishedWorkItemCount
+                              ? ` (${unfinishedWorkItemCount} unfinished fleet-wide.)`
+                              : ""
+                          }`
+                        : "Activates immediately on Save when no inheriting Work Items are unfinished. Model prefs are remembered per backend. Repository overrides are independent."}
+                    </span>
+                  </label>
+
+                  <div className={ui.dialogStatusBlock}>
+                    <div className={ui.dialogStatusHead}>
+                      <p className={ui.dialogStatusLabel}>
+                        Active Agent Backends
+                      </p>
+                      <button
+                        type="button"
+                        className={ui.plateMini}
+                        disabled={recheckBusy || backendChanging}
+                        onClick={() => {
+                          void recheckAllBackends()
+                        }}
+                      >
+                        {recheckAllPending ? "Rechecking all…" : "Recheck all"}
+                      </button>
+                    </div>
+                    {(statuses.length > 0
+                      ? statuses
+                      : defaultStatus !== undefined
+                        ? [defaultStatus as AgentBackendStatusRow]
+                        : []
+                    ).map((row) => {
+                      const isDefault = row.backend.id === savedAgentBackend
+                      const rowRechecking =
+                        recheckingBackendId === row.backend.id
+                      return (
+                        <div
+                          key={row.backend.id}
+                          className={ui.dialogStatusRow}
                         >
-                          {rowRechecking
-                            ? "Rechecking…"
-                            : `Recheck ${row.backend.label}`}
-                        </button>
-                      </div>
-                    )
-                  })}
-                  {statuses.length === 0 && defaultStatus === undefined && (
-                    <p className={ui.dialogLoading}>
-                      No Active Agent Backend status yet.
-                    </p>
+                          <p className="m-0">
+                            <strong>{row.backend.label}</strong>
+                            {isDefault ? " · Default" : null}
+                            {row.kind === "READY"
+                              ? " · Ready"
+                              : " · Unavailable"}
+                            {backendChanging &&
+                            row.backend.id === selectedAgentBackend
+                              ? " · Previewing selection"
+                              : null}
+                            {row.kind === "UNAVAILABLE" && row.reason !== null
+                              ? ` — ${row.reason}`
+                              : null}
+                          </p>
+                          <button
+                            type="button"
+                            className={ui.plateMini}
+                            disabled={recheckBusy || backendChanging}
+                            onClick={() => {
+                              setRecheckAllFailures([])
+                              recheckBackend.mutate(row.backend.id)
+                            }}
+                          >
+                            {rowRechecking
+                              ? "Rechecking…"
+                              : `Recheck ${row.backend.label}`}
+                          </button>
+                        </div>
+                      )
+                    })}
+                    {statuses.length === 0 && defaultStatus === undefined && (
+                      <p className={ui.dialogLoading}>
+                        No Active Agent Backend status yet.
+                      </p>
+                    )}
+                  </div>
+
+                  {backendChanging && previewError !== null && (
+                    <Banner
+                      className={ui.bannerCompact}
+                      tone="alarm"
+                      tag="Preview"
+                      role="alert"
+                    >
+                      Preview failed: {previewError}. Model fields stay disabled
+                      until preview succeeds. Active backend is unchanged until
+                      Save.
+                    </Banner>
                   )}
-                </div>
+                </section>
 
-                {backendChanging && previewError !== null && (
-                  <Banner
-                    className={ui.bannerCompact}
-                    tone="alarm"
-                    tag="Preview"
-                    role="alert"
-                  >
-                    Preview failed: {previewError}. Model fields stay disabled
-                    until preview succeeds. Active backend is unchanged until
-                    Save.
-                  </Banner>
-                )}
+                <section
+                  className={ui.dialogSection}
+                  aria-labelledby="settings-sec-models"
+                >
+                  <div className={ui.dialogSectionHead}>
+                    <h3
+                      id="settings-sec-models"
+                      className={ui.dialogSectionTitle}
+                    >
+                      Models
+                    </h3>
+                    <span className={ui.dialogSectionMeta}>Build · Review</span>
+                  </div>
 
-                <label className={cx(ui.dialogField, ui.dialogFieldMono)}>
-                  Build model
-                  <select
-                    name="defaultModel"
-                    value={defaultModel}
-                    onChange={(event) => {
-                      const nextModel = event.target.value
-                      setDefaultModel(nextModel)
-                      const nextVariants = variantsForModel(
-                        catalogModels,
-                        nextModel,
-                      )
-                      setDefaultVariant((current) =>
-                        reconcileVariantForModel(current, nextVariants),
-                      )
-                      if (reviewModel.length === 0) {
-                        setReviewVariant((current) =>
+                  <label className={cx(ui.dialogField, ui.dialogFieldMono)}>
+                    Build model
+                    <select
+                      className={cx(ui.dialogInput, ui.dialogInputMono)}
+                      name="defaultModel"
+                      value={defaultModel}
+                      onChange={(event) => {
+                        const nextModel = event.target.value
+                        setDefaultModel(nextModel)
+                        const nextVariants = variantsForModel(
+                          catalogModels,
+                          nextModel,
+                        )
+                        setDefaultVariant((current) =>
                           reconcileVariantForModel(current, nextVariants),
                         )
-                      }
-                    }}
-                    required={!backendChanging}
-                    disabled={modelsDisabled}
-                  >
-                    {defaultModel.length === 0 && (
-                      <option value="">
-                        {previewPending
-                          ? "Loading catalog…"
-                          : "Select a build model"}
-                      </option>
-                    )}
-                    {hasUnavailableBuildModel && (
-                      <option value={defaultModel}>
-                        {defaultModel} (not in Agent Model catalog)
-                      </option>
-                    )}
-                    {(catalogModels ?? []).map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.id}
-                      </option>
-                    ))}
-                  </select>
-                  <span className={ui.dialogFieldHint}>
-                    Used for implement and other build steps.
-                  </span>
-                </label>
-
-                {defaultModel.length > 0 && hasUnavailableBuildModel ? (
-                  <Banner
-                    className={ui.bannerCompact}
-                    tone="alarm"
-                    tag="Model"
-                    role="alert"
-                  >
-                    Build effort (thinking) is unavailable — the selected model
-                    is not in the Agent Model catalog. Choose another build
-                    model.
-                  </Banner>
-                ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
-                  <p className={ui.dialogNote}>
-                    Build effort (thinking) is unavailable — this model has no
-                    effort (thinking) options.
-                  </p>
-                ) : (
-                  <label className={ui.dialogField}>
-                    Build effort (thinking)
-                    <select
-                      name="defaultThinkingLevel"
-                      value={defaultThinkingLevel}
-                      onChange={(event) =>
-                        setDefaultVariant(event.target.value)
-                      }
-                      disabled={modelsDisabled || defaultModel.length === 0}
+                        if (reviewModel.length === 0) {
+                          setReviewVariant((current) =>
+                            reconcileVariantForModel(current, nextVariants),
+                          )
+                        }
+                      }}
+                      required={!backendChanging}
+                      disabled={modelsDisabled}
                     >
-                      <option value="">
-                        {buildVariants.length === 0
-                          ? "Model default (no effort (thinking) options)"
-                          : "Model default"}
-                      </option>
-                      {hasCustomBuildVariant && (
-                        <option value={defaultThinkingLevel}>
-                          {formatVariantLabel(defaultThinkingLevel)}
+                      {defaultModel.length === 0 && (
+                        <option value="">
+                          {previewPending
+                            ? "Loading catalog…"
+                            : "Select a build model"}
                         </option>
                       )}
-                      {buildVariants.map((variant) => (
-                        <option key={variant} value={variant}>
-                          {formatVariantLabel(variant)}
+                      {hasUnavailableBuildModel && (
+                        <option value={defaultModel}>
+                          {defaultModel} (not in Agent Model catalog)
+                        </option>
+                      )}
+                      {(catalogModels ?? []).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.id}
                         </option>
                       ))}
                     </select>
                     <span className={ui.dialogFieldHint}>
-                      Optional effort (thinking) for this model. Options come
-                      from the selected model.
+                      Used for implement and other build steps.
                     </span>
                   </label>
-                )}
 
-                <label className={cx(ui.dialogField, ui.dialogFieldMono)}>
-                  Review model
-                  <select
-                    name="reviewModel"
-                    value={reviewModel}
-                    disabled={modelsDisabled}
-                    onChange={(event) => {
-                      const nextModel = event.target.value
-                      setReviewModel(nextModel)
-                      const nextVariants = variantsForModel(
-                        catalogModels,
-                        nextModel.length > 0 ? nextModel : defaultModel,
-                      )
-                      setReviewVariant((current) =>
-                        reconcileVariantForModel(current, nextVariants),
-                      )
-                    }}
-                  >
-                    <option value="">Same as build model</option>
-                    {hasUnavailableReviewModel && (
-                      <option value={reviewModel}>
-                        {reviewModel} (not in Agent Model catalog)
-                      </option>
-                    )}
-                    {(catalogModels ?? []).map((model) => (
-                      <option key={`review-${model.id}`} value={model.id}>
-                        {model.id}
-                      </option>
-                    ))}
-                  </select>
-                  <span className={ui.dialogFieldHint}>
-                    Used only for the review step. Empty uses the build model.
-                  </span>
-                </label>
-
-                {reviewThinkingLevelSourceModel.length > 0 &&
-                ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
-                  (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
-                  <Banner
-                    className={ui.bannerCompact}
-                    tone="alarm"
-                    tag="Model"
-                    role="alert"
-                  >
-                    Review effort (thinking) is unavailable — the selected model
-                    is not in the Agent Model catalog. Choose another model or
-                    use the build model.
-                  </Banner>
-                ) : reviewThinkingLevelSourceModel.length > 0 &&
-                  reviewThinkingLevels.length === 0 ? (
-                  <p className={ui.dialogNote}>
-                    Review effort (thinking) is unavailable — this model has no
-                    effort (thinking) options.
-                  </p>
-                ) : (
-                  <label className={ui.dialogField}>
-                    Review effort (thinking)
-                    <select
-                      name="reviewThinkingLevel"
-                      value={reviewThinkingLevel}
-                      onChange={(event) => setReviewVariant(event.target.value)}
-                      disabled={
-                        modelsDisabled ||
-                        reviewThinkingLevelSourceModel.length === 0 ||
-                        reviewThinkingLevels.length === 0
-                      }
+                  {defaultModel.length > 0 && hasUnavailableBuildModel ? (
+                    <Banner
+                      className={ui.bannerCompact}
+                      tone="alarm"
+                      tag="Model"
+                      role="alert"
                     >
-                      <option value="">Same as build effort (thinking)</option>
-                      {hasCustomReviewVariant && (
-                        <option value={reviewThinkingLevel}>
-                          {formatVariantLabel(reviewThinkingLevel)}
+                      Build effort (thinking) is unavailable — the selected
+                      model is not in the Agent Model catalog. Choose another
+                      build model.
+                    </Banner>
+                  ) : defaultModel.length > 0 && buildVariants.length === 0 ? (
+                    <p className={ui.dialogNote}>
+                      Build effort (thinking) is unavailable — this model has no
+                      effort (thinking) options.
+                    </p>
+                  ) : (
+                    <label className={ui.dialogField}>
+                      Build effort (thinking)
+                      <select
+                        className={ui.dialogInput}
+                        name="defaultThinkingLevel"
+                        value={defaultThinkingLevel}
+                        onChange={(event) =>
+                          setDefaultVariant(event.target.value)
+                        }
+                        disabled={modelsDisabled || defaultModel.length === 0}
+                      >
+                        <option value="">
+                          {buildVariants.length === 0
+                            ? "Model default (no effort (thinking) options)"
+                            : "Model default"}
+                        </option>
+                        {hasCustomBuildVariant && (
+                          <option value={defaultThinkingLevel}>
+                            {formatVariantLabel(defaultThinkingLevel)}
+                          </option>
+                        )}
+                        {buildVariants.map((variant) => (
+                          <option key={variant} value={variant}>
+                            {formatVariantLabel(variant)}
+                          </option>
+                        ))}
+                      </select>
+                      <span className={ui.dialogFieldHint}>
+                        Optional effort (thinking) for this model. Options come
+                        from the selected model.
+                      </span>
+                    </label>
+                  )}
+
+                  <label className={cx(ui.dialogField, ui.dialogFieldMono)}>
+                    Review model
+                    <select
+                      className={cx(ui.dialogInput, ui.dialogInputMono)}
+                      name="reviewModel"
+                      value={reviewModel}
+                      disabled={modelsDisabled}
+                      onChange={(event) => {
+                        const nextModel = event.target.value
+                        setReviewModel(nextModel)
+                        const nextVariants = variantsForModel(
+                          catalogModels,
+                          nextModel.length > 0 ? nextModel : defaultModel,
+                        )
+                        setReviewVariant((current) =>
+                          reconcileVariantForModel(current, nextVariants),
+                        )
+                      }}
+                    >
+                      <option value="">Same as build model</option>
+                      {hasUnavailableReviewModel && (
+                        <option value={reviewModel}>
+                          {reviewModel} (not in Agent Model catalog)
                         </option>
                       )}
-                      {reviewThinkingLevels.map((variant) => (
-                        <option key={`review-${variant}`} value={variant}>
-                          {formatVariantLabel(variant)}
+                      {(catalogModels ?? []).map((model) => (
+                        <option key={`review-${model.id}`} value={model.id}>
+                          {model.id}
                         </option>
                       ))}
                     </select>
+                    <span className={ui.dialogFieldHint}>
+                      Used only for the review step. Empty uses the build model.
+                    </span>
                   </label>
-                )}
 
-                <label className={ui.dialogField}>
-                  Max concurrent Agent Turns
-                  <input
-                    name="maxConcurrentAgentTurns"
-                    type="number"
-                    min={1}
-                    step={1}
-                    required
-                    value={maxConcurrentAgentTurns}
-                    onChange={(event) =>
-                      setMaxConcurrentOpencodeSessions(event.target.value)
-                    }
-                  />
-                  <span className={ui.dialogFieldHint}>
-                    Caps how many Agent Turn CLI processes run at once (default
-                    2). Agent-free steps and model listing are not counted.
-                  </span>
-                </label>
+                  {reviewThinkingLevelSourceModel.length > 0 &&
+                  ((reviewModel.length > 0 && hasUnavailableReviewModel) ||
+                    (reviewModel.length === 0 && hasUnavailableBuildModel)) ? (
+                    <Banner
+                      className={ui.bannerCompact}
+                      tone="alarm"
+                      tag="Model"
+                      role="alert"
+                    >
+                      Review effort (thinking) is unavailable — the selected
+                      model is not in the Agent Model catalog. Choose another
+                      model or use the build model.
+                    </Banner>
+                  ) : reviewThinkingLevelSourceModel.length > 0 &&
+                    reviewThinkingLevels.length === 0 ? (
+                    <p className={ui.dialogNote}>
+                      Review effort (thinking) is unavailable — this model has
+                      no effort (thinking) options.
+                    </p>
+                  ) : (
+                    <label className={ui.dialogField}>
+                      Review effort (thinking)
+                      <select
+                        className={ui.dialogInput}
+                        name="reviewThinkingLevel"
+                        value={reviewThinkingLevel}
+                        onChange={(event) =>
+                          setReviewVariant(event.target.value)
+                        }
+                        disabled={
+                          modelsDisabled ||
+                          reviewThinkingLevelSourceModel.length === 0 ||
+                          reviewThinkingLevels.length === 0
+                        }
+                      >
+                        <option value="">
+                          Same as build effort (thinking)
+                        </option>
+                        {hasCustomReviewVariant && (
+                          <option value={reviewThinkingLevel}>
+                            {formatVariantLabel(reviewThinkingLevel)}
+                          </option>
+                        )}
+                        {reviewThinkingLevels.map((variant) => (
+                          <option key={`review-${variant}`} value={variant}>
+                            {formatVariantLabel(variant)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </section>
 
-                <label className={ui.dialogField}>
-                  Max concurrent Work Items
-                  <input
-                    name="maxConcurrentWorkItems"
-                    type="number"
-                    min={1}
-                    step={1}
-                    required
-                    value={maxConcurrentWorkItems}
-                    onChange={(event) =>
-                      setMaxConcurrentWorkItems(event.target.value)
-                    }
-                  />
-                  <span className={ui.dialogFieldHint}>
-                    Caps how many Work Items may be Admitted at once (Worker
-                    Slots, default 5). Extra Implement requests wait for a free
-                    slot.
-                  </span>
-                </label>
+                <section
+                  className={ui.dialogSection}
+                  aria-labelledby="settings-sec-concurrency"
+                >
+                  <div className={ui.dialogSectionHead}>
+                    <h3
+                      id="settings-sec-concurrency"
+                      className={ui.dialogSectionTitle}
+                    >
+                      Concurrency
+                    </h3>
+                    <span className={ui.dialogSectionMeta}>Fleet caps</span>
+                  </div>
+
+                  <label className={ui.dialogField}>
+                    Max concurrent Agent Turns
+                    <input
+                      className={ui.dialogInput}
+                      name="maxConcurrentAgentTurns"
+                      type="number"
+                      min={1}
+                      step={1}
+                      required
+                      value={maxConcurrentAgentTurns}
+                      onChange={(event) =>
+                        setMaxConcurrentOpencodeSessions(event.target.value)
+                      }
+                    />
+                    <span className={ui.dialogFieldHint}>
+                      Caps how many Agent Turn CLI processes run at once
+                      (default 2). Agent-free steps and model listing are not
+                      counted.
+                    </span>
+                  </label>
+
+                  <label className={ui.dialogField}>
+                    Max concurrent Work Items
+                    <input
+                      className={ui.dialogInput}
+                      name="maxConcurrentWorkItems"
+                      type="number"
+                      min={1}
+                      step={1}
+                      required
+                      value={maxConcurrentWorkItems}
+                      onChange={(event) =>
+                        setMaxConcurrentWorkItems(event.target.value)
+                      }
+                    />
+                    <span className={ui.dialogFieldHint}>
+                      Caps how many Work Items may be Admitted at once (Worker
+                      Slots, default 5). Extra Implement requests wait for a
+                      free slot.
+                    </span>
+                  </label>
+                </section>
               </>
             )}
 
