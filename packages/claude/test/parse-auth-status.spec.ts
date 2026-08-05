@@ -29,13 +29,53 @@ describe("parseClaudeAuthStatus", () => {
         }),
         0,
       ),
-    ).toEqual({ kind: "authenticated" })
+    ).toEqual({ kind: "authenticated", provider: "firstParty" })
+  })
+
+  it("recognizes Bedrock third-party auth status as authenticated (real CLI shape)", () => {
+    // Verified under CLAUDE_CODE_USE_BEDROCK: loggedIn true, third_party, bedrock.
+    expect(
+      parseClaudeAuthStatus(
+        JSON.stringify({
+          loggedIn: true,
+          authMethod: "third_party",
+          apiProvider: "bedrock",
+        }),
+        0,
+      ),
+    ).toEqual({ kind: "authenticated", provider: "bedrock" })
+  })
+
+  it("classifies Bedrock from apiProvider, not from missing claude.ai login", () => {
+    // First-party not logged in must never be inferred as Bedrock readiness.
+    expect(
+      parseClaudeAuthStatus(
+        JSON.stringify({
+          loggedIn: false,
+          authMethod: null,
+          apiProvider: "firstParty",
+        }),
+        1,
+      ),
+    ).toEqual({ kind: "unauthenticated", provider: "firstParty" })
+
+    expect(
+      parseClaudeAuthStatus(JSON.stringify({ loggedIn: false }), 1),
+    ).toEqual({ kind: "unauthenticated", provider: "unknown" })
+
+    // apiProvider alone without a loggedIn boolean is not ready.
+    expect(
+      parseClaudeAuthStatus(
+        JSON.stringify({ apiProvider: "bedrock", authMethod: "third_party" }),
+        0,
+      ),
+    ).toEqual({ kind: "malformed" })
   })
 
   it("recognizes loggedIn false JSON as unauthenticated", () => {
     expect(
       parseClaudeAuthStatus(JSON.stringify({ loggedIn: false }), 1),
-    ).toEqual({ kind: "unauthenticated" })
+    ).toEqual({ kind: "unauthenticated", provider: "unknown" })
   })
 
   it("classifies authenticated JSON when stderr noise follows the object", () => {
@@ -44,7 +84,7 @@ describe("parseClaudeAuthStatus", () => {
         '{"loggedIn":true,"authMethod":"claude.ai"}\nwarning: ambient noise',
         0,
       ),
-    ).toEqual({ kind: "authenticated" })
+    ).toEqual({ kind: "authenticated", provider: "unknown" })
   })
 
   it("classifies unauthenticated JSON when stderr noise follows the object", () => {
@@ -53,21 +93,24 @@ describe("parseClaudeAuthStatus", () => {
         '{"loggedIn":false,"authMethod":null}\nwarning: ambient noise',
         1,
       ),
-    ).toEqual({ kind: "unauthenticated" })
+    ).toEqual({ kind: "unauthenticated", provider: "unknown" })
   })
 
   it("recognizes human-readable not logged in", () => {
     expect(parseClaudeAuthStatus("Not logged in\n", 1)).toEqual({
       kind: "unauthenticated",
+      provider: "unknown",
     })
   })
 
   it("treats unauthenticated human copy as unauth, not authenticated", () => {
     expect(parseClaudeAuthStatus("You are unauthenticated.\n", 1)).toEqual({
       kind: "unauthenticated",
+      provider: "unknown",
     })
     expect(parseClaudeAuthStatus("Not authenticated\n", 1)).toEqual({
       kind: "unauthenticated",
+      provider: "unknown",
     })
   })
 
@@ -81,6 +124,7 @@ describe("parseClaudeAuthStatus", () => {
   it("recognizes human-readable logged in after unauth markers are ruled out", () => {
     expect(parseClaudeAuthStatus("Logged in as op@example.com\n", 0)).toEqual({
       kind: "authenticated",
+      provider: "unknown",
     })
   })
 
