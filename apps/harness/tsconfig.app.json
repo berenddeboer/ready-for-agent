@@ -47,6 +47,9 @@
       "path": "../../packages/codex/tsconfig.lib.json"
     },
     {
+      "path": "../../packages/claude/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/local-git/tsconfig.lib.json"
     },
     {

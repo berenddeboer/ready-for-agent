@@ -138,6 +138,28 @@ describe("host tools preflight", () => {
     expect(missingCodex.message).toContain("Codex Build")
   })
 
+  test("requires claude when only Claude Code is selected", () => {
+    const withClaude = checkHostTools(
+      (command) => ["git", "gh", "claude"].includes(command),
+      { selectedAgentBackendIds: ["claude"] },
+    )
+    expect(withClaude.ok).toBe(true)
+
+    const missingClaude = checkHostTools(
+      (command) => ["git", "gh", "opencode"].includes(command),
+      { selectedAgentBackendIds: ["claude"] },
+    )
+    expect(missingClaude.ok).toBe(false)
+    if (missingClaude.ok) return
+    expect(missingClaude.missing.map((tool) => tool.name)).toEqual(["claude"])
+    expect(missingClaude.message).toContain("claude")
+    expect(missingClaude.message).toContain("Claude Code")
+    expect(missingClaude.message).toContain(
+      "https://docs.anthropic.com/en/docs/claude-code",
+    )
+    expect(missingClaude.message).not.toContain("opencode")
+  })
+
   test("passes without keymaxxer", () => {
     const result = checkHostTools((command) =>
       ["git", "gh", "opencode"].includes(command),
