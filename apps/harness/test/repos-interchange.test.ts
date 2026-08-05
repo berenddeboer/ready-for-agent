@@ -146,6 +146,18 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(lifecycle).toContain("{!compact ? (")
     // Earlier-lane collapse (▸ BUILD · 5m) is shared with Kanban.
     expect(lifecycle).toContain("collapseEarlierLanes")
+    // COMPLETE collapses all reached lanes (including PR|MR), not only earlier.
+    expect(lifecycle).toContain("collapseAllReachedLanes")
+    expect(lifecycle).toContain('status === "COMPLETE"')
+    expect(lifecycle).toContain('workItem.state === "COMPLETE"')
+    // Mid-lifecycle step-run SUCCEEDED must not trigger collapse-all (focus strip).
+    const collapseAllPredicate = sliceBetweenMarkers(
+      lifecycle,
+      "const collapseAllReachedLanes =",
+      "const focusLane =",
+    )
+    expect(collapseAllPredicate).not.toContain("SUCCEEDED")
+    expect(lifecycle).toContain("forgeChangeRequestShort")
     expect(lifecycle).toContain("ui.legSummary")
 
     const row = sliceBetweenMarkers(
@@ -155,6 +167,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     )
     expect(row).toContain("onOpenSession=")
     expect(row).toContain("collapseEarlierLanes")
+    expect(row).toContain("forge={repository.forge}")
     // One SessionUsageDialog at RepositoryIssues — not per issue row.
     expect(row).not.toContain("<SessionUsageDialog")
 

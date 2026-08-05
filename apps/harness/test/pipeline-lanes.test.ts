@@ -512,4 +512,123 @@ describe("planLifecycleChipPresentation", () => {
       },
     ])
   })
+
+  test("COMPLETE collapse-all condenses Build, Review, and PR (no focus strip)", () => {
+    // Repos COMPLETE chrome: PR must not stay a permanent expanded black strip.
+    const blocks = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: "pr",
+      expandedEarlierLanes: new Set(),
+      collapseAllReachedLanes: true,
+    })
+    expect(blocks).toEqual([
+      {
+        kind: "earlier-lane",
+        lane: "build",
+        laneLabel: "Build",
+        durationMs: 40_000,
+        expanded: false,
+        chips: [chip("CREATE_WORKTREE", 10_000), chip("IMPLEMENT", 30_000)],
+      },
+      {
+        kind: "earlier-lane",
+        lane: "review",
+        laneLabel: "Review",
+        durationMs: 20_000,
+        expanded: false,
+        chips: [chip("REVIEW", 20_000)],
+      },
+      {
+        kind: "earlier-lane",
+        lane: "pr",
+        laneLabel: "PR",
+        durationMs: 13_000,
+        expanded: false,
+        chips: [chip("COMMIT", 5_000), chip("CREATE_PR", 8_000)],
+      },
+    ])
+    expect(blocks.some((block) => block.kind === "focus-lane")).toBe(false)
+  })
+
+  test("COMPLETE collapse-all sums each lane’s chip durations", () => {
+    const labels = [
+      chip("IMPLEMENT", 12_000),
+      chip("PRE_COMMIT", null),
+      chip("REVIEW", 9_000),
+      chip("COMMIT", 3_000),
+      chip("MERGE_PR", 7_000),
+      chip("LOCAL_CLEANUP", null),
+    ] as const
+    const blocks = planLifecycleChipPresentation(labels, {
+      collapseEarlierLanes: true,
+      focusLane: null,
+      expandedEarlierLanes: new Set(),
+      collapseAllReachedLanes: true,
+    })
+    expect(
+      blocks
+        .filter((block) => block.kind === "earlier-lane")
+        .map((block) => [block.lane, block.durationMs]),
+    ).toEqual([
+      ["build", 12_000],
+      ["review", 9_000],
+      ["pr", 10_000],
+    ])
+  })
+
+  test("COMPLETE collapse-all uses forge PR|MR lane label and expand state", () => {
+    const collapsed = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: null,
+      expandedEarlierLanes: new Set(),
+      collapseAllReachedLanes: true,
+      prLaneLabel: "MR",
+    })
+    const prLeg = collapsed.find(
+      (block) => block.kind === "earlier-lane" && block.lane === "pr",
+    )
+    expect(prLeg).toMatchObject({
+      kind: "earlier-lane",
+      laneLabel: "MR",
+      expanded: false,
+    })
+
+    const expandedPr = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: null,
+      expandedEarlierLanes: new Set<LifecyclePipelineLaneId>(["pr"]),
+      collapseAllReachedLanes: true,
+      prLaneLabel: "MR",
+    })
+    expect(
+      expandedPr
+        .filter((block) => block.kind === "earlier-lane")
+        .map((block) => [block.lane, block.expanded]),
+    ).toEqual([
+      ["build", false],
+      ["review", false],
+      ["pr", true],
+    ])
+  })
+
+  test("non-complete focus path still expands current lane only", () => {
+    // Regression: collapse-all must not change in-flight PR focus behavior.
+    const blocks = planLifecycleChipPresentation(buildReviewPr, {
+      collapseEarlierLanes: true,
+      focusLane: "pr",
+      expandedEarlierLanes: new Set(),
+      collapseAllReachedLanes: false,
+    })
+    expect(blocks.map((block) => block.kind)).toEqual([
+      "earlier-lane",
+      "earlier-lane",
+      "focus-lane",
+    ])
+    const focus = blocks.find((block) => block.kind === "focus-lane")
+    expect(focus).toMatchObject({
+      kind: "focus-lane",
+      lane: "pr",
+      chips: [chip("COMMIT", 5_000), chip("CREATE_PR", 8_000)],
+    })
+  })
 })
