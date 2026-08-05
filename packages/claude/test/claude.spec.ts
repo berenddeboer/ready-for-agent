@@ -122,6 +122,45 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
+  it("inspects Ready when auth status is Bedrock third-party (static alias catalog)", async () => {
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'if [ "$DISABLE_AUTOUPDATER" != "1" ]; then exit 21; fi',
+        // Real Claude Code Bedrock shape (issue #801 / epic #799).
+        'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}\'',
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(inspect(binary))
+        expect(result.backend).toEqual({
+          id: "claude",
+          label: "Claude Code",
+        })
+        expect(result.models.map((m) => m.id)).toEqual([
+          "haiku",
+          "sonnet",
+          "opus",
+          "fable",
+        ])
+        expect(result.models).toEqual(
+          CLAUDE_STATIC_CATALOG.map((model) => ({
+            id: model.id,
+            thinkingLevels: [...model.thinkingLevels],
+          })),
+        )
+        for (const model of result.models) {
+          expect(model.thinkingLevels).toEqual([
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+          ])
+        }
+      },
+    )
+  })
+
   it("fails inspect with actionable config error when unauthenticated", async () => {
     await withExecutable(
       [
@@ -136,6 +175,26 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           expect(error.message).toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
           expect(error.message).toContain("claude auth login")
           expect(error.message).toContain("ANTHROPIC_API_KEY")
+        }
+      },
+    )
+  })
+
+  it("keeps first-party loggedIn false on the login/API-key path (not Bedrock)", async () => {
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":false,"authMethod":null,"apiProvider":"firstParty"}\'',
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
+          expect(error.message).toContain("claude auth login")
+          expect(error.message).toContain("ANTHROPIC_API_KEY")
+          expect(error.message.toLowerCase()).not.toContain("bedrock")
         }
       },
     )

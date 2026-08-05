@@ -1,11 +1,32 @@
+/**
+ * Claude Code `apiProvider` as reported by `claude auth status` JSON.
+ * Used for readiness classification (first-party vs Amazon Bedrock, issue #801).
+ * Unknown when the field is absent or not a recognized value.
+ */
+export type ClaudeAuthProvider = "firstParty" | "bedrock" | "unknown"
+
 export type ClaudeAuthStatus =
-  | { readonly kind: "authenticated" }
-  | { readonly kind: "unauthenticated" }
+  | { readonly kind: "authenticated"; readonly provider: ClaudeAuthProvider }
+  | { readonly kind: "unauthenticated"; readonly provider: ClaudeAuthProvider }
   | { readonly kind: "malformed" }
   | { readonly kind: "failed"; readonly exitCode: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+/**
+ * Map Claude’s reported `apiProvider` string. Classification uses this field
+ * (and `loggedIn`), never “missing claude.ai login implies Bedrock”.
+ */
+export const readClaudeAuthProvider = (value: unknown): ClaudeAuthProvider => {
+  if (value === "bedrock") {
+    return "bedrock"
+  }
+  if (value === "firstParty") {
+    return "firstParty"
+  }
+  return "unknown"
+}
 
 /**
  * Extract the first balanced JSON object from mixed CLI capture text so trailing
@@ -54,10 +75,15 @@ export const extractFirstJsonObject = (text: string): string | undefined => {
 /**
  * Interpret `claude auth status` captured text (JSON default) plus exit code.
  *
- * Real CLI: authenticated exits 0 with `{"loggedIn":true,...}`; unauthenticated
- * reports `loggedIn: false` (often exit non-zero). Classification prefers the
- * JSON `loggedIn` field so a crash without that field is not mistaken for
- * missing auth.
+ * Real CLI shapes:
+ * - First-party ready: `{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty",...}`
+ * - Bedrock ready: `{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}`
+ * - Unauthenticated: `loggedIn: false` (often exit non-zero), first-party path
+ *
+ * Classification prefers JSON `loggedIn` plus `apiProvider` so:
+ * - Bedrock third-party auth is Ready when Claude reports it
+ * - Missing claude.ai login is never inferred as Bedrock
+ * - A crash without `loggedIn` is not mistaken for missing auth
  */
 export const parseClaudeAuthStatus = (
   output: string,
@@ -74,9 +100,13 @@ export const parseClaudeAuthStatus = (
     try {
       const parsed: unknown = JSON.parse(jsonObject)
       if (isRecord(parsed) && typeof parsed.loggedIn === "boolean") {
+        const provider = readClaudeAuthProvider(parsed.apiProvider)
+        // Ready for first-party OAuth/API key and for Bedrock third-party when
+        // Claude reports loggedIn true (verified Bedrock shape uses
+        // apiProvider "bedrock" + authMethod "third_party").
         return parsed.loggedIn
-          ? { kind: "authenticated" }
-          : { kind: "unauthenticated" }
+          ? { kind: "authenticated", provider }
+          : { kind: "unauthenticated", provider }
       }
     } catch {
       // Fall through to marker / exit-code paths.
@@ -93,12 +123,12 @@ export const parseClaudeAuthStatus = (
     /authentication required/i.test(trimmed) ||
     /please (?:log|sign) in/i.test(trimmed)
   ) {
-    return { kind: "unauthenticated" }
+    return { kind: "unauthenticated", provider: "unknown" }
   }
   // Positive phrases only — no `/authenticated/` (matches "unauthenticated")
   // and no field-name heuristics like `/authMethod/`.
   if (/\blogged in\b/i.test(trimmed)) {
-    return { kind: "authenticated" }
+    return { kind: "authenticated", provider: "unknown" }
   }
 
   if (exitCode !== 0) {
