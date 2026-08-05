@@ -44,11 +44,23 @@ const CODEX_REGISTRATION: AgentBackendRegistration = {
   ],
 }
 
+const CLAUDE_REGISTRATION: AgentBackendRegistration = {
+  descriptor: {
+    id: AGENT_BACKEND_IDS.claude,
+    label: "Claude Code",
+  },
+  capabilities: [
+    { _tag: "SessionTelemetry", supported: false },
+    { _tag: "KeymaxxerMcp", supported: false },
+  ],
+}
+
 /** Production selectable backends registered at build time. */
 const BUILT_IN_REGISTRY: ReadonlyArray<AgentBackendRegistration> = [
   OPENCODE_REGISTRATION,
   GROK_REGISTRATION,
   CODEX_REGISTRATION,
+  CLAUDE_REGISTRATION,
 ]
 
 export const listBuiltInAgentBackends =

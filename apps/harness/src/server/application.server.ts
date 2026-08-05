@@ -22,6 +22,7 @@ import {
   isSelectableAgentBackendId,
   resolveActiveRegistration,
 } from "@ready-for-agent/agent-backend"
+import { Claude, ClaudeSessionTelemetryLive } from "@ready-for-agent/claude"
 import { Codex, CodexSessionTelemetryLive } from "@ready-for-agent/codex"
 import { DatabaseLive } from "@ready-for-agent/db"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
@@ -85,6 +86,12 @@ const makeResolveRuntime = (
       return Layer.mergeAll(
         Codex.layer().pipe(Layer.provide(platformLayer)),
         CodexSessionTelemetryLive(),
+      )
+    }
+    if (backendId === AGENT_BACKEND_IDS.claude) {
+      return Layer.mergeAll(
+        Claude.layer().pipe(Layer.provide(platformLayer)),
+        ClaudeSessionTelemetryLive(),
       )
     }
     return Layer.mergeAll(

@@ -30,7 +30,6 @@ const BACKEND_HOST_TOOLS: Record<
     installHint:
       "Install Codex CLI: https://developers.openai.com/codex/cli (binary name: codex)",
   },
-  // Claude Code binary requirement; selection/wiring lands with #779.
   [AGENT_BACKEND_IDS.claude]: {
     name: "claude",
     installHint:

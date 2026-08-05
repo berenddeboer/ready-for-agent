@@ -35,9 +35,10 @@ work on it.
 
 The harness creates a new worktree, installs packages, and asks a
 selectable headless Agent Backend ([OpenCode](https://opencode.ai/),
-[Codex](https://github.com/openai/codex), or [Grok
-Build](https://docs.x.ai/)) to implement the issue, review the issue,
-create a PR, and merge if allowed.
+[Codex](https://github.com/openai/codex), [Grok
+Build](https://docs.x.ai/), or [Claude
+Code](https://docs.anthropic.com/en/docs/claude-code)) to implement the
+issue, review the issue, create a PR, and merge if allowed.
 
 The goal of this clanker harness is to get you to that 25+ PRs merged
 a day nirvana. It does that by removing the time spent babysitting an
@@ -153,15 +154,20 @@ required; default is OpenCode):
    selected Agent Backend
 6. [Grok Build](https://docs.x.ai/) (`grok` on PATH) when Grok Build is the
    selected Agent Backend
+7. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on
+   PATH) when Claude Code is the selected Agent Backend
 
 Authenticate Grok Build with `grok login` or `XAI_API_KEY` before Recheck /
 Agent Turns. Harness-launched Grok processes disable auto-update for that
 session (`--no-auto-update` / `GROK_DISABLE_AUTOUPDATER`). Grok Build Agent
 Turns do not integrate Keymaxxer; Session Telemetry is live-read from on-disk
-Grok session files under `$GROK_HOME/sessions` (default `~/.grok`). Opt-in live
-adapter tests use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` /
-`CODEX_INTEGRATION=1` / `CLAUDE_INTEGRATION=1`; normal CI does not need paid
-model credentials.
+Grok session files under `$GROK_HOME/sessions` (default `~/.grok`). Authenticate
+Claude Code with `claude auth login` or `ANTHROPIC_API_KEY` before Recheck /
+Agent Turns. Harness-launched Claude processes disable auto-update for that
+session (`DISABLE_AUTOUPDATER`). Claude Code Agent Turns do not integrate
+Keymaxxer; Session Telemetry is unsupported in v1. Opt-in live adapter tests
+use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` / `CODEX_INTEGRATION=1` /
+`CLAUDE_INTEGRATION=1`; normal CI does not need paid model credentials.
 
 # KeyMaxxer
 
@@ -181,8 +187,9 @@ KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 1. Is there support for agents other than OpenCode?
 
 Yes. Settings can select [OpenCode](https://opencode.ai/),
-[Codex](https://github.com/openai/codex), or [Grok Build](https://docs.x.ai/) as
-the instance-wide Agent Backend. The change hot-activates on Save when no Work
+[Codex](https://github.com/openai/codex), [Grok Build](https://docs.x.ai/), or
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) as the
+instance-wide Agent Backend. The change hot-activates on Save when no Work
 Items are unfinished (including Needs Human). Model catalogs and effort
 (thinking) options are backend-local, and build/review prefs are remembered per
 backend.

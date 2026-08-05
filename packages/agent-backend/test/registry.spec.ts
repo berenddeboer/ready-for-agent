@@ -11,12 +11,13 @@ import {
 import { describe, expect, it } from "bun:test"
 
 describe("Agent Backend registry", () => {
-  it("exposes OpenCode, Grok Build, and Codex Build as selectable production backends", () => {
+  it("exposes OpenCode, Grok Build, Codex Build, and Claude Code as selectable production backends", () => {
     const backends = listBuiltInAgentBackends()
     expect(backends.map((entry) => entry.descriptor.id)).toEqual([
       AGENT_BACKEND_IDS.opencode,
       AGENT_BACKEND_IDS.grok,
       AGENT_BACKEND_IDS.codex,
+      AGENT_BACKEND_IDS.claude,
     ])
     expect(defaultAgentBackendId).toBe(AGENT_BACKEND_IDS.opencode)
     expect(getBuiltInAgentBackend("missing")).toBeUndefined()
@@ -26,16 +27,20 @@ describe("Agent Backend registry", () => {
     expect(
       getBuiltInAgentBackend(AGENT_BACKEND_IDS.codex)?.descriptor.label,
     ).toBe("Codex Build")
+    expect(
+      getBuiltInAgentBackend(AGENT_BACKEND_IDS.claude)?.descriptor.label,
+    ).toBe("Claude Code")
   })
 
   it("maps backend ids to operator-visible labels for failure copy", () => {
     expect(agentBackendLabel(AGENT_BACKEND_IDS.opencode)).toBe("OpenCode")
     expect(agentBackendLabel(AGENT_BACKEND_IDS.grok)).toBe("Grok Build")
     expect(agentBackendLabel(AGENT_BACKEND_IDS.codex)).toBe("Codex Build")
+    expect(agentBackendLabel(AGENT_BACKEND_IDS.claude)).toBe("Claude Code")
     expect(agentBackendLabel("unknown-backend")).toBe("unknown-backend")
   })
 
-  it("declares typed capabilities for OpenCode, Grok Build, and Codex Build", () => {
+  it("declares typed capabilities for OpenCode, Grok Build, Codex Build, and Claude Code", () => {
     const opencode = getBuiltInAgentBackend(AGENT_BACKEND_IDS.opencode)
     expect(opencode).toBeDefined()
     expect(capabilitySupported(opencode!, "SessionTelemetry")).toBe(true)
@@ -50,6 +55,11 @@ describe("Agent Backend registry", () => {
     expect(codex).toBeDefined()
     expect(capabilitySupported(codex!, "SessionTelemetry")).toBe(false)
     expect(capabilitySupported(codex!, "KeymaxxerMcp")).toBe(false)
+
+    const claude = getBuiltInAgentBackend(AGENT_BACKEND_IDS.claude)
+    expect(claude).toBeDefined()
+    expect(capabilitySupported(claude!, "SessionTelemetry")).toBe(false)
+    expect(capabilitySupported(claude!, "KeymaxxerMcp")).toBe(false)
   })
 })
 

@@ -23,6 +23,7 @@
     "@ready-for-agent/keymaxxer-service": "workspace:*",
     "@ready-for-agent/lifecycle-model": "workspace:*",
     "@ready-for-agent/local-git": "workspace:*",
+    "@ready-for-agent/claude": "workspace:*",
     "@ready-for-agent/codex": "workspace:*",
     "@ready-for-agent/grok": "workspace:*",
     "@ready-for-agent/opencode": "workspace:*",
