@@ -163,11 +163,15 @@ session (`--no-auto-update` / `GROK_DISABLE_AUTOUPDATER`). Grok Build Agent
 Turns do not integrate Keymaxxer; Session Telemetry is live-read from on-disk
 Grok session files under `$GROK_HOME/sessions` (default `~/.grok`). Authenticate
 Claude Code with `claude auth login` or `ANTHROPIC_API_KEY` before Recheck /
-Agent Turns. Harness-launched Claude processes disable auto-update for that
-session (`DISABLE_AUTOUPDATER`). Claude Code Agent Turns do not integrate
-Keymaxxer; Session Telemetry is unsupported in v1. Opt-in live adapter tests
-use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` / `CODEX_INTEGRATION=1` /
-`CLAUDE_INTEGRATION=1`; normal CI does not need paid model credentials.
+Agent Turns. For **Amazon Bedrock**, set `CLAUDE_CODE_USE_BEDROCK=1` plus AWS
+credentials/region on the harness process instead of first-party login; see
+[Claude Code on Amazon Bedrock](docs/claude-code-amazon-bedrock.md) (Ready vs
+Unavailable, optional model pins, and MVP Settings limits). Harness-launched
+Claude processes disable auto-update for that session (`DISABLE_AUTOUPDATER`).
+Claude Code Agent Turns do not integrate Keymaxxer; Session Telemetry is
+unsupported in v1. Opt-in live adapter tests use `GROK_INTEGRATION=1` /
+`OPENCODE_INTEGRATION=1` / `CODEX_INTEGRATION=1` / `CLAUDE_INTEGRATION=1`;
+normal CI does not need paid model credentials.
 
 # KeyMaxxer
 
@@ -194,13 +198,22 @@ Items are unfinished (including Needs Human). Model catalogs and effort
 (thinking) options are backend-local, and build/review prefs are remembered per
 backend.
 
-2. Does the harness support a Forge other than GitHub?
+2. Can I run Claude Code through Amazon Bedrock?
+
+Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
+harness process, select Claude Code, then Recheck. Settings still lists
+floating aliases only; pin Bedrock inference profiles via Claude env vars.
+First-party login failures and Bedrock/AWS failures show different Unavailable
+messages. Details:
+[docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
+
+3. Does the harness support a Forge other than GitHub?
 
 Yes. GitLab Repository identity, Issue reconciliation, and local Agent Turns
 through Review are supported. GitLab Pull Request lifecycle operations are
 being delivered in later phases.
 
-3. Can I implement something locally, and then check myself?
+4. Can I implement something locally, and then check myself?
 
 Yes, pick "Implement locally" from the kebab menu. Everything stays
 local, and no commit is made.
