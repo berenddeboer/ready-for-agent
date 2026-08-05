@@ -46,6 +46,13 @@ const cardMetalLight =
 const mastScrollworkStroke =
   "[fill:none] [stroke-linecap:round] [stroke-linejoin:round]"
 
+/**
+ * Horizontal wrap row for collapsed journey-leg summaries (archive footer +
+ * Kanban/repos lifecycle chrome). Shared so both surfaces stay dense and
+ * consistent — not a vertical stack of BUILD / REVIEW / PR|MR.
+ */
+const legRowClasses = "flex flex-wrap items-center gap-[0.35rem]"
+
 export const ui = {
   /* ---------- Nav shell (§4.1) ---------- */
 
@@ -321,7 +328,11 @@ export const ui = {
 
   archiveJourney: "grid min-w-0 gap-[0.45rem]",
 
-  archiveFoot: "flex flex-wrap items-center gap-[0.35rem]",
+  /** Collapsed journey legs on one wrap line — see `legRowClasses`. */
+  legRow: legRowClasses,
+
+  /** Archive footer alias of `legRow` (call-site clarity on completed cards). */
+  archiveFoot: legRowClasses,
 
   /**
    * Journey-leg chips — board density floor (0.56rem) is the shared base.
@@ -932,6 +943,12 @@ export const ui = {
     "font-mono text-[0.56rem] font-bold tracking-[0.06em] uppercase whitespace-nowrap text-[var(--leg-on,#fff)]",
     "hover:brightness-105",
   ),
+
+  /**
+   * Multi-block lifecycle chrome: summary leg row on top, expanded chip
+   * strips full-width beneath (same pattern as archive journey).
+   */
+  lifecycleLegBlocks: "mt-2 flex min-w-0 max-w-full flex-col gap-1",
 
   /* ---------- Icon buttons (§5.4) ---------- */
 

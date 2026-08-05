@@ -130,6 +130,9 @@ least one chip, show one summary row instead of those chips:
 
 - Collapsed: `▸ {Lane name}  {duration}`
 - Expanded: `▾ {Lane name}  {duration}` plus that lane’s chips underneath
+- Multiple earlier-lane summaries share **one horizontal wrap row** (same
+  density as repos COMPLETE legs / archive foot); they wrap only when the
+  ticket column is too narrow.
 
 Rules:
 
@@ -138,10 +141,11 @@ Rules:
   format like chip durations. Not live-ticking.
 - Expand/collapse is **per earlier lane**, independent, and **ephemeral**
   (local UI state; not persisted).
-- Expanding a summary **replaces** the collapsed row with the header + chips
-  for that lane; other earlier lanes stay summaries until expanded.
+- Expanding a summary keeps the summary buttons on the wrap row (▸ → ▾) and
+  reveals that lane’s chips as a full-width strip beneath; other earlier
+  lanes stay summaries until expanded.
 - **Current-focus-lane chips** are always fully listed after all earlier-lane
-  blocks.
+  summary buttons (same wrap row when space allows).
 - Do **not** auto-expand an earlier lane because a chip there failed or needs
   human; Attention and the status badge carry alarm. Optional later: tint a
   summary when any chip in that lane is non-success.
@@ -225,5 +229,6 @@ Shared pieces:
 - Lane classifier, tab keyboard behavior, filtering, and mobile lane selection
   are covered by tests.
 - Kanban tickets collapse earlier-lane lifecycle chips into per-lane summary
-  rows (name + summed duration); focus-lane chips stay expanded; expand state
-  is local and ephemeral; Home chip rows are unaffected.
+  chips on one wrap row (name + summed duration); focus-lane chips stay
+  expanded; expand state is local and ephemeral; Home chip rows are
+  unaffected.

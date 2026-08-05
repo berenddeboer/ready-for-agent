@@ -159,6 +159,11 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(collapseAllPredicate).not.toContain("SUCCEEDED")
     expect(lifecycle).toContain("forgeChangeRequestShort")
     expect(lifecycle).toContain("ui.legSummary")
+    // Collapsed BUILD/REVIEW/PR|MR legs share one wrap row (#784), not a
+    // vertical stack — same density language as archive foot legs.
+    expect(lifecycle).toContain("ui.lifecycleLegBlocks")
+    expect(lifecycle).toContain("ui.legRow")
+    expect(lifecycle).not.toContain("flex flex-col gap-1")
 
     const row = sliceBetweenMarkers(
       homeSource(),
@@ -183,6 +188,14 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toContain("lifecycleInset:")
     expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-\[1\.5px\]/)
     expect(ui).toMatch(/lifecycleInset:[\s\S]*?border-ink/)
+    // Shared horizontal leg-row recipe (lifecycle chrome + archive foot).
+    expect(ui).toContain("legRow:")
+    expect(ui).toContain("lifecycleLegBlocks:")
+    expect(ui).toMatch(
+      /legRowClasses\s*=\s*"flex flex-wrap items-center gap-\[0\.35rem\]"/,
+    )
+    expect(ui).toContain("archiveFoot: legRowClasses")
+    expect(ui).toContain("legRow: legRowClasses")
   })
 
   test("parent issue groups use an aligned details card", () => {

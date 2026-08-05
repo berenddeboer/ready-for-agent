@@ -3680,20 +3680,23 @@ export function WorkItemLifecycleStatus({
         (chipBlocks.length === 1 && chipBlocks[0]?.kind === "full-list" ? (
           renderChipList(chipBlocks[0].chips)
         ) : (
-          <div className="mt-2 flex flex-col gap-1">
-            {chipBlocks.map((block) => {
-              if (block.kind === "earlier-lane") {
-                const chipsId = `lifecycle-lane-${workItem.id}-${block.lane}`
-                const durationLabel =
-                  block.durationMs === null
-                    ? null
-                    : formatDuration(block.durationMs)
-                const summaryStyle = lifecycleLaneCssVars(
-                  block.lane,
-                ) as CSSProperties
-                return (
-                  <div key={block.lane} className="min-w-0">
+          // Summary legs share one wrap row (like archive foot); expanded
+          // fine-grained chips are full-width strips beneath that row.
+          <div className={ui.lifecycleLegBlocks}>
+            <div className={ui.legRow}>
+              {chipBlocks.map((block) => {
+                if (block.kind === "earlier-lane") {
+                  const chipsId = `lifecycle-lane-${workItem.id}-${block.lane}`
+                  const durationLabel =
+                    block.durationMs === null
+                      ? null
+                      : formatDuration(block.durationMs)
+                  const summaryStyle = lifecycleLaneCssVars(
+                    block.lane,
+                  ) as CSSProperties
+                  return (
                     <button
+                      key={block.lane}
                       type="button"
                       className={ui.legSummary}
                       style={summaryStyle}
@@ -3707,29 +3710,48 @@ export function WorkItemLifecycleStatus({
                       <span>{block.laneLabel}</span>
                       {durationLabel !== null && <span>· {durationLabel}</span>}
                     </button>
-                    {block.expanded &&
-                      renderChipList(block.chips, {
-                        id: chipsId,
+                  )
+                }
+                if (block.kind === "focus-lane") {
+                  if (block.chips.length === 0) return null
+                  return (
+                    <div key="focus-lane" className="min-w-0 max-w-full">
+                      {renderChipList(block.chips, {
                         className:
-                          "mt-1 mb-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
-                        ariaLabel: `${block.laneLabel} lifecycle steps`,
+                          "m-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
+                        ariaLabel: "Current lifecycle steps",
                       })}
-                  </div>
-                )
-              }
-              if (block.kind === "focus-lane") {
-                if (block.chips.length === 0) return null
+                    </div>
+                  )
+                }
                 return (
-                  <div key="focus-lane" className="min-w-0 max-w-full">
+                  <div key="full-list" className="min-w-0 max-w-full">
                     {renderChipList(block.chips, {
                       className:
                         "m-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
-                      ariaLabel: "Current lifecycle steps",
                     })}
                   </div>
                 )
+              })}
+            </div>
+            {chipBlocks.map((block) => {
+              if (block.kind !== "earlier-lane" || !block.expanded) {
+                return null
               }
-              return <div key="full-list">{renderChipList(block.chips)}</div>
+              const chipsId = `lifecycle-lane-${workItem.id}-${block.lane}`
+              return (
+                <div
+                  key={`${block.lane}-expanded`}
+                  className="min-w-0 max-w-full"
+                >
+                  {renderChipList(block.chips, {
+                    id: chipsId,
+                    className:
+                      "m-0 flex min-w-0 max-w-full list-none flex-wrap gap-1 p-0",
+                    ariaLabel: `${block.laneLabel} lifecycle steps`,
+                  })}
+                </div>
+              )
             })}
           </div>
         ))}
