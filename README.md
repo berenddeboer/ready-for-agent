@@ -45,7 +45,7 @@ agent and guiding it through the implementation, review, commit, and PR
 status-check stages.
 
 See [the introduction
-video](https://www.youtube.com/watch?v=dnYWUenIo7Y) to see the tool in
+video](https://www.youtube.com/watch?v=TK1OeQZswiQ) to see the tool in
 action.
 
 # Usage
@@ -162,16 +162,6 @@ Grok session files under `$GROK_HOME/sessions` (default `~/.grok`). Opt-in live
 adapter tests use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` /
 `CODEX_INTEGRATION=1`; normal CI does not need paid model credentials.
 
-**Optional:**
-
-7. [keymaxxer](https://github.com/glommer/keymaxxer) — vault-backed secrets for
-   Harness-owned GitHub operations and GitHub or GitLab OpenCode Agent Turns.
-   Resolved as `KEYMAXXER_ENTRYPOINT` when set to an existing path, otherwise
-   the `keymaxxer` command on PATH. When neither is available, the harness uses
-   ambient Forge authentication. Set `KEYMAXXER_ENABLED=false` to force that
-   mode. Grok Build Agent Turns always use ambient Forge authentication and do
-   not configure Keymaxxer MCP.
-
 # KeyMaxxer
 
 Ready for Agent supports
@@ -219,6 +209,17 @@ agent swarm on `ready-for-agent` labeled work.
 ## GraphQL API
 
 The backend serves a GraphQL API at `http://127.0.0.1:6056/graphql`.
+
+## Ontology-based domain model
+
+The Work Item lifecycle is driven by a machine-readable ontology under
+`ontology/` (Turtle + SHACL), not by ad-hoc enums scattered through the
+code. States, legal transitions, guards, and glossary terms are declared
+there; TypeScript types, GraphQL enums, database columns, and the runtime
+transition check are generated from or validated against it. Agents propose
+work; the ontology defines what a state means and which moves are legal.
+See [ontology/README.md](ontology/README.md) and
+[docs/why-agentic-systems-need-ontologies.md](docs/why-agentic-systems-need-ontologies.md).
 
 ## Application data
 
