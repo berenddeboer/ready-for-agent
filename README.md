@@ -199,17 +199,20 @@ Yes. Settings can select [OpenCode](https://opencode.ai/),
 instance-wide Agent Backend. The change hot-activates on Save when no Work
 Items are unfinished (including Needs Human). Model catalogs and effort
 (thinking) options are backend-local, and build/review prefs are remembered per
-backend.
+backend. Model selection is catalog-only for every backend: build and review
+models are picked from the Agent Backend's current catalog, never typed in.
 
 2. Can I run Claude Code through Amazon Bedrock?
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
 harness process, select **Claude Code Bedrock**, then Recheck. Status shows
-**Claude Code · Amazon Bedrock**. In Bedrock mode Settings use a strict select
-of active Anthropic system-defined and application inference profiles from AWS
+**Claude Code · Amazon Bedrock**. In Bedrock mode Settings offer active
+Anthropic system-defined and application inference profiles discovered from AWS
 via the bundled SDK (no AWS CLI host tool; friendly names in Settings; ID/ARN
-stored and passed to Claude Code)—no free-text fallback. First-party Claude
-Code keeps the static alias catalog (and free-text) and never calls AWS.
+stored and passed to Claude Code). First-party Claude Code offers the static
+alias catalog (`haiku`, `sonnet`, `opus`, `fable`) and never calls AWS. A model
+stored under the other provider mode is kept and shown as unavailable until you
+pick a current one — it is never rewritten or translated.
 Discovery failures leave Claude Ready with a warning but block Save until a
 discovered profile is available after Recheck; listing does not prove
 InvokeModel access. Details:

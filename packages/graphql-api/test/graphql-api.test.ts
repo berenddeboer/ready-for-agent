@@ -1521,7 +1521,7 @@ describe("GraphQL API", () => {
             selectedAgentBackend: "opencode",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
-            reviewModel: "anthropic/claude-opus-4-6",
+            reviewModel: "opencode/deepseek-v4-flash-free",
             reviewThinkingLevel: "max",
             maxConcurrentAgentTurns: 3,
             maxConcurrentWorkItems: 7,
@@ -1535,13 +1535,336 @@ describe("GraphQL API", () => {
           selectedAgentBackend: "opencode",
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultThinkingLevel: "high",
-          reviewModel: "anthropic/claude-opus-4-6",
+          reviewModel: "opencode/deepseek-v4-flash-free",
           reviewThinkingLevel: "max",
           maxConcurrentAgentTurns: 3,
           maxConcurrentWorkItems: 7,
         },
       },
     })
+  })
+
+  test("updateConfig rejects an Agent Model outside the current catalog", async () => {
+    // Issue #838: Settings is catalog-only, and a direct GraphQL request must
+    // not be able to store a model the Agent Backend does not offer.
+    const updateCalls: string[] = []
+    const strictRuntime = makeRuntime({
+      updateConfig: (input) => {
+        updateCalls.push(input.selectedAgentBackend)
+        return Effect.succeed({
+          selectedAgentBackend: input.selectedAgentBackend,
+          defaultModel: input.defaultModel,
+          defaultThinkingLevel: input.defaultThinkingLevel,
+          reviewModel: input.reviewModel,
+          reviewThinkingLevel: input.reviewThinkingLevel,
+          maxConcurrentAgentTurns: input.maxConcurrentAgentTurns,
+          maxConcurrentWorkItems: input.maxConcurrentWorkItems,
+        })
+      },
+    })
+
+    const response = await createGraphqlApi(strictRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            // Legacy Bedrock profile left over under another provider mode.
+            defaultModel: "us.anthropic.claude-sonnet-4-6",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      data?: { updateConfig: unknown } | null
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultModel",
+    })
+    expect(payload.errors?.[0]?.message).toContain(
+      "us.anthropic.claude-sonnet-4-6",
+    )
+    // Nothing was persisted.
+    expect(updateCalls).toEqual([])
+    await strictRuntime.dispose()
+  })
+
+  test("updateConfig identifies the review model field when only it is invalid", async () => {
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: null,
+            reviewModel: "sonnet",
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "reviewModel",
+    })
+  })
+
+  test("updateConfig validates against the next backend, not the current one", async () => {
+    // Switching backends must be judged by what the *next* backend offers.
+    // grok is not Active here, so validation goes through the Preview path.
+    const previewCalls: string[] = []
+    const switchRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: (backendId) =>
+          Effect.succeed(
+            backendId === "opencode" ? readyRuntimeStatus() : null,
+          ),
+        preview: (backendId) => {
+          previewCalls.push(backendId)
+          return Effect.succeed({
+            backend: { id: backendId, label: backendId },
+            kind: "ready" as const,
+            reason: null,
+            models: [{ id: "grok-code-fast-1", thinkingLevels: [] }],
+            provider: null,
+            warnings: [],
+          })
+        },
+      },
+    )
+
+    const rejected = await createGraphqlApi(switchRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            // In the *current* backend's catalog, absent from grok's.
+            defaultModel: "anthropic/claude-sonnet-4-5",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const rejectedPayload = (await rejected.json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(rejectedPayload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultModel",
+    })
+    expect(previewCalls).toEqual(["grok"])
+
+    const accepted = await createGraphqlApi(switchRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            defaultModel: "grok-code-fast-1",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await accepted.json()).toEqual({
+      data: { updateConfig: { defaultModel: "grok-code-fast-1" } },
+    })
+    await switchRuntime.dispose()
+  })
+
+  test("updateConfig cannot validate an explicit model without a catalog", async () => {
+    const unavailableRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () =>
+          Effect.succeed({
+            ...readyRuntimeStatus(),
+            kind: "unavailable" as const,
+            reason: "opencode CLI is not installed",
+            models: [],
+          }),
+      },
+    )
+
+    const response = await createGraphqlApi(unavailableRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    const payload = (await response.json()) as {
+      errors?: ReadonlyArray<{
+        message: string
+        extensions?: { code?: string; field?: string }
+      }>
+    }
+    expect(payload.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_CONFIG_INPUT",
+      field: "defaultModel",
+    })
+    expect(payload.errors?.[0]?.message).toContain("catalog is unavailable")
+    expect(payload.errors?.[0]?.message).toContain(
+      "opencode CLI is not installed",
+    )
+    await unavailableRuntime.dispose()
+  })
+
+  test("updateConfig clears models without consulting a catalog", async () => {
+    // Clearing on a backend change must keep working even when no catalog can
+    // be produced — an empty model asserts nothing about membership.
+    const previewCalls: string[] = []
+    const clearingRuntime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        getBackendStatus: () => Effect.succeed(null),
+        preview: (backendId) => {
+          previewCalls.push(backendId)
+          return Effect.die("preview must not run for empty models")
+        },
+      },
+    )
+
+    const response = await createGraphqlApi(clearingRuntime).fetch(
+      graphqlRequest({
+        query: `mutation UpdateConfig($input: UpdateConfigInput!) {
+          updateConfig(input: $input) { defaultModel }
+        }`,
+        variables: {
+          input: {
+            selectedAgentBackend: "grok",
+            defaultModel: null,
+            defaultThinkingLevel: null,
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          },
+        },
+      }),
+    )
+    expect(await response.json()).toEqual({
+      data: { updateConfig: { defaultModel: null } },
+    })
+    expect(previewCalls).toEqual([])
+    await clearingRuntime.dispose()
+  })
+
+  test("updateRepositorySettings enforces the next Effective backend catalog", async () => {
+    const settingsCalls: unknown[] = []
+    const repoRuntime = makeRuntime({
+      updateRepositorySettings: (input) => {
+        settingsCalls.push(input)
+        return Effect.succeed({
+          ...repository,
+          paused: input.paused,
+          selectedAgentBackend:
+            input.selectedAgentBackend === undefined
+              ? repository.selectedAgentBackend
+              : input.selectedAgentBackend,
+          defaultModel: input.defaultModel,
+          defaultThinkingLevel: input.defaultThinkingLevel,
+          reviewModel: input.reviewModel,
+          reviewThinkingLevel: input.reviewThinkingLevel,
+          autoMerge: input.autoMerge,
+          includeAllIssueAuthors: input.includeAllIssueAuthors,
+          waitForReadyForReviewChecks: input.waitForReadyForReviewChecks,
+        })
+      },
+    })
+    const overrideInput = (defaultModel: string | null) => ({
+      repositoryId: repository.id,
+      paused: false,
+      selectedAgentBackend: null,
+      defaultModel,
+      defaultThinkingLevel: null,
+      reviewModel: null,
+      reviewThinkingLevel: null,
+      autoMerge: true,
+      includeAllIssueAuthors: false,
+      waitForReadyForReviewChecks: false,
+    })
+    const save = (defaultModel: string | null) =>
+      createGraphqlApi(repoRuntime).fetch(
+        graphqlRequest({
+          query: `mutation UpdateRepositorySettings($input: UpdateRepositorySettingsInput!) {
+            updateRepositorySettings(input: $input) { defaultModel }
+          }`,
+          variables: { input: overrideInput(defaultModel) },
+        }),
+      )
+
+    const rejected = (await (
+      await save("us.anthropic.claude-sonnet-4-6")
+    ).json()) as {
+      errors?: ReadonlyArray<{ extensions?: { code?: string; field?: string } }>
+    }
+    expect(rejected.errors?.[0]?.extensions).toEqual({
+      code: "INVALID_REPOSITORY_SETTINGS",
+      field: "defaultModel",
+    })
+    expect(settingsCalls).toEqual([])
+
+    // Clearing the override back to inheritance is always allowed.
+    expect(await (await save(null)).json()).toEqual({
+      data: { updateRepositorySettings: { defaultModel: null } },
+    })
+    expect(settingsCalls).toHaveLength(1)
+    await repoRuntime.dispose()
   })
 
   test("updateConfig syncs selected-or-in-use and moves proxy when default changes", async () => {
@@ -1752,7 +2075,7 @@ describe("GraphQL API", () => {
             selectedAgentBackend: "grok",
             defaultModel: "anthropic/claude-sonnet-4-5",
             defaultThinkingLevel: "high",
-            reviewModel: "anthropic/claude-opus-4-6",
+            reviewModel: "opencode/deepseek-v4-flash-free",
             reviewThinkingLevel: "max",
             autoMerge: true,
             includeAllIssueAuthors: true,
@@ -1769,7 +2092,7 @@ describe("GraphQL API", () => {
           selectedAgentBackend: "grok",
           defaultModel: "anthropic/claude-sonnet-4-5",
           defaultThinkingLevel: "high",
-          reviewModel: "anthropic/claude-opus-4-6",
+          reviewModel: "opencode/deepseek-v4-flash-free",
           reviewThinkingLevel: "max",
           autoMerge: true,
           includeAllIssueAuthors: true,

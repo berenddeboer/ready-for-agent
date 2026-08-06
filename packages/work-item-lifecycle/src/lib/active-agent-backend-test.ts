@@ -52,6 +52,12 @@ export const stubActiveAgentBackendLayer = (
     readonly registration: AgentBackendRegistration
     /** Additional Active registrations (for multi-backend routing tests). */
     readonly registrations: ReadonlyArray<AgentBackendRegistration>
+    /**
+     * Ready catalog reported for every Active backend. Defaults to empty,
+     * which carries no membership information and therefore does not gate
+     * Agent Model admission (issue #838).
+     */
+    readonly models: AgentBackendRuntimeStatus["models"]
     readonly getStatus: Effect.Effect<AgentBackendStatus>
     readonly requireAgentTurnsAllowed: Effect.Effect<
       void,
@@ -84,7 +90,8 @@ export const stubActiveAgentBackendLayer = (
   const byId = new Map<AgentBackendId, AgentBackendRegistration>(
     allRegistrations.map((entry) => [entry.descriptor.id, entry] as const),
   )
-  const readyFor = (entry: AgentBackendRegistration) => runtimeStatus(entry)
+  const readyFor = (entry: AgentBackendRegistration) =>
+    runtimeStatus(entry, overrides.models ?? [])
   const allReady = allRegistrations.map(readyFor)
   const legacyStatus =
     overrides.getStatus ?? Effect.succeed(readyStatus(registration))
@@ -131,7 +138,7 @@ export const stubActiveAgentBackendLayer = (
           backend: registrationFor(backendId).descriptor,
           kind: "ready" as const,
           reason: null,
-          models: [],
+          models: overrides.models ?? [],
           provider: null,
           warnings: [],
         }),

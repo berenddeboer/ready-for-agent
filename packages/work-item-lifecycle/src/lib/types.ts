@@ -329,6 +329,12 @@ export const STEP_RUN_REASON = {
   agentBackendUnavailable: "agent_backend_unavailable",
   /** Agent-dependent step blocked because no build Agent Model is configured. */
   buildModelNotConfigured: "build_model_not_configured",
+  /**
+   * Agent-dependent step blocked because the resolved Agent Model is absent
+   * from the Agent Backend's current Ready catalog (issue #838). Rejected
+   * before the backend CLI is spawned.
+   */
+  agentModelNotInCatalog: "agent_model_not_in_catalog",
   /** Mid-run: Review is running the reviewing (/review) OpenCode pass. */
   reviewReviewing: "review_reviewing",
   /** Mid-run: Review is applying findings with the build model. */

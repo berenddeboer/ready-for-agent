@@ -3,7 +3,7 @@
 Operator note for running the **Claude Code** Agent Backend through
 [Amazon Bedrock](https://code.claude.com/docs/en/amazon-bedrock) under Ready for
 Agent. Covers readiness, process environment, provider visibility (**Amazon
-Bedrock** vs first-party), profile discovery, and **strict** Bedrock model
+Bedrock** vs first-party), profile discovery, and **catalog-only** model
 selection in Settings (discovered profiles only when
 `CLAUDE_CODE_USE_BEDROCK=1` — see [Model selection](#model-selection)).
 
@@ -89,9 +89,9 @@ Env pins map Claude **floating aliases** to concrete model identifiers
 process-wide. In **Bedrock configuration mode** (`CLAUDE_CODE_USE_BEDROCK=1`)
 the Settings catalog no longer lists `haiku` / `sonnet` / `opus` / `fable`;
 you must pick a **discovered profile** (system profile ID or application ARN)
-from the strict select. Free-text entry is disabled in that mode. Pins remain
-useful when you still run first-party Claude Code aliases, or when other Claude
-tooling outside Settings still resolves aliases.
+from the catalog select. Pins remain useful when you still run first-party
+Claude Code aliases, or when other Claude tooling outside Settings still
+resolves aliases.
 
 ```bash
 export ANTHROPIC_DEFAULT_OPUS_MODEL='us.anthropic.claude-opus-4-8'
@@ -140,25 +140,42 @@ Selection for the **Claude Code** Agent Backend depends on configuration mode
 
 | Path | What you do | Notes |
 | --- | --- | --- |
-| **Catalog (first-party)** | Pick `haiku`, `sonnet`, `opus`, or `fable`, **or** free-text any Claude-accepted model string | Static alias catalog when Claude reports first-party; free-text remains for first-party only (issue #806) |
-| **Catalog (Bedrock mode)** | Pick a discovered system-defined or application inference profile from a **strict select** | Requires harness process `CLAUDE_CODE_USE_BEDROCK=1` for the **Claude Code Bedrock** Settings label and strict UI. Profiles come from AWS `ListInferenceProfiles` for the harness process account/region (ACTIVE Anthropic-backed system and application). Settings show friendly name and **System** / **Application** kind; the stored value is the system profile ID or application ARN. Floating aliases and free-text are **not** offered. |
-| **Env pins** | Optionally pin first-party aliases via `ANTHROPIC_DEFAULT_*_MODEL` | Maps aliases process-wide; complementary to first-party free-text / alias selection |
+| **Catalog (first-party)** | Pick `haiku`, `sonnet`, `opus`, or `fable` from a select | Static alias catalog when Claude reports first-party. Free-text entry was removed in issue #838, superseding issue #806. |
+| **Catalog (Bedrock mode)** | Pick a discovered system-defined or application inference profile from a select | Requires harness process `CLAUDE_CODE_USE_BEDROCK=1` for the **Claude Code Bedrock** Settings label. Profiles come from AWS `ListInferenceProfiles` for the harness process account/region (ACTIVE Anthropic-backed system and application). Settings show friendly name and **System** / **Application** kind; the stored value is the system profile ID or application ARN. Floating aliases are **not** offered. |
+| **Env pins** | Optionally pin first-party aliases via `ANTHROPIC_DEFAULT_*_MODEL` | Maps aliases process-wide; complementary to first-party alias selection |
 
-In **Bedrock configuration mode**, Save is blocked while profile discovery is
-loading, when discovery fails, when no eligible profiles are returned, when no
-build model is selected (Harness Config), or when a previously saved value is
-absent from the current catalog. The form shows the reason beside the model
-control. Existing saved values are **not** auto-deleted or rewritten; pick a
-current profile explicitly. **Recheck Agent Backend** refreshes provider,
-warnings, and catalog atomically after AWS fixes.
+Agent Model selection is **catalog-only for every Agent Backend** in both
+Harness Config and Repository settings (issue #838): build and review model
+controls are selects over the current catalog, never editable inputs or
+datalist suggestions. Save is blocked while the catalog is loading, when it
+fails to load, when it returns no entries, when no build model is selected
+(Harness Config), or when the selected value is absent from the current
+catalog. The form shows the reason beside the model control.
+
+Because backend-scoped model prefs are keyed by the stable backend ID `claude`
+and are not split by provider mode, a value saved in Bedrock mode is still
+present when the harness later runs **without** `CLAUDE_CODE_USE_BEDROCK=1`
+(and vice versa). Such a value is **not** auto-deleted, rewritten, or
+translated between modes: Settings keeps showing it, marked as not in the
+current catalog, alongside the models you can pick instead. Choose a current
+model explicitly, or — in Repository settings — clear the override to inherit
+the Harness default. **Recheck Agent Backend** refreshes provider, warnings,
+and catalog atomically after AWS fixes; opening Settings also re-fetches
+provider mode and catalog so a long-open browser cannot offer models from
+before a Harness restart.
+
+The same catalog rule is enforced server-side, so a direct GraphQL
+`updateConfig` / `updateRepositorySettings` request cannot store a model the
+Agent Backend does not offer. Work Item creation and each Agent Turn also
+refuse a stored model that is absent from the current catalog, with
+configuration guidance and **without** spawning the Claude CLI.
 
 Resolved model strings are passed through as Claude `--model` on Agent Turns.
-Thinking Level / effort uses the same Claude effort set (`low` … `max`) for
-catalog entries; unsupported model×effort combinations fail at turn time.
+Thinking Level / effort options come from the selected catalog entry;
+unsupported model×effort combinations fail at turn time.
 
 Empty / whitespace-only model values remain invalid for Harness Config build
-model. First-party free-text invalid ids fail at turn time as ordinary Step
-Run / CLI failures.
+model. Empty Repository overrides keep inheriting the Harness default.
 
 ### Bedrock profile discovery
 
@@ -211,13 +228,13 @@ Claude Code and every other Agent Backend make **no** AWS discovery calls.
   `APPLICATION` (Settings: **Application**).
 - Friendly `inferenceProfileName` is display-only; Claude Code always receives
   the stored id/ARN via `--model` unchanged.
-- Bedrock configuration mode does not accept free-text identifiers. Catalog-
-  absent saved values are shown as unavailable until you pick a current profile.
+- No Agent Backend accepts free-text model identifiers (issue #838). Catalog-
+  absent saved values are shown as unavailable until you pick a current model.
 
 **Out of scope (this path)**
 
-- Free-text expansion for non-Claude Agent Backends (those stay
-  catalog-constrained unless already free-form by design).
+- Any free-text escape hatch for custom, pinned, dated, preview, or
+  context-window model strings on any Agent Backend.
 - Invoking listed profiles to prove model entitlement (no billable probe).
 - Multi-region catalog aggregation or an AWS setup wizard in the harness.
 - Configuring AWS credentials, region, or IAM from the Harness UI.
@@ -231,8 +248,8 @@ Claude Code and every other Agent Backend make **no** AWS discovery calls.
 4. Settings → **Claude Code Bedrock** → Recheck Agent Backend → status shows
    **Claude Code · Amazon Bedrock · Ready** (or Ready with a catalog warning).
 5. Build/review prefs: select a discovered system-defined profile ID or
-   application profile ARN from the strict catalog select (friendly name + kind
-   shown; stored executable id/ARN in Harness Config / Repository model prefs).
+   application profile ARN from the catalog select (friendly name + kind shown;
+   stored executable id/ARN in Harness Config / Repository model prefs).
 6. Optional: `ANTHROPIC_DEFAULT_*_MODEL` pins when using first-party aliases
    outside Bedrock catalog mode.
 7. Optional: grant `bedrock:ListInferenceProfiles` for catalog population.
@@ -247,4 +264,5 @@ Claude Code and every other Agent Backend make **no** AWS discovery calls.
 - Claude Code Agent Backend decision: [ADR 0047](adr/0047-claude-code-agent-backend.md)
 - Provider + discovery epic: [issue #818](https://github.com/berenddeboer/ready-for-agent/issues/818)
 - Bedrock readiness MVP epic: [issue #799](https://github.com/berenddeboer/ready-for-agent/issues/799)
-- Model selection (hybrid aliases + free-text): [issue #800](https://github.com/berenddeboer/ready-for-agent/issues/800) / [issue #806](https://github.com/berenddeboer/ready-for-agent/issues/806)
+- Model selection (hybrid aliases + free-text, superseded by #838): [issue #800](https://github.com/berenddeboer/ready-for-agent/issues/800) / [issue #806](https://github.com/berenddeboer/ready-for-agent/issues/806)
+- Catalog-only Agent Model selection across Settings: [issue #838](https://github.com/berenddeboer/ready-for-agent/issues/838)

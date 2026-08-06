@@ -21,17 +21,16 @@ import {
 } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import { formatAgentBackendStatusLabel } from "../agent-backend-status-label.js"
 import { AgentBackendWarnings } from "../agent-backend-warnings.js"
+import { AgentModelSelect } from "../agent-model-select.js"
 import {
   type AgentModelOption,
   CLAUDE_AGENT_BACKEND_ID,
-  allowsClaudeFreeTextModels,
-  blocksClaudeBedrockModelSave,
-  claudeBedrockModelSaveBlockReason,
-  findCatalogModel,
-  formatAgentModelLabel,
+  agentModelCatalogNotice,
+  agentModelSaveBlockReason,
+  blocksAgentModelSave,
+  formatUnavailableVariantLabel,
   formatVariantLabel,
   isClaudeBedrockConfigurationMode,
-  isCustomAgentModelValue,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
   thinkingLevelsForModel,
@@ -1310,9 +1309,13 @@ function RepositoryCard({
     void queryClient.invalidateQueries({
       queryKey: repositoriesQuery.queryKey,
     })
-    if (config.isError) void config.refetch()
-    if (models.isError) void models.refetch()
-    if (agentBackends.isError) void agentBackends.refetch()
+    // Refresh provider-mode and catalog metadata on every open. Both queries
+    // are cached indefinitely, so a long-open browser would otherwise keep the
+    // catalog (and Claude configurationMode) from before a Harness restart and
+    // offer models the running Harness no longer accepts (issue #838).
+    void config.refetch()
+    void models.refetch()
+    void agentBackends.refetch()
     settingsDialogRef.current?.showModal()
   }
 
@@ -1484,10 +1487,12 @@ function RepositoryCard({
     usesPreviewCatalog ? (previewModels ?? undefined) : models.data
   const modelIds = (catalogModels ?? []).map((model) => model.id)
   const modelBackendId = draftEffective
+  const catalogLoaded = catalogModels !== undefined
   // configurationMode comes only from agentBackends. Until that list has
-  // successfully loaded, Claude mode is unknown — fail closed (no free-text,
-  // Save blocked) so Bedrock env mode cannot be saved as first-party free-text
-  // while the query is pending or failed (issue #828 review).
+  // successfully loaded, Claude mode is unknown — fail closed (Save blocked) so
+  // a Bedrock-mode harness cannot be shown first-party guidance while the query
+  // is pending or failed (issue #828 review). Catalog membership itself is
+  // required for every Agent Backend (issue #838).
   const agentBackendsModeReady =
     !agentBackends.isPending &&
     !agentBackends.isError &&
@@ -1497,9 +1502,6 @@ function RepositoryCard({
   const modelConfigurationMode =
     (agentBackends.data ?? []).find((backend) => backend.id === modelBackendId)
       ?.configurationMode ?? null
-  const claudeFreeTextModels =
-    !claudeConfigurationModeUnresolved &&
-    allowsClaudeFreeTextModels(modelBackendId, modelConfigurationMode)
   const claudeBedrockStrict =
     agentBackendsModeReady &&
     isClaudeBedrockConfigurationMode(modelBackendId, modelConfigurationMode)
@@ -1519,44 +1521,28 @@ function RepositoryCard({
           ? harnessReviewForSource
           : harnessBuildForSource
   const buildVariants = thinkingLevelsForModel(
-    modelBackendId,
     catalogModels,
     buildVariantSourceModel,
-    modelConfigurationMode,
   )
   const reviewThinkingLevels = thinkingLevelsForModel(
-    modelBackendId,
     catalogModels,
     reviewThinkingLevelSourceModel,
-    modelConfigurationMode,
   )
-  // Catalog-absent models block Save only for catalog-constrained backends.
-  // First-party Claude free-text remains allowed (#806); Bedrock is strict (#828).
-  const hasUnavailableBuildModel = isUnavailableCatalogModel({
-    backendId: modelBackendId,
-    modelId: defaultModel,
-    catalogModelIds: modelIds,
-    configurationMode: modelConfigurationMode,
-  })
-  const hasUnavailableReviewModel = isUnavailableCatalogModel({
-    backendId: modelBackendId,
-    modelId: reviewModel,
-    catalogModelIds: modelIds,
-    configurationMode: modelConfigurationMode,
-  })
   // Effort source may be the override or an inherited harness model string.
-  const buildVariantSourceUnavailable = isUnavailableCatalogModel({
-    backendId: modelBackendId,
-    modelId: buildVariantSourceModel,
-    catalogModelIds: modelIds,
-    configurationMode: modelConfigurationMode,
-  })
-  const reviewThinkingLevelSourceUnavailable = isUnavailableCatalogModel({
-    backendId: modelBackendId,
-    modelId: reviewThinkingLevelSourceModel,
-    catalogModelIds: modelIds,
-    configurationMode: modelConfigurationMode,
-  })
+  // Only claim "unavailable" once a catalog loaded so a pending fetch cannot
+  // flash an alarm for a value that may yet match (issue #838).
+  const buildVariantSourceUnavailable =
+    catalogLoaded &&
+    isUnavailableCatalogModel({
+      modelId: buildVariantSourceModel,
+      catalogModelIds: modelIds,
+    })
+  const reviewThinkingLevelSourceUnavailable =
+    catalogLoaded &&
+    isUnavailableCatalogModel({
+      modelId: reviewThinkingLevelSourceModel,
+      catalogModelIds: modelIds,
+    })
   const hasCustomBuildVariant =
     defaultThinkingLevel.length > 0 &&
     (buildVariantSourceUnavailable ||
@@ -1567,19 +1553,21 @@ function RepositoryCard({
       !reviewThinkingLevels.includes(reviewThinkingLevel))
   const modelsDisabled =
     usesPreviewCatalog && (previewPending || previewError !== null)
+  // isFetching, not isPending: opening Settings refetches, and React Query
+  // would otherwise keep serving the previous catalog while that request is in
+  // flight — exactly the indefinitely-cached catalog a Harness restart must
+  // invalidate (issue #838). Treat a refresh as "no catalog yet" so no stale
+  // model is offered and Save stays blocked until the current one arrives.
   const modelsLoading =
     settingsOpen &&
     (usesPreviewCatalog
-      ? previewPending || config.isPending
-      : models.isPending || config.isPending || agentBackends.isPending)
-  // Only enforce "model not in catalog" when a catalog actually loaded.
-  // Failed/pending override preview leaves modelIds empty and must not block
-  // non-model saves for the current effective backend. First-party Claude
-  // free-text is never blocked by catalog membership (#806). Bedrock mode is
-  // always strict when the effective backend is Claude (#828).
+      ? previewPending || config.isFetching
+      : models.isFetching || config.isFetching || agentBackends.isFetching)
+  // A backend-draft change may only be saved once its Preview catalog resolved,
+  // so the model overrides are validated against the next Effective backend.
   const catalogReadyForModelValidation = usesPreviewCatalog
     ? !previewPending && previewError === null && previewModels !== null
-    : !models.isPending && !models.isError && models.data !== undefined
+    : !models.isFetching && !models.isError && models.data !== undefined
   const discoveryWarningsForModels = usesPreviewCatalog ? previewWarnings : []
   const catalogFailed =
     !modelsLoading &&
@@ -1587,94 +1575,62 @@ function RepositoryCard({
     (usesPreviewCatalog
       ? previewError !== null
       : models.isError || agentBackends.isError)
-  const catalogLoadingForBedrock =
+  const catalogLoading =
     modelsLoading ||
     modelsDisabled ||
     (!catalogFailed && catalogModels === undefined)
-  const blockSaveForBedrockBuildModel = blocksClaudeBedrockModelSave({
+  const catalogState = {
     backendId: modelBackendId,
     configurationMode: modelConfigurationMode,
-    catalogLoading: catalogLoadingForBedrock,
+    catalogLoading,
     catalogFailed,
     catalogModels,
-    // Repository override may leave build model empty to inherit harness.
-    // Strict membership is still enforced when a non-empty value is set.
+    discoveryWarnings: discoveryWarningsForModels,
+  }
+  // Repository overrides are optional: empty inherits the harness default and
+  // saves even without a healthy catalog. Any explicit value must be in the
+  // current catalog of the next Effective Agent Backend (issue #838).
+  const blockSaveForBuildModel = blocksAgentModelSave({
+    ...catalogState,
     modelId: defaultModel,
     requireSelection: false,
   })
-  const blockSaveForBedrockReviewModel =
-    claudeBedrockStrict &&
-    reviewModel.length > 0 &&
-    blocksClaudeBedrockModelSave({
-      backendId: modelBackendId,
-      configurationMode: modelConfigurationMode,
-      catalogLoading: catalogLoadingForBedrock,
-      catalogFailed,
-      catalogModels,
-      modelId: reviewModel,
-      requireSelection: false,
-    })
-  // When the operator sets an explicit Bedrock override (non-empty), require
-  // catalog membership. Empty still inherits harness and does not block.
-  const bedrockBuildModelBlockReason =
+  const blockSaveForReviewModel = blocksAgentModelSave({
+    ...catalogState,
+    modelId: reviewModel,
+    requireSelection: false,
+  })
+  const catalogUnusable =
+    catalogLoading ||
+    catalogFailed ||
+    catalogModels === undefined ||
+    catalogModels.length === 0
+  // With an explicit override, explain why it blocks Save. While inheriting,
+  // still explain an unusable catalog (nothing is selectable) without claiming
+  // a selection is required.
+  const buildModelBlockReason =
     defaultModel.length > 0
-      ? claudeBedrockModelSaveBlockReason({
-          backendId: modelBackendId,
-          configurationMode: modelConfigurationMode,
-          catalogLoading: catalogLoadingForBedrock,
-          catalogFailed,
-          catalogModels,
+      ? agentModelSaveBlockReason({
+          ...catalogState,
           modelId: defaultModel,
           requireSelection: false,
-          discoveryWarnings: discoveryWarningsForModels,
         })
-      : claudeBedrockStrict &&
-          (catalogLoadingForBedrock ||
-            catalogFailed ||
-            catalogModels === undefined ||
-            catalogModels.length === 0)
-        ? claudeBedrockModelSaveBlockReason({
-            backendId: modelBackendId,
-            configurationMode: modelConfigurationMode,
-            catalogLoading: catalogLoadingForBedrock,
-            catalogFailed,
-            catalogModels,
-            modelId: "",
-            // Surface loading/empty catalog guidance even when inheriting.
-            requireSelection: true,
-            discoveryWarnings: discoveryWarningsForModels,
-          })
+      : catalogUnusable
+        ? agentModelCatalogNotice(catalogState)
         : null
-  const bedrockReviewModelBlockReason =
+  const reviewModelBlockReason =
     reviewModel.length > 0
-      ? claudeBedrockModelSaveBlockReason({
-          backendId: modelBackendId,
-          configurationMode: modelConfigurationMode,
-          catalogLoading: catalogLoadingForBedrock,
-          catalogFailed,
-          catalogModels,
+      ? agentModelSaveBlockReason({
+          ...catalogState,
           modelId: reviewModel,
           requireSelection: false,
-          discoveryWarnings: discoveryWarningsForModels,
         })
-      : null
-  const bedrockModelSelectDisabled =
-    modelsDisabled ||
-    (claudeBedrockStrict &&
-      (catalogLoadingForBedrock ||
-        catalogFailed ||
-        catalogModels === undefined ||
-        catalogModels.length === 0))
-  const blockSaveForUnavailableBuildModel =
-    (catalogReadyForModelValidation &&
-      defaultModel.length > 0 &&
-      hasUnavailableBuildModel) ||
-    blockSaveForBedrockBuildModel ||
-    blockSaveForBedrockReviewModel ||
-    (catalogReadyForModelValidation &&
-      reviewModel.length > 0 &&
-      hasUnavailableReviewModel &&
-      !allowsClaudeFreeTextModels(modelBackendId, modelConfigurationMode))
+      : catalogUnusable
+        ? agentModelCatalogNotice(catalogState)
+        : null
+  // Never disable on an unusable catalog: clearing a stale override back to
+  // inheritance must stay reachable (issue #838).
+  const modelSelectDisabled = modelsDisabled
   // Single Save gate for button + form onSubmit (Enter must not bypass #828).
   const repositorySettingsSaveBlocked =
     updateSettings.isPending ||
@@ -1688,7 +1644,8 @@ function RepositoryCard({
       usesPreviewCatalog &&
       !catalogReadyForModelValidation) ||
     (backendDraftChanging && usesPreviewCatalog && previewError !== null) ||
-    blockSaveForUnavailableBuildModel
+    blockSaveForBuildModel ||
+    blockSaveForReviewModel
 
   const saveSettings = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -2319,175 +2276,54 @@ function RepositoryCard({
                 </Banner>
               ) : (
                 <>
-                  {claudeFreeTextModels ? (
-                    <label className={ui.dialogField}>
-                      Build model
-                      <input
-                        className={cx(ui.dialogInput, ui.dialogInputMono)}
-                        list={`repo-claude-build-models-${repository.id}`}
-                        value={defaultModel}
-                        disabled={modelsDisabled}
-                        onChange={(event) => {
-                          const nextModel = event.target.value
-                          setDefaultModel(nextModel)
-                          const sourceModel =
-                            nextModel.length > 0
-                              ? nextModel
+                  <AgentModelSelect
+                    label="Build model"
+                    name="defaultModel"
+                    value={defaultModel}
+                    models={catalogModels}
+                    catalogLoading={catalogLoading}
+                    allowClear
+                    required={false}
+                    disabled={modelSelectDisabled}
+                    placeholder={`Harness default (${harnessDefaultModel})`}
+                    emptyCatalogLabel={
+                      claudeBedrockStrict
+                        ? "No Bedrock profiles available"
+                        : "No Agent Models available"
+                    }
+                    blockReason={buildModelBlockReason}
+                    hint={
+                      claudeBedrockStrict
+                        ? "Empty inherits harness default. Otherwise choose a discovered Bedrock inference profile."
+                        : "Empty inherits harness default. Otherwise choose a model from the catalog."
+                    }
+                    onChange={(nextModel) => {
+                      setDefaultModel(nextModel)
+                      const sourceModel =
+                        nextModel.length > 0 ? nextModel : harnessBuildForSource
+                      const nextVariants = thinkingLevelsForModel(
+                        catalogModels,
+                        sourceModel,
+                      )
+                      setDefaultVariant((current) =>
+                        reconcileVariantForModel(current, nextVariants),
+                      )
+                      if (reviewModel.length === 0) {
+                        const reviewSource =
+                          nextModel.length > 0
+                            ? nextModel
+                            : harnessReviewForSource.length > 0
+                              ? harnessReviewForSource
                               : harnessBuildForSource
-                          const nextVariants = thinkingLevelsForModel(
-                            modelBackendId,
-                            catalogModels,
-                            sourceModel,
-                            modelConfigurationMode,
-                          )
-                          setDefaultVariant((current) =>
-                            reconcileVariantForModel(current, nextVariants),
-                          )
-                          if (reviewModel.length === 0) {
-                            const reviewSource =
-                              nextModel.length > 0
-                                ? nextModel
-                                : harnessReviewForSource.length > 0
-                                  ? harnessReviewForSource
-                                  : harnessBuildForSource
-                            setReviewVariant((current) =>
-                              reconcileVariantForModel(
-                                current,
-                                thinkingLevelsForModel(
-                                  modelBackendId,
-                                  catalogModels,
-                                  reviewSource,
-                                  modelConfigurationMode,
-                                ),
-                              ),
-                            )
-                          }
-                        }}
-                        placeholder={`Harness default (${harnessDefaultModel})`}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <datalist
-                        id={`repo-claude-build-models-${repository.id}`}
-                      >
-                        {(catalogModels ?? []).map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {formatAgentModelLabel(model)}
-                          </option>
-                        ))}
-                      </datalist>
-                      {(() => {
-                        const catalogMatch = findCatalogModel(
-                          catalogModels,
-                          defaultModel,
+                        setReviewVariant((current) =>
+                          reconcileVariantForModel(
+                            current,
+                            thinkingLevelsForModel(catalogModels, reviewSource),
+                          ),
                         )
-                        if (catalogMatch === undefined) {
-                          return null
-                        }
-                        return (
-                          <span className={ui.dialogFieldHint}>
-                            Catalog: {formatAgentModelLabel(catalogMatch)}
-                          </span>
-                        )
-                      })()}
-                      {isCustomAgentModelValue({
-                        models: catalogModels,
-                        modelId: defaultModel,
-                      }) && (
-                        <span className={ui.dialogFieldHint}>
-                          Custom value (not in Agent Model catalog) — stored and
-                          passed to Claude Code unchanged
-                        </span>
-                      )}
-                      <span className={ui.dialogFieldHint}>
-                        Empty inherits harness default. Otherwise catalog alias
-                        or any Claude-accepted model string.
-                      </span>
-                    </label>
-                  ) : (
-                    <label className={ui.dialogField}>
-                      Build model
-                      <select
-                        className={cx(ui.dialogInput, ui.dialogInputMono)}
-                        value={defaultModel}
-                        disabled={
-                          claudeBedrockStrict
-                            ? bedrockModelSelectDisabled
-                            : modelsDisabled
-                        }
-                        onChange={(event) => {
-                          const nextModel = event.target.value
-                          setDefaultModel(nextModel)
-                          const sourceModel =
-                            nextModel.length > 0
-                              ? nextModel
-                              : harnessBuildForSource
-                          const nextVariants = thinkingLevelsForModel(
-                            modelBackendId,
-                            catalogModels,
-                            sourceModel,
-                            modelConfigurationMode,
-                          )
-                          setDefaultVariant((current) =>
-                            reconcileVariantForModel(current, nextVariants),
-                          )
-                          if (reviewModel.length === 0) {
-                            const reviewSource =
-                              nextModel.length > 0
-                                ? nextModel
-                                : harnessReviewForSource.length > 0
-                                  ? harnessReviewForSource
-                                  : harnessBuildForSource
-                            setReviewVariant((current) =>
-                              reconcileVariantForModel(
-                                current,
-                                thinkingLevelsForModel(
-                                  modelBackendId,
-                                  catalogModels,
-                                  reviewSource,
-                                  modelConfigurationMode,
-                                ),
-                              ),
-                            )
-                          }
-                        }}
-                      >
-                        <option value="">
-                          {modelsLoading
-                            ? "Loading catalog…"
-                            : claudeBedrockStrict &&
-                                catalogModels !== undefined &&
-                                catalogModels.length === 0
-                              ? "No Bedrock profiles available"
-                              : `Harness default (${harnessDefaultModel})`}
-                        </option>
-                        {(hasUnavailableBuildModel ||
-                          (claudeBedrockStrict &&
-                            defaultModel.length > 0 &&
-                            catalogModels !== undefined &&
-                            !modelIds.includes(defaultModel))) && (
-                          <option value={defaultModel}>
-                            {defaultModel} (not in Agent Model catalog)
-                          </option>
-                        )}
-                        {(catalogModels ?? []).map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {formatAgentModelLabel(model)}
-                          </option>
-                        ))}
-                      </select>
-                      {bedrockBuildModelBlockReason !== null ? (
-                        <span className={ui.dialogFieldHint} role="status">
-                          {bedrockBuildModelBlockReason}
-                        </span>
-                      ) : claudeBedrockStrict ? (
-                        <span className={ui.dialogFieldHint}>
-                          Empty inherits harness default. Otherwise choose a
-                          discovered Bedrock inference profile.
-                        </span>
-                      ) : null}
-                    </label>
-                  )}
+                      }
+                    }}
+                  />
                   {buildVariantSourceModel.length > 0 &&
                   buildVariantSourceUnavailable ? (
                     <Banner
@@ -2527,7 +2363,9 @@ function RepositoryCard({
                         </option>
                         {hasCustomBuildVariant && (
                           <option value={defaultThinkingLevel}>
-                            {formatVariantLabel(defaultThinkingLevel)}
+                            {formatUnavailableVariantLabel(
+                              defaultThinkingLevel,
+                            )}
                           </option>
                         )}
                         {buildVariants.map((variant) => (
@@ -2538,134 +2376,37 @@ function RepositoryCard({
                       </select>
                     </label>
                   )}
-                  {claudeFreeTextModels ? (
-                    <label className={ui.dialogField}>
-                      Review model
-                      <input
-                        className={cx(ui.dialogInput, ui.dialogInputMono)}
-                        list={`repo-claude-review-models-${repository.id}`}
-                        value={reviewModel}
-                        disabled={modelsDisabled}
-                        onChange={(event) => {
-                          const nextModel = event.target.value
-                          setReviewModel(nextModel)
-                          const sourceModel =
-                            nextModel.length > 0
-                              ? nextModel
-                              : defaultModel.length > 0
-                                ? defaultModel
-                                : harnessReviewForSource.length > 0
-                                  ? harnessReviewForSource
-                                  : harnessBuildForSource
-                          setReviewVariant((current) =>
-                            reconcileVariantForModel(
-                              current,
-                              thinkingLevelsForModel(
-                                modelBackendId,
-                                catalogModels,
-                                sourceModel,
-                                modelConfigurationMode,
-                              ),
-                            ),
-                          )
-                        }}
-                        placeholder={`Harness default (${harnessReviewModel})`}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                      <datalist
-                        id={`repo-claude-review-models-${repository.id}`}
-                      >
-                        {(catalogModels ?? []).map((model) => (
-                          <option key={`review-${model.id}`} value={model.id}>
-                            {formatAgentModelLabel(model)}
-                          </option>
-                        ))}
-                      </datalist>
-                      {(() => {
-                        const catalogMatch = findCatalogModel(
-                          catalogModels,
-                          reviewModel,
-                        )
-                        if (catalogMatch === undefined) {
-                          return null
-                        }
-                        return (
-                          <span className={ui.dialogFieldHint}>
-                            Catalog: {formatAgentModelLabel(catalogMatch)}
-                          </span>
-                        )
-                      })()}
-                      {isCustomAgentModelValue({
-                        models: catalogModels,
-                        modelId: reviewModel,
-                      }) && (
-                        <span className={ui.dialogFieldHint}>
-                          Custom value (not in Agent Model catalog) — stored and
-                          passed to Claude Code unchanged
-                        </span>
-                      )}
-                    </label>
-                  ) : (
-                    <label className={ui.dialogField}>
-                      Review model
-                      <select
-                        className={cx(ui.dialogInput, ui.dialogInputMono)}
-                        value={reviewModel}
-                        disabled={
-                          claudeBedrockStrict
-                            ? bedrockModelSelectDisabled
-                            : modelsDisabled
-                        }
-                        onChange={(event) => {
-                          const nextModel = event.target.value
-                          setReviewModel(nextModel)
-                          const sourceModel =
-                            nextModel.length > 0
-                              ? nextModel
-                              : defaultModel.length > 0
-                                ? defaultModel
-                                : harnessReviewForSource.length > 0
-                                  ? harnessReviewForSource
-                                  : harnessBuildForSource
-                          setReviewVariant((current) =>
-                            reconcileVariantForModel(
-                              current,
-                              thinkingLevelsForModel(
-                                modelBackendId,
-                                catalogModels,
-                                sourceModel,
-                                modelConfigurationMode,
-                              ),
-                            ),
-                          )
-                        }}
-                      >
-                        <option value="">
-                          Harness default ({harnessReviewModel})
-                        </option>
-                        {(hasUnavailableReviewModel ||
-                          (claudeBedrockStrict &&
-                            reviewModel.length > 0 &&
-                            catalogModels !== undefined &&
-                            !modelIds.includes(reviewModel))) && (
-                          <option value={reviewModel}>
-                            {reviewModel} (not in Agent Model catalog)
-                          </option>
-                        )}
-                        {(catalogModels ?? []).map((model) => (
-                          <option key={`review-${model.id}`} value={model.id}>
-                            {formatAgentModelLabel(model)}
-                          </option>
-                        ))}
-                      </select>
-                      {bedrockReviewModelBlockReason !== null ? (
-                        <span className={ui.dialogFieldHint} role="status">
-                          {bedrockReviewModelBlockReason}
-                        </span>
-                      ) : null}
-                    </label>
-                  )}
+                  <AgentModelSelect
+                    label="Review model"
+                    name="reviewModel"
+                    value={reviewModel}
+                    models={catalogModels}
+                    catalogLoading={catalogLoading}
+                    allowClear
+                    required={false}
+                    disabled={modelSelectDisabled}
+                    placeholder={`Harness default (${harnessReviewModel})`}
+                    emptyCatalogLabel={`Harness default (${harnessReviewModel})`}
+                    blockReason={reviewModelBlockReason}
+                    hint={null}
+                    onChange={(nextModel) => {
+                      setReviewModel(nextModel)
+                      const sourceModel =
+                        nextModel.length > 0
+                          ? nextModel
+                          : defaultModel.length > 0
+                            ? defaultModel
+                            : harnessReviewForSource.length > 0
+                              ? harnessReviewForSource
+                              : harnessBuildForSource
+                      setReviewVariant((current) =>
+                        reconcileVariantForModel(
+                          current,
+                          thinkingLevelsForModel(catalogModels, sourceModel),
+                        ),
+                      )
+                    }}
+                  />
                   {reviewThinkingLevelSourceModel.length > 0 &&
                   reviewThinkingLevelSourceUnavailable ? (
                     <Banner
@@ -2705,7 +2446,7 @@ function RepositoryCard({
                         </option>
                         {hasCustomReviewVariant && (
                           <option value={reviewThinkingLevel}>
-                            {formatVariantLabel(reviewThinkingLevel)}
+                            {formatUnavailableVariantLabel(reviewThinkingLevel)}
                           </option>
                         )}
                         {reviewThinkingLevels.map((variant) => (

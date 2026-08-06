@@ -124,7 +124,7 @@ An explicit operator request that revalidates one Agent Backend by id and refres
 _Avoid_: Automatic health poll, model-cache refresh only, Harness restart, Agent Backend Preview
 
 **Agent Model**:
-A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Each Agent Turn resolves build and review Agent Models from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend rather than from Work Item-stored model fields.
+A model in an Agent Backend's catalog for Agent Turns. Its identity and availability are backend-specific rather than Repository-specific. Each Agent Turn resolves build and review Agent Models from current backend-scoped Repository settings falling back to backend-scoped Harness Config for the Work Item's captured Agent Backend rather than from Work Item-stored model fields. Selection is catalog-only: Settings offers exactly the selected Agent Backend's current catalog, and the same membership rule is enforced when settings are saved. A stored value the current catalog no longer lists is preserved and shown as unavailable rather than deleted, rewritten, or translated between provider modes; it cannot be saved, and it blocks Work Item creation and each Agent Turn with configuration guidance before the Agent Backend CLI is spawned. An Agent Backend that reports no catalog at all carries no membership information and does not block.
 _Avoid_: Provider, Agent Backend, model profile
 
 **Thinking Level**:

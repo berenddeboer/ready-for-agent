@@ -1,18 +1,22 @@
 /**
- * Settings helpers for Agent Model fields (Harness Config + Repository prefs).
+ * Settings policy for Agent Model fields (Harness Config + Repository prefs).
  *
- * First-party Claude Code allows free-text model ids (any Claude-accepted
- * `--model` string) in addition to the static alias catalog (issue #806).
- * Claude Code Bedrock configuration mode (`configurationMode === "bedrock"`,
- * from harness process `CLAUDE_CODE_USE_BEDROCK=1`) uses a strict select of
- * discovered inference profiles only — free-text is disabled (issue #828).
- * Other backends stay catalog-constrained at Save.
+ * Agent Model selection is **catalog-only for every Agent Backend** (issue
+ * #838). Settings never accepts a model string that is absent from the current
+ * Ready catalog of the selected/effective Agent Backend — first-party Claude
+ * Code offers its static aliases, Claude Code Bedrock offers discovered
+ * inference profiles, and the other backends offer their own catalogs. This
+ * supersedes the first-party free-text decision (issue #806) and keeps the
+ * strict Bedrock decision (issue #828).
+ *
+ * A stored value that is no longer in the catalog is **preserved** (never
+ * rewritten, translated between provider modes, or coerced to the first
+ * catalog entry). Settings shows it as a visibly unavailable option next to the
+ * current catalog and blocks Save until the operator picks a current model (or,
+ * in Repository scope, clears the override to inherit).
  *
  * Bedrock catalog entries may carry optional operator-facing `name` and `kind`
  * while the executable persisted value remains `id` (issue #821).
- *
- * Effort levels are a local literal (not imported from `@ready-for-agent/claude`)
- * so this client-shared module stays free of the Claude adapter barrel.
  */
 
 export type AgentModelOption = {
@@ -91,33 +95,10 @@ export const formatAgentModelLabel = (model: AgentModelOption): string => {
 }
 
 /**
- * Effort (thinking) options for Claude free-text models — same set as aliases
- * (ADR 0047: low … max, no ultracode). Keep in lockstep with
- * `CLAUDE_THINKING_LEVELS` in packages/claude (asserted in unit tests).
- */
-export const CLAUDE_FREE_TEXT_THINKING_LEVELS: readonly string[] = [
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max",
-]
-
-/**
- * True when Settings may accept non-catalog model strings for this backend.
- * First-party Claude Code allows free-text; Claude Code Bedrock mode does not
- * (issue #828). Other backends never allow free-text.
- */
-export const allowsClaudeFreeTextModels = (
-  backendId: string,
-  configurationMode?: string | null,
-): boolean =>
-  backendId === CLAUDE_AGENT_BACKEND_ID &&
-  configurationMode !== CLAUDE_BEDROCK_CONFIGURATION_MODE
-
-/**
- * True when Claude Code is in Bedrock configuration mode (strict profile
- * select, no free-text). Mode comes from GraphQL agentBackends metadata.
+ * True when Claude Code is in Bedrock configuration mode. Mode comes from
+ * GraphQL agentBackends metadata (never from browser process env) and only
+ * selects operator guidance wording — catalog-only enforcement is identical
+ * for every Agent Backend (issue #838).
  */
 export const isClaudeBedrockConfigurationMode = (
   backendId: string,
@@ -127,169 +108,8 @@ export const isClaudeBedrockConfigurationMode = (
   configurationMode === CLAUDE_BEDROCK_CONFIGURATION_MODE
 
 /**
- * Thinking Levels for a selected model id. Catalog membership wins when the
- * catalog is loaded; first-party Claude free-text (and first-party Claude while
- * the catalog is still pending/failed) falls back to the full Claude effort
- * catalog so operators can set effort the same way as aliases without waiting
- * on inspect. Bedrock mode and other backends return [] when the model is
- * unknown or the catalog is unavailable.
- */
-export const thinkingLevelsForModel = (
-  backendId: string,
-  models: readonly AgentModelOption[] | undefined,
-  modelId: string,
-  configurationMode?: string | null,
-): readonly string[] => {
-  if (modelId.length === 0) {
-    return []
-  }
-  if (models !== undefined) {
-    const fromCatalog = models.find(
-      (model) => model.id === modelId,
-    )?.thinkingLevels
-    if (fromCatalog !== undefined) {
-      return fromCatalog
-    }
-  }
-  // Claude free-text effort is static (ADR 0047 / #806) — do not gate it on a
-  // loaded catalog. Also covers Claude aliases while preview/models is pending.
-  // Bedrock mode is catalog-only (#828).
-  if (allowsClaudeFreeTextModels(backendId, configurationMode)) {
-    return CLAUDE_FREE_TEXT_THINKING_LEVELS
-  }
-  return []
-}
-
-/**
- * True when a non-empty model string is absent from the loaded catalog and the
- * backend does not allow free-text. Used to block Save and hide effort.
- */
-export const isUnavailableCatalogModel = (input: {
-  readonly backendId: string
-  readonly modelId: string
-  readonly catalogModelIds: readonly string[]
-  readonly configurationMode?: string | null
-}): boolean =>
-  input.modelId.length > 0 &&
-  !input.catalogModelIds.includes(input.modelId) &&
-  !allowsClaudeFreeTextModels(input.backendId, input.configurationMode)
-
-/**
- * Whether Bedrock-mode Settings must block Save for the current catalog/model
- * state. Loading, failed/empty discovery, missing selection, and values absent
- * from the catalog all block. First-party Claude and other backends return
- * false from this helper (they use their own Save gates).
- */
-export const blocksClaudeBedrockModelSave = (input: {
-  readonly backendId: string
-  readonly configurationMode?: string | null
-  /** Catalog is still loading (inspect/preview pending). */
-  readonly catalogLoading: boolean
-  /**
-   * True when the catalog query/preview failed (distinct from still loading).
-   * Blocks Save with a Recheck-oriented reason.
-   */
-  readonly catalogFailed?: boolean
-  /**
-   * Loaded catalog when known. `undefined` means not yet available (treat as
-   * loading when {@link catalogLoading} is true, or as failed when
-   * {@link catalogFailed} is true). Empty array = no profiles.
-   */
-  readonly catalogModels: readonly AgentModelOption[] | undefined
-  /** Build (or required) model field value. */
-  readonly modelId: string
-  /**
-   * When false, an empty modelId does not block (Repository inherit empty is
-   * allowed). Harness Config requires a selection in Bedrock mode.
-   */
-  readonly requireSelection: boolean
-}): boolean => {
-  if (
-    !isClaudeBedrockConfigurationMode(input.backendId, input.configurationMode)
-  ) {
-    return false
-  }
-  if (input.catalogFailed === true) {
-    return true
-  }
-  if (input.catalogLoading || input.catalogModels === undefined) {
-    return true
-  }
-  if (input.catalogModels.length === 0) {
-    return true
-  }
-  if (input.modelId.length === 0) {
-    return input.requireSelection
-  }
-  return isUnavailableCatalogModel({
-    backendId: input.backendId,
-    modelId: input.modelId,
-    catalogModelIds: input.catalogModels.map((model) => model.id),
-    configurationMode: input.configurationMode,
-  })
-}
-
-/**
- * Operator-facing explanation when Bedrock model Save is blocked. Null when
- * Save is allowed for the model field.
- */
-export const claudeBedrockModelSaveBlockReason = (input: {
-  readonly backendId: string
-  readonly configurationMode?: string | null
-  readonly catalogLoading: boolean
-  readonly catalogFailed?: boolean
-  readonly catalogModels: readonly AgentModelOption[] | undefined
-  readonly modelId: string
-  readonly requireSelection: boolean
-  /** Non-fatal discovery warnings from inspect/preview (already secret-safe). */
-  readonly discoveryWarnings?: readonly string[]
-}): string | null => {
-  if (
-    !blocksClaudeBedrockModelSave({
-      backendId: input.backendId,
-      configurationMode: input.configurationMode,
-      catalogLoading: input.catalogLoading,
-      catalogFailed: input.catalogFailed,
-      catalogModels: input.catalogModels,
-      modelId: input.modelId,
-      requireSelection: input.requireSelection,
-    })
-  ) {
-    return null
-  }
-  if (input.catalogFailed === true) {
-    return "Could not load the Bedrock profile catalog. Recheck Agent Backend after fixing network or AWS configuration."
-  }
-  if (input.catalogLoading || input.catalogModels === undefined) {
-    return "Loading Bedrock inference profiles… Save is blocked until the catalog is ready."
-  }
-  if (input.catalogModels.length === 0) {
-    const warning = input.discoveryWarnings?.find(
-      (entry) => entry.trim().length > 0,
-    )
-    if (warning !== undefined) {
-      return `${warning} Choose a discovered profile after fixing AWS configuration and using Recheck Agent Backend.`
-    }
-    return "No active Anthropic-backed Bedrock inference profiles were found for the resolved AWS region. Fix AWS configuration, then Recheck Agent Backend."
-  }
-  if (input.modelId.length === 0) {
-    return "Select a discovered Bedrock inference profile before saving."
-  }
-  return "The selected model is not in the current Bedrock profile catalog. Choose a discovered profile before saving."
-}
-
-export const formatVariantLabel = (variant: string): string =>
-  `${variant[0]?.toUpperCase() ?? ""}${variant.slice(1)}`
-
-export const reconcileVariantForModel = (
-  variant: string,
-  modelVariants: readonly string[],
-): string =>
-  variant.length > 0 && modelVariants.includes(variant) ? variant : ""
-
-/**
- * Find a catalog entry by executable id. Used to label free-text inputs when
- * the current value is a discovered profile rather than a pure custom string.
+ * Find a catalog entry by executable id. Friendly names are presentation only
+ * and are never a lookup key.
  */
 export const findCatalogModel = (
   models: readonly AgentModelOption[] | undefined,
@@ -302,15 +122,176 @@ export const findCatalogModel = (
 }
 
 /**
- * True when a non-empty model string is known to be absent from a **loaded**
- * catalog. Returns false while the catalog is still pending (`undefined`) so
- * Settings does not flash “custom” for saved values that may yet match
- * (issue #821 review).
+ * Thinking Levels for a selected model id, derived from the catalog entry.
+ * Returns [] for an empty selection, an unknown model, or a catalog that has
+ * not loaded — Settings then shows "no effort (thinking) options" rather than
+ * inventing a level set (issue #838 removed the Claude free-text fallback).
  */
-export const isCustomAgentModelValue = (input: {
-  readonly models: readonly AgentModelOption[] | undefined
+export const thinkingLevelsForModel = (
+  models: readonly AgentModelOption[] | undefined,
+  modelId: string,
+): readonly string[] => findCatalogModel(models, modelId)?.thinkingLevels ?? []
+
+/**
+ * True when a non-empty model string is absent from the given catalog ids.
+ * Catalog membership is required for every Agent Backend.
+ */
+export const isUnavailableCatalogModel = (input: {
   readonly modelId: string
+  readonly catalogModelIds: readonly string[]
 }): boolean =>
-  input.models !== undefined &&
-  input.modelId.length > 0 &&
-  findCatalogModel(input.models, input.modelId) === undefined
+  input.modelId.length > 0 && !input.catalogModelIds.includes(input.modelId)
+
+/** Catalog availability for one Settings model field. */
+export type AgentModelCatalogState = {
+  /** Catalog is still loading (models query / preview pending). */
+  readonly catalogLoading: boolean
+  /** Catalog query or preview failed (distinct from still loading). */
+  readonly catalogFailed?: boolean
+  /**
+   * Loaded catalog when known. `undefined` means not yet available; an empty
+   * array means the backend reported no models.
+   */
+  readonly catalogModels: readonly AgentModelOption[] | undefined
+}
+
+export type AgentModelSaveInput = AgentModelCatalogState & {
+  /** Current field value ("" means unset / inherit). */
+  readonly modelId: string
+  /**
+   * When false an empty value never blocks (Repository override inherits the
+   * harness default). Harness Config requires a build model selection.
+   */
+  readonly requireSelection: boolean
+}
+
+/**
+ * Whether Settings must block Save for this model field.
+ *
+ * An empty optional value is always fine (nothing to validate — inheritance
+ * keeps working even without a healthy catalog). Any explicit value requires a
+ * loaded, non-empty catalog that contains it: loading, failed, and empty
+ * catalogs cannot establish membership, so they block rather than silently
+ * accept a value that would only fail later at CLI time.
+ */
+export const blocksAgentModelSave = (input: AgentModelSaveInput): boolean => {
+  if (input.modelId.length === 0 && !input.requireSelection) {
+    return false
+  }
+  if (input.catalogFailed === true) {
+    return true
+  }
+  if (input.catalogLoading || input.catalogModels === undefined) {
+    return true
+  }
+  if (input.catalogModels.length === 0) {
+    return true
+  }
+  if (input.modelId.length === 0) {
+    return true
+  }
+  return isUnavailableCatalogModel({
+    modelId: input.modelId,
+    catalogModelIds: input.catalogModels.map((model) => model.id),
+  })
+}
+
+export type AgentModelSaveReasonInput = AgentModelSaveInput & {
+  /** Selected/effective backend id — selects operator guidance wording. */
+  readonly backendId: string
+  readonly configurationMode?: string | null
+  /** Non-fatal discovery warnings from inspect/preview (already secret-safe). */
+  readonly discoveryWarnings?: readonly string[]
+}
+
+/**
+ * Operator-facing explanation when a model field blocks Save. Null when the
+ * field is fine. Bedrock mode keeps its AWS-specific guidance (issue #828);
+ * every other backend gets the equivalent catalog wording.
+ */
+export const agentModelSaveBlockReason = (
+  input: AgentModelSaveReasonInput,
+): string | null => {
+  if (!blocksAgentModelSave(input)) {
+    return null
+  }
+  const bedrock = isClaudeBedrockConfigurationMode(
+    input.backendId,
+    input.configurationMode,
+  )
+  if (input.catalogFailed === true) {
+    return bedrock
+      ? "Could not load the Bedrock profile catalog. Recheck Agent Backend after fixing network or AWS configuration."
+      : "Could not load the Agent Model catalog. Recheck Agent Backend after fixing the Agent Backend configuration."
+  }
+  if (input.catalogLoading || input.catalogModels === undefined) {
+    return bedrock
+      ? "Loading Bedrock inference profiles… Save is blocked until the catalog is ready."
+      : "Loading the Agent Model catalog… Save is blocked until the catalog is ready."
+  }
+  if (input.catalogModels.length === 0) {
+    const warning = input.discoveryWarnings?.find(
+      (entry) => entry.trim().length > 0,
+    )
+    if (warning !== undefined) {
+      return `${warning} Choose a discovered profile after fixing AWS configuration and using Recheck Agent Backend.`
+    }
+    return bedrock
+      ? "No active Anthropic-backed Bedrock inference profiles were found for the resolved AWS region. Fix AWS configuration, then Recheck Agent Backend."
+      : "No Agent Models are available for this Agent Backend. Fix the Agent Backend configuration, then Recheck Agent Backend."
+  }
+  if (input.modelId.length === 0) {
+    return bedrock
+      ? "Select a discovered Bedrock inference profile before saving."
+      : "Select a model from the Agent Model catalog before saving."
+  }
+  return bedrock
+    ? "The selected model is not in the current Bedrock profile catalog. Choose a discovered profile before saving."
+    : "The selected model is not in the current Agent Model catalog. Choose a listed model before saving."
+}
+
+/**
+ * Catalog-state guidance independent of the current field value. Repository
+ * overrides may be left empty (and saved) while a catalog is loading, failed,
+ * or empty, so the dialog still explains why no options are selectable.
+ */
+export const agentModelCatalogNotice = (
+  input: AgentModelCatalogState & {
+    readonly backendId: string
+    readonly configurationMode?: string | null
+    readonly discoveryWarnings?: readonly string[]
+  },
+): string | null => {
+  const catalogUsable =
+    input.catalogFailed !== true &&
+    !input.catalogLoading &&
+    input.catalogModels !== undefined &&
+    input.catalogModels.length > 0
+  if (catalogUsable) {
+    return null
+  }
+  // Report the catalog state only — never "select a model", which would be
+  // wrong guidance for a field that is allowed to stay empty.
+  return agentModelSaveBlockReason({
+    ...input,
+    modelId: "",
+    requireSelection: true,
+  })
+}
+
+export const formatVariantLabel = (variant: string): string =>
+  `${variant[0]?.toUpperCase() ?? ""}${variant.slice(1)}`
+
+/**
+ * Label for a stored effort (thinking) level that the selected catalog entry
+ * does not offer. The stored value is preserved and marked, never dropped
+ * silently (issue #838).
+ */
+export const formatUnavailableVariantLabel = (variant: string): string =>
+  `${formatVariantLabel(variant)} (not available for this model)`
+
+export const reconcileVariantForModel = (
+  variant: string,
+  modelVariants: readonly string[],
+): string =>
+  variant.length > 0 && modelVariants.includes(variant) ? variant : ""

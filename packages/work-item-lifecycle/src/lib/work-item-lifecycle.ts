@@ -88,6 +88,7 @@ import {
 } from "./pre-commit-errors.js"
 import {
   type AgentModelSelection,
+  agentModelCatalogViolation,
   resolveAgentModelsForBackend,
 } from "./resolve-agent-models.js"
 import {
@@ -3653,6 +3654,38 @@ export const makeWorkItemLifecycleLive = (
               }
               const selection = modelOutcome.selection
 
+              // Pre-Agent-Turn catalog admission (issue #838): a Work Item
+              // configured with a model the backend no longer offers fails
+              // here with actionable guidance instead of spawning the CLI and
+              // burning an Agent Turn on a certain failure.
+              if (isAgentDependentLifecycleStep(stepRun.step)) {
+                const catalogStatus =
+                  yield* activeAgentBackend.getBackendStatus(
+                    workItem.agent_backend as AgentBackendId,
+                  )
+                const violation =
+                  catalogStatus === null || catalogStatus.kind !== "ready"
+                    ? null
+                    : agentModelCatalogViolation({
+                        backendLabel: catalogStatus.backend.label,
+                        catalogModelIds: catalogStatus.models.map(
+                          (model) => model.id,
+                        ),
+                        selection,
+                        includeReviewModel: stepRun.step === "review",
+                      })
+                if (violation !== null) {
+                  const failed = yield* completeFailedStep({
+                    stepRun: afterStart,
+                    workItem,
+                    reasonCode: STEP_RUN_REASON.agentModelNotInCatalog,
+                    reasonMessage: violation,
+                    cause: Cause.fail(violation),
+                  })
+                  return { _tag: "processed" as const, workItem: failed }
+                }
+              }
+
               const context: LifecycleStepContext = {
                 workItemId: workItem.id as WorkItemId,
                 repositoryId: workItem.repository_id,
@@ -5385,7 +5418,31 @@ export const makeWorkItemLifecycleLive = (
                 )
               // Models are not stored on the Work Item; resolve against the
               // captured backend's prefs after coordination has locked the switch.
-              yield* resolveModelsForBackend(repositoryId, captureBackendId)
+              const capturedSelection = yield* resolveModelsForBackend(
+                repositoryId,
+                captureBackendId,
+              )
+              // Catalog admission (issue #838): refuse to create a Work Item
+              // whose resolved models the captured backend no longer offers,
+              // so the failure surfaces at the operator action rather than as
+              // a dead Agent Turn later.
+              const captureStatus =
+                yield* activeAgentBackend.getBackendStatus(captureBackendId)
+              if (captureStatus !== null && captureStatus.kind === "ready") {
+                const violation = agentModelCatalogViolation({
+                  backendLabel: captureStatus.backend.label,
+                  catalogModelIds: captureStatus.models.map(
+                    (model) => model.id,
+                  ),
+                  selection: capturedSelection,
+                  includeReviewModel: true,
+                })
+                if (violation !== null) {
+                  return yield* new BuildModelNotConfiguredError({
+                    message: violation,
+                  })
+                }
+              }
               const activeRegistration =
                 yield* activeAgentBackend.getRegistration(captureBackendId)
               const agentBackendId = activeRegistration.descriptor.id
