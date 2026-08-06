@@ -5,7 +5,7 @@ import {
   Effect,
   Layer,
   Option,
-  Schedule,
+  Result,
   Schema,
 } from "effect"
 import { SqlClient } from "effect/unstable/sql"
@@ -61,15 +61,39 @@ const isSqliteBusy = (error: unknown): boolean => {
   )
 }
 
-const retrySqliteBusy = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(
-    Effect.retry({
-      schedule: Schedule.addDelay(Schedule.recurs(4), () =>
-        Effect.succeed(Duration.millis(50)),
-      ),
-      while: isSqliteBusy,
-    }),
+/**
+ * Wall-clock pause for SQLITE_BUSY backoff. Schedule delays honor the Effect
+ * Clock (including TestClock). File-backed lifecycle restart tests under CI
+ * can hit SQLITE_BUSY; if retry sleeps went through TestClock they hung until
+ * the suite timeout (no clock adjust) and failed quality-gates.
+ */
+const wallClockSleep = (ms: number): Effect.Effect<void> =>
+  Effect.promise(
+    () =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, ms)
+      }),
   )
+
+const SQLITE_BUSY_MAX_RETRIES = 4
+const SQLITE_BUSY_RETRY_DELAY_MS = 50
+
+const retrySqliteBusy = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  Effect.gen(function* () {
+    for (let attempt = 0; ; attempt += 1) {
+      const result = yield* Effect.result(effect)
+      if (Result.isSuccess(result)) {
+        return result.success
+      }
+      const error = result.failure
+      if (!isSqliteBusy(error) || attempt >= SQLITE_BUSY_MAX_RETRIES) {
+        return yield* Effect.fail(error)
+      }
+      yield* wallClockSleep(SQLITE_BUSY_RETRY_DELAY_MS)
+    }
+  })
 
 const toUtc = (millis: number): DateTime.Utc => DateTime.makeUnsafe(millis)
 
