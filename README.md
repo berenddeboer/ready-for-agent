@@ -202,10 +202,11 @@ backend.
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
 harness process, select Claude Code, then Recheck. In Bedrock mode the Agent
-Model catalog lists active Anthropic system-defined inference profiles from
-AWS (or free-text a profile ID/ARN). First-party Claude Code keeps the static
-alias catalog. Discovery failures leave Claude Ready with a warning and free-
-text entry. Details:
+Model catalog lists active Anthropic system-defined and application inference
+profiles from AWS (friendly names in Settings; ID/ARN stored and passed to
+Claude Code), or free-text a profile ID/ARN. First-party Claude Code keeps the
+static alias catalog. Discovery failures leave Claude Ready with a warning and
+free-text entry. Details:
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
 3. Does the harness support a Forge other than GitHub?

@@ -27,7 +27,10 @@ import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
 import {
   type AgentModelOption,
   allowsClaudeFreeTextModels,
+  findCatalogModel,
+  formatAgentModelLabel,
   formatVariantLabel,
+  isCustomAgentModelValue,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
   thinkingLevelsForModel,
@@ -85,7 +88,7 @@ const agentBackendStatusSelection = {
   activeBackend: { id: true, label: true },
   kind: true,
   reason: true,
-  models: { id: true, thinkingLevels: true },
+  models: { id: true, thinkingLevels: true, name: true, kind: true },
   provider: { id: true, label: true },
   warnings: true,
 } as const
@@ -120,7 +123,7 @@ const modelsQuery = {
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({
-      models: { id: true, thinkingLevels: true },
+      models: { id: true, thinkingLevels: true, name: true, kind: true },
     })
     return result.models
   },
@@ -555,7 +558,7 @@ function SettingsChrome() {
             backend: { id: true, label: true },
             kind: true,
             reason: true,
-            models: { id: true, thinkingLevels: true },
+            models: { id: true, thinkingLevels: true, name: true, kind: true },
             provider: { id: true, label: true },
             warnings: true,
           },
@@ -1164,9 +1167,34 @@ function SettingsChrome() {
                       />
                       <datalist id="harness-claude-build-models">
                         {(catalogModels ?? []).map((model) => (
-                          <option key={model.id} value={model.id} />
+                          <option key={model.id} value={model.id}>
+                            {formatAgentModelLabel(model)}
+                          </option>
                         ))}
                       </datalist>
+                      {(() => {
+                        const catalogMatch = findCatalogModel(
+                          catalogModels,
+                          defaultModel,
+                        )
+                        if (catalogMatch === undefined) {
+                          return null
+                        }
+                        return (
+                          <span className={ui.dialogFieldHint}>
+                            Catalog: {formatAgentModelLabel(catalogMatch)}
+                          </span>
+                        )
+                      })()}
+                      {isCustomAgentModelValue({
+                        models: catalogModels,
+                        modelId: defaultModel,
+                      }) && (
+                        <span className={ui.dialogFieldHint}>
+                          Custom value (not in Agent Model catalog) — stored and
+                          passed to Claude Code unchanged
+                        </span>
+                      )}
                       <span className={ui.dialogFieldHint}>
                         Catalog alias (haiku, sonnet, opus, fable) or any
                         Claude-accepted model string (Bedrock inference profile
@@ -1214,7 +1242,7 @@ function SettingsChrome() {
                         )}
                         {(catalogModels ?? []).map((model) => (
                           <option key={model.id} value={model.id}>
-                            {model.id}
+                            {formatAgentModelLabel(model)}
                           </option>
                         ))}
                       </select>
@@ -1302,9 +1330,34 @@ function SettingsChrome() {
                       />
                       <datalist id="harness-claude-review-models">
                         {(catalogModels ?? []).map((model) => (
-                          <option key={`review-${model.id}`} value={model.id} />
+                          <option key={`review-${model.id}`} value={model.id}>
+                            {formatAgentModelLabel(model)}
+                          </option>
                         ))}
                       </datalist>
+                      {(() => {
+                        const catalogMatch = findCatalogModel(
+                          catalogModels,
+                          reviewModel,
+                        )
+                        if (catalogMatch === undefined) {
+                          return null
+                        }
+                        return (
+                          <span className={ui.dialogFieldHint}>
+                            Catalog: {formatAgentModelLabel(catalogMatch)}
+                          </span>
+                        )
+                      })()}
+                      {isCustomAgentModelValue({
+                        models: catalogModels,
+                        modelId: reviewModel,
+                      }) && (
+                        <span className={ui.dialogFieldHint}>
+                          Custom value (not in Agent Model catalog) — stored and
+                          passed to Claude Code unchanged
+                        </span>
+                      )}
                       <span className={ui.dialogFieldHint}>
                         Optional review alias or custom Claude model ID. Empty
                         uses the build model.
@@ -1339,7 +1392,7 @@ function SettingsChrome() {
                         )}
                         {(catalogModels ?? []).map((model) => (
                           <option key={`review-${model.id}`} value={model.id}>
-                            {model.id}
+                            {formatAgentModelLabel(model)}
                           </option>
                         ))}
                       </select>

@@ -23,7 +23,10 @@ import { formatAgentBackendStatusLabel } from "../agent-backend-status-label.js"
 import {
   type AgentModelOption,
   allowsClaudeFreeTextModels,
+  findCatalogModel,
+  formatAgentModelLabel,
   formatVariantLabel,
+  isCustomAgentModelValue,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
   thinkingLevelsForModel,
@@ -127,7 +130,7 @@ const modelsQuery = {
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({
-      models: { id: true, thinkingLevels: true },
+      models: { id: true, thinkingLevels: true, name: true, kind: true },
     })
     return result.models
   },
@@ -1389,7 +1392,12 @@ function RepositoryCard({
               backend: { id: true, label: true },
               kind: true,
               reason: true,
-              models: { id: true, thinkingLevels: true },
+              models: {
+                id: true,
+                thinkingLevels: true,
+                name: true,
+                kind: true,
+              },
               provider: { id: true, label: true },
               warnings: true,
             },
@@ -2229,9 +2237,34 @@ function RepositoryCard({
                         id={`repo-claude-build-models-${repository.id}`}
                       >
                         {(catalogModels ?? []).map((model) => (
-                          <option key={model.id} value={model.id} />
+                          <option key={model.id} value={model.id}>
+                            {formatAgentModelLabel(model)}
+                          </option>
                         ))}
                       </datalist>
+                      {(() => {
+                        const catalogMatch = findCatalogModel(
+                          catalogModels,
+                          defaultModel,
+                        )
+                        if (catalogMatch === undefined) {
+                          return null
+                        }
+                        return (
+                          <span className={ui.dialogFieldHint}>
+                            Catalog: {formatAgentModelLabel(catalogMatch)}
+                          </span>
+                        )
+                      })()}
+                      {isCustomAgentModelValue({
+                        models: catalogModels,
+                        modelId: defaultModel,
+                      }) && (
+                        <span className={ui.dialogFieldHint}>
+                          Custom value (not in Agent Model catalog) — stored and
+                          passed to Claude Code unchanged
+                        </span>
+                      )}
                       <span className={ui.dialogFieldHint}>
                         Empty inherits harness default. Otherwise catalog alias
                         or any Claude-accepted model string (Bedrock profile
@@ -2290,7 +2323,7 @@ function RepositoryCard({
                         )}
                         {(catalogModels ?? []).map((model) => (
                           <option key={model.id} value={model.id}>
-                            {model.id}
+                            {formatAgentModelLabel(model)}
                           </option>
                         ))}
                       </select>
@@ -2384,9 +2417,34 @@ function RepositoryCard({
                         id={`repo-claude-review-models-${repository.id}`}
                       >
                         {(catalogModels ?? []).map((model) => (
-                          <option key={`review-${model.id}`} value={model.id} />
+                          <option key={`review-${model.id}`} value={model.id}>
+                            {formatAgentModelLabel(model)}
+                          </option>
                         ))}
                       </datalist>
+                      {(() => {
+                        const catalogMatch = findCatalogModel(
+                          catalogModels,
+                          reviewModel,
+                        )
+                        if (catalogMatch === undefined) {
+                          return null
+                        }
+                        return (
+                          <span className={ui.dialogFieldHint}>
+                            Catalog: {formatAgentModelLabel(catalogMatch)}
+                          </span>
+                        )
+                      })()}
+                      {isCustomAgentModelValue({
+                        models: catalogModels,
+                        modelId: reviewModel,
+                      }) && (
+                        <span className={ui.dialogFieldHint}>
+                          Custom value (not in Agent Model catalog) — stored and
+                          passed to Claude Code unchanged
+                        </span>
+                      )}
                     </label>
                   ) : (
                     <label className={ui.dialogField}>
@@ -2428,7 +2486,7 @@ function RepositoryCard({
                         )}
                         {(catalogModels ?? []).map((model) => (
                           <option key={`review-${model.id}`} value={model.id}>
-                            {model.id}
+                            {formatAgentModelLabel(model)}
                           </option>
                         ))}
                       </select>

@@ -13,7 +13,7 @@ import {
 
 /**
  * One raw Bedrock inference profile summary used for catalog mapping tests
- * and the AWS SDK adapter (issue #820).
+ * and the AWS SDK adapter (issues #820 / #821).
  */
 export type BedrockInferenceProfileSummary = {
   readonly inferenceProfileId?: string | null
@@ -51,6 +51,12 @@ export type DiscoverBedrockModels = ClaudeDiscoverBedrockModels
 /** Default bound when inspect does not pass a timeout. */
 export const DEFAULT_BEDROCK_DISCOVERY_TIMEOUT = Duration.seconds(15)
 
+/** Stable AgentModel.kind for AWS system-defined inference profiles. */
+export const BEDROCK_PROFILE_KIND_SYSTEM_DEFINED = "SYSTEM_DEFINED"
+
+/** Stable AgentModel.kind for organization application inference profiles. */
+export const BEDROCK_PROFILE_KIND_APPLICATION = "APPLICATION"
+
 const FREE_TEXT_HINT = "Free-text Agent Model entry remains available."
 
 const discoveryWarning = (detail: string): string =>
@@ -58,9 +64,9 @@ const discoveryWarning = (detail: string): string =>
 
 /**
  * Soft warning when the control plane returns summaries but none survive the
- * ACTIVE / SYSTEM_DEFINED / Anthropic filters (issue #820 review).
+ * ACTIVE / Anthropic / system-or-application filters (issues #820 / #821).
  */
-export const EMPTY_BEDROCK_SYSTEM_DEFINED_CATALOG_WARNING = `No active Anthropic system-defined inference profiles were returned for this account/region; use free-text or check region/model access. ${FREE_TEXT_HINT}`
+export const EMPTY_BEDROCK_CATALOG_WARNING = `No active Anthropic Bedrock inference profiles were returned for this account/region; use free-text or check region/model access. ${FREE_TEXT_HINT}`
 
 /**
  * Resolve the Bedrock control-plane region from ambient env (AWS_REGION, then
@@ -89,23 +95,74 @@ const isAnthropicBacked = (
   if (id.includes("anthropic.")) {
     return true
   }
+  // Do not treat the inference-profile ARN as an Anthropic signal: system
+  // profile ARNs embed the profile id path, but application ARNs do not, and
+  // default test fixtures can attach a system ARN to non-Anthropic summaries.
+  // Rely on backing foundation-model ARNs (and profile id above).
   const models = profile.models
   if (models === undefined || models === null || models.length === 0) {
     return false
   }
   return models.some((model) => {
-    const arn = model.modelArn?.trim() ?? ""
+    const modelArn = model.modelArn?.trim() ?? ""
     // Foundation model ARNs embed `anthropic.` for Claude models.
-    return arn.includes("anthropic.")
+    return modelArn.includes("anthropic.")
   })
+}
+
+const trimOrEmpty = (value: string | null | undefined): string =>
+  value?.trim() ?? ""
+
+/**
+ * Executable Agent Model value for a raw profile summary.
+ * System-defined → inference profile ID; application → ARN (issue #821).
+ * Returns null when the summary is missing the required identifier.
+ */
+export const bedrockProfileExecutableId = (
+  profile: BedrockInferenceProfileSummary,
+): string | null => {
+  const type = trimOrEmpty(profile.type)
+  if (type === BEDROCK_PROFILE_KIND_SYSTEM_DEFINED) {
+    const id = trimOrEmpty(profile.inferenceProfileId)
+    return id.length > 0 ? id : null
+  }
+  if (type === BEDROCK_PROFILE_KIND_APPLICATION) {
+    const arn = trimOrEmpty(profile.inferenceProfileArn)
+    return arn.length > 0 ? arn : null
+  }
+  return null
+}
+
+const friendlyName = (
+  profile: BedrockInferenceProfileSummary,
+  executableId: string,
+): string | null => {
+  const name = trimOrEmpty(profile.inferenceProfileName)
+  if (name.length === 0 || name === executableId) {
+    return null
+  }
+  return name
+}
+
+const kindRank = (kind: string): number => {
+  if (kind === BEDROCK_PROFILE_KIND_SYSTEM_DEFINED) {
+    return 0
+  }
+  if (kind === BEDROCK_PROFILE_KIND_APPLICATION) {
+    return 1
+  }
+  return 2
 }
 
 /**
  * Map raw ListInferenceProfiles summaries to the Claude Agent Model catalog.
  *
- * Keeps only ACTIVE, SYSTEM_DEFINED profiles with at least one Anthropic-backed
- * signal (model ARN or profile id). Uses inference profile ID as the
- * persisted Agent Model value. Sorts by id and deduplicates.
+ * Keeps only ACTIVE Anthropic-backed SYSTEM_DEFINED and APPLICATION profiles.
+ * System-defined entries use the inference profile ID as the persisted Agent
+ * Model value; application entries use the ARN. Friendly AWS names and kind
+ * metadata travel with the catalog for Settings presentation (issue #821).
+ * Sorts system-defined before application, then by executable id; deduplicates
+ * by executable id. Name is presentation-only and does not affect order.
  */
 export const bedrockProfilesToAgentModels = (
   profiles: ReadonlyArray<BedrockInferenceProfileSummary>,
@@ -117,25 +174,41 @@ export const bedrockProfilesToAgentModels = (
     if (profile.status !== "ACTIVE") {
       continue
     }
-    if (profile.type !== "SYSTEM_DEFINED") {
+    const kind = trimOrEmpty(profile.type)
+    if (
+      kind !== BEDROCK_PROFILE_KIND_SYSTEM_DEFINED &&
+      kind !== BEDROCK_PROFILE_KIND_APPLICATION
+    ) {
       continue
     }
     if (!isAnthropicBacked(profile)) {
       continue
     }
-    const id = profile.inferenceProfileId?.trim() ?? ""
-    if (id.length === 0) {
+    const id = bedrockProfileExecutableId(profile)
+    if (id === null) {
       continue
     }
     if (byId.has(id)) {
       continue
     }
-    byId.set(id, { id, thinkingLevels: [...thinkingLevels] })
+    const name = friendlyName(profile, id)
+    byId.set(id, {
+      id,
+      thinkingLevels: [...thinkingLevels],
+      ...(name !== null ? { name } : {}),
+      kind,
+    })
   }
 
-  return [...byId.values()].sort((left, right) =>
-    left.id.localeCompare(right.id),
-  )
+  // Deterministic: system-defined before application, then by executable id.
+  // Name is presentation-only and must not reorder equivalent rechecks.
+  return [...byId.values()].sort((left, right) => {
+    const kindCompare = kindRank(left.kind ?? "") - kindRank(right.kind ?? "")
+    if (kindCompare !== 0) {
+      return kindCompare
+    }
+    return left.id.localeCompare(right.id)
+  })
 }
 
 /**
@@ -145,8 +218,7 @@ export const finalizeBedrockDiscoveryModels = (
   models: ReadonlyArray<AgentModel>,
 ): DiscoverBedrockModelsResult => ({
   models,
-  warning:
-    models.length === 0 ? EMPTY_BEDROCK_SYSTEM_DEFINED_CATALOG_WARNING : null,
+  warning: models.length === 0 ? EMPTY_BEDROCK_CATALOG_WARNING : null,
 })
 
 /**
@@ -255,7 +327,8 @@ const toSummary = (
 
 /**
  * Exhaust ListInferenceProfiles pagination via the AWS SDK Bedrock client.
- * Does not shell out to the AWS CLI.
+ * Does not shell out to the AWS CLI. Lists both system-defined and application
+ * profiles (no typeEquals filter — issue #821).
  */
 export const listAllInferenceProfileSummaries = async (options: {
   readonly region?: string
@@ -274,8 +347,8 @@ export const listAllInferenceProfileSummaries = async (options: {
       const response = await client.send(
         new ListInferenceProfilesCommand({
           maxResults: 100,
-          // Server-side filter: APPLICATION profiles are out of scope for #820.
-          typeEquals: "SYSTEM_DEFINED",
+          // Omit typeEquals so system-defined and application profiles both
+          // appear; client-side mapping filters and maps executable ids.
           ...(nextToken !== undefined ? { nextToken } : {}),
         }),
         options.abortSignal !== undefined

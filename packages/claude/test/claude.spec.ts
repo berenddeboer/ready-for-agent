@@ -68,7 +68,12 @@ const inspect = (
 const fakeDiscover =
   (
     result: {
-      models: ReadonlyArray<{ id: string; thinkingLevels: readonly string[] }>
+      models: ReadonlyArray<{
+        id: string
+        thinkingLevels: readonly string[]
+        name?: string | null
+        kind?: string | null
+      }>
       warning: string | null
     },
     onCall?: (input: {
@@ -82,6 +87,12 @@ const fakeDiscover =
       models: result.models.map((model) => ({
         id: model.id,
         thinkingLevels: [...model.thinkingLevels],
+        ...(model.name !== undefined && model.name !== null
+          ? { name: model.name }
+          : {}),
+        ...(model.kind !== undefined && model.kind !== null
+          ? { kind: model.kind }
+          : {}),
       })),
       warning: result.warning,
     })
@@ -174,10 +185,23 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
-  it("inspects Ready Bedrock with discovered system-defined profile catalog (issue #820)", async () => {
-    const profileIds = [
-      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-      "us.anthropic.claude-sonnet-4-6",
+  it("inspects Ready Bedrock with system and application profile catalog (issues #820 / #821)", async () => {
+    const systemId = "us.anthropic.claude-sonnet-4-6"
+    const applicationArn =
+      "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
+    const catalog = [
+      {
+        id: systemId,
+        name: "US Anthropic Claude Sonnet 4.6",
+        kind: "SYSTEM_DEFINED",
+        thinkingLevels: [...CLAUDE_THINKING_LEVELS],
+      },
+      {
+        id: applicationArn,
+        name: "My Org Sonnet",
+        kind: "APPLICATION",
+        thinkingLevels: [...CLAUDE_THINKING_LEVELS],
+      },
     ]
     let discoveryCalls = 0
     let seenTimeout: unknown
@@ -193,10 +217,7 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           inspect(binary, "2 seconds", {
             discoverBedrockModels: fakeDiscover(
               {
-                models: profileIds.map((id) => ({
-                  id,
-                  thinkingLevels: [...CLAUDE_THINKING_LEVELS],
-                })),
+                models: catalog,
                 warning: null,
               },
               (input) => {
@@ -217,8 +238,8 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           id: "bedrock",
           label: "Amazon Bedrock",
         })
-        // Issue #820: Bedrock catalog is profile IDs, not floating aliases.
-        expect(result.models.map((m) => m.id)).toEqual(profileIds)
+        // Issues #820 / #821: system IDs + application ARNs with name/kind.
+        expect(result.models).toEqual(catalog)
         expect(result.models.map((m) => m.id)).not.toContain("haiku")
         expect(result.models.map((m) => m.id)).not.toContain("sonnet")
         expect(result.models.map((m) => m.id)).not.toContain("opus")
@@ -721,6 +742,40 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
         expect(result.assistantText).toBe("ok")
       },
     )
+  })
+
+  it("passes system profile IDs and application ARNs unchanged as --model (issue #821)", async () => {
+    const cases = [
+      "us.anthropic.claude-sonnet-4-6",
+      "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/org-sonnet",
+      "custom.operator.typed-id-v1:0",
+    ] as const
+    for (const modelId of cases) {
+      await withExecutable(
+        [
+          'case " $* " in *" --model "*) ;; *) exit 50 ;; esac',
+          `case " $* " in *" --model ${modelId} "*) ;; *) exit 51 ;; esac`,
+          'case " $* " in *" --effort high "*) ;; *) exit 52 ;; esac',
+          captureSessionScript,
+          successfulTurnStream(),
+        ].join("\n"),
+        async (binary) => {
+          const result = await Effect.runPromise(
+            Effect.gen(function* () {
+              const backend = yield* AgentBackend
+              return yield* backend.startTurn({
+                cwd: process.cwd(),
+                prompt: "bedrock catalog model unchanged",
+                model: modelId,
+                thinkingLevel: "high",
+                timeout: "2 seconds",
+              })
+            }).pipe(Effect.provide(provide(binary))),
+          )
+          expect(result.assistantText).toBe("ok")
+        },
+      )
+    }
   })
 
   it("prefixes /review into the prompt on continueTurn", async () => {

@@ -57,11 +57,12 @@ const clipProbeOutput = (text: string, maxChars = 240): string => {
  *
  * Readiness inspection ships with this layer. First-party Claude Code exposes
  * the static alias catalog; authenticated Amazon Bedrock replaces the catalog
- * with system-defined Anthropic inference profiles from AWS (issue #820).
- * Agent Turns run `claude -p` with stream-json, preassign a Session UUID via
- * `--session-id` (reported through `onSessionId` while the first turn runs),
- * resume later turns with `--resume`, and normalize the JSONL stream into
- * Session ID + ordered final assistant text (issue #778 / ADR 0047).
+ * with Anthropic-backed system-defined and application inference profiles from
+ * AWS (issues #820 / #821). Agent Turns run `claude -p` with stream-json,
+ * preassign a Session UUID via `--session-id` (reported through `onSessionId`
+ * while the first turn runs), resume later turns with `--resume`, and
+ * normalize the JSONL stream into Session ID + ordered final assistant text
+ * (issue #778 / ADR 0047).
  */
 export class Claude {
   static layer = (options: ClaudeLayerOptions = {}) =>
@@ -146,11 +147,11 @@ export class Claude {
             }
           }
 
-          // Bedrock: replace floating aliases with discovered system-defined
-          // Anthropic inference profile IDs. Discovery is best-effort — Ready
-          // stays Ready with a warning when listing fails (issue #820). Bound
-          // by the same inspect timeout so a hung Bedrock API cannot stall
-          // Activate / Recheck / Preview indefinitely.
+          // Bedrock: replace floating aliases with discovered Anthropic
+          // inference profiles (system ID + application ARN). Discovery is
+          // best-effort — Ready stays Ready with a warning when listing fails
+          // (issues #820 / #821). Bound by the same inspect timeout so a hung
+          // Bedrock API cannot stall Activate / Recheck / Preview indefinitely.
           const discovery = yield* discoverBedrockModels({
             environment: discoveryEnvironment,
             timeout: input.timeout ?? defaultTimeout,
@@ -165,6 +166,12 @@ export class Claude {
             models: discovery.models.map((model) => ({
               id: model.id,
               thinkingLevels: [...model.thinkingLevels],
+              ...(model.name !== undefined && model.name !== null
+                ? { name: model.name }
+                : {}),
+              ...(model.kind !== undefined && model.kind !== null
+                ? { kind: model.kind }
+                : {}),
             })),
             provider,
             warnings,
