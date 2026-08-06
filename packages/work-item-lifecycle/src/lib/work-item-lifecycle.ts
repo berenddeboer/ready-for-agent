@@ -2634,6 +2634,18 @@ export const makeWorkItemLifecycleLive = (
             : null
           const nextStep =
             transition?.nextState ?? nextOperationalStep(stepRun.step)
+          // Assess Changes NO_CHANGES intentionally routes to Close Issue, which
+          // accepts already-closed Issues. When the agent closed the Issue during
+          // Implement (tracker/decision work), post-step revalidation sees
+          // issue_not_open — allow that transition only; missing/blocked/parent
+          // still fail terminally.
+          const allowClosedIssueForNoChangeClose =
+            !revalidation.ok &&
+            revalidation.failureCode === "issue_not_open" &&
+            stepRun.step === "assess_changes" &&
+            transition?.nextState === "close_issue"
+          const revalidationBlocksProgress =
+            !revalidation.ok && !allowClosedIssueForNoChangeClose
           const stepRunReasonCode =
             ownedPrIssueStop?.reasonCode ?? output.stepRunReasonCode ?? null
           const stepRunReasonMessage =
@@ -2643,7 +2655,7 @@ export const makeWorkItemLifecycleLive = (
               ? ("local_cleanup" as const)
               : ownedPrIssueStop?._tag === "pause"
                 ? null
-                : !revalidation.ok
+                : revalidationBlocksProgress
                   ? ("failed" as const)
                   : nextStep
 
@@ -2791,7 +2803,7 @@ export const makeWorkItemLifecycleLive = (
                       workItem.id,
                     ],
                   )
-                } else if (!revalidation.ok) {
+                } else if (revalidationBlocksProgress) {
                   yield* sql.unsafe(
                     `UPDATE work_item
                    SET state = 'failed',

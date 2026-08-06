@@ -688,6 +688,410 @@ describe("Assess Changes lifecycle routes", () => {
     }
   })
 
+  it("advances to Close Issue when Assess Changes NO_CHANGES and the Issue is already CLOSED", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rfa-no-change-already-closed-"))
+    const githubCalls: Array<{
+      issueNumber: number
+      workItemId: string
+      summary: string
+    }> = []
+    try {
+      const { worktree, startingCommitOid } = await initWorktreeRepo(root)
+      const summary =
+        "Decision recorded on the Issue; closed it without repository changes."
+      const issueNumber = 805
+
+      const steps: LifecycleStepsShape = {
+        createWorktree: () =>
+          Effect.succeed({
+            worktreePath: worktree,
+            startingCommitOid,
+          }),
+        installDependencies: () => Effect.void,
+        implement: () => Effect.succeed("ses_decision_closed"),
+        assessChanges: (context) =>
+          Effect.gen(function* () {
+            // Agent closed the Issue during Implement (tracker-only decision).
+            // Assess confirms NO_CHANGES; post-step revalidation must not
+            // terminal-fail with issue_not_open before Close Issue runs.
+            const db = yield* DbService
+            yield* db.storeIssue({
+              repositoryId: context.repositoryId,
+              issueNumber,
+              title: "Product decision",
+              body: "Tracker-only; no Settings UI.",
+              url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+              state: "CLOSED",
+              githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+              issueAuthor: null,
+              parent: null,
+              parentPosition: null,
+              hasChildren: false,
+              blockedBy: [],
+            })
+            return {
+              _tag: "no_changes" as const,
+              completionSummary: summary,
+            }
+          }),
+        preCommit: () => Effect.die("pre-commit must not run for NO_CHANGES"),
+        review: () => Effect.die("review must not run for NO_CHANGES"),
+        commit: () => Effect.die("commit must not run for NO_CHANGES"),
+        createPr: () => Effect.die("create PR must not run for NO_CHANGES"),
+        watchPrStatusChecks: () =>
+          Effect.die("status checks must not run for NO_CHANGES"),
+        resolvePrMergeConflict: () =>
+          Effect.die("merge conflict must not run for NO_CHANGES"),
+        investigatePrStatusChecks: () =>
+          Effect.die("investigate checks must not run for NO_CHANGES"),
+        markPrReadyForReview: () =>
+          Effect.die("mark ready must not run for NO_CHANGES"),
+        decidePrMerge: () =>
+          Effect.die("decide merge must not run for NO_CHANGES"),
+        mergePr: () => Effect.die("merge PR must not run for NO_CHANGES"),
+        closeIssue: (context) =>
+          Effect.sync(() => {
+            githubCalls.push({
+              issueNumber: context.issueNumber,
+              workItemId: context.workItemId,
+              summary: context.completionSummary ?? "",
+            })
+          }),
+        localCleanup: () => Effect.void,
+        removeWorktree: () => Effect.void,
+      }
+
+      const layer = WorkItemLifecycleLive.pipe(
+        Layer.provideMerge(stubActiveAgentBackendLayer()),
+        Layer.provideMerge(stubGitHubServiceLayer()),
+        Layer.provideMerge(stubGitLabServiceLayer()),
+        Layer.provideMerge(
+          Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+        ),
+        Layer.provideMerge(DbServiceLive),
+        Layer.provideMerge(SqliteQueueServiceLive),
+        Layer.provideMerge(DatabaseTest),
+      )
+
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const db = yield* DbService
+
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel: "opencode/test",
+            defaultThinkingLevel: "low",
+            reviewModel: null,
+            reviewThinkingLevel: null,
+            maxConcurrentAgentTurns: 2,
+            maxConcurrentWorkItems: 5,
+          })
+
+          const repository = yield* db.addRepository({
+            forge: "github",
+            forgeHost: "github.com",
+            projectPath: "acme/widgets",
+            localPath: worktree,
+            isBare: false,
+          })
+          yield* db.storeIssue({
+            repositoryId: repository.id,
+            issueNumber,
+            title: "Product decision",
+            body: "Tracker-only; no Settings UI.",
+            url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+            state: "OPEN",
+            githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+            issueAuthor: null,
+            parent: null,
+            parentPosition: null,
+            hasChildren: false,
+            blockedBy: [],
+          })
+
+          const claimAndRun = Effect.gen(function* () {
+            const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+            expect(Option.isSome(claimed)).toBe(true)
+            if (Option.isNone(claimed)) {
+              return yield* Effect.die("expected lifecycle job")
+            }
+            return yield* lifecycle.runStep(
+              (claimed.value.payload as { stepRunId: string }).stepRunId,
+            )
+          })
+
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issueNumber,
+          )
+          yield* claimAndRun // create_worktree
+          yield* claimAndRun // install
+          yield* claimAndRun // implement
+
+          const afterAssess = yield* claimAndRun
+          expect(afterAssess._tag).toBe("processed")
+          if (afterAssess._tag !== "processed") {
+            return
+          }
+          expect(afterAssess.workItem.state).toBe("close_issue")
+          expect(afterAssess.workItem.completionSummary).toBe(summary)
+          expect(afterAssess.workItem.failureCode).toBeNull()
+          expect(afterAssess.workItem.pullRequestNumber).toBeNull()
+          const assessRun = afterAssess.workItem.stepRuns.find(
+            (run) => run.step === "assess_changes",
+          )
+          expect(assessRun?.status).toBe("succeeded")
+
+          const afterClose = yield* claimAndRun
+          expect(afterClose._tag).toBe("processed")
+          if (afterClose._tag !== "processed") {
+            return
+          }
+          expect(afterClose.workItem.state).toBe("local_cleanup")
+          expect(afterClose.workItem.completionSummary).toBe(summary)
+          expect(githubCalls).toEqual([
+            {
+              issueNumber,
+              workItemId: created.id,
+              summary,
+            },
+          ])
+
+          const afterCleanup = yield* claimAndRun
+          expect(afterCleanup._tag).toBe("processed")
+          if (afterCleanup._tag !== "processed") {
+            return
+          }
+          expect(afterCleanup.workItem.state).toBe("complete")
+          expect(afterCleanup.workItem.completionSummary).toBe(summary)
+          expect(
+            afterCleanup.workItem.stepRuns.map((run) => [run.step, run.status]),
+          ).toEqual([
+            ["create_worktree", "succeeded"],
+            ["install_dependencies", "succeeded"],
+            ["implement", "succeeded"],
+            ["assess_changes", "succeeded"],
+            ["close_issue", "succeeded"],
+            ["local_cleanup", "succeeded"],
+          ])
+        }).pipe(Effect.provide(layer)),
+      )
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it("still fails terminally when NO_CHANGES revalidation finds a missing, blocked, or parent Issue", async () => {
+    const cases = [
+      {
+        name: "missing",
+        mutate: (repositoryId: string, issueNumber: number) =>
+          Effect.gen(function* () {
+            const db = yield* DbService
+            yield* db.deleteIssue(repositoryId, issueNumber)
+          }),
+        code: "issue_not_found",
+      },
+      {
+        name: "parent",
+        mutate: (repositoryId: string, issueNumber: number) =>
+          Effect.gen(function* () {
+            const db = yield* DbService
+            yield* db.storeIssue({
+              repositoryId,
+              issueNumber,
+              title: "Became parent",
+              body: "body",
+              url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+              state: "OPEN",
+              githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+              issueAuthor: null,
+              parent: null,
+              parentPosition: null,
+              hasChildren: true,
+              blockedBy: [],
+            })
+          }),
+        code: "issue_is_parent",
+      },
+      {
+        name: "blocked",
+        mutate: (repositoryId: string, issueNumber: number) =>
+          Effect.gen(function* () {
+            const db = yield* DbService
+            yield* db.storeIssue({
+              repositoryId,
+              issueNumber,
+              title: "Became blocked",
+              body: "body",
+              url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+              state: "OPEN",
+              githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+              issueAuthor: null,
+              parent: null,
+              parentPosition: null,
+              hasChildren: false,
+              blockedBy: [
+                {
+                  issueNumber: 99,
+                  issueUrl: "https://github.com/acme/widgets/issues/99",
+                },
+              ],
+            })
+          }),
+        code: "issue_blocked",
+      },
+    ] as const
+
+    for (const testCase of cases) {
+      const root = await mkdtemp(
+        join(tmpdir(), `rfa-no-change-reval-${testCase.name}-`),
+      )
+      try {
+        const { worktree, startingCommitOid } = await initWorktreeRepo(root)
+        const summary = "Would complete without repo changes."
+        const issueNumber = 816
+
+        const steps: LifecycleStepsShape = {
+          createWorktree: () =>
+            Effect.succeed({
+              worktreePath: worktree,
+              startingCommitOid,
+            }),
+          installDependencies: () => Effect.void,
+          implement: () => Effect.succeed("ses_no_change_reval"),
+          assessChanges: (context) =>
+            Effect.gen(function* () {
+              yield* testCase.mutate(context.repositoryId, issueNumber)
+              return {
+                _tag: "no_changes" as const,
+                completionSummary: summary,
+              }
+            }),
+          preCommit: () => Effect.void,
+          review: () => Effect.succeed({ _tag: "clean" as const }),
+          commit: () =>
+            Effect.succeed({
+              completion: "native" as const,
+              publicationTitle: "feat: test",
+              publicationBody: "Why\n\nCloses #1",
+            }),
+          createPr: () =>
+            Effect.succeed({
+              pullRequestNumber: 1,
+              completion: "native" as const,
+              publicationTitle: "feat: test",
+              publicationBody: "Why\n\nCloses #1",
+            }),
+          watchPrStatusChecks: () =>
+            Effect.succeed({
+              _tag: "succeeded" as const,
+              createdAt: new Date(0),
+              headSha: "settled-head",
+              headPushedAt: new Date(0),
+              isDraft: true,
+            }),
+          resolvePrMergeConflict: () => Effect.succeed({ _tag: "processed" }),
+          investigatePrStatusChecks: () =>
+            Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+          markPrReadyForReview: () => Effect.void,
+          decidePrMerge: () => Effect.succeed({ _tag: "clanker_merge" }),
+          mergePr: () => Effect.succeed({ _tag: "merged" }),
+          closeIssue: () => Effect.die("close issue must not run"),
+          localCleanup: () => Effect.void,
+          removeWorktree: () => Effect.void,
+        }
+
+        const layer = WorkItemLifecycleLive.pipe(
+          Layer.provideMerge(stubActiveAgentBackendLayer()),
+          Layer.provideMerge(stubGitHubServiceLayer()),
+          Layer.provideMerge(stubGitLabServiceLayer()),
+          Layer.provideMerge(
+            Layer.succeed(LifecycleSteps, LifecycleSteps.of(steps)),
+          ),
+          Layer.provideMerge(DbServiceLive),
+          Layer.provideMerge(SqliteQueueServiceLive),
+          Layer.provideMerge(DatabaseTest),
+        )
+
+        await Effect.runPromise(
+          Effect.gen(function* () {
+            const lifecycle = yield* WorkItemLifecycle
+            const queue = yield* QueueService
+            const db = yield* DbService
+
+            yield* db.updateConfig({
+              selectedAgentBackend: "opencode",
+              defaultModel: "opencode/test",
+              defaultThinkingLevel: "low",
+              reviewModel: null,
+              reviewThinkingLevel: null,
+              maxConcurrentAgentTurns: 2,
+              maxConcurrentWorkItems: 5,
+            })
+
+            const repository = yield* db.addRepository({
+              forge: "github",
+              forgeHost: "github.com",
+              projectPath: "acme/widgets",
+              localPath: worktree,
+              isBare: false,
+            })
+            yield* db.storeIssue({
+              repositoryId: repository.id,
+              issueNumber,
+              title: "No-change revalidation",
+              body: "body",
+              url: `https://github.com/acme/widgets/issues/${issueNumber}`,
+              state: "OPEN",
+              githubCreatedAt: new Date("2026-01-15T12:00:00.000Z"),
+              issueAuthor: null,
+              parent: null,
+              parentPosition: null,
+              hasChildren: false,
+              blockedBy: [],
+            })
+
+            const claimAndRun = Effect.gen(function* () {
+              const claimed = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+              expect(Option.isSome(claimed)).toBe(true)
+              if (Option.isNone(claimed)) {
+                return yield* Effect.die("expected lifecycle job")
+              }
+              return yield* lifecycle.runStep(
+                (claimed.value.payload as { stepRunId: string }).stepRunId,
+              )
+            })
+
+            yield* lifecycle.implementNow(repository.id, issueNumber)
+            yield* claimAndRun
+            yield* claimAndRun
+            yield* claimAndRun
+
+            const afterAssess = yield* claimAndRun
+            expect(afterAssess._tag).toBe("processed")
+            if (afterAssess._tag !== "processed") {
+              return
+            }
+            expect(afterAssess.workItem.state).toBe("failed")
+            expect(afterAssess.workItem.failureCode).toBe(testCase.code)
+            expect(afterAssess.workItem.completionSummary).toBe(summary)
+            expect(afterAssess.workItem.stepRuns.at(-1)?.status).toBe(
+              "succeeded",
+            )
+            expect(afterAssess.workItem.stepRuns.at(-1)?.step).toBe(
+              "assess_changes",
+            )
+          }).pipe(Effect.provide(layer)),
+        )
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  })
+
   it("routes clean CHANGES from OpenCode to Pre-Commit without a second git gate", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-clean-changes-"))
     let opencodeAssessCalls = 0
