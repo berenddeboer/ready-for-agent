@@ -24,6 +24,7 @@ import {
 } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
 import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
+import { AgentBackendWarnings } from "../agent-backend-warnings.js"
 import {
   type AgentModelOption,
   CLAUDE_AGENT_BACKEND_ID,
@@ -1152,16 +1153,9 @@ function SettingsChrome() {
                                 reason: reasonForRow,
                               })}
                             </p>
-                            {kindForRow === "READY" &&
-                              warningsForRow.map((warning) => (
-                                <p
-                                  key={warning}
-                                  className="m-0 mt-1 text-sm text-amber-800 dark:text-amber-200"
-                                  role="status"
-                                >
-                                  {warning}
-                                </p>
-                              ))}
+                            {kindForRow === "READY" && (
+                              <AgentBackendWarnings warnings={warningsForRow} />
+                            )}
                           </div>
                           <button
                             type="button"
@@ -1206,17 +1200,11 @@ function SettingsChrome() {
                                     reason: previewError,
                                   })}
                             </p>
-                            {!previewPending &&
-                              previewError === null &&
-                              previewWarnings.map((warning) => (
-                                <p
-                                  key={warning}
-                                  className="m-0 mt-1 text-sm text-amber-800 dark:text-amber-200"
-                                  role="status"
-                                >
-                                  {warning}
-                                </p>
-                              ))}
+                            {!previewPending && previewError === null && (
+                              <AgentBackendWarnings
+                                warnings={previewWarnings}
+                              />
+                            )}
                           </div>
                         </div>
                       )}

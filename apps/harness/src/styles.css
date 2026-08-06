@@ -51,6 +51,12 @@
   --signal: #ffd21c;
   --merged-halo: transparent;
   --scrim: rgb(21 21 21 / 0.45);
+  /*
+   * Non-fatal warning text (Agent Backend status / preview). Burnt end of the
+   * warning ramp so small text clears WCAG AA on paper, panel, dialog-stage,
+   * and plate. Theme-driven — never a prefers-color-scheme variant (#830).
+   */
+  --warn-ink: #7c3a00;
 
   --mast-bg: #101314;
   --mast-ink: #ffffff;
@@ -90,6 +96,8 @@
   --signal: #ffd21c;
   --merged-halo: rgb(242 243 241 / 0.85);
   --scrim: rgb(0 0 0 / 0.55);
+  /* Pale end of the same warning ramp — AA on every dark surface. */
+  --warn-ink: #fcd34d;
   /* Dark: soft lift over panel (no warm parchment). */
   --ticket-fill: #32383d;
 
@@ -142,6 +150,7 @@
   --signal: #ffd21c;
   --merged-halo: transparent;
   --scrim: rgb(21 21 21 / 0.45);
+  --warn-ink: #7c3a00;
   --ticket-fill: #f4f1e8;
   --plate: #dfe4e1;
   --plate-hover: #cfd6d2;
@@ -165,6 +174,7 @@
   --color-line-ghost: rgb(21 21 21 / 0.12);
   --color-scrim: rgb(21 21 21 / 0.45);
   --color-signal: #ffd21c;
+  --color-warn-ink: #7c3a00;
   --color-merged-halo: transparent;
   --color-plate: #dfe4e1;
   --color-plate-hover: #cfd6d2;
@@ -190,6 +200,7 @@
   --color-line-ghost: var(--line-ghost);
   --color-scrim: var(--scrim);
   --color-signal: var(--signal);
+  --color-warn-ink: var(--warn-ink);
   --color-merged-halo: var(--merged-halo);
   --color-lane-queue: var(--lane-queue);
   --color-lane-build: var(--lane-build);

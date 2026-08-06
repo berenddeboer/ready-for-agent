@@ -535,6 +535,24 @@ export const ui = {
   dialogStatusRowStrong: "font-bold text-ink",
 
   /**
+   * Non-fatal warning line inside a status row / status label (Agent Backend
+   * discovery warnings). One shared recipe for all three render sites.
+   *
+   * Color comes from `--warn-ink`, which flips with `[data-theme]` — not with
+   * Tailwind's `dark:` (`prefers-color-scheme`) variant. A light Harness
+   * surface under a dark OS preference would otherwise paint pale warning
+   * text on pale plate (#830). The left rule carries the warning state
+   * structurally so emphasis is not color-only.
+   */
+  dialogStatusWarning: cx(
+    "m-0 mt-1 border-l-2 border-warn-ink pl-2",
+    "text-sm font-semibold text-warn-ink",
+    // Warning sentences are body copy, not microcopy: the status-row parents
+    // set mono (and dialogStatusLabel sets uppercase), which both inherit.
+    "font-display leading-[1.4] tracking-normal normal-case",
+  ),
+
+  /**
    * Fieldset shell aligned with dialogSection (identity / grouped options).
    * Prefer dialogSection + dialogSectionHead for new sectioned settings.
    */
