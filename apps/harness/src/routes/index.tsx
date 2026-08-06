@@ -22,10 +22,14 @@ import {
 import { formatAgentBackendStatusLabel } from "../agent-backend-status-label.js"
 import {
   type AgentModelOption,
+  CLAUDE_AGENT_BACKEND_ID,
   allowsClaudeFreeTextModels,
+  blocksClaudeBedrockModelSave,
+  claudeBedrockModelSaveBlockReason,
   findCatalogModel,
   formatAgentModelLabel,
   formatVariantLabel,
+  isClaudeBedrockConfigurationMode,
   isCustomAgentModelValue,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
@@ -122,6 +126,7 @@ const configQuery = {
 type AgentBackendInfo = {
   id: string
   label: string
+  configurationMode: string | null
 }
 
 const modelsQuery = {
@@ -142,7 +147,7 @@ const agentBackendsQuery = {
   gcTime: Number.POSITIVE_INFINITY,
   queryFn: async () => {
     const result = await graphql.query({
-      agentBackends: { id: true, label: true },
+      agentBackends: { id: true, label: true, configurationMode: true },
     })
     return result.agentBackends
   },
@@ -1310,27 +1315,6 @@ function RepositoryCard({
     settingsDialogRef.current?.showModal()
   }
 
-  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    updateSettings.mutate({
-      repositoryId: repository.id,
-      forge,
-      forgeHost: forgeHost.trim(),
-      projectPath: projectPath.trim(),
-      paused,
-      selectedAgentBackend,
-      defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
-      defaultThinkingLevel:
-        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel.trim(),
-      reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
-      reviewThinkingLevel:
-        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
-      autoMerge,
-      includeAllIssueAuthors,
-      waitForReadyForReviewChecks,
-    })
-  }
-
   const harnessDefaultBackendId =
     config.data?.selectedAgentBackend ?? "opencode"
   const harnessDefaultBackendLabel =
@@ -1499,7 +1483,25 @@ function RepositoryCard({
     usesPreviewCatalog ? (previewModels ?? undefined) : models.data
   const modelIds = (catalogModels ?? []).map((model) => model.id)
   const modelBackendId = draftEffective
-  const claudeFreeTextModels = allowsClaudeFreeTextModels(modelBackendId)
+  // configurationMode comes only from agentBackends. Until that list has
+  // successfully loaded, Claude mode is unknown — fail closed (no free-text,
+  // Save blocked) so Bedrock env mode cannot be saved as first-party free-text
+  // while the query is pending or failed (issue #828 review).
+  const agentBackendsModeReady =
+    !agentBackends.isPending &&
+    !agentBackends.isError &&
+    agentBackends.data !== undefined
+  const claudeConfigurationModeUnresolved =
+    modelBackendId === CLAUDE_AGENT_BACKEND_ID && !agentBackendsModeReady
+  const modelConfigurationMode =
+    (agentBackends.data ?? []).find((backend) => backend.id === modelBackendId)
+      ?.configurationMode ?? null
+  const claudeFreeTextModels =
+    !claudeConfigurationModeUnresolved &&
+    allowsClaudeFreeTextModels(modelBackendId, modelConfigurationMode)
+  const claudeBedrockStrict =
+    agentBackendsModeReady &&
+    isClaudeBedrockConfigurationMode(modelBackendId, modelConfigurationMode)
   const harnessBuildForSource =
     harnessDefaultModel !== "not configured" ? harnessDefaultModel : ""
   const harnessReviewForSource = !harnessReviewModel.startsWith("Build (")
@@ -1519,34 +1521,40 @@ function RepositoryCard({
     modelBackendId,
     catalogModels,
     buildVariantSourceModel,
+    modelConfigurationMode,
   )
   const reviewThinkingLevels = thinkingLevelsForModel(
     modelBackendId,
     catalogModels,
     reviewThinkingLevelSourceModel,
+    modelConfigurationMode,
   )
   // Catalog-absent models block Save only for catalog-constrained backends.
-  // Claude free-text (Bedrock profile IDs/ARNs, custom ids) is allowed (#806).
+  // First-party Claude free-text remains allowed (#806); Bedrock is strict (#828).
   const hasUnavailableBuildModel = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: defaultModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
   const hasUnavailableReviewModel = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: reviewModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
   // Effort source may be the override or an inherited harness model string.
   const buildVariantSourceUnavailable = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: buildVariantSourceModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
   const reviewThinkingLevelSourceUnavailable = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: reviewThinkingLevelSourceModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
   const hasCustomBuildVariant =
     defaultThinkingLevel.length > 0 &&
@@ -1565,15 +1573,145 @@ function RepositoryCard({
       : models.isPending || config.isPending || agentBackends.isPending)
   // Only enforce "model not in catalog" when a catalog actually loaded.
   // Failed/pending override preview leaves modelIds empty and must not block
-  // non-model saves for the current effective backend. Claude free-text is
-  // never blocked by catalog membership (#806).
+  // non-model saves for the current effective backend. First-party Claude
+  // free-text is never blocked by catalog membership (#806). Bedrock mode is
+  // always strict when the effective backend is Claude (#828).
   const catalogReadyForModelValidation = usesPreviewCatalog
     ? !previewPending && previewError === null && previewModels !== null
     : !models.isPending && !models.isError && models.data !== undefined
+  const discoveryWarningsForModels = usesPreviewCatalog ? previewWarnings : []
+  const catalogFailed =
+    !modelsLoading &&
+    !modelsDisabled &&
+    (usesPreviewCatalog
+      ? previewError !== null
+      : models.isError || agentBackends.isError)
+  const catalogLoadingForBedrock =
+    modelsLoading ||
+    modelsDisabled ||
+    (!catalogFailed && catalogModels === undefined)
+  const blockSaveForBedrockBuildModel = blocksClaudeBedrockModelSave({
+    backendId: modelBackendId,
+    configurationMode: modelConfigurationMode,
+    catalogLoading: catalogLoadingForBedrock,
+    catalogFailed,
+    catalogModels,
+    // Repository override may leave build model empty to inherit harness.
+    // Strict membership is still enforced when a non-empty value is set.
+    modelId: defaultModel,
+    requireSelection: false,
+  })
+  const blockSaveForBedrockReviewModel =
+    claudeBedrockStrict &&
+    reviewModel.length > 0 &&
+    blocksClaudeBedrockModelSave({
+      backendId: modelBackendId,
+      configurationMode: modelConfigurationMode,
+      catalogLoading: catalogLoadingForBedrock,
+      catalogFailed,
+      catalogModels,
+      modelId: reviewModel,
+      requireSelection: false,
+    })
+  // When the operator sets an explicit Bedrock override (non-empty), require
+  // catalog membership. Empty still inherits harness and does not block.
+  const bedrockBuildModelBlockReason =
+    defaultModel.length > 0
+      ? claudeBedrockModelSaveBlockReason({
+          backendId: modelBackendId,
+          configurationMode: modelConfigurationMode,
+          catalogLoading: catalogLoadingForBedrock,
+          catalogFailed,
+          catalogModels,
+          modelId: defaultModel,
+          requireSelection: false,
+          discoveryWarnings: discoveryWarningsForModels,
+        })
+      : claudeBedrockStrict &&
+          (catalogLoadingForBedrock ||
+            catalogFailed ||
+            catalogModels === undefined ||
+            catalogModels.length === 0)
+        ? claudeBedrockModelSaveBlockReason({
+            backendId: modelBackendId,
+            configurationMode: modelConfigurationMode,
+            catalogLoading: catalogLoadingForBedrock,
+            catalogFailed,
+            catalogModels,
+            modelId: "",
+            // Surface loading/empty catalog guidance even when inheriting.
+            requireSelection: true,
+            discoveryWarnings: discoveryWarningsForModels,
+          })
+        : null
+  const bedrockReviewModelBlockReason =
+    reviewModel.length > 0
+      ? claudeBedrockModelSaveBlockReason({
+          backendId: modelBackendId,
+          configurationMode: modelConfigurationMode,
+          catalogLoading: catalogLoadingForBedrock,
+          catalogFailed,
+          catalogModels,
+          modelId: reviewModel,
+          requireSelection: false,
+          discoveryWarnings: discoveryWarningsForModels,
+        })
+      : null
+  const bedrockModelSelectDisabled =
+    modelsDisabled ||
+    (claudeBedrockStrict &&
+      (catalogLoadingForBedrock ||
+        catalogFailed ||
+        catalogModels === undefined ||
+        catalogModels.length === 0))
   const blockSaveForUnavailableBuildModel =
-    catalogReadyForModelValidation &&
-    defaultModel.length > 0 &&
-    hasUnavailableBuildModel
+    (catalogReadyForModelValidation &&
+      defaultModel.length > 0 &&
+      hasUnavailableBuildModel) ||
+    blockSaveForBedrockBuildModel ||
+    blockSaveForBedrockReviewModel ||
+    (catalogReadyForModelValidation &&
+      reviewModel.length > 0 &&
+      hasUnavailableReviewModel &&
+      !allowsClaudeFreeTextModels(modelBackendId, modelConfigurationMode))
+  // Single Save gate for button + form onSubmit (Enter must not bypass #828).
+  const repositorySettingsSaveBlocked =
+    updateSettings.isPending ||
+    // Always block while Claude configuration mode is unknown (not only when
+    // the backend draft is changing) — mirrors Harness gating on status pending.
+    claudeConfigurationModeUnresolved ||
+    (backendChangeBlocked &&
+      selectedAgentBackend !== repository.selectedAgentBackend) ||
+    (backendDraftChanging && modelsLoading) ||
+    (backendDraftChanging &&
+      usesPreviewCatalog &&
+      !catalogReadyForModelValidation) ||
+    (backendDraftChanging && usesPreviewCatalog && previewError !== null) ||
+    blockSaveForUnavailableBuildModel
+
+  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (repositorySettingsSaveBlocked) {
+      return
+    }
+    updateSettings.mutate({
+      repositoryId: repository.id,
+      forge,
+      forgeHost: forgeHost.trim(),
+      projectPath: projectPath.trim(),
+      paused,
+      selectedAgentBackend,
+      defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
+      defaultThinkingLevel:
+        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel.trim(),
+      reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
+      reviewThinkingLevel:
+        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
+      autoMerge,
+      includeAllIssueAuthors,
+      waitForReadyForReviewChecks,
+    })
+  }
 
   const removeRepository = useMutation({
     mutationFn: async () => {
@@ -2206,6 +2344,7 @@ function RepositoryCard({
                             modelBackendId,
                             catalogModels,
                             sourceModel,
+                            modelConfigurationMode,
                           )
                           setDefaultVariant((current) =>
                             reconcileVariantForModel(current, nextVariants),
@@ -2224,6 +2363,7 @@ function RepositoryCard({
                                   modelBackendId,
                                   catalogModels,
                                   reviewSource,
+                                  modelConfigurationMode,
                                 ),
                               ),
                             )
@@ -2267,8 +2407,7 @@ function RepositoryCard({
                       )}
                       <span className={ui.dialogFieldHint}>
                         Empty inherits harness default. Otherwise catalog alias
-                        or any Claude-accepted model string (Bedrock profile
-                        ID/ARN).
+                        or any Claude-accepted model string.
                       </span>
                     </label>
                   ) : (
@@ -2277,7 +2416,11 @@ function RepositoryCard({
                       <select
                         className={cx(ui.dialogInput, ui.dialogInputMono)}
                         value={defaultModel}
-                        disabled={modelsDisabled}
+                        disabled={
+                          claudeBedrockStrict
+                            ? bedrockModelSelectDisabled
+                            : modelsDisabled
+                        }
                         onChange={(event) => {
                           const nextModel = event.target.value
                           setDefaultModel(nextModel)
@@ -2289,6 +2432,7 @@ function RepositoryCard({
                             modelBackendId,
                             catalogModels,
                             sourceModel,
+                            modelConfigurationMode,
                           )
                           setDefaultVariant((current) =>
                             reconcileVariantForModel(current, nextVariants),
@@ -2307,6 +2451,7 @@ function RepositoryCard({
                                   modelBackendId,
                                   catalogModels,
                                   reviewSource,
+                                  modelConfigurationMode,
                                 ),
                               ),
                             )
@@ -2314,9 +2459,19 @@ function RepositoryCard({
                         }}
                       >
                         <option value="">
-                          Harness default ({harnessDefaultModel})
+                          {modelsLoading
+                            ? "Loading catalog…"
+                            : claudeBedrockStrict &&
+                                catalogModels !== undefined &&
+                                catalogModels.length === 0
+                              ? "No Bedrock profiles available"
+                              : `Harness default (${harnessDefaultModel})`}
                         </option>
-                        {hasUnavailableBuildModel && (
+                        {(hasUnavailableBuildModel ||
+                          (claudeBedrockStrict &&
+                            defaultModel.length > 0 &&
+                            catalogModels !== undefined &&
+                            !modelIds.includes(defaultModel))) && (
                           <option value={defaultModel}>
                             {defaultModel} (not in Agent Model catalog)
                           </option>
@@ -2327,6 +2482,16 @@ function RepositoryCard({
                           </option>
                         ))}
                       </select>
+                      {bedrockBuildModelBlockReason !== null ? (
+                        <span className={ui.dialogFieldHint} role="status">
+                          {bedrockBuildModelBlockReason}
+                        </span>
+                      ) : claudeBedrockStrict ? (
+                        <span className={ui.dialogFieldHint}>
+                          Empty inherits harness default. Otherwise choose a
+                          discovered Bedrock inference profile.
+                        </span>
+                      ) : null}
                     </label>
                   )}
                   {buildVariantSourceModel.length > 0 &&
@@ -2405,6 +2570,7 @@ function RepositoryCard({
                                 modelBackendId,
                                 catalogModels,
                                 sourceModel,
+                                modelConfigurationMode,
                               ),
                             ),
                           )
@@ -2452,7 +2618,11 @@ function RepositoryCard({
                       <select
                         className={cx(ui.dialogInput, ui.dialogInputMono)}
                         value={reviewModel}
-                        disabled={modelsDisabled}
+                        disabled={
+                          claudeBedrockStrict
+                            ? bedrockModelSelectDisabled
+                            : modelsDisabled
+                        }
                         onChange={(event) => {
                           const nextModel = event.target.value
                           setReviewModel(nextModel)
@@ -2471,6 +2641,7 @@ function RepositoryCard({
                                 modelBackendId,
                                 catalogModels,
                                 sourceModel,
+                                modelConfigurationMode,
                               ),
                             ),
                           )
@@ -2479,7 +2650,11 @@ function RepositoryCard({
                         <option value="">
                           Harness default ({harnessReviewModel})
                         </option>
-                        {hasUnavailableReviewModel && (
+                        {(hasUnavailableReviewModel ||
+                          (claudeBedrockStrict &&
+                            reviewModel.length > 0 &&
+                            catalogModels !== undefined &&
+                            !modelIds.includes(reviewModel))) && (
                           <option value={reviewModel}>
                             {reviewModel} (not in Agent Model catalog)
                           </option>
@@ -2490,6 +2665,11 @@ function RepositoryCard({
                           </option>
                         ))}
                       </select>
+                      {bedrockReviewModelBlockReason !== null ? (
+                        <span className={ui.dialogFieldHint} role="status">
+                          {bedrockReviewModelBlockReason}
+                        </span>
+                      ) : null}
                     </label>
                   )}
                   {reviewThinkingLevelSourceModel.length > 0 &&
@@ -2575,19 +2755,7 @@ function RepositoryCard({
               type="submit"
               className={ui.platePrimary}
               aria-busy={updateSettings.isPending || undefined}
-              disabled={
-                updateSettings.isPending ||
-                (backendChangeBlocked &&
-                  selectedAgentBackend !== repository.selectedAgentBackend) ||
-                (backendDraftChanging && modelsLoading) ||
-                (backendDraftChanging &&
-                  usesPreviewCatalog &&
-                  !catalogReadyForModelValidation) ||
-                (backendDraftChanging &&
-                  usesPreviewCatalog &&
-                  previewError !== null) ||
-                blockSaveForUnavailableBuildModel
-              }
+              disabled={repositorySettingsSaveBlocked}
             >
               {updateSettings.isPending ? "Saving…" : "Save"}
             </button>

@@ -38,7 +38,7 @@ describe.skipIf(!runIntegration)(
       if (result.warning !== null) {
         expect(result.warning.length).toBeGreaterThan(0)
         expect(result.warning).toContain(
-          "Free-text Agent Model entry remains available",
+          "Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend",
         )
         // Never surface credential material from live AWS errors.
         expect(result.warning).not.toMatch(

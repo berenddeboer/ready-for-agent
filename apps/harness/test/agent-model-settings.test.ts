@@ -3,11 +3,15 @@ import {
   AGENT_MODEL_KIND_APPLICATION,
   AGENT_MODEL_KIND_SYSTEM_DEFINED,
   CLAUDE_AGENT_BACKEND_ID,
+  CLAUDE_BEDROCK_CONFIGURATION_MODE,
   CLAUDE_FREE_TEXT_THINKING_LEVELS,
   allowsClaudeFreeTextModels,
+  blocksClaudeBedrockModelSave,
+  claudeBedrockModelSaveBlockReason,
   findCatalogModel,
   formatAgentModelKindLabel,
   formatAgentModelLabel,
+  isClaudeBedrockConfigurationMode,
   isCustomAgentModelValue,
   isUnavailableCatalogModel,
   thinkingLevelsForModel,
@@ -23,12 +27,54 @@ const claudeCatalog = [
 
 const catalogIds = claudeCatalog.map((model) => model.id)
 
+const systemProfileId = "us.anthropic.claude-sonnet-4-6"
+const applicationArn =
+  "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
+
+const bedrockCatalog = [
+  {
+    id: systemProfileId,
+    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+    name: "US Anthropic Claude Sonnet 4.6",
+    kind: AGENT_MODEL_KIND_SYSTEM_DEFINED,
+  },
+  {
+    id: applicationArn,
+    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+    name: "My Org Sonnet",
+    kind: AGENT_MODEL_KIND_APPLICATION,
+  },
+] as const
+
 describe("Claude free-text Agent Model settings (issue #806)", () => {
-  test("only Claude backend allows free-text model strings", () => {
+  test("only first-party Claude backend allows free-text model strings", () => {
     expect(allowsClaudeFreeTextModels(CLAUDE_AGENT_BACKEND_ID)).toBe(true)
+    expect(allowsClaudeFreeTextModels(CLAUDE_AGENT_BACKEND_ID, null)).toBe(true)
     expect(allowsClaudeFreeTextModels("opencode")).toBe(false)
     expect(allowsClaudeFreeTextModels("codex")).toBe(false)
     expect(allowsClaudeFreeTextModels("grok")).toBe(false)
+  })
+
+  test("Claude Code Bedrock mode disables free-text (issue #828)", () => {
+    expect(
+      allowsClaudeFreeTextModels(
+        CLAUDE_AGENT_BACKEND_ID,
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toBe(false)
+    expect(
+      isClaudeBedrockConfigurationMode(
+        CLAUDE_AGENT_BACKEND_ID,
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toBe(true)
+    expect(isClaudeBedrockConfigurationMode("claude", null)).toBe(false)
+    expect(
+      isClaudeBedrockConfigurationMode(
+        "opencode",
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toBe(false)
   })
 
   test("local free-text effort set stays aligned with Claude package catalog", () => {
@@ -80,6 +126,25 @@ describe("Claude free-text Agent Model settings (issue #806)", () => {
     ])
   })
 
+  test("Bedrock mode does not invent free-text effort for non-catalog values", () => {
+    expect(
+      thinkingLevelsForModel(
+        "claude",
+        bedrockCatalog,
+        "operator-typed-custom",
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toEqual([])
+    expect(
+      thinkingLevelsForModel(
+        "claude",
+        undefined,
+        systemProfileId,
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toEqual([])
+  })
+
   test("other backends do not invent effort levels for unknown models", () => {
     expect(
       thinkingLevelsForModel("opencode", claudeCatalog, "custom-id"),
@@ -89,13 +154,32 @@ describe("Claude free-text Agent Model settings (issue #806)", () => {
     )
   })
 
-  test("catalog membership is not required for Claude free-text at Save", () => {
+  test("catalog membership is not required for first-party Claude free-text at Save", () => {
     const freeText = "us.anthropic.claude-sonnet-4-6"
     expect(
       isUnavailableCatalogModel({
         backendId: "claude",
         modelId: freeText,
         catalogModelIds: catalogIds,
+      }),
+    ).toBe(false)
+  })
+
+  test("catalog membership is required for Claude Bedrock mode at Save", () => {
+    expect(
+      isUnavailableCatalogModel({
+        backendId: "claude",
+        modelId: "operator-typed-custom",
+        catalogModelIds: bedrockCatalog.map((model) => model.id),
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      }),
+    ).toBe(true)
+    expect(
+      isUnavailableCatalogModel({
+        backendId: "claude",
+        modelId: systemProfileId,
+        catalogModelIds: bedrockCatalog.map((model) => model.id),
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
       }),
     ).toBe(false)
   })
@@ -121,21 +205,187 @@ describe("Claude free-text Agent Model settings (issue #806)", () => {
   })
 })
 
+describe("Claude Bedrock strict Save gates (issue #828)", () => {
+  test("blocks Save while catalog is loading or unknown", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: true,
+        catalogModels: undefined,
+        modelId: "",
+        requireSelection: true,
+      }),
+    ).toBe(true)
+    expect(
+      claudeBedrockModelSaveBlockReason({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: true,
+        catalogModels: undefined,
+        modelId: "",
+        requireSelection: true,
+      }),
+    ).toMatch(/Loading Bedrock/)
+  })
+
+  test("blocks Save with a distinct reason when catalog load failed", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogFailed: true,
+        catalogModels: undefined,
+        modelId: systemProfileId,
+        requireSelection: true,
+      }),
+    ).toBe(true)
+    expect(
+      claudeBedrockModelSaveBlockReason({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogFailed: true,
+        catalogModels: undefined,
+        modelId: systemProfileId,
+        requireSelection: true,
+      }),
+    ).toMatch(/Could not load the Bedrock profile catalog/)
+  })
+
+  test("blocks Save when discovery returns no profiles", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: [],
+        modelId: "",
+        requireSelection: true,
+      }),
+    ).toBe(true)
+    expect(
+      claudeBedrockModelSaveBlockReason({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: [],
+        modelId: "",
+        requireSelection: true,
+        discoveryWarnings: [
+          "Could not list Amazon Bedrock inference profiles: access denied.",
+        ],
+      }),
+    ).toMatch(/access denied/)
+  })
+
+  test("blocks Save with no selection when selection is required", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: "",
+        requireSelection: true,
+      }),
+    ).toBe(true)
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: "",
+        requireSelection: false,
+      }),
+    ).toBe(false)
+  })
+
+  test("blocks Save when saved value is absent from the current catalog", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: "stale-out-of-region-profile",
+        requireSelection: true,
+      }),
+    ).toBe(true)
+    expect(
+      claudeBedrockModelSaveBlockReason({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: "stale-out-of-region-profile",
+        requireSelection: true,
+      }),
+    ).toMatch(/not in the current Bedrock profile catalog/)
+  })
+
+  test("allows Save for system-defined ID and application ARN selections", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: systemProfileId,
+        requireSelection: true,
+      }),
+    ).toBe(false)
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: applicationArn,
+        requireSelection: true,
+      }),
+    ).toBe(false)
+    expect(
+      claudeBedrockModelSaveBlockReason({
+        backendId: "claude",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: false,
+        catalogModels: bedrockCatalog,
+        modelId: systemProfileId,
+        requireSelection: true,
+      }),
+    ).toBeNull()
+  })
+
+  test("does not apply Bedrock Save gates to first-party Claude or other backends", () => {
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "claude",
+        configurationMode: null,
+        catalogLoading: true,
+        catalogModels: undefined,
+        modelId: "",
+        requireSelection: true,
+      }),
+    ).toBe(false)
+    expect(
+      blocksClaudeBedrockModelSave({
+        backendId: "opencode",
+        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+        catalogLoading: true,
+        catalogModels: undefined,
+        modelId: "",
+        requireSelection: true,
+      }),
+    ).toBe(false)
+  })
+})
+
 describe("Bedrock Agent Model presentation (issue #821)", () => {
-  const systemModel = {
-    id: "us.anthropic.claude-sonnet-4-6",
-    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
-    name: "US Anthropic Claude Sonnet 4.6",
-    kind: AGENT_MODEL_KIND_SYSTEM_DEFINED,
-  }
-  const applicationArn =
-    "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
-  const applicationModel = {
-    id: applicationArn,
-    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
-    name: "My Org Sonnet",
-    kind: AGENT_MODEL_KIND_APPLICATION,
-  }
+  const systemModel = bedrockCatalog[0]
+  const applicationModel = bedrockCatalog[1]
 
   test("formatAgentModelLabel keeps executable id while showing name and kind", () => {
     expect(formatAgentModelKindLabel(AGENT_MODEL_KIND_SYSTEM_DEFINED)).toBe(
@@ -237,8 +487,8 @@ describe("Bedrock Agent Model presentation (issue #821)", () => {
   })
 })
 
-describe("Harness Settings Claude free-text surface (source contract)", () => {
-  test("harness and repository settings allow free-text Claude model fields", async () => {
+describe("Harness Settings Claude free-text / Bedrock surface (source contract)", () => {
+  test("first-party Claude free-text surface remains in harness and repository settings", async () => {
     const { readFileSync } = await import("node:fs")
     const { join } = await import("node:path")
     const root = readFileSync(
@@ -252,14 +502,27 @@ describe("Harness Settings Claude free-text surface (source contract)", () => {
     expect(root).toContain("allowsClaudeFreeTextModels")
     expect(root).toContain("harness-claude-build-models")
     expect(root).toContain("Alias or custom model ID")
-    expect(root).toContain("Claude free-text custom ids are allowed")
-    // Save must not block Claude free-text solely for catalog absence.
+    expect(root).toContain("First-party Claude free-text")
     expect(root).toContain("hasUnavailableBuildModel")
     expect(root).toContain("isUnavailableCatalogModel")
+    // Issue #828: Bedrock mode uses configurationMode metadata + strict select.
+    expect(root).toContain("configurationMode: true")
+    expect(root).toContain("claudeBedrockStrict")
+    expect(root).toContain("blocksClaudeBedrockModelSave")
+    expect(root).toContain("Select a Bedrock inference profile")
+    expect(root).toContain("blockSaveForBedrockBuildModel")
+    // Submit and disabled button share one gate so Enter cannot bypass Save.
+    expect(root).toContain("harnessSettingsSaveBlocked")
+    expect(root).toContain("if (harnessSettingsSaveBlocked)")
 
     expect(index).toContain("allowsClaudeFreeTextModels")
     expect(index).toContain("repo-claude-build-models-")
     expect(index).toContain("blockSaveForUnavailableBuildModel")
     expect(index).toContain("isUnavailableCatalogModel")
+    expect(index).toContain("configurationMode: true")
+    expect(index).toContain("claudeBedrockStrict")
+    expect(index).toContain("blocksClaudeBedrockModelSave")
+    expect(index).toContain("repositorySettingsSaveBlocked")
+    expect(index).toContain("if (repositorySettingsSaveBlocked)")
   })
 })

@@ -255,7 +255,7 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
 
   it("keeps Ready with warning when Bedrock discovery fails (issue #820)", async () => {
     const warning =
-      "Could not list Amazon Bedrock inference profiles: access denied (need bedrock:ListInferenceProfiles on the harness IAM principal). Free-text Agent Model entry remains available."
+      "Could not list Amazon Bedrock inference profiles: access denied (need bedrock:ListInferenceProfiles on the harness IAM principal). Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend."
     await withExecutable(
       [
         'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',

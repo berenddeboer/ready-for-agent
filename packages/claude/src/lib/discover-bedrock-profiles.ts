@@ -60,16 +60,24 @@ export const BEDROCK_PROFILE_KIND_SYSTEM_DEFINED = "SYSTEM_DEFINED"
 /** Stable AgentModel.kind for organization application inference profiles. */
 export const BEDROCK_PROFILE_KIND_APPLICATION = "APPLICATION"
 
-const FREE_TEXT_HINT = "Free-text Agent Model entry remains available."
+/**
+ * Operator guidance after a non-fatal discovery failure. Mode-neutral: discovery
+ * runs whenever Claude inspect reports Bedrock, including without harness
+ * `CLAUDE_CODE_USE_BEDROCK=1`. Strict Save-blocked copy belongs only in Settings
+ * helpers that know `configurationMode` (issue #828 review) — do not claim Save
+ * is blocked from the adapter warning alone.
+ */
+const DISCOVERY_RECOVERY_HINT =
+  "Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend."
 
 const discoveryWarning = (detail: string): string =>
-  `Could not list Amazon Bedrock inference profiles: ${detail}. ${FREE_TEXT_HINT}`
+  `Could not list Amazon Bedrock inference profiles: ${detail}. ${DISCOVERY_RECOVERY_HINT}`
 
 /**
  * Soft warning when the control plane returns summaries but none survive the
- * ACTIVE / Anthropic / system-or-application filters (issues #820 / #821).
+ * ACTIVE / Anthropic / system-or-application filters (issues #820 / #821 / #828).
  */
-export const EMPTY_BEDROCK_CATALOG_WARNING = `No active Anthropic Bedrock inference profiles were returned for this account/region; use free-text or check region/model access. ${FREE_TEXT_HINT}`
+export const EMPTY_BEDROCK_CATALOG_WARNING = `No active Anthropic Bedrock inference profiles were returned for this account/region; check region and model access. ${DISCOVERY_RECOVERY_HINT}`
 
 /**
  * Strip access keys, session tokens, bearer tokens, and other credential-like

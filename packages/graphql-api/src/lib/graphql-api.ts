@@ -17,7 +17,7 @@ import {
   type SessionTelemetryAvailability,
   getBuiltInAgentBackend,
   isSelectableAgentBackendId,
-  listBuiltInAgentBackends,
+  listSelectableAgentBackendInfos,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
 import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
@@ -364,6 +364,12 @@ export const createGraphqlApi = (
      * Defaults to {@link DEFAULT_KEYMAXXER_METADATA_TIMEOUT}.
      */
     readonly keymaxxerMetadataTimeout?: Duration.Duration
+    /**
+     * Process environment for Claude Code Bedrock configuration mode (issue
+     * #828). Defaults to `process.env`. Tests inject a map so mode metadata
+     * does not depend on the host shell.
+     */
+    readonly environment?: Readonly<Record<string, string | undefined>>
   } = {},
 ) => {
   const agentBackendCwd =
@@ -371,6 +377,8 @@ export const createGraphqlApi = (
   const commandExists = options.commandExists ?? commandExistsOnPath
   const keymaxxerMetadataTimeout =
     options.keymaxxerMetadataTimeout ?? DEFAULT_KEYMAXXER_METADATA_TIMEOUT
+  const environment =
+    options.environment ?? (process.env as Record<string, string | undefined>)
   const tokenProvisioning = Effect.runSync(Semaphore.make(1))
 
   const runGraphql = <A>(
@@ -533,9 +541,11 @@ export const createGraphqlApi = (
               }).pipe(Effect.withSpan("graphql-api.config")),
             ),
           agentBackends: () =>
-            listBuiltInAgentBackends().map((entry) =>
-              toGraphqlBackend(entry.descriptor),
-            ),
+            listSelectableAgentBackendInfos(environment).map((entry) => ({
+              id: entry.id,
+              label: entry.label,
+              configurationMode: entry.configurationMode,
+            })),
           agentBackendStatuses: async () =>
             runGraphql(
               Effect.gen(function* () {

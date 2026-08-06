@@ -74,9 +74,9 @@ import {
 } from "../src/index.js"
 import { describe, expect, it, setDefaultTimeout } from "bun:test"
 
-// File-backed bun:sqlite under nx parallel CI load can exceed the 5s default
-// (restart tests open a temp DB twice via makeRestartTestLayer).
-setDefaultTimeout(15_000)
+// File-backed bun:sqlite under nx parallel CI load can be slow (restart tests
+// open a temp DB twice via makeRestartTestLayer). Keep above the 5s default.
+setDefaultTimeout(30_000)
 
 describe("WorkItemLifecycle", () => {
   const settledTiming = {
@@ -2701,11 +2701,13 @@ describe("WorkItemLifecycle", () => {
 
                 for (let index = 0; index < 8; index += 1) {
                   yield* TestClock.adjust(1_000)
+                  yield* makeQueuedJobsAvailable
                   yield* claimAndRunPending
                 }
                 yield* forgetCreatePrDraftProvenance(created.id)
 
                 yield* TestClock.adjust(1_000)
+                yield* makeQueuedJobsAvailable
                 const first = yield* claimAndRunPending
                 expect(first._tag).toBe("processed")
                 if (first._tag === "processed") {
