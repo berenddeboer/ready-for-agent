@@ -68,10 +68,6 @@ const discoveryWarning = (detail: string): string =>
  */
 export const EMPTY_BEDROCK_CATALOG_WARNING = `No active Anthropic Bedrock inference profiles were returned for this account/region; use free-text or check region/model access. ${FREE_TEXT_HINT}`
 
-/** @deprecated Use {@link EMPTY_BEDROCK_CATALOG_WARNING}. Kept for call-site stability. */
-export const EMPTY_BEDROCK_SYSTEM_DEFINED_CATALOG_WARNING =
-  EMPTY_BEDROCK_CATALOG_WARNING
-
 /**
  * Resolve the Bedrock control-plane region from ambient env (AWS_REGION, then
  * AWS_DEFAULT_REGION). Named-profile region resolution is left to the AWS SDK

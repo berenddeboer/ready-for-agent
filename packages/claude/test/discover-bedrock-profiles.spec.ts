@@ -3,7 +3,6 @@ import {
   BEDROCK_PROFILE_KIND_SYSTEM_DEFINED,
   CLAUDE_THINKING_LEVELS,
   EMPTY_BEDROCK_CATALOG_WARNING,
-  EMPTY_BEDROCK_SYSTEM_DEFINED_CATALOG_WARNING,
   bedrockProfileExecutableId,
   bedrockProfilesToAgentModels,
   finalizeBedrockDiscoveryModels,
@@ -330,9 +329,6 @@ describe("finalizeBedrockDiscoveryModels", () => {
     })
     expect(EMPTY_BEDROCK_CATALOG_WARNING).toContain(
       "Free-text Agent Model entry remains available",
-    )
-    expect(EMPTY_BEDROCK_SYSTEM_DEFINED_CATALOG_WARNING).toBe(
-      EMPTY_BEDROCK_CATALOG_WARNING,
     )
   })
 
