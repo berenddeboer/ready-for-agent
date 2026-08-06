@@ -1,6 +1,6 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { BunServices } from "@effect/platform-bun"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import {
@@ -10,6 +10,7 @@ import {
   AgentBackendMalformedOutputError,
   AgentBackendTimeoutError,
   type OnSessionId,
+  PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
 import { Grok } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -81,6 +82,48 @@ describe("Grok AgentBackend adapter", () => {
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
         )
         expect(result.assistantText).toBe("first second")
+      },
+    )
+  })
+
+  it("passes a large single-line prompt in a scoped prompt file, not argv", async () => {
+    // Single-line and past the argv byte limit: on argv this spawn fails with an
+    // opaque platform error. Headless Grok ignores piped stdin, so the body
+    // travels in a temp file that only lives as long as the turn.
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    await withExecutable(
+      [
+        'file=""',
+        'p=""',
+        'for arg in "$@"; do',
+        '  if [ "$p" = "--prompt-file" ]; then file="$arg"; fi',
+        '  p="$arg"',
+        "done",
+        '[ -n "$file" ] || exit 30',
+        'case " $* " in *" -p "*) exit 31 ;; esac',
+        // Record what the CLI saw so the test can assert after the turn, when
+        // the scoped file is already gone.
+        'out="$(dirname "$0")"',
+        'printf \'%s\' "$file" > "$out/prompt-path"',
+        'wc -c < "$file" | tr -d " \\n" > "$out/prompt-bytes"',
+        'head -c 5 "$file" > "$out/prompt-head"',
+        captureSessionScript,
+        endEvent,
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          startTurn(binary, "10 seconds", undefined, prompt),
+        )
+        expect(result.assistantText).toBe("")
+
+        const out = dirname(binary)
+        const promptPath = await readFile(join(out, "prompt-path"), "utf8")
+        expect(await readFile(join(out, "prompt-bytes"), "utf8")).toBe(
+          String(Buffer.byteLength(prompt, "utf8")),
+        )
+        expect(await readFile(join(out, "prompt-head"), "utf8")).toBe("Fix x")
+        // Scoped: the prompt file is removed once the turn finishes.
+        await expect(stat(promptPath)).rejects.toThrow()
       },
     )
   })

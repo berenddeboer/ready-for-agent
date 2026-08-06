@@ -1,3 +1,5 @@
+import { exceedsPromptArgvLimit } from "@ready-for-agent/agent-backend"
+
 const commandName = (command: string): string =>
   command.startsWith("/") ? command.slice(1) : command
 
@@ -7,8 +9,22 @@ const messageTokens = (prompt: string): ReadonlyArray<string> =>
     .split(/\s+/)
     .filter((token) => token.length > 0)
 
-export const shouldUsePromptStdin = (prompt: string): boolean =>
-  /\r|\n/.test(prompt)
+/**
+ * Prompts go through stdin when argv cannot carry them faithfully or safely.
+ *
+ * Non-command prompts lose their structure once tokenized, so any newline sends
+ * them to stdin. Either shape goes to stdin past the argv byte limit: a
+ * single-line pasted stack trace or inlined diff would otherwise fail the spawn
+ * with an opaque platform error instead of an Agent Backend error. Command
+ * prompts below the limit stay tokenized after `--` so `$ARGUMENTS` keeps its
+ * established argv shape.
+ */
+export const shouldUsePromptStdin = (input: {
+  readonly prompt: string
+  readonly command?: string
+}): boolean =>
+  exceedsPromptArgvLimit(input.prompt) ||
+  (input.command === undefined && /\r|\n/.test(input.prompt))
 
 export const buildRunArgs = (input: {
   readonly prompt: string
@@ -40,14 +56,9 @@ export const buildRunArgs = (input: {
 
   if (input.command !== undefined) {
     args.push("--command", commandName(input.command))
-    const tokens = messageTokens(input.prompt)
-    if (tokens.length > 0) {
-      args.push("--", ...tokens)
-    }
-    return args
   }
 
-  if (!shouldUsePromptStdin(input.prompt)) {
+  if (!shouldUsePromptStdin(input)) {
     const tokens = messageTokens(input.prompt)
     if (tokens.length > 0) {
       args.push("--", ...tokens)

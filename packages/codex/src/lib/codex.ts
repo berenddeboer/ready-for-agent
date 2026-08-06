@@ -1,4 +1,4 @@
-import { Duration, Effect, Layer } from "effect"
+import { Duration, Effect, Layer, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AGENT_BACKEND_IDS,
@@ -13,7 +13,11 @@ import {
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
-import { buildRunArgs } from "./build-args.js"
+import {
+  buildPromptBody,
+  buildRunArgs,
+  shouldUsePromptStdin,
+} from "./build-args.js"
 import { makeCodexEnvironment } from "./environment.js"
 import { parseCodexLoginStatus } from "./parse-login-status.js"
 import {
@@ -129,17 +133,21 @@ export class Codex {
           AgentBackendError
         > =>
           Effect.gen(function* () {
-            const args = buildRunArgs({
+            const promptInput = {
               prompt: input.prompt,
+              ...(input.command !== undefined
+                ? { command: input.command }
+                : {}),
+            }
+            const args = buildRunArgs({
+              ...promptInput,
               model: input.model,
               thinkingLevel: input.thinkingLevel,
               ...(input.resume && input.sessionId !== undefined
                 ? { resumeSessionId: input.sessionId }
                 : {}),
-              ...(input.command !== undefined
-                ? { command: input.command }
-                : {}),
             })
+            const promptOnStdin = shouldUsePromptStdin(promptInput)
 
             let stream = createCodexStreamParseState()
             // On resume, the Session ID is already durable; seed parse state so
@@ -190,7 +198,11 @@ export class Codex {
                 }
                 return {}
               },
-              stdin: "ignore",
+              stdin: promptOnStdin
+                ? Stream.fromIterable([
+                    new TextEncoder().encode(buildPromptBody(promptInput)),
+                  ])
+                : "ignore",
             })
 
             if (stream.malformedLine) {

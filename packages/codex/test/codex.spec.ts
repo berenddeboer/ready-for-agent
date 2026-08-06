@@ -11,6 +11,7 @@ import {
   AgentBackendSessionIdMissingError,
   AgentBackendTimeoutError,
   type OnSessionId,
+  PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
 import {
   CODEX_STATIC_CATALOG,
@@ -189,6 +190,30 @@ describe("Codex AgentBackend adapter (Agent Turns)", () => {
         const result = await Effect.runPromise(startTurn(binary, "2 seconds"))
         expect(result.assistantText).toBe("ok")
         expect(result.sessionId).toBe("019fab2c-9466-7432-ad16-9de23f94f2db")
+      },
+    )
+  })
+
+  it("sends a large single-line prompt through stdin instead of argv", async () => {
+    // Single-line and past the argv byte limit: on argv this spawn fails with
+    // an opaque platform error rather than reaching the CLI at all.
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    await withExecutable(
+      [
+        // `-` is the only positional prompt; the body arrives on stdin.
+        'case " $* " in *" -- - ") ;; *) exit 30 ;; esac',
+        "input=$(cat)",
+        `[ \${#input} -eq ${prompt.length} ] || exit 31`,
+        'case "$input" in "Fix x"*) ;; *) exit 32 ;; esac',
+        successfulTurnStream("thread-large"),
+      ].join("\n"),
+      async (binary) => {
+        await expect(
+          Effect.runPromise(startTurn(binary, "10 seconds", undefined, prompt)),
+        ).resolves.toEqual({
+          sessionId: "thread-large",
+          assistantText: "ok",
+        })
       },
     )
   })

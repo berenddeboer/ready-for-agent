@@ -11,7 +11,8 @@ A compatible Agent Backend must:
 - expose an instance-wide Agent Model catalog through atomic readiness inspection;
 - emit machine-readable output that the adapter can normalize to the Session ID and ordered final assistant text;
 - begin emitting that output within a bounded startup window (60 seconds) of spawn;
-- provide the `/review` Agent Command at runtime; and
+- provide the `/review` Agent Command at runtime;
+- accept an Agent Turn prompt out of band as well as on argv, since argv cannot carry a large prompt (Linux caps a single argument at 128 KiB, and an oversized argument fails the spawn with an opaque platform error rather than an Agent Backend error) — the shared package sets the byte ceiling, and each adapter routes past it through whatever the CLI supports (stdin for OpenCode, Claude Code, and Codex Build; a prompt file for Grok Build, which ignores piped stdin); and
 - tolerate bounded termination of the whole Agent Turn process tree on timeout, Reset, or Harness shutdown.
 
 Project-instruction file conventions are backend-native rather than part of this contract. Runtime Agent Turn failures fail only the current Step Run; Agent Backend Unavailable is established only by startup inspection or an explicit recheck.

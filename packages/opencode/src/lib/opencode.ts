@@ -93,16 +93,18 @@ export class Opencode {
           { readonly sessionId: string; readonly assistantText: string },
           AgentBackendError
         > => {
-          const args = buildRunArgs({
+          const promptInput = {
             prompt: input.prompt,
+            ...(input.command !== undefined ? { command: input.command } : {}),
+          }
+          const args = buildRunArgs({
+            ...promptInput,
             cwd: input.cwd,
             model: input.model,
             thinkingLevel: input.thinkingLevel,
             sessionId: input.sessionId,
-            ...(input.command !== undefined ? { command: input.command } : {}),
           })
-          const promptOnStdin =
-            input.command === undefined && shouldUsePromptStdin(input.prompt)
+          const promptOnStdin = shouldUsePromptStdin(promptInput)
           const commandName = input.command
 
           return runCliTurn({

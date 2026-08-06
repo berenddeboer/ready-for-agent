@@ -10,6 +10,7 @@ import {
   AgentBackendMalformedOutputError,
   AgentBackendTimeoutError,
   type OnSessionId,
+  PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
 import {
   CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE,
@@ -709,6 +710,28 @@ describe("Claude AgentBackend adapter (Agent Turns)", () => {
           Effect.runPromise(
             startTurn(binary, "2 seconds", undefined, "test", null),
           ),
+        ).resolves.toMatchObject({ assistantText: "ok" })
+      },
+    )
+  })
+
+  it("sends a large single-line prompt through stdin instead of argv", async () => {
+    // Single-line and past the argv byte limit: on argv this spawn fails with
+    // an opaque platform error rather than reaching Claude Code at all.
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    await withExecutable(
+      [
+        "input=$(cat)",
+        `[ \${#input} -eq ${prompt.length} ] || exit 60`,
+        'case "$input" in "Fix x"*) ;; *) exit 61 ;; esac',
+        // No positional prompt: argv must not carry an end-of-options prompt.
+        'case " $* " in *" -- "*) exit 62 ;; esac',
+        captureSessionScript,
+        successfulTurnStream(),
+      ].join("\n"),
+      async (binary) => {
+        await expect(
+          Effect.runPromise(startTurn(binary, "10 seconds", undefined, prompt)),
         ).resolves.toMatchObject({ assistantText: "ok" })
       },
     )

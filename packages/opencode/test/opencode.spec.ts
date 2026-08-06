@@ -9,6 +9,7 @@ import {
   AgentBackendMalformedOutputError,
   AgentBackendTimeoutError,
   type OnSessionId,
+  PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
 import { Opencode, parseVerboseModelsOutput } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
@@ -124,6 +125,29 @@ describe("Opencode AgentBackend adapter", () => {
           Effect.runPromise(startTurn(binary, "2 seconds", undefined, prompt)),
         ).resolves.toEqual({
           sessionId: "ses_stdin",
+          assistantText: "",
+        })
+      },
+    )
+  })
+
+  it("sends a large single-line prompt through stdin instead of argv", async () => {
+    // Single-line and past the argv byte limit: on argv this spawn fails with
+    // an opaque platform error rather than reaching the CLI at all.
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    await withExecutable(
+      [
+        "input=$(cat)",
+        `[ \${#input} -eq ${prompt.length} ] || exit 9`,
+        'case "$input" in "Fix x"*) ;; *) exit 10 ;; esac',
+        'case " $* " in *" -- "*) exit 11 ;; esac',
+        `printf '%s\\n' '{"type":"step_start","sessionID":"ses_large"}'`,
+      ].join("\n"),
+      async (binary) => {
+        await expect(
+          Effect.runPromise(startTurn(binary, "10 seconds", undefined, prompt)),
+        ).resolves.toEqual({
+          sessionId: "ses_large",
           assistantText: "",
         })
       },

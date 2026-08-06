@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { Duration, Effect, Layer } from "effect"
+import { Duration, Effect, FileSystem, Layer } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AGENT_BACKEND_IDS,
@@ -14,7 +14,11 @@ import {
   runCliCapture,
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
-import { buildRunArgs } from "./build-args.js"
+import {
+  buildPromptBody,
+  buildRunArgs,
+  shouldUsePromptFile,
+} from "./build-args.js"
 import { makeGrokEnvironment } from "./environment.js"
 import { parseGrokModelsOutput } from "./parse-models.js"
 import {
@@ -42,6 +46,7 @@ export class Grok {
       AgentBackend,
       Effect.gen(function* () {
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const fs = yield* FileSystem.FileSystem
         const binary = options.binary ?? DEFAULT_BINARY
         const defaultTimeout = options.defaultTimeout ?? DEFAULT_TIMEOUT
         const environment = makeGrokEnvironment()
@@ -78,6 +83,24 @@ export class Grok {
           }
         })
 
+        /**
+         * Park an oversized prompt body in a temp file for the life of the turn.
+         *
+         * Headless Grok ignores piped stdin, so `--prompt-file` is the only way
+         * to keep a large prompt off argv. The file is scoped to the turn and
+         * owner-only because prompts carry Work Item context.
+         */
+        const writePromptFile = (body: string) =>
+          Effect.gen(function* () {
+            const path = yield* fs.makeTempFileScoped({
+              prefix: "ready-for-agent-grok-prompt-",
+              suffix: ".md",
+            })
+            yield* fs.writeFileString(path, body)
+            yield* fs.chmod(path, 0o600)
+            return path
+          })
+
         const runTurn = (input: {
           readonly prompt: string
           readonly cwd: string
@@ -92,104 +115,114 @@ export class Grok {
           { readonly sessionId: string; readonly assistantText: string },
           AgentBackendError
         > =>
-          Effect.gen(function* () {
-            if (!input.resume && input.onSessionId !== undefined) {
-              yield* input.onSessionId(input.sessionId).pipe(
-                Effect.catch((error) =>
-                  Effect.logWarning("Grok onSessionId observer failed", {
-                    sessionId: input.sessionId,
-                    error,
-                  }),
-                ),
-              )
-            }
+          // Scoped so an oversized prompt file lives only as long as the turn.
+          Effect.scoped(
+            Effect.gen(function* () {
+              if (!input.resume && input.onSessionId !== undefined) {
+                yield* input.onSessionId(input.sessionId).pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("Grok onSessionId observer failed", {
+                      sessionId: input.sessionId,
+                      error,
+                    }),
+                  ),
+                )
+              }
 
-            const args = buildRunArgs({
-              prompt: input.prompt,
-              cwd: input.cwd,
-              model: input.model,
-              thinkingLevel: input.thinkingLevel,
-              ...(input.resume
-                ? { resumeSessionId: input.sessionId }
-                : { sessionId: input.sessionId }),
-              ...(input.command !== undefined
-                ? { command: input.command }
-                : {}),
-            })
+              const promptInput = {
+                prompt: input.prompt,
+                ...(input.command !== undefined
+                  ? { command: input.command }
+                  : {}),
+              }
+              const promptFile = shouldUsePromptFile(promptInput)
+                ? yield* writePromptFile(buildPromptBody(promptInput))
+                : undefined
+              const args = buildRunArgs({
+                ...promptInput,
+                cwd: input.cwd,
+                model: input.model,
+                thinkingLevel: input.thinkingLevel,
+                ...(input.resume
+                  ? { resumeSessionId: input.sessionId }
+                  : { sessionId: input.sessionId }),
+                ...(promptFile !== undefined ? { promptFile } : {}),
+              })
 
-            let stream = createGrokStreamParseState()
+              let stream = createGrokStreamParseState()
 
-            const turn = yield* runCliTurn({
-              spawner,
-              binary,
-              args,
-              cwd: input.cwd,
-              env: environment,
-              timeout: input.timeout ?? defaultTimeout,
-              knownSessionId: input.sessionId,
-              observerLabel: "Grok Build",
-              parseLine: (line) => {
-                stream = foldGrokStreamLine(stream, line)
+              const turn = yield* runCliTurn({
+                spawner,
+                binary,
+                args,
+                cwd: input.cwd,
+                env: environment,
+                timeout: input.timeout ?? defaultTimeout,
+                knownSessionId: input.sessionId,
+                observerLabel: "Grok Build",
+                parseLine: (line) => {
+                  stream = foldGrokStreamLine(stream, line)
 
-                if (stream.errorMessage !== undefined) {
-                  return {}
-                }
-                if (stream.maxTurnsReached) {
-                  return {}
-                }
-                if (stream.endSeen && isSuccessfulGrokEnd(stream)) {
-                  const endSessionId = stream.endSessionId ?? input.sessionId
-                  return {
-                    sessionId: endSessionId,
-                    finalizeText: grokAssistantText(stream),
+                  if (stream.errorMessage !== undefined) {
+                    return {}
                   }
-                }
-                return {}
-              },
-              stdin: "ignore",
-            })
-
-            if (stream.malformedLine) {
-              return yield* malformedOutput(
-                input.cwd,
-                "(malformed stream line)",
-              )
-            }
-            if (stream.errorMessage !== undefined) {
-              return yield* new AgentBackendExitError({
-                exitCode: 1,
-                cwd: input.cwd,
-                sessionId: input.sessionId,
+                  if (stream.maxTurnsReached) {
+                    return {}
+                  }
+                  if (stream.endSeen && isSuccessfulGrokEnd(stream)) {
+                    const endSessionId = stream.endSessionId ?? input.sessionId
+                    return {
+                      sessionId: endSessionId,
+                      finalizeText: grokAssistantText(stream),
+                    }
+                  }
+                  return {}
+                },
+                stdin: "ignore",
               })
-            }
-            if (stream.maxTurnsReached) {
-              return yield* new AgentBackendExitError({
-                exitCode: 1,
-                cwd: input.cwd,
-                sessionId: input.sessionId,
-              })
-            }
-            if (!stream.endSeen || !isSuccessfulGrokEnd(stream)) {
-              return yield* malformedOutput(
-                input.cwd,
-                "(missing or unsuccessful terminal end event)",
-              )
-            }
-            if (
-              stream.endSessionId !== undefined &&
-              stream.endSessionId !== input.sessionId
-            ) {
-              return yield* malformedOutput(
-                input.cwd,
-                `(session id mismatch: expected ${input.sessionId}, got ${stream.endSessionId})`,
-              )
-            }
 
-            return {
-              sessionId: input.sessionId,
-              assistantText: turn.assistantText,
-            }
-          })
+              if (stream.malformedLine) {
+                return yield* malformedOutput(
+                  input.cwd,
+                  "(malformed stream line)",
+                )
+              }
+              if (stream.errorMessage !== undefined) {
+                return yield* new AgentBackendExitError({
+                  exitCode: 1,
+                  cwd: input.cwd,
+                  sessionId: input.sessionId,
+                })
+              }
+              if (stream.maxTurnsReached) {
+                return yield* new AgentBackendExitError({
+                  exitCode: 1,
+                  cwd: input.cwd,
+                  sessionId: input.sessionId,
+                })
+              }
+              if (!stream.endSeen || !isSuccessfulGrokEnd(stream)) {
+                return yield* malformedOutput(
+                  input.cwd,
+                  "(missing or unsuccessful terminal end event)",
+                )
+              }
+              if (
+                stream.endSessionId !== undefined &&
+                stream.endSessionId !== input.sessionId
+              ) {
+                return yield* malformedOutput(
+                  input.cwd,
+                  `(session id mismatch: expected ${input.sessionId}, got ${stream.endSessionId})`,
+                )
+              }
+
+              return {
+                sessionId: input.sessionId,
+                assistantText: turn.assistantText,
+              }
+            }),
+          )
 
         return AgentBackend.of({
           inspect,
