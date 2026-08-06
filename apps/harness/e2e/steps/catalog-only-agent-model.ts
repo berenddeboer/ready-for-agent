@@ -146,7 +146,8 @@ Given(
 
 Given(
   "the Harness runs Claude Code with the {string} Agent Model",
-  async (_fixtures, model: string) => {
+  // biome-ignore lint/correctness/noEmptyPattern: playwright-bdd requires the first argument to use the object destructuring pattern, even when no fixtures are needed.
+  async ({}, model: string) => {
     await seedClaudeHarnessDefault(model)
   },
 )
