@@ -1,11 +1,5 @@
 import { spawnSync } from "node:child_process"
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-} from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -22,6 +16,11 @@ import {
   FIXTURE_GITLAB_SECRET_NAME,
   FIXTURE_GITLAB_VAULT_ACCOUNT,
 } from "./constants.ts"
+import {
+  fixtureVaultEnvOverrides,
+  resolveKeymaxxerE2ePolicy,
+  seedFixtureVaultHome,
+} from "./keymaxxer-e2e-policy.ts"
 
 export type FixtureForge = "github" | "gitlab"
 
@@ -40,7 +39,6 @@ class CloneFixtureError extends Data.TaggedError("CloneFixtureError")<{
 
 const supportDir = dirname(fileURLToPath(import.meta.url))
 const workspaceRoot = resolve(supportDir, "../../../..")
-const fixtureVaultDir = resolve(workspaceRoot, "e2e/fixtures/keymaxxer")
 
 export const githubFixtureSpec = (): FixtureCloneSpec => ({
   forge: "github",
@@ -87,39 +85,22 @@ const keymaxxerBin = () => {
   )
 }
 
+/**
+ * Fixture-vault environment for a Keymaxxer CLI/Sidecar call, or `null` when
+ * policy resolves to interactive mode (ambient `~/.keymaxxer`, opted into via
+ * `E2E_ALLOW_KEYMAXXER_PROMPTS=1`). Throws when no credential is available
+ * and no interactive opt-in was given — see `keymaxxer-e2e-policy.ts`.
+ */
 const fixtureVaultEnv = (): NodeJS.ProcessEnv | null => {
-  const masterKey =
-    process.env.E2E_KEYMAXXER_MASTER_KEY?.trim() ||
-    process.env.KEYMAXXER_MASTER_KEY?.trim()
-  const useFixture =
-    process.env.CI === "true" ||
-    process.env.E2E_USE_FIXTURE_VAULT === "1" ||
-    Boolean(masterKey)
-
-  if (!useFixture) return null
-  if (!masterKey) {
-    throw new Error(
-      "CI live e2e requires E2E_KEYMAXXER_MASTER_KEY (or KEYMAXXER_MASTER_KEY).",
-    )
-  }
+  const policy = resolveKeymaxxerE2ePolicy()
+  if (policy.mode === "interactive") return null
 
   const home = mkdtempSync(join(tmpdir(), "rfa-e2e-keymaxxer-home-"))
-  const keymaxxerDir = join(home, ".keymaxxer")
-  mkdirSync(keymaxxerDir, { recursive: true })
-  copyFileSync(
-    join(fixtureVaultDir, "vault.db"),
-    join(keymaxxerDir, "vault.db"),
-  )
-  copyFileSync(
-    join(fixtureVaultDir, "vault.meta.json"),
-    join(keymaxxerDir, "vault.meta.json"),
-  )
+  seedFixtureVaultHome(home)
 
   return {
     ...process.env,
-    HOME: home,
-    KEYMAXXER_MASTER_KEY: masterKey,
-    KEYMAXXER_APPROVE: "deny",
+    ...fixtureVaultEnvOverrides(home, policy.masterKey),
   }
 }
 

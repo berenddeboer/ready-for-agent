@@ -17,7 +17,6 @@
 import { type ChildProcess, spawn } from "node:child_process"
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -31,6 +30,12 @@ import { delimiter, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { E2E_HARNESS_PORT } from "./constants.ts"
 import {
+  type KeymaxxerE2ePolicy,
+  fixtureVaultEnvOverrides,
+  resolveKeymaxxerE2ePolicy,
+  seedFixtureVaultHome,
+} from "./keymaxxer-e2e-policy.ts"
+import {
   CONTROL_FILES,
   LIVE_HARNESS_STATE_FILE,
   type LiveHarnessState,
@@ -39,9 +44,18 @@ import { Database } from "bun:sqlite"
 
 const supportDir = dirname(fileURLToPath(import.meta.url))
 const harnessRoot = resolve(supportDir, "../..")
-const workspaceRoot = resolve(harnessRoot, "../..")
-const fixtureVaultDir = resolve(workspaceRoot, "e2e/fixtures/keymaxxer")
 const port = Number(process.env.E2E_HARNESS_PORT ?? E2E_HARNESS_PORT)
+
+// Fail fast, before creating any temp dir, fake CLI, or production-build
+// check: a missing credential must never get far enough to touch the
+// Harness, Sidecar, or Keymaxxer CLI.
+let keymaxxerPolicy: KeymaxxerE2ePolicy
+try {
+  keymaxxerPolicy = resolveKeymaxxerE2ePolicy()
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exit(1)
+}
 
 const runDir = mkdtempSync(join(tmpdir(), "ready-for-agent-e2e-harness-"))
 const dbPath = join(runDir, "harness.db")
@@ -97,38 +111,18 @@ const env: NodeJS.ProcessEnv = {
 // unavailable rather than accepted, and no AWS discovery may be attempted.
 delete env.CLAUDE_CODE_USE_BEDROCK
 
-const masterKey =
-  process.env.E2E_KEYMAXXER_MASTER_KEY?.trim() ||
-  process.env.KEYMAXXER_MASTER_KEY?.trim()
-const useFixtureVault =
-  process.env.CI === "true" ||
-  process.env.E2E_USE_FIXTURE_VAULT === "1" ||
-  Boolean(masterKey)
-
-if (useFixtureVault) {
-  if (!masterKey) {
-    console.error(
-      "CI live e2e requires E2E_KEYMAXXER_MASTER_KEY (or KEYMAXXER_MASTER_KEY).",
-    )
-    process.exit(1)
-  }
+if (keymaxxerPolicy.mode === "fixture") {
   const keymaxxerHome = join(runDir, "keymaxxer-home")
-  const keymaxxerDir = join(keymaxxerHome, ".keymaxxer")
-  mkdirSync(keymaxxerDir, { recursive: true })
-  copyFileSync(
-    join(fixtureVaultDir, "vault.db"),
-    join(keymaxxerDir, "vault.db"),
+  seedFixtureVaultHome(keymaxxerHome)
+  Object.assign(
+    env,
+    fixtureVaultEnvOverrides(keymaxxerHome, keymaxxerPolicy.masterKey),
   )
-  copyFileSync(
-    join(fixtureVaultDir, "vault.meta.json"),
-    join(keymaxxerDir, "vault.meta.json"),
-  )
-  env.HOME = keymaxxerHome
-  env.KEYMAXXER_MASTER_KEY = masterKey
-  env.KEYMAXXER_APPROVE = "deny"
   // Fresh sidecar bound to the fixture vault — do not reuse a developer sidecar.
   delete env.KEYMAXXER_SIDECAR_URL
 }
+// keymaxxerPolicy.mode === "interactive": leave the environment untouched so
+// Keymaxxer uses the operator's ambient ~/.keymaxxer vault, prompts and all.
 
 const serverEntry = resolve(harnessRoot, "server.ts")
 const distServer = resolve(harnessRoot, "dist/server/server.js")

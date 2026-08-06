@@ -78,14 +78,24 @@ binary, as well as the dedicated Kanban pipeline route.
 bunx nx run harness:e2e
 ```
 
-Local runs leave `~/.keymaxxer` untouched and use your matching fixture
-credentials (normal Keymaxxer prompts allowed):
+Live e2e is non-interactive by default and requires a Keymaxxer credential
+before it starts the Harness, Sidecar, or CLI at all — it never falls back to
+silently prompting:
 
-- GitHub: `provider=github` / `account=berenddeboer/test-ready-for-agent`
-- GitLab: `provider=gitlab` /
-  `account=git.drupalcode.org/<fixture-project-path>`
+- **Fixture vault (default, non-interactive):** set
+  `E2E_KEYMAXXER_MASTER_KEY` (or the legacy `KEYMAXXER_MASTER_KEY`) to unlock
+  the checked-in fixture vault into a temporary `HOME`, with
+  `KEYMAXXER_APPROVE=deny` so nothing can prompt. CI always uses this mode.
+- **Ambient vault (explicit local opt-in only):** set
+  `E2E_ALLOW_KEYMAXXER_PROMPTS=1` to intentionally run against your own
+  `~/.keymaxxer` vault, with your matching fixture credentials (normal
+  Keymaxxer prompts allowed):
+  - GitHub: `provider=github` / `account=berenddeboer/test-ready-for-agent`
+  - GitLab: `provider=gitlab` /
+    `account=git.drupalcode.org/<fixture-project-path>`
+- **Neither set:** live e2e fails fast with a diagnostic instead of starting
+  anything.
 
-CI unlocks the checked-in fixture vault with `E2E_KEYMAXXER_MASTER_KEY`. The
-GitLab scenario soft-skips until that vault includes the GitLab secret; set
-`E2E_REQUIRE_GITLAB=1` to fail closed after bootstrap. See `docs/e2e-fixture.md`
-and `docs/adr/0021-live-harness-end-to-end-test.md`.
+The GitLab scenario soft-skips until the fixture vault includes the GitLab
+secret; set `E2E_REQUIRE_GITLAB=1` to fail closed after bootstrap. See
+`docs/e2e-fixture.md` and `docs/adr/0021-live-harness-end-to-end-test.md`.

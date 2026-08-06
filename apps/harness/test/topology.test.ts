@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test"
 type Target = {
   continuous?: boolean
   dependsOn?: unknown[]
-  options?: { command?: string }
+  options?: { command?: string; env?: Record<string, string> }
 }
 
 const readJson = async <A>(relativePath: string): Promise<A> =>
@@ -75,6 +75,51 @@ describe("single application server topology", () => {
     expect(smokeScript).toContain("AbortSignal.timeout")
     expect(smokeScript).toContain("GRAPHQL_HEALTH_TIMEOUT_MS")
     expect(smokeScript).not.toContain("E2E_KEYMAXXER_MASTER_KEY")
+  })
+
+  test("forces KEYMAXXER_ENABLED=false at the ordinary test-target boundary, but not for live e2e", async () => {
+    const harness = await readJson<{ targets: Record<string, Target> }>(
+      "../project.json",
+    )
+
+    expect(harness.targets.test?.options?.env?.KEYMAXXER_ENABLED).toBe("false")
+    expect(harness.targets["slow-test"]?.options?.env?.KEYMAXXER_ENABLED).toBe(
+      "false",
+    )
+    expect(harness.targets.smoke?.options?.env?.KEYMAXXER_ENABLED).toBe("false")
+    // Live e2e is the one supported suite that intentionally keeps Keymaxxer
+    // enabled: it validates the real Sidecar, CLI, and fixture credentials.
+    expect(harness.targets.e2e?.options?.env?.KEYMAXXER_ENABLED).toBeUndefined()
+
+    const runnerScript = await readFile(
+      new URL("../scripts/run-unit-tests.sh", import.meta.url),
+      "utf8",
+    )
+    expect(runnerScript).toContain("export KEYMAXXER_ENABLED=false")
+  })
+
+  test("an inherited KEYMAXXER_ENABLED=true cannot override the unit-test runner's export", async () => {
+    const { spawnSync } = await import("node:child_process")
+    const harnessRoot = new URL("..", import.meta.url).pathname
+
+    // Source only the runner's own export line (not the full suite) against
+    // an inherited KEYMAXXER_ENABLED=true, proving the script's real export
+    // wins deterministically rather than asserting bash semantics in the
+    // abstract.
+    const result = spawnSync(
+      "bash",
+      [
+        "-c",
+        "source <(grep -m1 '^export KEYMAXXER_ENABLED=' scripts/run-unit-tests.sh); echo \"$KEYMAXXER_ENABLED\"",
+      ],
+      {
+        cwd: harnessRoot,
+        env: { ...process.env, KEYMAXXER_ENABLED: "true" },
+        encoding: "utf8",
+      },
+    )
+
+    expect(result.stdout.trim()).toBe("false")
   })
 
   test("uses TanStack Start SPA mode without the old API proxy", async () => {

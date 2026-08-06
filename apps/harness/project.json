@@ -51,7 +51,10 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bash scripts/run-unit-tests.sh"
+        "command": "bash scripts/run-unit-tests.sh",
+        "env": {
+          "KEYMAXXER_ENABLED": "false"
+        }
       },
       "inputs": ["default", "^production"],
       "cache": true,
@@ -61,7 +64,10 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --bun ./node_modules/vitest/vitest.mjs run --config vitest.config.ts test/production-sse-idle-timeout.test.ts"
+        "command": "bun --bun ./node_modules/vitest/vitest.mjs run --config vitest.config.ts test/production-sse-idle-timeout.test.ts",
+        "env": {
+          "KEYMAXXER_ENABLED": "false"
+        }
       },
       "inputs": ["default", "^production"],
       "cache": true,
@@ -85,7 +91,10 @@
       "executor": "nx:run-commands",
       "options": {
         "cwd": "{projectRoot}",
-        "command": "bun --conditions @ready-for-agent/source scripts/dev-smoke.ts"
+        "command": "bun --conditions @ready-for-agent/source scripts/dev-smoke.ts",
+        "env": {
+          "KEYMAXXER_ENABLED": "false"
+        }
       },
       "dependsOn": [
         "db:migrate",
