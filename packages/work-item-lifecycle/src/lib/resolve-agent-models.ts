@@ -114,6 +114,41 @@ export const resolveAgentModelsForBackend = (
   })
 
 /**
+ * Reject a resolved Agent Model that the Agent Backend's current Ready catalog
+ * does not list (issue #838), before any Agent Backend CLI is spawned. Returns
+ * actionable operator guidance, or null when the selection is usable.
+ *
+ * An empty catalog is not evidence of absence: a Ready backend that reported no
+ * models (discovery gap, adapter without a catalog) carries no membership
+ * information, and treating it as "every model is invalid" would stall every
+ * Work Item on that backend. Settings already blocks *saving* into an empty
+ * catalog, so admission defers to CLI-time failure in that case.
+ */
+export const agentModelCatalogViolation = (input: {
+  readonly backendLabel: string
+  readonly catalogModelIds: readonly string[]
+  readonly selection: AgentModelSelection
+  /** Review model is only used by the review step. */
+  readonly includeReviewModel: boolean
+}): string | null => {
+  if (input.catalogModelIds.length === 0) {
+    return null
+  }
+  const checked = [
+    ["Build", input.selection.model] as const,
+    ...(input.includeReviewModel
+      ? [["Review", input.selection.reviewModel] as const]
+      : []),
+  ]
+  for (const [role, model] of checked) {
+    if (model.length > 0 && !input.catalogModelIds.includes(model)) {
+      return `${role} Agent Model "${model}" is not in the current ${input.backendLabel} Agent Model catalog. Choose a model the Agent Backend currently offers in Settings, then start this work again.`
+    }
+  }
+  return null
+}
+
+/**
  * Load current repository and harness settings and resolve Agent Models for
  * the next Agent Turn using the harness default backend's prefs map entry.
  * Prefer {@link resolveAgentModelsForBackend} when a captured or effective

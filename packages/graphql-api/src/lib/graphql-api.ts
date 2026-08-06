@@ -20,7 +20,12 @@ import {
   listSelectableAgentBackendInfos,
   toAgentBackendStatus,
 } from "@ready-for-agent/agent-backend"
-import { DbService, RepositoryNotFoundError } from "@ready-for-agent/db-service"
+import {
+  DbService,
+  InvalidConfigInputError,
+  InvalidRepositorySettingsError,
+  RepositoryNotFoundError,
+} from "@ready-for-agent/db-service"
 import { GitHubService } from "@ready-for-agent/github-service"
 import {
   GitLabService,
@@ -59,6 +64,7 @@ import {
   withKeymaxxerMetadataTimeout,
 } from "./repository-credentials.js"
 import { toGraphQLError } from "./to-graphql-error.js"
+import { validateAgentModelsAgainstCatalog } from "./validate-agent-models.js"
 import {
   lifecycleLabels,
   statusLabel,
@@ -916,6 +922,19 @@ export const createGraphqlApi = (
                 // Implement Now cannot capture pre-activate Active provenance.
                 const updated = yield* active.withConfigCoordination(
                   Effect.gen(function* () {
+                    // Catalog-only Agent Models (issue #838): validate against
+                    // the backend this Save is about to select, inside the same
+                    // coordinated section that commits and activates it.
+                    yield* validateAgentModelsAgainstCatalog({
+                      backendId: args.input.selectedAgentBackend,
+                      inspectInput: inspectInput(agentBackendCwd),
+                      models: {
+                        defaultModel: args.input.defaultModel,
+                        reviewModel: args.input.reviewModel,
+                      },
+                      onInvalid: (field, message) =>
+                        new InvalidConfigInputError({ field, message }),
+                    })
                     const next = yield* db.updateConfig({
                       selectedAgentBackend: args.input.selectedAgentBackend,
                       defaultModel: args.input.defaultModel ?? null,
@@ -1056,6 +1075,26 @@ export const createGraphqlApi = (
                 // may change so Implement Now cannot capture a pre-activate id.
                 const updated = yield* active.withConfigCoordination(
                   Effect.gen(function* () {
+                    // Catalog-only Agent Models (issue #838): validate explicit
+                    // overrides against the next Effective Agent Backend —
+                    // the repository override when set, else the harness
+                    // default. Empty overrides inherit and assert nothing.
+                    const nextSelected =
+                      args.input.selectedAgentBackend === undefined
+                        ? repository.selectedAgentBackend
+                        : args.input.selectedAgentBackend
+                    const nextEffective =
+                      nextSelected ?? (yield* db.getConfig).selectedAgentBackend
+                    yield* validateAgentModelsAgainstCatalog({
+                      backendId: nextEffective,
+                      inspectInput: inspectInput(agentBackendCwd),
+                      models: {
+                        defaultModel: args.input.defaultModel,
+                        reviewModel: args.input.reviewModel,
+                      },
+                      onInvalid: (field, message) =>
+                        new InvalidRepositorySettingsError({ field, message }),
+                    })
                     const updated = yield* db.updateRepositorySettings({
                       repositoryId: args.input.repositoryId,
                       ...(args.input.forge === undefined && !identityChanging

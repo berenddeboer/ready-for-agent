@@ -1,31 +1,36 @@
-import { CLAUDE_THINKING_LEVELS } from "@ready-for-agent/claude"
 import {
   AGENT_MODEL_KIND_APPLICATION,
   AGENT_MODEL_KIND_SYSTEM_DEFINED,
   CLAUDE_AGENT_BACKEND_ID,
   CLAUDE_BEDROCK_CONFIGURATION_MODE,
-  CLAUDE_FREE_TEXT_THINKING_LEVELS,
-  allowsClaudeFreeTextModels,
-  blocksClaudeBedrockModelSave,
-  claudeBedrockModelSaveBlockReason,
+  agentModelCatalogNotice,
+  agentModelSaveBlockReason,
+  blocksAgentModelSave,
   findCatalogModel,
   formatAgentModelKindLabel,
   formatAgentModelLabel,
+  formatUnavailableVariantLabel,
   isClaudeBedrockConfigurationMode,
-  isCustomAgentModelValue,
   isUnavailableCatalogModel,
+  reconcileVariantForModel,
   thinkingLevelsForModel,
 } from "../src/agent-model-settings.js"
 import { describe, expect, test } from "bun:test"
 
+const CLAUDE_EFFORT = ["low", "medium", "high", "xhigh", "max"] as const
+
+/** First-party Claude Code static aliases (adapter catalog). */
 const claudeCatalog = [
-  { id: "haiku", thinkingLevels: ["low", "medium", "high", "xhigh", "max"] },
-  { id: "sonnet", thinkingLevels: ["low", "medium", "high", "xhigh", "max"] },
-  { id: "opus", thinkingLevels: ["low", "medium", "high", "xhigh", "max"] },
-  { id: "fable", thinkingLevels: ["low", "medium", "high", "xhigh", "max"] },
+  { id: "haiku", thinkingLevels: [...CLAUDE_EFFORT] },
+  { id: "sonnet", thinkingLevels: [...CLAUDE_EFFORT] },
+  { id: "opus", thinkingLevels: [...CLAUDE_EFFORT] },
+  { id: "fable", thinkingLevels: [...CLAUDE_EFFORT] },
 ] as const
 
-const catalogIds = claudeCatalog.map((model) => model.id)
+const opencodeCatalog = [
+  { id: "opencode/deepseek-v4-flash-free", thinkingLevels: ["high", "max"] },
+  { id: "opencode/gpt-5", thinkingLevels: [] },
+] as const
 
 const systemProfileId = "us.anthropic.claude-sonnet-4-6"
 const applicationArn =
@@ -34,245 +39,153 @@ const applicationArn =
 const bedrockCatalog = [
   {
     id: systemProfileId,
-    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+    thinkingLevels: [...CLAUDE_EFFORT],
     name: "US Anthropic Claude Sonnet 4.6",
     kind: AGENT_MODEL_KIND_SYSTEM_DEFINED,
   },
   {
     id: applicationArn,
-    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+    thinkingLevels: [...CLAUDE_EFFORT],
     name: "My Org Sonnet",
     kind: AGENT_MODEL_KIND_APPLICATION,
   },
 ] as const
 
-describe("Claude free-text Agent Model settings (issue #806)", () => {
-  test("only first-party Claude backend allows free-text model strings", () => {
-    expect(allowsClaudeFreeTextModels(CLAUDE_AGENT_BACKEND_ID)).toBe(true)
-    expect(allowsClaudeFreeTextModels(CLAUDE_AGENT_BACKEND_ID, null)).toBe(true)
-    expect(allowsClaudeFreeTextModels("opencode")).toBe(false)
-    expect(allowsClaudeFreeTextModels("codex")).toBe(false)
-    expect(allowsClaudeFreeTextModels("grok")).toBe(false)
+const ready = (models: readonly { id: string }[]) => ({
+  catalogLoading: false,
+  catalogFailed: false,
+  catalogModels: models as never,
+})
+
+const bedrockScope = {
+  backendId: CLAUDE_AGENT_BACKEND_ID,
+  configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
+}
+const firstPartyClaudeScope = {
+  backendId: CLAUDE_AGENT_BACKEND_ID,
+  configurationMode: null,
+}
+const opencodeScope = { backendId: "opencode", configurationMode: null }
+
+describe("catalog-only Agent Model selection (issue #838)", () => {
+  test("every backend requires catalog membership for an explicit model", () => {
+    for (const [catalog, present, absent] of [
+      [claudeCatalog, "sonnet", "us.anthropic.claude-sonnet-4-6"],
+      [opencodeCatalog, "opencode/gpt-5", "anthropic/claude-sonnet-4-5"],
+      [bedrockCatalog, systemProfileId, "sonnet"],
+    ] as const) {
+      const catalogModelIds = catalog.map((model) => model.id)
+      expect(
+        isUnavailableCatalogModel({ modelId: present, catalogModelIds }),
+      ).toBe(false)
+      expect(
+        isUnavailableCatalogModel({ modelId: absent, catalogModelIds }),
+      ).toBe(true)
+    }
   })
 
-  test("Claude Code Bedrock mode disables free-text (issue #828)", () => {
-    expect(
-      allowsClaudeFreeTextModels(
-        CLAUDE_AGENT_BACKEND_ID,
-        CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      ),
-    ).toBe(false)
-    expect(
-      isClaudeBedrockConfigurationMode(
-        CLAUDE_AGENT_BACKEND_ID,
-        CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      ),
-    ).toBe(true)
-    expect(isClaudeBedrockConfigurationMode("claude", null)).toBe(false)
-    expect(
-      isClaudeBedrockConfigurationMode(
-        "opencode",
-        CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      ),
-    ).toBe(false)
-  })
-
-  test("local free-text effort set stays aligned with Claude package catalog", () => {
-    // Client helpers keep a local literal to avoid importing the adapter barrel.
-    expect([...CLAUDE_FREE_TEXT_THINKING_LEVELS]).toEqual([
-      ...CLAUDE_THINKING_LEVELS,
-    ])
-  })
-
-  test("catalog aliases still resolve thinking levels from the catalog", () => {
-    expect(thinkingLevelsForModel("claude", claudeCatalog, "sonnet")).toEqual([
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-    ])
-  })
-
-  test("Claude free-text models offer the full Claude effort catalog", () => {
-    const freeText =
-      "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-profile"
-    expect(thinkingLevelsForModel("claude", claudeCatalog, freeText)).toEqual([
-      ...CLAUDE_FREE_TEXT_THINKING_LEVELS,
-    ])
-    expect(CLAUDE_FREE_TEXT_THINKING_LEVELS).toEqual([
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-      "max",
-    ])
-  })
-
-  test("Claude free-text effort does not require a loaded catalog (issue #806 review)", () => {
-    const freeText =
-      "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/my-profile"
-    // models query pending / Settings just opened
-    expect(thinkingLevelsForModel("claude", undefined, freeText)).toEqual([
-      ...CLAUDE_FREE_TEXT_THINKING_LEVELS,
-    ])
-    // failed/empty preview still offers static Claude effort
-    expect(thinkingLevelsForModel("claude", [], freeText)).toEqual([
-      ...CLAUDE_FREE_TEXT_THINKING_LEVELS,
-    ])
-    // Claude aliases while catalog is pending also get the static set
-    expect(thinkingLevelsForModel("claude", undefined, "sonnet")).toEqual([
-      ...CLAUDE_FREE_TEXT_THINKING_LEVELS,
-    ])
-  })
-
-  test("Bedrock mode does not invent free-text effort for non-catalog values", () => {
-    expect(
-      thinkingLevelsForModel(
-        "claude",
-        bedrockCatalog,
-        "operator-typed-custom",
-        CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      ),
-    ).toEqual([])
-    expect(
-      thinkingLevelsForModel(
-        "claude",
-        undefined,
-        systemProfileId,
-        CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      ),
-    ).toEqual([])
-  })
-
-  test("other backends do not invent effort levels for unknown models", () => {
-    expect(
-      thinkingLevelsForModel("opencode", claudeCatalog, "custom-id"),
-    ).toEqual([])
-    expect(thinkingLevelsForModel("opencode", undefined, "custom-id")).toEqual(
-      [],
-    )
-  })
-
-  test("catalog membership is not required for first-party Claude free-text at Save", () => {
-    const freeText = "us.anthropic.claude-sonnet-4-6"
+  test("an empty model is never treated as unavailable", () => {
     expect(
       isUnavailableCatalogModel({
-        backendId: "claude",
-        modelId: freeText,
-        catalogModelIds: catalogIds,
-      }),
-    ).toBe(false)
-  })
-
-  test("catalog membership is required for Claude Bedrock mode at Save", () => {
-    expect(
-      isUnavailableCatalogModel({
-        backendId: "claude",
-        modelId: "operator-typed-custom",
-        catalogModelIds: bedrockCatalog.map((model) => model.id),
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      }),
-    ).toBe(true)
-    expect(
-      isUnavailableCatalogModel({
-        backendId: "claude",
-        modelId: systemProfileId,
-        catalogModelIds: bedrockCatalog.map((model) => model.id),
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-      }),
-    ).toBe(false)
-  })
-
-  test("catalog-absent models still block Save for non-Claude backends", () => {
-    expect(
-      isUnavailableCatalogModel({
-        backendId: "opencode",
-        modelId: "missing-model",
-        catalogModelIds: ["opencode/deepseek-v4-flash-free"],
-      }),
-    ).toBe(true)
-  })
-
-  test("empty model is never treated as unavailable", () => {
-    expect(
-      isUnavailableCatalogModel({
-        backendId: "claude",
         modelId: "",
-        catalogModelIds: catalogIds,
+        catalogModelIds: claudeCatalog.map((model) => model.id),
       }),
     ).toBe(false)
+  })
+
+  test("first-party Claude no longer accepts non-catalog strings", () => {
+    // Superseded #806: a Claude-accepted alias outside the catalog is blocked
+    // in Settings instead of being stored and failing later at CLI time.
+    const input = {
+      ...ready(claudeCatalog),
+      modelId: "claude-sonnet-4-5-20250929",
+      requireSelection: true,
+    }
+    expect(blocksAgentModelSave(input)).toBe(true)
+    expect(
+      agentModelSaveBlockReason({ ...input, ...firstPartyClaudeScope }),
+    ).toMatch(/not in the current Agent Model catalog/)
+  })
+
+  test("a catalog selection saves for every backend", () => {
+    expect(
+      blocksAgentModelSave({
+        ...ready(claudeCatalog),
+        modelId: "opus",
+        requireSelection: true,
+      }),
+    ).toBe(false)
+    expect(
+      blocksAgentModelSave({
+        ...ready(opencodeCatalog),
+        modelId: "opencode/gpt-5",
+        requireSelection: true,
+      }),
+    ).toBe(false)
+    for (const modelId of [systemProfileId, applicationArn]) {
+      expect(
+        blocksAgentModelSave({
+          ...ready(bedrockCatalog),
+          modelId,
+          requireSelection: true,
+        }),
+      ).toBe(false)
+    }
   })
 })
 
-describe("Claude Bedrock strict Save gates (issue #828)", () => {
-  test("blocks Save while catalog is loading or unknown", () => {
-    expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: true,
-        catalogModels: undefined,
-        modelId: "",
-        requireSelection: true,
-      }),
-    ).toBe(true)
-    expect(
-      claudeBedrockModelSaveBlockReason({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: true,
-        catalogModels: undefined,
-        modelId: "",
-        requireSelection: true,
-      }),
-    ).toMatch(/Loading Bedrock/)
+describe("Save gating by catalog state (issue #838)", () => {
+  test("a loading catalog cannot validate an explicit model", () => {
+    const input = {
+      catalogLoading: true,
+      catalogModels: undefined,
+      modelId: "sonnet",
+      requireSelection: false,
+    }
+    expect(blocksAgentModelSave(input)).toBe(true)
+    expect(agentModelSaveBlockReason({ ...input, ...opencodeScope })).toMatch(
+      /Loading the Agent Model catalog/,
+    )
+    expect(agentModelSaveBlockReason({ ...input, ...bedrockScope })).toMatch(
+      /Loading Bedrock inference profiles/,
+    )
   })
 
-  test("blocks Save with a distinct reason when catalog load failed", () => {
-    expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogFailed: true,
-        catalogModels: undefined,
-        modelId: systemProfileId,
-        requireSelection: true,
-      }),
-    ).toBe(true)
-    expect(
-      claudeBedrockModelSaveBlockReason({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogFailed: true,
-        catalogModels: undefined,
-        modelId: systemProfileId,
-        requireSelection: true,
-      }),
-    ).toMatch(/Could not load the Bedrock profile catalog/)
+  test("a failed catalog cannot validate an explicit model", () => {
+    const input = {
+      catalogLoading: false,
+      catalogFailed: true,
+      catalogModels: undefined,
+      modelId: systemProfileId,
+      requireSelection: true,
+    }
+    expect(blocksAgentModelSave(input)).toBe(true)
+    expect(agentModelSaveBlockReason({ ...input, ...opencodeScope })).toMatch(
+      /Could not load the Agent Model catalog/,
+    )
+    expect(agentModelSaveBlockReason({ ...input, ...bedrockScope })).toMatch(
+      /Could not load the Bedrock profile catalog/,
+    )
   })
 
-  test("blocks Save when discovery returns no profiles", () => {
+  test("an empty catalog blocks and points at Recheck", () => {
+    const input = {
+      ...ready([]),
+      modelId: "",
+      requireSelection: true,
+    }
+    expect(blocksAgentModelSave(input)).toBe(true)
+    expect(agentModelSaveBlockReason({ ...input, ...opencodeScope })).toMatch(
+      /No Agent Models are available/,
+    )
+    expect(agentModelSaveBlockReason({ ...input, ...bedrockScope })).toMatch(
+      /No active Anthropic-backed Bedrock inference profiles/,
+    )
+    // A discovery warning is more actionable than the generic wording.
     expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: [],
-        modelId: "",
-        requireSelection: true,
-      }),
-    ).toBe(true)
-    expect(
-      claudeBedrockModelSaveBlockReason({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: [],
-        modelId: "",
-        requireSelection: true,
+      agentModelSaveBlockReason({
+        ...input,
+        ...bedrockScope,
         discoveryWarnings: [
           "Could not list Amazon Bedrock inference profiles: access denied.",
         ],
@@ -280,110 +193,124 @@ describe("Claude Bedrock strict Save gates (issue #828)", () => {
     ).toMatch(/access denied/)
   })
 
-  test("blocks Save with no selection when selection is required", () => {
+  test("Harness Config requires a build model; review model stays optional", () => {
+    const required = {
+      ...ready(claudeCatalog),
+      modelId: "",
+      requireSelection: true,
+    }
+    expect(blocksAgentModelSave(required)).toBe(true)
     expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
-        modelId: "",
-        requireSelection: true,
-      }),
-    ).toBe(true)
-    expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
-        modelId: "",
-        requireSelection: false,
-      }),
-    ).toBe(false)
+      agentModelSaveBlockReason({ ...required, ...firstPartyClaudeScope }),
+    ).toMatch(/Select a model from the Agent Model catalog/)
+    expect(agentModelSaveBlockReason({ ...required, ...bedrockScope })).toMatch(
+      /Select a discovered Bedrock inference profile/,
+    )
+    expect(blocksAgentModelSave({ ...required, requireSelection: false })).toBe(
+      false,
+    )
   })
 
-  test("blocks Save when saved value is absent from the current catalog", () => {
-    expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
-        modelId: "stale-out-of-region-profile",
-        requireSelection: true,
-      }),
-    ).toBe(true)
-    expect(
-      claudeBedrockModelSaveBlockReason({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
-        modelId: "stale-out-of-region-profile",
-        requireSelection: true,
-      }),
-    ).toMatch(/not in the current Bedrock profile catalog/)
+  test("an empty Repository override saves even without a healthy catalog", () => {
+    // Inheritance has nothing to validate — a loading, failed, or empty
+    // catalog must not strand unrelated Repository settings.
+    for (const catalog of [
+      { catalogLoading: true, catalogModels: undefined },
+      { catalogLoading: false, catalogFailed: true, catalogModels: undefined },
+      { catalogLoading: false, catalogModels: [] },
+    ]) {
+      expect(
+        blocksAgentModelSave({
+          ...catalog,
+          modelId: "",
+          requireSelection: false,
+        }),
+      ).toBe(false)
+    }
   })
 
-  test("allows Save for system-defined ID and application ARN selections", () => {
+  test("a stale explicit value blocks Save until a current model is chosen", () => {
+    const stale = {
+      ...ready(claudeCatalog),
+      modelId: systemProfileId,
+      requireSelection: false,
+    }
+    expect(blocksAgentModelSave(stale)).toBe(true)
     expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
-        modelId: systemProfileId,
-        requireSelection: true,
-      }),
-    ).toBe(false)
+      agentModelSaveBlockReason({ ...stale, ...firstPartyClaudeScope }),
+    ).toMatch(/not in the current Agent Model catalog/)
+    // Picking a current model unblocks; so does clearing back to inheritance.
+    expect(blocksAgentModelSave({ ...stale, modelId: "sonnet" })).toBe(false)
+    expect(blocksAgentModelSave({ ...stale, modelId: "" })).toBe(false)
+  })
+
+  test("a healthy catalog reports no block reason", () => {
     expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
+      agentModelSaveBlockReason({
+        ...ready(bedrockCatalog),
+        ...bedrockScope,
         modelId: applicationArn,
         requireSelection: true,
       }),
-    ).toBe(false)
+    ).toBeNull()
     expect(
-      claudeBedrockModelSaveBlockReason({
-        backendId: "claude",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: false,
-        catalogModels: bedrockCatalog,
-        modelId: systemProfileId,
-        requireSelection: true,
-      }),
+      agentModelCatalogNotice({ ...ready(claudeCatalog), ...opencodeScope }),
     ).toBeNull()
   })
 
-  test("does not apply Bedrock Save gates to first-party Claude or other backends", () => {
+  test("catalog notice explains an unusable catalog while inheriting", () => {
     expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "claude",
-        configurationMode: null,
-        catalogLoading: true,
-        catalogModels: undefined,
-        modelId: "",
-        requireSelection: true,
+      agentModelCatalogNotice({
+        catalogLoading: false,
+        catalogModels: [],
+        ...opencodeScope,
       }),
-    ).toBe(false)
-    expect(
-      blocksClaudeBedrockModelSave({
-        backendId: "opencode",
-        configurationMode: CLAUDE_BEDROCK_CONFIGURATION_MODE,
-        catalogLoading: true,
-        catalogModels: undefined,
-        modelId: "",
-        requireSelection: true,
-      }),
-    ).toBe(false)
+    ).toMatch(/No Agent Models are available/)
   })
 })
 
-describe("Bedrock Agent Model presentation (issue #821)", () => {
+describe("Thinking Levels derive from the selected catalog entry (issue #838)", () => {
+  test("levels come from the catalog entry, for every backend", () => {
+    expect(thinkingLevelsForModel(claudeCatalog, "sonnet")).toEqual([
+      ...CLAUDE_EFFORT,
+    ])
+    expect(
+      thinkingLevelsForModel(
+        opencodeCatalog,
+        "opencode/deepseek-v4-flash-free",
+      ),
+    ).toEqual(["high", "max"])
+    expect(thinkingLevelsForModel(bedrockCatalog, applicationArn)).toEqual([
+      ...CLAUDE_EFFORT,
+    ])
+  })
+
+  test("no invented levels for unknown models or unloaded catalogs", () => {
+    // The first-party Claude free-text fallback is gone (#806 superseded):
+    // an unknown model has no effort options rather than the full alias set.
+    expect(thinkingLevelsForModel(claudeCatalog, systemProfileId)).toEqual([])
+    expect(thinkingLevelsForModel(undefined, "sonnet")).toEqual([])
+    expect(thinkingLevelsForModel([], "sonnet")).toEqual([])
+    expect(thinkingLevelsForModel(claudeCatalog, "")).toEqual([])
+    expect(thinkingLevelsForModel(opencodeCatalog, "opencode/gpt-5")).toEqual(
+      [],
+    )
+  })
+
+  test("an incompatible stored level is cleared on model change", () => {
+    expect(reconcileVariantForModel("high", ["high", "max"])).toBe("high")
+    expect(reconcileVariantForModel("low", ["high", "max"])).toBe("")
+    expect(reconcileVariantForModel("", ["high", "max"])).toBe("")
+  })
+
+  test("a preserved incompatible level is labelled unavailable", () => {
+    expect(formatUnavailableVariantLabel("xhigh")).toBe(
+      "Xhigh (not available for this model)",
+    )
+  })
+})
+
+describe("Agent Model presentation (issue #821)", () => {
   const systemModel = bedrockCatalog[0]
   const applicationModel = bedrockCatalog[1]
 
@@ -404,7 +331,7 @@ describe("Bedrock Agent Model presentation (issue #821)", () => {
     expect(
       formatAgentModelLabel({
         id: "sonnet",
-        thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+        thinkingLevels: [...CLAUDE_EFFORT],
       }),
     ).toBe("sonnet")
   })
@@ -418,111 +345,36 @@ describe("Bedrock Agent Model presentation (issue #821)", () => {
     expect(
       findCatalogModel(catalog, "US Anthropic Claude Sonnet 4.6"),
     ).toBeUndefined()
-  })
-
-  test("isCustomAgentModelValue waits for a loaded catalog (issue #821 review)", () => {
-    const catalog = [systemModel, applicationModel]
-    // Pending/undefined catalog must not flash "custom" for saved values.
-    expect(
-      isCustomAgentModelValue({
-        models: undefined,
-        modelId: systemModel.id,
-      }),
-    ).toBe(false)
-    expect(
-      isCustomAgentModelValue({
-        models: undefined,
-        modelId: "operator-typed-custom",
-      }),
-    ).toBe(false)
-    // Loaded empty catalog: any non-empty value is custom.
-    expect(
-      isCustomAgentModelValue({
-        models: [],
-        modelId: systemModel.id,
-      }),
-    ).toBe(true)
-    // Loaded catalog: match is not custom; absent value is.
-    expect(
-      isCustomAgentModelValue({
-        models: catalog,
-        modelId: systemModel.id,
-      }),
-    ).toBe(false)
-    expect(
-      isCustomAgentModelValue({
-        models: catalog,
-        modelId: applicationArn,
-      }),
-    ).toBe(false)
-    expect(
-      isCustomAgentModelValue({
-        models: catalog,
-        modelId: "operator-typed-custom",
-      }),
-    ).toBe(true)
-    expect(
-      isCustomAgentModelValue({
-        models: catalog,
-        modelId: "",
-      }),
-    ).toBe(false)
-  })
-
-  test("discovered Bedrock profiles keep Claude thinking levels", () => {
-    expect(
-      thinkingLevelsForModel(
-        "claude",
-        [systemModel, applicationModel],
-        systemModel.id,
-      ),
-    ).toEqual([...CLAUDE_FREE_TEXT_THINKING_LEVELS])
-    expect(
-      thinkingLevelsForModel(
-        "claude",
-        [systemModel, applicationModel],
-        applicationArn,
-      ),
-    ).toEqual([...CLAUDE_FREE_TEXT_THINKING_LEVELS])
+    expect(findCatalogModel(undefined, systemModel.id)).toBeUndefined()
   })
 })
 
-describe("Harness Settings Claude free-text / Bedrock surface (source contract)", () => {
-  test("first-party Claude free-text surface remains in harness and repository settings", async () => {
-    const { readFileSync } = await import("node:fs")
-    const { join } = await import("node:path")
-    const root = readFileSync(
-      join(import.meta.dir, "../src/routes/__root.tsx"),
-      "utf8",
+describe("Claude Bedrock configuration mode (issue #828)", () => {
+  test("mode selects operator guidance wording only", () => {
+    expect(
+      isClaudeBedrockConfigurationMode(
+        CLAUDE_AGENT_BACKEND_ID,
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toBe(true)
+    expect(
+      isClaudeBedrockConfigurationMode(CLAUDE_AGENT_BACKEND_ID, null),
+    ).toBe(false)
+    expect(
+      isClaudeBedrockConfigurationMode(
+        "opencode",
+        CLAUDE_BEDROCK_CONFIGURATION_MODE,
+      ),
+    ).toBe(false)
+    // Enforcement itself is identical regardless of mode.
+    const stale = {
+      ...ready(bedrockCatalog),
+      modelId: "sonnet",
+      requireSelection: true,
+    }
+    expect(blocksAgentModelSave(stale)).toBe(true)
+    expect(agentModelSaveBlockReason({ ...stale, ...bedrockScope })).toMatch(
+      /not in the current Bedrock profile catalog/,
     )
-    const index = readFileSync(
-      join(import.meta.dir, "../src/routes/index.tsx"),
-      "utf8",
-    )
-    expect(root).toContain("allowsClaudeFreeTextModels")
-    expect(root).toContain("harness-claude-build-models")
-    expect(root).toContain("Alias or custom model ID")
-    expect(root).toContain("First-party Claude free-text")
-    expect(root).toContain("hasUnavailableBuildModel")
-    expect(root).toContain("isUnavailableCatalogModel")
-    // Issue #828: Bedrock mode uses configurationMode metadata + strict select.
-    expect(root).toContain("configurationMode: true")
-    expect(root).toContain("claudeBedrockStrict")
-    expect(root).toContain("blocksClaudeBedrockModelSave")
-    expect(root).toContain("Select a Bedrock inference profile")
-    expect(root).toContain("blockSaveForBedrockBuildModel")
-    // Submit and disabled button share one gate so Enter cannot bypass Save.
-    expect(root).toContain("harnessSettingsSaveBlocked")
-    expect(root).toContain("if (harnessSettingsSaveBlocked)")
-
-    expect(index).toContain("allowsClaudeFreeTextModels")
-    expect(index).toContain("repo-claude-build-models-")
-    expect(index).toContain("blockSaveForUnavailableBuildModel")
-    expect(index).toContain("isUnavailableCatalogModel")
-    expect(index).toContain("configurationMode: true")
-    expect(index).toContain("claudeBedrockStrict")
-    expect(index).toContain("blocksClaudeBedrockModelSave")
-    expect(index).toContain("repositorySettingsSaveBlocked")
-    expect(index).toContain("if (repositorySettingsSaveBlocked)")
   })
 })

@@ -646,3 +646,243 @@ describe("Captured Agent Backend (create + route + models)", () => {
     )
   })
 })
+
+describe("Agent Model catalog admission (issue #838)", () => {
+  const STALE_BEDROCK_PROFILE = "us.anthropic.claude-sonnet-4-6"
+  const opencodeCatalog = [
+    { id: "opencode/deepseek-v4-flash-free", thinkingLevels: ["high"] },
+    { id: "opencode/gpt-5", thinkingLevels: [] },
+  ]
+
+  /**
+   * Lifecycle steps that record every invocation. Agent-dependent steps are
+   * where the Agent Backend CLI would be spawned, so an empty log proves the
+   * rejection happened before any Agent Turn was attempted.
+   */
+  const recordingSteps = (invoked: string[]): LifecycleStepsShape => ({
+    ...successfulSteps,
+    installDependencies: () => {
+      invoked.push("install_dependencies")
+      return Effect.void
+    },
+    implement: () => {
+      invoked.push("implement")
+      return Effect.succeed("ses_test")
+    },
+    review: () => {
+      invoked.push("review")
+      return Effect.succeed({ _tag: "clean" as const })
+    },
+  })
+
+  it("rejects create when the resolved build model is absent from the catalog", async () => {
+    const invoked: string[] = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-stale-catalog.git",
+          isBare: true,
+        })
+        // Legacy settings left behind by a provider-mode change: the stored
+        // model is a Bedrock profile the running backend does not offer.
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: STALE_BEDROCK_PROFILE,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 20)
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 20))
+        expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
+        expect(error.message).toContain(STALE_BEDROCK_PROFILE)
+        expect(error.message).toContain("Agent Model catalog")
+        expect(error.message).toContain("Settings")
+        // No Work Item, and no Agent Backend CLI was ever reached.
+        expect(yield* lifecycle.listWorkItemsForIssue(repo.id, 20)).toEqual([])
+        expect(invoked).toEqual([])
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+            recordingSteps(invoked),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("rejects create when only the review model is absent from the catalog", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-stale-review.git",
+          isBare: true,
+        })
+        yield* db.updateConfig({
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/gpt-5",
+          defaultThinkingLevel: null,
+          reviewModel: STALE_BEDROCK_PROFILE,
+          reviewThinkingLevel: null,
+          maxConcurrentAgentTurns: 2,
+          maxConcurrentWorkItems: 5,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 21)
+        const error = yield* Effect.flip(lifecycle.implementNow(repo.id, 21))
+        expect(error).toBeInstanceOf(BuildModelNotConfiguredError)
+        expect(error.message).toContain("Review Agent Model")
+        expect(error.message).toContain(STALE_BEDROCK_PROFILE)
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("admits create when the resolved models are in the catalog", async () => {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-current-catalog.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 22)
+        const created = yield* lifecycle.implementNow(repo.id, 22)
+        expect(created.agentBackend).toBe("opencode")
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("fails an agent-dependent step whose model left the catalog, without an Agent Turn", async () => {
+    const invoked: string[] = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-turn-admission.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: "opencode/deepseek-v4-flash-free",
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 23)
+        const created = yield* lifecycle.implementNow(repo.id, 23)
+        // The operator (or a legacy row) puts back a model the backend no
+        // longer offers after the Work Item already exists.
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: STALE_BEDROCK_PROFILE,
+        })
+        const createRun = created.stepRuns[0]
+        expect(createRun?.step).toBe("create_worktree")
+        const afterCreate = yield* lifecycle.runStep(createRun!.id)
+        expect(afterCreate._tag).toBe("processed")
+        if (afterCreate._tag !== "processed") {
+          return
+        }
+        const agentStep = afterCreate.workItem.stepRuns.find(
+          (run) => run.status === "queued",
+        )
+        expect(agentStep).toBeDefined()
+        const afterAgentStep = yield* lifecycle.runStep(agentStep!.id)
+        expect(afterAgentStep._tag).toBe("processed")
+        if (afterAgentStep._tag !== "processed") {
+          return
+        }
+        const failed = afterAgentStep.workItem.stepRuns.find(
+          (run) => run.id === agentStep!.id,
+        )
+        expect(failed?.status).toBe("failed")
+        expect(failed?.reasonCode).toBe(STEP_RUN_REASON.agentModelNotInCatalog)
+        expect(failed?.reasonMessage).toContain(STALE_BEDROCK_PROFILE)
+        expect(failed?.reasonMessage).toContain("Settings")
+        // The step never ran, so no Agent Backend CLI was spawned.
+        expect(invoked).toEqual([])
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+              models: opencodeCatalog,
+            }),
+            recordingSteps(invoked),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it("does not gate on a Ready backend that reports no catalog", async () => {
+    // An empty catalog carries no membership information (adapters without
+    // discovery). Treating it as "everything is invalid" would stall every
+    // Work Item, so admission defers to CLI-time failure.
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const db = yield* DbService
+        const lifecycle = yield* WorkItemLifecycle
+        const repo = yield* db.addRepository({
+          forge: "github",
+          forgeHost: "github.com",
+          projectPath: "acme/widgets",
+          localPath: "/repos/acme/widgets-no-catalog.git",
+          isBare: true,
+        })
+        yield* seedHarness(db, {
+          selectedAgentBackend: "opencode",
+          defaultModel: STALE_BEDROCK_PROFILE,
+        })
+        yield* storeOpenLeafIssue(db, repo.id, 24)
+        const created = yield* lifecycle.implementNow(repo.id, 24)
+        expect(created.agentBackend).toBe("opencode")
+      }).pipe(
+        Effect.provide(
+          lifecycleLayer(
+            stubActiveAgentBackendLayer({
+              registration: opencodeRegistration,
+            }),
+          ),
+        ),
+      ),
+    )
+  })
+})

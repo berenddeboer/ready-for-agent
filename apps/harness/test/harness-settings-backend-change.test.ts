@@ -58,61 +58,60 @@ describe("Harness settings Agent Backend change", () => {
     expect(source).not.toContain("process.env")
   })
 
-  test("requests and surfaces Bedrock discovery warnings with strict Bedrock select (issue #828)", () => {
-    // Issue #820 warnings remain; #828 replaces free-text fallback in Bedrock mode.
+  test("requests and surfaces Bedrock discovery warnings with a catalog-only select (issues #828, #838)", () => {
+    // Issue #820 warnings remain; #838 replaces the free-text branch entirely.
     const source = rootSource()
     expect(source).toContain("warnings: true")
     expect(source).toContain("previewWarnings")
     expect(source).toContain("warningsForRow")
-    expect(source).toContain('role="status"')
-    // First-party free-text path still exists; Bedrock uses configurationMode.
-    expect(source).toContain("allowsClaudeFreeTextModels")
-    expect(source).toContain("claudeFreeTextModels")
     expect(source).toContain("configurationMode: true")
     expect(source).toContain("claudeBedrockStrict")
-    expect(source).toContain("blocksClaudeBedrockModelSave")
-    expect(source).toContain("bedrockBuildModelBlockReason")
+    expect(source).toContain("blocksAgentModelSave")
+    expect(source).toContain("buildModelBlockReason")
     // Models from status/preview catalogs remain selectable (profile IDs/ARNs).
     expect(source).toContain(
       "models: { id: true, thinkingLevels: true, name: true, kind: true }",
     )
   })
 
-  test("presents friendly Bedrock profile names and kinds while persisting executable ids (issue #821)", () => {
+  test("build and review models use the shared catalog-only control (issues #821, #838)", () => {
     const source = rootSource()
-    expect(source).toContain("formatAgentModelLabel")
-    expect(source).toContain("findCatalogModel")
-    expect(source).toContain("isCustomAgentModelValue")
-    expect(source).toContain("Catalog:")
-    expect(source).toContain(
-      "Custom value (not in Agent Model catalog) — stored",
-    )
-    // option value remains the executable id; label is friendly presentation.
-    expect(source).toContain("value={model.id}")
-    expect(source).toContain("{formatAgentModelLabel(model)}")
+    expect(source).toContain("<AgentModelSelect")
+    expect(source).toContain('name="defaultModel"')
+    expect(source).toContain('name="reviewModel"')
+    // Rendered options, labels, and the preserved unavailable value are
+    // asserted against real markup in agent-model-select.test.tsx.
   })
 
-  test("Claude Code Bedrock mode uses a strict select and blocks Save without a catalog profile", () => {
+  test("Claude Code Bedrock mode blocks Save without a catalog profile", () => {
     // Issue #828 operator-visible Settings contract for Harness Config.
     const source = rootSource()
     expect(source).toContain("Select a Bedrock inference profile")
     expect(source).toContain("No Bedrock profiles available")
-    expect(source).toContain("blockSaveForBedrockBuildModel")
-    expect(source).toContain("not in Agent Model catalog")
-    // Free-text datalist remains for first-party only (gated by claudeFreeTextModels).
-    expect(source).toContain("harness-claude-build-models")
+    expect(source).toContain("blockSaveForBuildModel")
+    expect(source).toContain("blockSaveForReviewModel")
     // Disabled button and form onSubmit share one gate (Enter cannot bypass).
     expect(source).toContain("harnessSettingsSaveBlocked")
     expect(source).toContain("if (harnessSettingsSaveBlocked)")
     expect(source).toContain("disabled={harnessSettingsSaveBlocked}")
     // Fail closed while Claude configurationMode is unknown; Recheck with a
     // null cache invalidates the full status query instead of seeding empty
-    // backends (which would re-enable free-text under Bedrock env).
+    // backends (which would misreport Bedrock mode as first-party).
     expect(source).toContain("claudeConfigurationModeUnresolved")
     expect(source).toContain("if (current == null)")
     expect(source).toContain("queryKey: agentBackendStatusQuery.queryKey")
     expect(source).toContain(
       "Preserve agentBackends (configurationMode) from the prior fetch",
     )
+  })
+
+  test("Settings open refreshes indefinitely cached mode and catalog (issue #838)", () => {
+    const source = rootSource()
+    const openSettings = source.slice(
+      source.indexOf("const openSettings = () => {"),
+      source.indexOf("dialogRef.current?.showModal()"),
+    )
+    expect(openSettings).toContain("void models.refetch()")
+    expect(openSettings).toContain("void backendStatus.refetch()")
   })
 })

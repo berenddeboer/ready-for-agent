@@ -64,18 +64,16 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("usesPreviewCatalog && !previewPending")
   })
 
-  test("override preview requests discovery warnings and applies Bedrock strict select (issue #828)", () => {
-    // Issue #820 warnings remain; #828 makes Bedrock mode catalog-strict for repos too.
+  test("override preview requests discovery warnings and keeps a catalog-only select (issues #828, #838)", () => {
+    // Issue #820 warnings remain; #838 makes every backend catalog-strict.
     const source = indexSource()
     expect(source).toContain("warnings: true")
     expect(source).toContain("previewWarnings")
     expect(source).toContain("setPreviewWarnings")
-    expect(source).toContain("allowsClaudeFreeTextModels")
-    expect(source).toContain("claudeFreeTextModels")
     expect(source).toContain("configurationMode: true")
     expect(source).toContain("claudeBedrockStrict")
-    expect(source).toContain("blocksClaudeBedrockModelSave")
-    expect(source).toContain("bedrockBuildModelBlockReason")
+    expect(source).toContain("blocksAgentModelSave")
+    expect(source).toContain("buildModelBlockReason")
     expect(source).toContain("No Bedrock profiles available")
     expect(source).toContain("discovered Bedrock inference profile")
     // Disabled button and form onSubmit share one gate (Enter cannot bypass).
@@ -87,19 +85,26 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("agentBackendsModeReady")
   })
 
-  test("presents friendly Bedrock profile names and kinds while persisting executable ids (issue #821)", () => {
+  test("model overrides use the shared catalog-only control (issues #821, #838)", () => {
     const source = indexSource()
+    // Presentation metadata still travels with the catalog so the shared
+    // control can label profiles while persisting executable ids. How that
+    // markup renders is asserted in agent-model-select.test.tsx.
     expect(source).toContain(
       "models: { id: true, thinkingLevels: true, name: true, kind: true }",
     )
-    expect(source).toContain("formatAgentModelLabel")
-    expect(source).toContain("findCatalogModel")
-    expect(source).toContain("isCustomAgentModelValue")
-    expect(source).toContain("Catalog:")
-    expect(source).toContain(
-      "Custom value (not in Agent Model catalog) — stored",
+    expect(source).toContain("<AgentModelSelect")
+    expect(source).toContain('name="defaultModel"')
+    expect(source).toContain('name="reviewModel"')
+  })
+
+  test("Settings open refreshes indefinitely cached mode and catalog (issue #838)", () => {
+    const source = indexSource()
+    const openSettings = source.slice(
+      source.indexOf("const openSettings = () => {"),
+      source.indexOf("const harnessDefaultBackendId"),
     )
-    expect(source).toContain("value={model.id}")
-    expect(source).toContain("{formatAgentModelLabel(model)}")
+    expect(openSettings).toContain("void models.refetch()")
+    expect(openSettings).toContain("void agentBackends.refetch()")
   })
 })
