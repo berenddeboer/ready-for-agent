@@ -7,6 +7,7 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   AgentBackendExitError,
   AgentBackendSessionIdMissingError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
   runCliCapture,
   runCliTurn,
@@ -473,6 +474,177 @@ describe("runCliTurn", () => {
     } finally {
       await rm(markerDir, { recursive: true, force: true })
     }
+  })
+
+  it("fails within the startup window when the CLI emits nothing", async () => {
+    const markerDir = await mkdtemp(join(tmpdir(), "agent-backend-startup-"))
+    const grandPidFile = join(markerDir, "grand.pid")
+    try {
+      await withExecutable(
+        [
+          // Silent hang after spawning a descendant: the failure mode the
+          // startup window exists for (bad auth, broken config, crash).
+          `setsid sh -c 'echo $$ > "${grandPidFile}"; sleep 100' &`,
+          `while [ ! -s "${grandPidFile}" ]; do sleep 0.01; done`,
+          "sleep 100",
+        ].join("\n"),
+        async (binary) => {
+          const startedAt = Date.now()
+          const error = await Effect.runPromise(
+            withSpawner((spawner) =>
+              runCliTurn({
+                spawner,
+                binary,
+                args: [],
+                cwd: process.cwd(),
+                env: sanitizeInheritedEnvironment(),
+                timeout: Duration.seconds(30),
+                startupTimeout: Duration.millis(300),
+                forceKillAfter: Duration.millis(100),
+                knownSessionId: "ses_startup",
+                parseLine: parseSimpleLine,
+              }).pipe(Effect.flip),
+            ),
+          )
+          const elapsed = Date.now() - startedAt
+
+          expect(error).toEqual(
+            new AgentBackendStartupTimeoutError({
+              cwd: process.cwd(),
+              startupTimeoutMs: 300,
+              sessionId: "ses_startup",
+            }),
+          )
+          // Startup window, not the 30 second turn timeout.
+          expect(elapsed).toBeLessThan(5_000)
+
+          const grandPid = Number(
+            (
+              await Bun.file(grandPidFile)
+                .text()
+                .catch(() => "")
+            ).trim(),
+          )
+          expect(Number.isFinite(grandPid) && grandPid > 0).toBe(true)
+          expect(isPidAlive(grandPid)).toBe(false)
+        },
+      )
+    } finally {
+      await rm(markerDir, { recursive: true, force: true })
+    }
+  })
+
+  it("omits the session id when a silent CLI has no known session", async () => {
+    await withExecutable("sleep 100", async (binary) => {
+      const error = await Effect.runPromise(
+        withSpawner((spawner) =>
+          runCliTurn({
+            spawner,
+            binary,
+            args: [],
+            cwd: process.cwd(),
+            env: sanitizeInheritedEnvironment(),
+            timeout: Duration.seconds(30),
+            startupTimeout: Duration.millis(200),
+            forceKillAfter: Duration.millis(100),
+            parseLine: parseSimpleLine,
+          }).pipe(Effect.flip),
+        ),
+      )
+      expect(error).toEqual(
+        new AgentBackendStartupTimeoutError({
+          cwd: process.cwd(),
+          startupTimeoutMs: 200,
+        }),
+      )
+    })
+  })
+
+  it("reports the exit code when a silent CLI exits before the startup window", async () => {
+    await withExecutable("exit 7", async (binary) => {
+      const error = await Effect.runPromise(
+        withSpawner((spawner) =>
+          runCliTurn({
+            spawner,
+            binary,
+            args: [],
+            cwd: process.cwd(),
+            env: sanitizeInheritedEnvironment(),
+            timeout: Duration.seconds(5),
+            startupTimeout: Duration.seconds(5),
+            parseLine: parseSimpleLine,
+          }).pipe(Effect.flip),
+        ),
+      )
+      expect(error).toEqual(
+        new AgentBackendExitError({ exitCode: 7, cwd: process.cwd() }),
+      )
+    })
+  })
+
+  it("disarms the startup window once the CLI emits output", async () => {
+    await withExecutable(
+      [
+        // Output arrives inside the startup window, then a long silence like a
+        // legitimate build or test-suite tool call. Only the turn timeout applies.
+        `printf '%s\\n' '{"sessionID":"ses_quiet"}'`,
+        "sleep 100",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.millis(600),
+              startupTimeout: Duration.millis(200),
+              forceKillAfter: Duration.millis(100),
+              parseLine: parseSimpleLine,
+            }).pipe(Effect.flip),
+          ),
+        )
+        expect(error).toEqual(
+          new AgentBackendTimeoutError({
+            cwd: process.cwd(),
+            timeoutMs: 600,
+            sessionId: "ses_quiet",
+          }),
+        )
+      },
+    )
+  })
+
+  it("completes a slow turn whose first output beats the startup window", async () => {
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"sessionID":"ses_slow"}'`,
+        "sleep 0.5",
+        `printf '%s\\n' '{"text":"late"}'`,
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+              startupTimeout: Duration.millis(250),
+              parseLine: parseSimpleLine,
+            }),
+          ),
+        )
+        expect(result).toEqual({
+          sessionId: "ses_slow",
+          assistantText: "late",
+        })
+      },
+    )
   })
 
   it("returns cleanly when the CLI exits on its own", async () => {

@@ -10,13 +10,18 @@ A compatible Agent Backend must:
 - accept an explicit Agent Model and optional backend-defined Thinking Level on every turn, including switching them within one Session;
 - expose an instance-wide Agent Model catalog through atomic readiness inspection;
 - emit machine-readable output that the adapter can normalize to the Session ID and ordered final assistant text;
+- begin emitting that output within a bounded startup window (60 seconds) of spawn;
 - provide the `/review` Agent Command at runtime; and
 - tolerate bounded termination of the whole Agent Turn process tree on timeout, Reset, or Harness shutdown.
 
 Project-instruction file conventions are backend-native rather than part of this contract. Runtime Agent Turn failures fail only the current Step Run; Agent Backend Unavailable is established only by startup inspection or an explicit recheck.
+
+The startup window is enforced only until the first stdout output arrives, then disarmed for the rest of the turn: a legitimate long-running tool call (build, test suite) may produce no output for many minutes, so a mid-turn inactivity bound would be unsafe. A turn that never starts fails with a distinct never-started error rather than the overall turn timeout, so the failure is diagnosable as a broken CLI, bad auth, or bad configuration instead of exhausted time.
 
 The shared `maxConcurrentAgentTurns` limit defaults to two and bounds in-flight CLI turns rather than durable Sessions. CI uses fake-CLI conformance suites and generic lifecycle tests; authenticated live adapter tests remain opt-in.
 
 ## Consequences
 
 Grok Build is the first additional adapter, with stable ID `grok`. It runs with auto-update disabled so Harness operation cannot replace the CLI underneath active work. The adapter initially uses ambient `gh` authentication and does not integrate Keymaxxer.
+
+A backend whose first machine-readable output can legitimately lag more than a minute behind spawn must raise its own startup window rather than rely on the shared default.

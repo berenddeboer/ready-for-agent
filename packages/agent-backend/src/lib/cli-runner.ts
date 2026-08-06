@@ -1,4 +1,4 @@
-import { Duration, Effect, Ref, Result, Stream } from "effect"
+import { Deferred, Duration, Effect, Ref, Result, Stream } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process"
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner"
@@ -10,6 +10,7 @@ import {
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
   AgentBackendSessionIdMissingError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
 } from "./errors.js"
 import { killProcessTree } from "./kill-process-tree.js"
@@ -18,9 +19,17 @@ import type { OnSessionId } from "./types.js"
 /** Graceful terminate then force-kill bound for the Agent Turn process tree. */
 export const DEFAULT_FORCE_KILL_AFTER = Duration.seconds(2)
 
+/**
+ * Window from spawn to the first stdout output of an Agent Turn. A CLI that
+ * crashes or hangs before emitting anything otherwise burns the whole turn
+ * timeout while holding the Work Item.
+ */
+export const DEFAULT_STARTUP_TIMEOUT = Duration.seconds(60)
+
 export type AgentBackendCliError =
   | AgentBackendExitError
   | AgentBackendTimeoutError
+  | AgentBackendStartupTimeoutError
   | AgentBackendSessionIdMissingError
   | AgentBackendMalformedOutputError
   | PlatformError
@@ -71,6 +80,14 @@ export type RunCliTurnInput = {
   readonly onSessionId?: OnSessionId
   readonly parseLine: (line: string) => CliLineEvent
   readonly observerLabel?: string
+  /**
+   * Startup-only inactivity bound: when no stdout output arrives within this
+   * window of spawn, the process tree is reaped and the turn fails with
+   * AgentBackendStartupTimeoutError. Disarmed by the first output, so a
+   * long-running tool call mid-turn is never cut short. Defaults to
+   * {@link DEFAULT_STARTUP_TIMEOUT}.
+   */
+  readonly startupTimeout?: Duration.Input
 }
 
 const commandOptions = (input: {
@@ -184,6 +201,12 @@ export const runCliCapture = (
 /**
  * Run a CLI Agent Turn: stream stdout lines, observe early Session ID, fold
  * ordered assistant text, require a Session ID on success.
+ *
+ * A startup-only inactivity bound fails the turn as soon as it is clear the CLI
+ * never started (no stdout output within `startupTimeout` of spawn) instead of
+ * holding the Work Item for the whole turn timeout. The first stdout output
+ * disarms it, because a legitimate mid-turn tool call (build, test suite) can
+ * stay silent for many minutes.
  */
 export const runCliTurn = (
   input: RunCliTurnInput,
@@ -195,6 +218,8 @@ export const runCliTurn = (
     const spawner = input.spawner
     const timeoutMs = Duration.toMillis(input.timeout)
     const forceKillAfter = input.forceKillAfter ?? DEFAULT_FORCE_KILL_AFTER
+    const startupTimeout = input.startupTimeout ?? DEFAULT_STARTUP_TIMEOUT
+    const startupTimeoutMs = Duration.toMillis(startupTimeout)
     const knownSessionId = input.knownSessionId
     const seenSessionId = yield* Ref.make(knownSessionId)
     const sessionIdNotified = yield* Ref.make(false)
@@ -214,7 +239,35 @@ export const runCliTurn = (
           terminateCliTree(handle, forceKillAfter),
         )
 
+        // Disarms the startup bound on the first stdout output rather than the
+        // first parsed line, so a CLI that streams one large slow line still
+        // counts as started.
+        const started = yield* Deferred.make<void>()
+        const startupWatchdog = Deferred.await(started).pipe(
+          Effect.timeoutOrElse({
+            duration: startupTimeout,
+            orElse: () =>
+              Effect.logWarning(
+                `${observerLabel} produced no output within the startup window`,
+                { cwd: input.cwd, startupTimeoutMs },
+              ).pipe(
+                Effect.andThen(
+                  new AgentBackendStartupTimeoutError({
+                    cwd: input.cwd,
+                    startupTimeoutMs,
+                    ...(knownSessionId !== undefined
+                      ? { sessionId: knownSessionId }
+                      : {}),
+                  }),
+                ),
+              ),
+          }),
+          // Started: never wins the race, so the turn is bounded only by timeout.
+          Effect.andThen(Effect.never),
+        )
+
         const collectOutput = Stream.decodeText(handle.stdout).pipe(
+          Stream.tap(() => Deferred.succeed(started, undefined)),
           Stream.splitLines,
           Stream.runFoldEffect(
             (): {
@@ -291,6 +344,10 @@ export const runCliTurn = (
         const [exitOutcome, output] = yield* Effect.all(
           [handle.exitCode.pipe(Effect.result), collectOutput],
           { concurrency: 2 },
+        ).pipe(
+          // raceFirst so the armed watchdog failure ends the turn immediately
+          // instead of waiting for the silent CLI to exit on its own.
+          Effect.raceFirst(startupWatchdog),
         )
 
         return {

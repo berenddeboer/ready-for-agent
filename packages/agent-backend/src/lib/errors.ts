@@ -37,6 +37,20 @@ export class AgentBackendTimeoutError extends Schema.TaggedErrorClass<AgentBacke
   },
 ) {}
 
+/**
+ * The Agent Turn CLI produced no stdout output within the startup window, so
+ * it never began the turn (bad auth, broken config, crash during startup).
+ * Distinct from AgentBackendTimeoutError, which means the turn ran out of time.
+ */
+export class AgentBackendStartupTimeoutError extends Schema.TaggedErrorClass<AgentBackendStartupTimeoutError>()(
+  "AgentBackendStartupTimeoutError",
+  {
+    cwd: Schema.String,
+    startupTimeoutMs: Schema.Finite,
+    sessionId: Schema.optionalKey(Schema.String),
+  },
+) {}
+
 export class AgentBackendSessionIdMissingError extends Schema.TaggedErrorClass<AgentBackendSessionIdMissingError>()(
   "AgentBackendSessionIdMissingError",
   {

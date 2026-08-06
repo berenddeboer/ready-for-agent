@@ -6,6 +6,7 @@ import type {
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
   AgentBackendSessionIdMissingError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
 } from "./errors.js"
 import type {
@@ -20,6 +21,7 @@ export type AgentBackendError =
   | AgentBackendConfigError
   | AgentBackendExitError
   | AgentBackendTimeoutError
+  | AgentBackendStartupTimeoutError
   | AgentBackendSessionIdMissingError
   | AgentBackendMalformedOutputError
   | PlatformError
