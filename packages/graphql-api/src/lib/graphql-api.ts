@@ -228,6 +228,7 @@ const toGraphqlAgentBackendStatus = (
     reason: singular.reason,
     models: singular.models,
     provider: toGraphqlProvider(singular.provider),
+    warnings: [...singular.warnings],
   }
 }
 
@@ -248,12 +249,14 @@ const toGraphqlAgentBackendPreview = (preview: {
   readonly reason: string | null
   readonly models: AgentBackendStatus["models"]
   readonly provider: AgentBackendStatus["provider"]
+  readonly warnings: ReadonlyArray<string>
 }) => ({
   backend: toGraphqlBackend(preview.backend),
   kind: preview.kind.toUpperCase(),
   reason: preview.reason,
   models: preview.models,
   provider: toGraphqlProvider(preview.provider),
+  warnings: [...preview.warnings],
 })
 
 const resolveWorkItemBackend = (agentBackendId: string) => {
@@ -577,6 +580,7 @@ export const createGraphqlApi = (
                     reason: `Unknown Agent Backend: ${args.backendId}`,
                     models: [],
                     provider: null,
+                    warnings: [] as const,
                   }
                 }
                 const active = yield* ActiveAgentBackend
@@ -996,6 +1000,7 @@ export const createGraphqlApi = (
                     reason: `Unknown Agent Backend: ${displayId}`,
                     models: [] as const,
                     provider: null,
+                    warnings: [] as const,
                   }
                 }
                 const status = yield* active.recheck(

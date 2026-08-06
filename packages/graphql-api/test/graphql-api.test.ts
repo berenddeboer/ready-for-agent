@@ -88,6 +88,7 @@ const readyRuntimeStatus = (
   models: AgentBackendRuntimeStatus["models"] = defaultModels,
   backendId: AgentBackendId = "opencode",
   provider: AgentBackendRuntimeStatus["provider"] = null,
+  warnings: AgentBackendRuntimeStatus["warnings"] = [],
 ): AgentBackendRuntimeStatus => ({
   backend: {
     id: backendId,
@@ -97,6 +98,7 @@ const readyRuntimeStatus = (
   reason: null,
   models,
   provider,
+  warnings,
 })
 
 const readyStatus = (
@@ -355,6 +357,7 @@ const makeRuntime = (
         reason: null,
         models: readyStatus().models,
         provider: null,
+        warnings: [],
       }),
     withConfigCoordination: (effect) => effect,
     getRegistration: () =>
@@ -2628,6 +2631,7 @@ describe("GraphQL API", () => {
               reason: null,
               models: claudeStatus.models,
               provider: bedrockProvider,
+              warnings: claudeStatus.warnings,
             })
           }
           return Effect.succeed({
@@ -2636,6 +2640,7 @@ describe("GraphQL API", () => {
             reason: null,
             models: defaultModels,
             provider: null,
+            warnings: [],
           })
         },
       },
@@ -2719,6 +2724,135 @@ describe("GraphQL API", () => {
           backend: { id: "claude" },
           kind: "READY",
           provider: bedrockProvider,
+        },
+      },
+    })
+    expect(rechecked).toEqual(["claude"])
+  })
+
+  test("propagates Bedrock profile catalog and discovery warnings on status, preview, and recheck", async () => {
+    // Issue #820: profile IDs and non-fatal warnings pass through without reinterpretation.
+    const bedrockProvider = { id: "bedrock", label: "Amazon Bedrock" }
+    const warning =
+      "Could not list Amazon Bedrock inference profiles: access denied. Free-text Agent Model entry remains available."
+    const profileModels = [
+      {
+        id: "us.anthropic.claude-sonnet-4-6",
+        thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+      },
+    ]
+    const claudeStatus = readyRuntimeStatus(
+      profileModels,
+      "claude",
+      bedrockProvider,
+      [warning],
+    )
+    const rechecked: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listStatuses: Effect.succeed([claudeStatus]),
+        getBackendStatus: (backendId) =>
+          Effect.succeed(backendId === "claude" ? claudeStatus : null),
+        getStatus: Effect.succeed(toAgentBackendStatus(claudeStatus)),
+        recheck: (backendId) => {
+          rechecked.push(backendId)
+          return Effect.succeed(
+            backendId === "claude" ? claudeStatus : readyRuntimeStatus(),
+          )
+        },
+        preview: (backendId) => {
+          if (backendId === "claude") {
+            return Effect.succeed({
+              backend: claudeStatus.backend,
+              kind: "ready" as const,
+              reason: null,
+              models: claudeStatus.models,
+              provider: bedrockProvider,
+              warnings: claudeStatus.warnings,
+            })
+          }
+          return Effect.succeed({
+            backend: { id: "opencode", label: "OpenCode" },
+            kind: "ready" as const,
+            reason: null,
+            models: defaultModels,
+            provider: null,
+            warnings: [],
+          })
+        },
+      },
+    )
+
+    const statusResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          agentBackendStatuses {
+            backend { id }
+            kind
+            models { id thinkingLevels }
+            warnings
+            provider { id label }
+          }
+        }`,
+      }),
+    )
+    expect(await statusResponse.json()).toEqual({
+      data: {
+        agentBackendStatuses: [
+          {
+            backend: { id: "claude" },
+            kind: "READY",
+            models: profileModels,
+            warnings: [warning],
+            provider: bedrockProvider,
+          },
+        ],
+      },
+    })
+
+    const previewResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          previewAgentBackend(backendId: "claude") {
+            kind
+            models { id }
+            warnings
+          }
+        }`,
+      }),
+    )
+    expect(await previewResponse.json()).toEqual({
+      data: {
+        previewAgentBackend: {
+          kind: "READY",
+          models: [{ id: "us.anthropic.claude-sonnet-4-6" }],
+          warnings: [warning],
+        },
+      },
+    })
+
+    const recheckResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          recheckAgentBackend(backendId: "claude") {
+            kind
+            models { id }
+            warnings
+          }
+        }`,
+      }),
+    )
+    expect(await recheckResponse.json()).toEqual({
+      data: {
+        recheckAgentBackend: {
+          kind: "READY",
+          models: [{ id: "us.anthropic.claude-sonnet-4-6" }],
+          warnings: [warning],
         },
       },
     })

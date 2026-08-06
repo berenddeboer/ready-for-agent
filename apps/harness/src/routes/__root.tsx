@@ -87,6 +87,7 @@ const agentBackendStatusSelection = {
   reason: true,
   models: { id: true, thinkingLevels: true },
   provider: { id: true, label: true },
+  warnings: true,
 } as const
 
 const agentBackendStatusQuery = {
@@ -110,6 +111,7 @@ type AgentBackendStatusRow = {
   reason: string | null
   models: readonly AgentModelOption[]
   provider: { id: string; label: string } | null
+  warnings: readonly string[]
 }
 
 const modelsQuery = {
@@ -314,6 +316,7 @@ function SettingsChrome() {
     id: string
     label: string
   } | null>(null)
+  const [previewWarnings, setPreviewWarnings] = useState<readonly string[]>([])
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const previewGenerationRef = useRef(0)
@@ -525,6 +528,7 @@ function SettingsChrome() {
       }
       setPreviewModels(null)
       setPreviewProvider(null)
+      setPreviewWarnings([])
       setPreviewError(null)
       setPreviewPending(false)
       return
@@ -533,6 +537,7 @@ function SettingsChrome() {
     setPreviewPending(true)
     setPreviewError(null)
     setPreviewProvider(null)
+    setPreviewWarnings([])
     try {
       const [prefsResult, previewResult] = await Promise.all([
         graphql.query({
@@ -552,6 +557,7 @@ function SettingsChrome() {
             reason: true,
             models: { id: true, thinkingLevels: true },
             provider: { id: true, label: true },
+            warnings: true,
           },
         }),
       ])
@@ -562,6 +568,7 @@ function SettingsChrome() {
       applyModelPrefs(prefsResult.harnessModelPrefs)
       const preview = previewResult.previewAgentBackend
       setPreviewProvider(preview.provider)
+      setPreviewWarnings(preview.warnings ?? [])
       if (preview.kind === "READY") {
         setPreviewModels(preview.models)
         setPreviewError(null)
@@ -578,6 +585,7 @@ function SettingsChrome() {
       }
       setPreviewModels([])
       setPreviewProvider(null)
+      setPreviewWarnings([])
       setPreviewError(
         error instanceof Error
           ? error.message
@@ -986,10 +994,15 @@ function SettingsChrome() {
                       let kindForRow = row.kind
                       let reasonForRow =
                         row.kind === "UNAVAILABLE" ? row.reason : null
+                      let warningsForRow =
+                        previewingThisRow && !previewPending
+                          ? previewWarnings
+                          : (row.warnings ?? [])
                       if (previewingThisRow && !previewPending) {
                         if (previewError !== null) {
                           kindForRow = "UNAVAILABLE"
                           reasonForRow = previewError
+                          warningsForRow = []
                         } else {
                           kindForRow = "READY"
                           reasonForRow = null
@@ -1000,16 +1013,28 @@ function SettingsChrome() {
                           key={row.backend.id}
                           className={ui.dialogStatusRow}
                         >
-                          <p className="m-0">
-                            <strong>{row.backend.label}</strong>
-                            {formatAgentBackendStatusTrail({
-                              kind: kindForRow,
-                              provider: providerForRow,
-                              isDefault,
-                              previewing: previewingThisRow,
-                              reason: reasonForRow,
-                            })}
-                          </p>
+                          <div className="min-w-0 flex-1">
+                            <p className="m-0">
+                              <strong>{row.backend.label}</strong>
+                              {formatAgentBackendStatusTrail({
+                                kind: kindForRow,
+                                provider: providerForRow,
+                                isDefault,
+                                previewing: previewingThisRow,
+                                reason: reasonForRow,
+                              })}
+                            </p>
+                            {kindForRow === "READY" &&
+                              warningsForRow.map((warning) => (
+                                <p
+                                  key={warning}
+                                  className="m-0 mt-1 text-sm text-amber-800 dark:text-amber-200"
+                                  role="status"
+                                >
+                                  {warning}
+                                </p>
+                              ))}
+                          </div>
                           <button
                             type="button"
                             className={ui.plateMini}
@@ -1033,25 +1058,38 @@ function SettingsChrome() {
                       selectedAgentBackend !==
                         (defaultStatus?.backend.id ?? "") && (
                         <div className={ui.dialogStatusRow}>
-                          <p className="m-0">
-                            <strong>
-                              {(backendStatus.data?.agentBackends ?? []).find(
-                                (backend) =>
-                                  backend.id === selectedAgentBackend,
-                              )?.label ?? selectedAgentBackend}
-                            </strong>
-                            {previewPending
-                              ? " · Previewing selection…"
-                              : formatAgentBackendStatusTrail({
-                                  kind:
-                                    previewError !== null
-                                      ? "UNAVAILABLE"
-                                      : "READY",
-                                  provider: previewProvider,
-                                  previewing: true,
-                                  reason: previewError,
-                                })}
-                          </p>
+                          <div className="min-w-0 flex-1">
+                            <p className="m-0">
+                              <strong>
+                                {(backendStatus.data?.agentBackends ?? []).find(
+                                  (backend) =>
+                                    backend.id === selectedAgentBackend,
+                                )?.label ?? selectedAgentBackend}
+                              </strong>
+                              {previewPending
+                                ? " · Previewing selection…"
+                                : formatAgentBackendStatusTrail({
+                                    kind:
+                                      previewError !== null
+                                        ? "UNAVAILABLE"
+                                        : "READY",
+                                    provider: previewProvider,
+                                    previewing: true,
+                                    reason: previewError,
+                                  })}
+                            </p>
+                            {!previewPending &&
+                              previewError === null &&
+                              previewWarnings.map((warning) => (
+                                <p
+                                  key={warning}
+                                  className="m-0 mt-1 text-sm text-amber-800 dark:text-amber-200"
+                                  role="status"
+                                >
+                                  {warning}
+                                </p>
+                              ))}
+                          </div>
                         </div>
                       )}
                     {statuses.length === 0 && defaultStatus === undefined && (

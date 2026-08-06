@@ -38,6 +38,7 @@ const makeResolve =
       string,
       { id: string; label: string } | null
     >
+    readonly warningsByBackend?: Record<string, ReadonlyArray<string>>
     /** Provider attached to ConfigError when inspect fails for that backend. */
     readonly failInspectProviderByBackend?: Record<
       string,
@@ -53,6 +54,7 @@ const makeResolve =
       options.providerByBackend !== undefined
         ? (options.providerByBackend[backendId] ?? null)
         : null
+    const warnings = options.warningsByBackend?.[backendId] ?? []
     return Effect.succeed({
       registration: reg,
       adapter: {
@@ -73,6 +75,7 @@ const makeResolve =
             backend: reg.descriptor,
             models: [...models],
             provider,
+            warnings: [...warnings],
           })
         },
         startTurn: () => Effect.succeed(turnResult(`${backendId}-start`)),
@@ -281,6 +284,65 @@ describe("ActiveAgentBackend multi-backend registry", () => {
     )
   })
 
+  it("caches inspect warnings with catalog on Ready status, Recheck, and Preview", async () => {
+    // Issue #820: non-fatal Bedrock discovery warnings travel with Ready status.
+    const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
+    const warning =
+      "Could not list Amazon Bedrock inference profiles: access denied. Free-text Agent Model entry remains available."
+    const profiles = [
+      {
+        id: "us.anthropic.claude-sonnet-4-6",
+        thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+      },
+    ]
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeResolve({
+        providerByBackend: {
+          [AGENT_BACKEND_IDS.claude]: bedrock,
+        },
+        modelsByBackend: {
+          [AGENT_BACKEND_IDS.claude]: profiles,
+        },
+        warningsByBackend: {
+          [AGENT_BACKEND_IDS.claude]: [warning],
+        },
+      }),
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const activated = yield* active.activate(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(activated.kind).toBe("ready")
+        expect(activated.warnings).toEqual([warning])
+        expect(activated.models.map((model) => model.id)).toEqual([
+          "us.anthropic.claude-sonnet-4-6",
+        ])
+
+        const rechecked = yield* active.recheck(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(rechecked.kind).toBe("ready")
+        expect(rechecked.warnings).toEqual([warning])
+        expect(rechecked.models.map((model) => model.id)).toEqual([
+          "us.anthropic.claude-sonnet-4-6",
+        ])
+
+        const preview = yield* active.preview(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(preview.kind).toBe("ready")
+        expect(preview.warnings).toEqual([warning])
+        expect(preview.models.map((model) => model.id)).toEqual([
+          "us.anthropic.claude-sonnet-4-6",
+        ])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
   it("preserves last-known provider after a failed recheck", async () => {
     const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
     // Mutable set so inspect can succeed first, then fail without a provider on the error.
@@ -310,6 +372,7 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         })
         expect(failed.kind).toBe("unavailable")
         expect(failed.provider).toEqual(bedrock)
+        expect(failed.warnings).toEqual([])
       }).pipe(Effect.provide(layer)),
     )
   })

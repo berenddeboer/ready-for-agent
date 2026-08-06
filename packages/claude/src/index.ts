@@ -1,5 +1,6 @@
 export * from "./lib/build-args.js"
 export * from "./lib/claude.js"
+export * from "./lib/discover-bedrock-profiles.js"
 export * from "./lib/environment.js"
 export * from "./lib/parse-auth-status.js"
 export * from "./lib/parse-stream.js"

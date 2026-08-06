@@ -56,4 +56,18 @@ describe("Harness settings Agent Backend change", () => {
     // Provider comes from inspect/status — not CLAUDE_CODE_USE_BEDROCK alone.
     expect(source).not.toContain("CLAUDE_CODE_USE_BEDROCK")
   })
+
+  test("requests and surfaces Bedrock discovery warnings with selectable models", () => {
+    // Issue #820: non-fatal discovery warnings and profile catalog in Settings.
+    const source = rootSource()
+    expect(source).toContain("warnings: true")
+    expect(source).toContain("previewWarnings")
+    expect(source).toContain("warningsForRow")
+    expect(source).toContain('role="status"')
+    // Free-text Claude model entry remains available while Bedrock is active.
+    expect(source).toContain("allowsClaudeFreeTextModels")
+    expect(source).toContain("claudeFreeTextModels")
+    // Models from status/preview catalogs remain selectable (profile IDs).
+    expect(source).toContain("models: { id: true, thinkingLevels: true }")
+  })
 })

@@ -1098,6 +1098,7 @@ function RepositoryCard({
     id: string
     label: string
   } | null>(null)
+  const [previewWarnings, setPreviewWarnings] = useState<readonly string[]>([])
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const [harnessPrefsForDraft, setHarnessPrefsForDraft] = useState<{
@@ -1230,12 +1231,14 @@ function RepositoryCard({
       setPreviewError(null)
       setPreviewModels(null)
       setPreviewProvider(null)
+      setPreviewWarnings([])
       setHarnessPrefsForDraft(null)
     } else {
       setPreviewPending(true)
       setPreviewError(null)
       setPreviewModels(null)
       setPreviewProvider(null)
+      setPreviewWarnings([])
       setHarnessPrefsForDraft(null)
     }
 
@@ -1278,6 +1281,7 @@ function RepositoryCard({
     setWaitForReadyForReviewChecks(repository.waitForReadyForReviewChecks)
     setPreviewModels(null)
     setPreviewProvider(null)
+    setPreviewWarnings([])
     setPreviewError(null)
     // Override catalogs load via preview; start pending so model fields stay
     // disabled until the effect loads the correct catalog.
@@ -1353,6 +1357,7 @@ function RepositoryCard({
       setHarnessPrefsForDraft(null)
       setPreviewModels(null)
       setPreviewProvider(null)
+      setPreviewWarnings([])
       setPreviewError(null)
       setPreviewPending(false)
       return
@@ -1365,6 +1370,7 @@ function RepositoryCard({
     setHarnessPrefsForDraft(null)
     setPreviewModels(null)
     setPreviewProvider(null)
+    setPreviewWarnings([])
     void (async () => {
       try {
         const [prefsResult, previewResult] = await Promise.all([
@@ -1385,6 +1391,7 @@ function RepositoryCard({
               reason: true,
               models: { id: true, thinkingLevels: true },
               provider: { id: true, label: true },
+              warnings: true,
             },
           }),
         ])
@@ -1394,6 +1401,7 @@ function RepositoryCard({
         setHarnessPrefsForDraft(prefsResult.harnessModelPrefs)
         const preview = previewResult.previewAgentBackend
         setPreviewProvider(preview.provider)
+        setPreviewWarnings(preview.warnings ?? [])
         if (preview.kind === "READY") {
           setPreviewModels(preview.models)
           setPreviewError(null)
@@ -1410,6 +1418,7 @@ function RepositoryCard({
         }
         setPreviewModels([])
         setPreviewProvider(null)
+        setPreviewWarnings([])
         setPreviewError(
           error instanceof Error
             ? error.message
@@ -2090,17 +2099,29 @@ function RepositoryCard({
               </label>
 
               {usesPreviewCatalog && !previewPending && (
-                <p className={ui.dialogStatusLabel}>
-                  {formatAgentBackendStatusLabel({
-                    backendLabel:
-                      (agentBackends.data ?? []).find(
-                        (backend) => backend.id === draftEffective,
-                      )?.label ?? draftEffective,
-                    kind: previewError !== null ? "UNAVAILABLE" : "READY",
-                    provider: previewProvider,
-                    // Reason text is on the Banner below when preview fails.
-                  })}
-                </p>
+                <div className={ui.dialogStatusLabel}>
+                  <p className="m-0">
+                    {formatAgentBackendStatusLabel({
+                      backendLabel:
+                        (agentBackends.data ?? []).find(
+                          (backend) => backend.id === draftEffective,
+                        )?.label ?? draftEffective,
+                      kind: previewError !== null ? "UNAVAILABLE" : "READY",
+                      provider: previewProvider,
+                      // Reason text is on the Banner below when preview fails.
+                    })}
+                  </p>
+                  {previewError === null &&
+                    previewWarnings.map((warning) => (
+                      <p
+                        key={warning}
+                        className="m-0 mt-1 text-sm text-amber-800 dark:text-amber-200"
+                        role="status"
+                      >
+                        {warning}
+                      </p>
+                    ))}
+                </div>
               )}
 
               {agentBackends.isError && (
