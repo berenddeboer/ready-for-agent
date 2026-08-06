@@ -100,7 +100,7 @@ describe("buildRunArgs", () => {
       "--variant",
       "high",
     ])
-    expect(shouldUsePromptStdin(prompt)).toBe(true)
+    expect(shouldUsePromptStdin({ prompt })).toBe(true)
     expect(messageTokensFromArgs(args)).toEqual([])
     expect(args).not.toContain(prompt)
   })
@@ -117,7 +117,7 @@ describe("buildRunArgs", () => {
         thinkingLevel: "high",
       })
 
-      expect(shouldUsePromptStdin(prompt)).toBe(usesStdin)
+      expect(shouldUsePromptStdin({ prompt })).toBe(usesStdin)
       expect(messageTokensFromArgs(args)).toEqual(message)
       expect(args).not.toContain(prompt)
     }
@@ -136,7 +136,7 @@ describe("buildRunArgs", () => {
       thinkingLevel: "high",
     })
 
-    expect(shouldUsePromptStdin(prompt)).toBe(true)
+    expect(shouldUsePromptStdin({ prompt })).toBe(true)
     expect(messageTokensFromArgs(args)).toEqual([])
     expect(args).toEqual([
       "run",
@@ -162,7 +162,7 @@ describe("buildRunArgs", () => {
       thinkingLevel: "high",
     })
 
-    expect(shouldUsePromptStdin(prompt)).toBe(false)
+    expect(shouldUsePromptStdin({ prompt })).toBe(false)
     expect(messageTokensFromArgs(args)).toEqual([prompt])
   })
 
@@ -178,7 +178,7 @@ describe("buildRunArgs", () => {
       command: "/review",
     })
 
-    expect(shouldUsePromptStdin(prompt, "/review")).toBe(true)
+    expect(shouldUsePromptStdin({ prompt, command: "/review" })).toBe(true)
     expect(args).toEqual([
       "run",
       "--auto",
@@ -201,7 +201,7 @@ describe("buildRunArgs", () => {
   it("keeps multi-line command prompts tokenized on argv", () => {
     // Commands read `$ARGUMENTS`; only the argv byte limit moves them to stdin.
     const prompt = "first\nsecond"
-    expect(shouldUsePromptStdin(prompt, "/review")).toBe(false)
+    expect(shouldUsePromptStdin({ prompt, command: "/review" })).toBe(false)
 
     const args = buildRunArgs({
       prompt,
@@ -372,7 +372,7 @@ describe("buildRunArgs", () => {
     })
 
     const messageTokens = messageTokensFromArgs(args)
-    expect(shouldUsePromptStdin(prompt)).toBe(true)
+    expect(shouldUsePromptStdin({ prompt })).toBe(true)
     expect(messageTokens).toEqual([])
   })
 })

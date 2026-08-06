@@ -19,12 +19,12 @@ const messageTokens = (prompt: string): ReadonlyArray<string> =>
  * prompts below the limit stay tokenized after `--` so `$ARGUMENTS` keeps its
  * established argv shape.
  */
-export const shouldUsePromptStdin = (
-  prompt: string,
-  command?: string,
-): boolean =>
-  exceedsPromptArgvLimit(prompt) ||
-  (command === undefined && /\r|\n/.test(prompt))
+export const shouldUsePromptStdin = (input: {
+  readonly prompt: string
+  readonly command?: string
+}): boolean =>
+  exceedsPromptArgvLimit(input.prompt) ||
+  (input.command === undefined && /\r|\n/.test(input.prompt))
 
 export const buildRunArgs = (input: {
   readonly prompt: string
@@ -58,7 +58,7 @@ export const buildRunArgs = (input: {
     args.push("--command", commandName(input.command))
   }
 
-  if (!shouldUsePromptStdin(input.prompt, input.command)) {
+  if (!shouldUsePromptStdin(input)) {
     const tokens = messageTokens(input.prompt)
     if (tokens.length > 0) {
       args.push("--", ...tokens)
