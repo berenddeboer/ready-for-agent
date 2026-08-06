@@ -124,7 +124,9 @@ describe("compiled host binary ambient-auth smoke", () => {
     mkdirSync(dirname(databasePath), { recursive: true })
     mkdirSync(restrictedBin, { recursive: true })
 
-    // Required host tools only — no bun/nx on PATH for the product process.
+    // Required host tools only — no bun/nx/aws on PATH for the product process.
+    // Bedrock profile discovery is bundled via the AWS SDK (issue #822); the
+    // AWS CLI must not become a packaged-binary host prerequisite.
     for (const tool of ["git", "gh", "opencode"] as const) {
       const resolved = Bun.which(tool)
       if (resolved === null) {
@@ -136,6 +138,8 @@ describe("compiled host binary ambient-auth smoke", () => {
         { mode: 0o755 },
       )
     }
+    // Explicitly leave `aws` off PATH even when installed on the host.
+    expect(Bun.which("aws", { PATH: restrictedBin })).toBeNull()
 
     port = 18_000 + Math.floor(Math.random() * 1000)
   }, 600_000)
@@ -144,6 +148,23 @@ describe("compiled host binary ambient-auth smoke", () => {
     if (fixtureRoot !== "") {
       rmSync(fixtureRoot, { recursive: true, force: true })
     }
+  })
+
+  test("bundles AWS SDK Bedrock discovery without requiring the AWS CLI (issue #822)", async () => {
+    const binary = Bun.file(binaryPath)
+    expect(await binary.exists()).toBe(true)
+    // In-process binary scan — no host `rg`/`strings` dependency. Assert on
+    // stable product strings (API name + operator warning); package path is
+    // secondary evidence that the SDK client was compiled in. Latin-1 keeps a
+    // 1:1 byte↔code-unit mapping so ASCII needles match embedded C strings.
+    const haystack = Buffer.from(await binary.arrayBuffer()).toString("latin1")
+    expect(haystack.includes("ListInferenceProfiles")).toBe(true)
+    expect(
+      haystack.includes("Could not list Amazon Bedrock inference profiles"),
+    ).toBe(true)
+    expect(haystack.includes("@aws-sdk/client-bedrock")).toBe(true)
+    // No host-tool preflight string should invent an AWS CLI requirement.
+    expect(haystack.includes("Install AWS CLI")).toBe(false)
   })
 
   test("starts UI, assets, GraphQL, migrates, restarts, reports version, shuts down", async () => {

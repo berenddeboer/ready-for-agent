@@ -122,6 +122,12 @@ type ActiveEntry = {
   readonly provider: AgentBackendProvider | null
   /** Non-fatal Ready warnings from the last successful inspect. */
   readonly warnings: ReadonlyArray<string>
+  /**
+   * Monotonic inspect generation for this entry. Bumped when an inspect starts
+   * so a slower concurrent Recheck cannot apply stale provider/catalog/warning
+   * state over a newer result (issue #822).
+   */
+  readonly inspectGeneration: number
 }
 
 const normalizeInspectProvider = (
@@ -263,6 +269,7 @@ const emptyEntry = (
   unavailableReason,
   provider: null,
   warnings: [],
+  inspectGeneration: 0,
 })
 
 export type ActiveAgentBackendShape = {
@@ -552,15 +559,45 @@ export const ActiveAgentBackendLive = (
         input: InspectInput,
       ): Effect.Effect<AgentBackendRuntimeStatus> =>
         Effect.gen(function* () {
+          // Claim a generation before calling inspect so concurrent Rechecks
+          // that finish later cannot clobber a fresher catalog/provider/warning
+          // snapshot (issue #822).
+          const claimedGeneration = yield* Ref.modify(stateRef, (state) => {
+            const previous = state.entries.get(inspectedBackendId)
+            if (
+              previous === undefined ||
+              previous.adapter !== entryAtStart.adapter
+            ) {
+              return [null as number | null, state]
+            }
+            const nextGeneration = previous.inspectGeneration + 1
+            const entries = new Map(state.entries)
+            entries.set(inspectedBackendId, {
+              ...previous,
+              inspectGeneration: nextGeneration,
+            })
+            return [nextGeneration, { ...state, entries }]
+          })
+          if (claimedGeneration === null) {
+            // Entry was dropped or replaced between the caller's snapshot and
+            // claim (e.g. deselect/reselect installed a new adapter). Return
+            // the current status when still Active under the replacement;
+            // only report not-Active when the id is truly absent.
+            const current = yield* getBackendStatus(inspectedBackendId)
+            return current ?? notActiveStatus(inspectedBackendId)
+          }
+
           const inspected = yield* Effect.result(
             entryAtStart.adapter.inspect(input),
           )
-          // Discard results if this backend was dropped or replaced mid-inspect.
-          const stillSameEntry = (state: RegistryState): boolean => {
+          // Discard results if this backend was dropped, replaced, or a newer
+          // inspect claimed the entry mid-flight.
+          const stillCurrentInspect = (state: RegistryState): boolean => {
             const previous = state.entries.get(inspectedBackendId)
             return (
               previous !== undefined &&
-              previous.adapter === entryAtStart.adapter
+              previous.adapter === entryAtStart.adapter &&
+              previous.inspectGeneration === claimedGeneration
             )
           }
           if (Result.isFailure(inspected)) {
@@ -571,7 +608,7 @@ export const ActiveAgentBackendLive = (
               inspected.failure,
             )
             yield* Ref.update(stateRef, (state) => {
-              if (!stillSameEntry(state)) {
+              if (!stillCurrentInspect(state)) {
                 return state
               }
               const previous = state.entries.get(inspectedBackendId)
@@ -592,7 +629,7 @@ export const ActiveAgentBackendLive = (
             return status ?? notActiveStatus(inspectedBackendId)
           }
           yield* Ref.update(stateRef, (state) => {
-            if (!stillSameEntry(state)) {
+            if (!stillCurrentInspect(state)) {
               return state
             }
             const previous = state.entries.get(inspectedBackendId)

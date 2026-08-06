@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import {
   BedrockClient,
   type InferenceProfileSummary,
@@ -69,12 +72,130 @@ const discoveryWarning = (detail: string): string =>
 export const EMPTY_BEDROCK_CATALOG_WARNING = `No active Anthropic Bedrock inference profiles were returned for this account/region; use free-text or check region/model access. ${FREE_TEXT_HINT}`
 
 /**
- * Resolve the Bedrock control-plane region from ambient env (AWS_REGION, then
- * AWS_DEFAULT_REGION). Named-profile region resolution is left to the AWS SDK
- * default chain when region is omitted.
+ * Strip access keys, session tokens, bearer tokens, and other credential-like
+ * payloads from operator-facing discovery warnings (issue #822).
+ */
+export const scrubBedrockDiscoverySecrets = (text: string): string => {
+  let scrubbed = text
+  // IAM access key ids (long-term AKIA… and temporary ASIA…).
+  scrubbed = scrubbed.replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[redacted]")
+  // Env-style, property-style, and JSON-ish secret field assignments.
+  scrubbed = scrubbed.replace(
+    /\b(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_BEARER_TOKEN_BEDROCK|AWS_ACCESS_KEY_ID|aws_secret_access_key|aws_session_token|aws_access_key_id|secretAccessKey|SecretAccessKey|accessKeyId|AccessKeyId|sessionToken|SessionToken|security.?token)\b\s*[=:]\s*"?[^"\s,}]+"?/gi,
+    (match) => {
+      const keyMatch = match.match(/^([^=:]+)/)
+      const key = (keyMatch?.[1] ?? "secret").trim()
+      const separator = match.includes("=") ? "=" : ":"
+      return `${key}${separator}[redacted]`
+    },
+  )
+  // JSON `"secretAccessKey": "…"` / `"accessKeyId":"…"` forms.
+  scrubbed = scrubbed.replace(
+    /"(?:secretAccessKey|SecretAccessKey|accessKeyId|AccessKeyId|sessionToken|SessionToken|aws_secret_access_key|aws_session_token|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AWS_ACCESS_KEY_ID)"\s*:\s*"[^"]*"/gi,
+    (match) => {
+      const keyMatch = match.match(/^"([^"]+)"/)
+      const key = keyMatch?.[1] ?? "secret"
+      return `"${key}":"[redacted]"`
+    },
+  )
+  // Authorization / bearer headers.
+  scrubbed = scrubbed.replace(
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+    "Bearer [redacted]",
+  )
+  return scrubbed
+}
+
+export type ResolveBedrockRegionOptions = {
+  /**
+   * Read shared AWS config for named-profile region. Tests inject a fake;
+   * production reads from disk (or returns null when the file is missing).
+   */
+  readonly readTextFile?: (path: string) => string | null
+  /** Override home directory used when resolving `~/.aws/config`. */
+  readonly homeDirectory?: string
+}
+
+const defaultReadTextFile = (path: string): string | null => {
+  try {
+    return readFileSync(path, "utf8")
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Parse a shared AWS config file for the `region` of a named profile.
+ * Supports `[default]` and `[profile name]` sections only (issue #822).
+ */
+export const regionFromAwsConfigText = (
+  configText: string,
+  profileName: string,
+): string | undefined => {
+  const target =
+    profileName.trim() === "" || profileName.trim() === "default"
+      ? "default"
+      : profileName.trim()
+  const lines = configText.split(/\r?\n/)
+  let inTarget = false
+  for (const rawLine of lines) {
+    const line = rawLine.trim()
+    if (line.length === 0 || line.startsWith("#") || line.startsWith(";")) {
+      continue
+    }
+    const section = line.match(/^\[(.+)\]$/)
+    if (section !== null) {
+      const heading = (section[1] ?? "").trim()
+      if (target === "default") {
+        inTarget = heading === "default" || heading === "profile default"
+      } else {
+        inTarget =
+          heading === `profile ${target}` ||
+          // Rare but valid: bare `[name]` in some tooling; accept equality.
+          heading === target
+      }
+      continue
+    }
+    if (!inTarget) {
+      continue
+    }
+    const regionMatch = line.match(/^region\s*=\s*(.+)$/i)
+    if (regionMatch !== null) {
+      // Strip end-of-line comments and optional surrounding quotes so values
+      // like `region = "us-east-1"` or `region = us-east-1 # comment` resolve.
+      let value = (regionMatch[1] ?? "").trim()
+      const commentIndex = value.search(/\s+[#;]/)
+      if (commentIndex >= 0) {
+        value = value.slice(0, commentIndex).trim()
+      }
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1).trim()
+      }
+      if (value.length > 0) {
+        return value
+      }
+    }
+  }
+  return undefined
+}
+
+/**
+ * Resolve the Bedrock control-plane region from the supported harness process
+ * environment (issue #822):
+ *
+ * 1. `AWS_REGION`
+ * 2. `AWS_DEFAULT_REGION`
+ * 3. `region` for `AWS_PROFILE` (or `default`) in the shared AWS config file
+ *    (`AWS_CONFIG_FILE` or `~/.aws/config`)
+ * 4. `undefined` — Bedrock client omits an explicit region so the AWS SDK
+ *    default provider chain can still resolve ambient region sources
  */
 export const resolveBedrockRegion = (
   environment: Readonly<Record<string, string | undefined>>,
+  options: ResolveBedrockRegionOptions = {},
 ): string | undefined => {
   const region = environment.AWS_REGION?.trim()
   if (region !== undefined && region.length > 0) {
@@ -83,6 +204,19 @@ export const resolveBedrockRegion = (
   const defaultRegion = environment.AWS_DEFAULT_REGION?.trim()
   if (defaultRegion !== undefined && defaultRegion.length > 0) {
     return defaultRegion
+  }
+
+  const profile = environment.AWS_PROFILE?.trim() || "default"
+  const readTextFile = options.readTextFile ?? defaultReadTextFile
+  const homeDirectory = options.homeDirectory ?? homedir()
+  const configPath =
+    environment.AWS_CONFIG_FILE?.trim() || join(homeDirectory, ".aws", "config")
+  const configText = readTextFile(configPath)
+  if (configText !== null) {
+    const fromProfile = regionFromAwsConfigText(configText, profile)
+    if (fromProfile !== undefined) {
+      return fromProfile
+    }
   }
   return undefined
 }
@@ -223,7 +357,9 @@ export const finalizeBedrockDiscoveryModels = (
 
 /**
  * Map AWS SDK / network failures to actionable operator warnings without
- * exposing credential material.
+ * exposing credential material (issue #822). Distinguishes access denial,
+ * expired/missing credentials, unresolved profile/region, throttling, and
+ * generic Bedrock control-plane failures when the AWS response permits it.
  */
 export const formatBedrockDiscoveryFailure = (error: unknown): string => {
   const name =
@@ -238,7 +374,7 @@ export const formatBedrockDiscoveryFailure = (error: unknown): string => {
           typeof (error as { _tag: unknown })._tag === "string"
         ? (error as { _tag: string })._tag
         : ""
-  const message =
+  const rawMessage =
     typeof error === "object" &&
     error !== null &&
     "message" in error &&
@@ -247,6 +383,7 @@ export const formatBedrockDiscoveryFailure = (error: unknown): string => {
       : typeof error === "string"
         ? error
         : "control-plane request failed"
+  const message = scrubBedrockDiscoverySecrets(rawMessage)
 
   const combined = `${name} ${message}`.toLowerCase()
 
@@ -264,21 +401,46 @@ export const formatBedrockDiscoveryFailure = (error: unknown): string => {
     combined.includes("accessdenied") ||
     combined.includes("access denied") ||
     combined.includes("not authorized") ||
-    combined.includes("unauthorized")
+    combined.includes("unauthorized") ||
+    combined.includes("is not authorized to perform")
   ) {
     return discoveryWarning(
-      "access denied (need bedrock:ListInferenceProfiles on the harness IAM principal)",
+      "access denied (optional catalog permission bedrock:ListInferenceProfiles missing or denied on the harness IAM principal)",
+    )
+  }
+  // Named shared-config / AWS_PROFILE only. Avoid bare "profile" + credentials
+  // conjunctions that also match IAM instance-profile / IMDS and Bedrock
+  // inference-profile wording (review follow-ups for #822).
+  if (
+    combined.includes("profilenotfound") ||
+    combined.includes("could not find credentials for profile") ||
+    combined.includes("could not load credentials from profile") ||
+    combined.includes("unknown profile") ||
+    combined.includes("the config profile") ||
+    combined.includes("aws_profile") ||
+    combined.includes("shared config profile") ||
+    /(?:^|[\s("'])profile\s+[\w./@+-]+\s+(?:could not be found|does not exist|was not found)/.test(
+      combined,
+    )
+  ) {
+    return discoveryWarning(
+      "AWS named profile is unresolved or unavailable to the harness process (check AWS_PROFILE and shared config)",
     )
   }
   if (
     combined.includes("expiredtoken") ||
     combined.includes("expired token") ||
+    combined.includes("token has expired") ||
     combined.includes("could not load credentials") ||
     combined.includes("credentials not found") ||
     combined.includes("unable to locate credentials") ||
+    combined.includes("could not load credentials from any providers") ||
     combined.includes("security token") ||
     combined.includes("invalidclienttokenid") ||
-    combined.includes("unrecognizedclient")
+    combined.includes("unrecognizedclient") ||
+    combined.includes("invalididentitytoken") ||
+    combined.includes("sso session") ||
+    combined.includes("token is expired")
   ) {
     return discoveryWarning(
       "AWS credentials are missing, expired, or invalid for the harness process",
@@ -287,7 +449,9 @@ export const formatBedrockDiscoveryFailure = (error: unknown): string => {
   if (
     combined.includes("throttl") ||
     combined.includes("toomanyrequests") ||
-    combined.includes("rate exceeded")
+    combined.includes("rate exceeded") ||
+    combined.includes("requestlimitexceeded") ||
+    combined.includes("slowdown")
   ) {
     return discoveryWarning(
       "request throttled; retry with Recheck Agent Backend",
@@ -297,20 +461,24 @@ export const formatBedrockDiscoveryFailure = (error: unknown): string => {
     combined.includes("could not resolve region") ||
     combined.includes("region is missing") ||
     combined.includes("region is not configured") ||
-    combined.includes("missing region")
+    combined.includes("missing region") ||
+    combined.includes("region not configured") ||
+    combined.includes("no region")
   ) {
     return discoveryWarning(
-      "AWS region is not configured (set AWS_REGION or AWS_DEFAULT_REGION, or a profile region)",
+      "AWS region is not configured (set AWS_REGION or AWS_DEFAULT_REGION, or a region on the active AWS profile)",
     )
   }
   if (combined.includes("enotfound") || combined.includes("networkingerror")) {
     return discoveryWarning("Bedrock control plane is unreachable")
   }
 
-  // Keep a short, non-secret detail for other control-plane failures.
-  const safeDetail = message.replace(/\s+/g, " ").trim().slice(0, 160)
+  // Keep a short, scrubbed detail for other control-plane failures.
+  const safeDetail = scrubBedrockDiscoverySecrets(
+    message.replace(/\s+/g, " ").trim().slice(0, 160),
+  )
   return discoveryWarning(
-    safeDetail.length > 0 ? safeDetail : "control-plane request failed",
+    safeDetail.length > 0 ? safeDetail : "Bedrock control-plane request failed",
   )
 }
 
