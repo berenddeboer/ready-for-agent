@@ -8,7 +8,7 @@
  * - `Claude Code · Amazon Bedrock · Default · Unavailable — …`
  */
 
-export type AgentBackendStatusProviderLabel = {
+type AgentBackendStatusProviderLabel = {
   readonly id: string
   readonly label: string
 }
