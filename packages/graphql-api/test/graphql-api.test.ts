@@ -2731,14 +2731,25 @@ describe("GraphQL API", () => {
   })
 
   test("propagates Bedrock profile catalog and discovery warnings on status, preview, and recheck", async () => {
-    // Issue #820: profile IDs and non-fatal warnings pass through without reinterpretation.
+    // Issues #820 / #821: profile IDs/ARNs, friendly names, kinds, and non-fatal
+    // warnings pass through without reinterpretation.
     const bedrockProvider = { id: "bedrock", label: "Amazon Bedrock" }
     const warning =
       "Could not list Amazon Bedrock inference profiles: access denied. Free-text Agent Model entry remains available."
+    const applicationArn =
+      "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
     const profileModels = [
       {
         id: "us.anthropic.claude-sonnet-4-6",
         thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+        name: "US Anthropic Claude Sonnet 4.6",
+        kind: "SYSTEM_DEFINED",
+      },
+      {
+        id: applicationArn,
+        thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+        name: "My Org Sonnet",
+        kind: "APPLICATION",
       },
     ]
     const claudeStatus = readyRuntimeStatus(
@@ -2794,7 +2805,7 @@ describe("GraphQL API", () => {
           agentBackendStatuses {
             backend { id }
             kind
-            models { id thinkingLevels }
+            models { id thinkingLevels name kind }
             warnings
             provider { id label }
           }
@@ -2820,7 +2831,7 @@ describe("GraphQL API", () => {
         query: `query {
           previewAgentBackend(backendId: "claude") {
             kind
-            models { id }
+            models { id name kind }
             warnings
           }
         }`,
@@ -2830,7 +2841,18 @@ describe("GraphQL API", () => {
       data: {
         previewAgentBackend: {
           kind: "READY",
-          models: [{ id: "us.anthropic.claude-sonnet-4-6" }],
+          models: [
+            {
+              id: "us.anthropic.claude-sonnet-4-6",
+              name: "US Anthropic Claude Sonnet 4.6",
+              kind: "SYSTEM_DEFINED",
+            },
+            {
+              id: applicationArn,
+              name: "My Org Sonnet",
+              kind: "APPLICATION",
+            },
+          ],
           warnings: [warning],
         },
       },
@@ -2841,7 +2863,7 @@ describe("GraphQL API", () => {
         query: `mutation {
           recheckAgentBackend(backendId: "claude") {
             kind
-            models { id }
+            models { id name kind }
             warnings
           }
         }`,
@@ -2851,12 +2873,82 @@ describe("GraphQL API", () => {
       data: {
         recheckAgentBackend: {
           kind: "READY",
-          models: [{ id: "us.anthropic.claude-sonnet-4-6" }],
+          models: [
+            {
+              id: "us.anthropic.claude-sonnet-4-6",
+              name: "US Anthropic Claude Sonnet 4.6",
+              kind: "SYSTEM_DEFINED",
+            },
+            {
+              id: applicationArn,
+              name: "My Org Sonnet",
+              kind: "APPLICATION",
+            },
+          ],
           warnings: [warning],
         },
       },
     })
     expect(rechecked).toEqual(["claude"])
+  })
+
+  test("models query exposes executable id separately from friendly name metadata (issue #821)", async () => {
+    const applicationArn =
+      "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
+    const profileModels = [
+      {
+        id: "us.anthropic.claude-sonnet-4-6",
+        thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+        name: "US Anthropic Claude Sonnet 4.6",
+        kind: "SYSTEM_DEFINED",
+      },
+      {
+        id: applicationArn,
+        thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+        name: "My Org Sonnet",
+        kind: "APPLICATION",
+      },
+    ]
+    const claudeStatus = readyRuntimeStatus(profileModels, "claude", {
+      id: "bedrock",
+      label: "Amazon Bedrock",
+    })
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {
+        getConfig: Effect.succeed({
+          ...config,
+          selectedAgentBackend: "claude",
+          defaultModel: "us.anthropic.claude-sonnet-4-6",
+        }),
+      },
+      {},
+      {},
+      {},
+      {
+        listStatuses: Effect.succeed([claudeStatus]),
+        getBackendStatus: (backendId) =>
+          Effect.succeed(backendId === "claude" ? claudeStatus : null),
+        getStatus: Effect.succeed(toAgentBackendStatus(claudeStatus)),
+      },
+    )
+
+    const modelsResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query { models { id name kind thinkingLevels } }`,
+      }),
+    )
+    const body = await modelsResponse.json()
+    // Executable values stay on id; name/kind are presentation-only.
+    expect(body).toEqual({
+      data: {
+        models: profileModels,
+      },
+    })
+    expect(body.data.models[0].id).toBe("us.anthropic.claude-sonnet-4-6")
+    expect(body.data.models[0].name).not.toBe(body.data.models[0].id)
+    expect(body.data.models[1].id).toBe(applicationArn)
+    expect(body.data.models[1].kind).toBe("APPLICATION")
   })
 
   test("rejects invalid backend id on recheck and surfaces repository settings rejection", async () => {

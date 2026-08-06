@@ -73,4 +73,20 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("allowsClaudeFreeTextModels")
     expect(source).toContain("claudeFreeTextModels")
   })
+
+  test("presents friendly Bedrock profile names and kinds while persisting executable ids (issue #821)", () => {
+    const source = indexSource()
+    expect(source).toContain(
+      "models: { id: true, thinkingLevels: true, name: true, kind: true }",
+    )
+    expect(source).toContain("formatAgentModelLabel")
+    expect(source).toContain("findCatalogModel")
+    expect(source).toContain("isCustomAgentModelValue")
+    expect(source).toContain("Catalog:")
+    expect(source).toContain(
+      "Custom value (not in Agent Model catalog) — stored",
+    )
+    expect(source).toContain("value={model.id}")
+    expect(source).toContain("{formatAgentModelLabel(model)}")
+  })
 })

@@ -112,7 +112,7 @@ Bedrock”.
 | **First-party** (claude.ai / API key) not authenticated | No OAuth session and no usable `ANTHROPIC_API_KEY` (`loggedIn: false` on first-party) | Unavailable pointing at **`claude auth login` or `ANTHROPIC_API_KEY`** | Log in or set the API key, then Recheck |
 | **Bedrock** not ready | Claude reports `apiProvider: "bedrock"` with `loggedIn: false` (unusable Bedrock/AWS readiness) | Unavailable pointing at **AWS credentials/region and `CLAUDE_CODE_USE_BEDROCK=1`**—not first-party login | Fix harness process env / AWS access, then Recheck |
 | **Ready** (first-party) | Claude reports authenticated with `apiProvider: "firstParty"` | **Claude Code · First-party · Ready**; static alias catalog (`haiku` / `sonnet` / `opus` / `fable`) | Work Items can run Agent Turns |
-| **Ready** (Bedrock) | Claude reports authenticated with `apiProvider: "bedrock"` | **Claude Code · Amazon Bedrock · Ready**; catalog is active Anthropic **system-defined** inference profiles from AWS (`ListInferenceProfiles` via the AWS SDK, ambient credentials/region). Floating aliases are **not** catalog choices in Bedrock mode. | Work Items can run Agent Turns |
+| **Ready** (Bedrock) | Claude reports authenticated with `apiProvider: "bedrock"` | **Claude Code · Amazon Bedrock · Ready**; catalog is active Anthropic **system-defined** and **application** inference profiles from AWS (`ListInferenceProfiles` via the AWS SDK, ambient credentials/region). Floating aliases are **not** catalog choices in Bedrock mode. | Work Items can run Agent Turns |
 | **Ready with catalog warning** | Claude is Ready on Bedrock but profile listing failed (IAM, region, throttle, credentials for control plane, etc.) | Ready status with a non-fatal warning; empty/partial catalog; free-text Agent Model still available | Fix IAM/`bedrock:ListInferenceProfiles`, region, or credentials, then **Recheck Agent Backend** |
 
 CLI crashes or unparseable `claude auth status` output are **not** the Bedrock
@@ -135,8 +135,8 @@ per-Repository prefs; same backend-scoped model fields as other backends):
 | Path | What you do | Notes |
 | --- | --- | --- |
 | **Catalog (first-party)** | Pick `haiku`, `sonnet`, `opus`, or `fable` | Static alias catalog when Claude reports first-party |
-| **Catalog (Bedrock)** | Pick a discovered system-defined inference profile ID | From AWS `ListInferenceProfiles` for the harness process account/region; ACTIVE Anthropic-backed system profiles only. Floating aliases are not listed while Bedrock is active. |
-| **Free-text** | Enter a non-empty Claude-accepted model string (Bedrock inference profile ID, application inference profile ARN, dated model id, etc.) as build and/or review Agent Model | Always available for Claude Code, including when discovery fails or the profile is outside the listed set; no ARN shape check at Save |
+| **Catalog (Bedrock)** | Pick a discovered system-defined or application inference profile | From AWS `ListInferenceProfiles` for the harness process account/region; ACTIVE Anthropic-backed system and application profiles. Settings show the friendly AWS profile name and **System** / **Application** kind; the stored value is the system profile ID or application ARN. Floating aliases are not listed while Bedrock is active. |
+| **Free-text** | Enter a non-empty Claude-accepted model string (Bedrock inference profile ID, application inference profile ARN, dated model id, etc.) as build and/or review Agent Model | Always available for Claude Code, including when discovery fails or the profile is outside the listed set; no ARN shape check at Save. A previously saved value missing from a later catalog remains as a custom value and is never silently cleared. |
 | **Env pins** | Optionally pin first-party aliases via `ANTHROPIC_DEFAULT_*_MODEL` | Maps aliases process-wide; complementary to free-text / Bedrock profile selection |
 
 Resolved model strings are passed through as Claude `--model` on Agent Turns.
@@ -161,10 +161,19 @@ empty, free-text remains usable, and Settings shows a warning. **Recheck Agent
 Backend** retries discovery and refreshes catalog + warning atomically.
 Agent Backend Preview discovers profiles without activating Claude Code.
 
+**Catalog presentation (issue #821)**
+
+- System-defined profiles: executable Agent Model = inference profile ID;
+  kind `SYSTEM_DEFINED` (Settings: **System**).
+- Application profiles: executable Agent Model = profile ARN; kind
+  `APPLICATION` (Settings: **Application**).
+- Friendly `inferenceProfileName` is display-only; Claude Code always receives
+  the stored id/ARN via `--model` unchanged.
+- Free-text remains for identifiers AWS does not return. Catalog-absent saved
+  values stay available as custom.
+
 **Out of scope (this path)**
 
-- Application inference profiles and friendly profile names in the picker
-  (follow-on work).
 - Free-text expansion for non-Claude Agent Backends (those stay
   catalog-constrained unless already free-form by design).
 
@@ -174,9 +183,10 @@ Agent Backend Preview discovers profiles without activating Claude Code.
 2. `CLAUDE_CODE_USE_BEDROCK=1` (and region) available to the harness process.
 3. Valid AWS credentials for Bedrock in that same process environment.
 4. Settings → Claude Code → Recheck Agent Backend → Ready.
-5. Build/review prefs: select a discovered system-defined inference profile ID
-   from the catalog, **or** free-text any Claude-accepted Bedrock profile
-   ID/ARN (stored in Harness Config / Repository model prefs).
+5. Build/review prefs: select a discovered system-defined profile ID or
+   application profile ARN from the catalog (friendly name + kind shown in
+   Settings), **or** free-text any Claude-accepted Bedrock profile ID/ARN
+   (stored in Harness Config / Repository model prefs).
 6. Optional: `ANTHROPIC_DEFAULT_*_MODEL` pins when using first-party aliases
    outside Bedrock mode.
 7. If Settings shows a discovery warning, fix IAM/region/credentials and

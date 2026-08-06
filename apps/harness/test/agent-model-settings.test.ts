@@ -1,8 +1,14 @@
 import { CLAUDE_THINKING_LEVELS } from "@ready-for-agent/claude"
 import {
+  AGENT_MODEL_KIND_APPLICATION,
+  AGENT_MODEL_KIND_SYSTEM_DEFINED,
   CLAUDE_AGENT_BACKEND_ID,
   CLAUDE_FREE_TEXT_THINKING_LEVELS,
   allowsClaudeFreeTextModels,
+  findCatalogModel,
+  formatAgentModelKindLabel,
+  formatAgentModelLabel,
+  isCustomAgentModelValue,
   isUnavailableCatalogModel,
   thinkingLevelsForModel,
 } from "../src/agent-model-settings.js"
@@ -112,6 +118,122 @@ describe("Claude free-text Agent Model settings (issue #806)", () => {
         catalogModelIds: catalogIds,
       }),
     ).toBe(false)
+  })
+})
+
+describe("Bedrock Agent Model presentation (issue #821)", () => {
+  const systemModel = {
+    id: "us.anthropic.claude-sonnet-4-6",
+    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+    name: "US Anthropic Claude Sonnet 4.6",
+    kind: AGENT_MODEL_KIND_SYSTEM_DEFINED,
+  }
+  const applicationArn =
+    "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
+  const applicationModel = {
+    id: applicationArn,
+    thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+    name: "My Org Sonnet",
+    kind: AGENT_MODEL_KIND_APPLICATION,
+  }
+
+  test("formatAgentModelLabel keeps executable id while showing name and kind", () => {
+    expect(formatAgentModelKindLabel(AGENT_MODEL_KIND_SYSTEM_DEFINED)).toBe(
+      "System",
+    )
+    expect(formatAgentModelKindLabel(AGENT_MODEL_KIND_APPLICATION)).toBe(
+      "Application",
+    )
+    expect(formatAgentModelLabel(systemModel)).toBe(
+      "US Anthropic Claude Sonnet 4.6 · System · us.anthropic.claude-sonnet-4-6",
+    )
+    expect(formatAgentModelLabel(applicationModel)).toBe(
+      `My Org Sonnet · Application · ${applicationArn}`,
+    )
+    // Plain aliases stay unchanged when no presentation metadata is present.
+    expect(
+      formatAgentModelLabel({
+        id: "sonnet",
+        thinkingLevels: [...CLAUDE_FREE_TEXT_THINKING_LEVELS],
+      }),
+    ).toBe("sonnet")
+  })
+
+  test("findCatalogModel matches by executable id only", () => {
+    const catalog = [systemModel, applicationModel]
+    expect(findCatalogModel(catalog, systemModel.id)).toEqual(systemModel)
+    expect(findCatalogModel(catalog, applicationArn)).toEqual(applicationModel)
+    expect(findCatalogModel(catalog, "sonnet")).toBeUndefined()
+    // Friendly name is presentation-only — never a lookup key.
+    expect(
+      findCatalogModel(catalog, "US Anthropic Claude Sonnet 4.6"),
+    ).toBeUndefined()
+  })
+
+  test("isCustomAgentModelValue waits for a loaded catalog (issue #821 review)", () => {
+    const catalog = [systemModel, applicationModel]
+    // Pending/undefined catalog must not flash "custom" for saved values.
+    expect(
+      isCustomAgentModelValue({
+        models: undefined,
+        modelId: systemModel.id,
+      }),
+    ).toBe(false)
+    expect(
+      isCustomAgentModelValue({
+        models: undefined,
+        modelId: "operator-typed-custom",
+      }),
+    ).toBe(false)
+    // Loaded empty catalog: any non-empty value is custom.
+    expect(
+      isCustomAgentModelValue({
+        models: [],
+        modelId: systemModel.id,
+      }),
+    ).toBe(true)
+    // Loaded catalog: match is not custom; absent value is.
+    expect(
+      isCustomAgentModelValue({
+        models: catalog,
+        modelId: systemModel.id,
+      }),
+    ).toBe(false)
+    expect(
+      isCustomAgentModelValue({
+        models: catalog,
+        modelId: applicationArn,
+      }),
+    ).toBe(false)
+    expect(
+      isCustomAgentModelValue({
+        models: catalog,
+        modelId: "operator-typed-custom",
+      }),
+    ).toBe(true)
+    expect(
+      isCustomAgentModelValue({
+        models: catalog,
+        modelId: "",
+      }),
+    ).toBe(false)
+  })
+
+  test("discovered Bedrock profiles keep Claude thinking levels", () => {
+    expect(
+      thinkingLevelsForModel(
+        "claude",
+        [systemModel, applicationModel],
+        systemModel.id,
+      ),
+    ).toEqual([...CLAUDE_FREE_TEXT_THINKING_LEVELS])
+    expect(
+      thinkingLevelsForModel(
+        "claude",
+        [systemModel, applicationModel],
+        applicationArn,
+      ),
+    ).toEqual([...CLAUDE_FREE_TEXT_THINKING_LEVELS])
   })
 })
 

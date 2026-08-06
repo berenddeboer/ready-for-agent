@@ -279,12 +279,29 @@ type Config {
 }
 
 type AgentModel {
+  """
+  Executable Agent Model value persisted in Settings and passed to the backend
+  (e.g. Claude Code --model). For Bedrock system-defined profiles this is the
+  inference profile ID; for application profiles it is the ARN.
+  """
   id: String!
   """
   Thinking Levels supported by this model, e.g. low, high, xhigh.
   Empty when the model has no Thinking Levels.
   """
   thinkingLevels: [String!]!
+  """
+  Optional operator-facing display name. Distinct from id: Settings may show
+  this while still storing and executing id. Null when the backend has no
+  friendlier label than id.
+  """
+  name: String
+  """
+  Optional catalog kind metadata (e.g. SYSTEM_DEFINED or APPLICATION for
+  Amazon Bedrock inference profiles). Null when the backend does not classify
+  catalog entries.
+  """
+  kind: String
 }
 
 type Repository {

@@ -31,8 +31,21 @@ export interface AgentBackendProvider {
 
 /** One Agent Model in the Active Agent Backend catalog. */
 export interface AgentModel {
+  /** Executable Agent Model value passed to the backend (e.g. Claude `--model`). */
   readonly id: string
   readonly thinkingLevels: ReadonlyArray<string>
+  /**
+   * Optional operator-facing display name. Distinct from {@link id}: Settings
+   * may show this while still persisting and executing `id` unchanged.
+   * Omitted/null when the backend has no friendlier label than `id`.
+   */
+  readonly name?: string | null
+  /**
+   * Optional catalog kind metadata so Settings can distinguish entry types
+   * without changing other Agent Backends (e.g. Bedrock `SYSTEM_DEFINED` vs
+   * `APPLICATION`). Omitted/null when the backend does not classify entries.
+   */
+  readonly kind?: string | null
 }
 
 /**

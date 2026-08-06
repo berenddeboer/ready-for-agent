@@ -67,7 +67,23 @@ describe("Harness settings Agent Backend change", () => {
     // Free-text Claude model entry remains available while Bedrock is active.
     expect(source).toContain("allowsClaudeFreeTextModels")
     expect(source).toContain("claudeFreeTextModels")
-    // Models from status/preview catalogs remain selectable (profile IDs).
-    expect(source).toContain("models: { id: true, thinkingLevels: true }")
+    // Models from status/preview catalogs remain selectable (profile IDs/ARNs).
+    expect(source).toContain(
+      "models: { id: true, thinkingLevels: true, name: true, kind: true }",
+    )
+  })
+
+  test("presents friendly Bedrock profile names and kinds while persisting executable ids (issue #821)", () => {
+    const source = rootSource()
+    expect(source).toContain("formatAgentModelLabel")
+    expect(source).toContain("findCatalogModel")
+    expect(source).toContain("isCustomAgentModelValue")
+    expect(source).toContain("Catalog:")
+    expect(source).toContain(
+      "Custom value (not in Agent Model catalog) — stored",
+    )
+    // option value remains the executable id; label is friendly presentation.
+    expect(source).toContain("value={model.id}")
+    expect(source).toContain("{formatAgentModelLabel(model)}")
   })
 })
