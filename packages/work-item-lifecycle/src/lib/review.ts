@@ -174,28 +174,35 @@ export const buildRerunAssessmentPrompt = () =>
     "when a full reviewing pass is required.",
   ].join("\n")
 
-const uniqueFinalResultLine = (output: string): string | null => {
-  const lines = output.split("\n").map((line) => line.trim())
-  const nonEmptyLines = lines.filter((line) => line !== "")
-  const resultLines = lines.filter((line) =>
-    /^READY_FOR_AGENT_RESULT:/i.test(line),
-  )
-  const finalLine = nonEmptyLines.at(-1)
+const candidateResultLines = (output: string): string[] =>
+  output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^READY_FOR_AGENT_RESULT:/i.test(line))
 
-  if (
-    resultLines.length !== 1 ||
-    finalLine === undefined ||
-    finalLine !== resultLines[0]
-  ) {
-    return null
+/**
+ * Try each candidate READY_FOR_AGENT_RESULT line (in order) against
+ * `tryParseLine` and keep the last one that parses to a valid, known
+ * marker. Explanatory prose around or between candidates, and earlier
+ * candidates that don't parse (or are superseded by a later valid one),
+ * are ignored. Returns null only when no candidate parses.
+ */
+const lastValidResult = <T>(
+  output: string,
+  tryParseLine: (line: string) => T | null,
+): T | null => {
+  let result: T | null = null
+  for (const line of candidateResultLines(output)) {
+    const parsed = tryParseLine(line)
+    if (parsed !== null) {
+      result = parsed
+    }
   }
-  return finalLine
+  return result
 }
 
 const hasResultLine = (output: string): boolean =>
-  output
-    .split("\n")
-    .some((line) => /^READY_FOR_AGENT_RESULT:/i.test(line.trim()))
+  candidateResultLines(output).length > 0
 
 const parseSeverity = (raw: string): ReviewSeverity | null => {
   const value = raw.trim().toLowerCase()
@@ -215,23 +222,12 @@ const parseDeferredSeverity = (raw: string): DeferredReviewSeverity | null => {
 
 const boundReason = (reason: string): string => reason.trim().slice(0, 500)
 
-/**
- * Parse the unique final READY_FOR_AGENT_RESULT line from a reviewing pass.
- * Returns null for missing, duplicate, non-final, or unrecognized markers.
- */
-export const parseReviewResult = (
-  output: string,
-): ReviewingPassResult | null => {
-  const finalLine = uniqueFinalResultLine(output)
-  if (finalLine === null) {
-    return null
-  }
-
-  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEAN$/i.test(finalLine)) {
+const tryParseReviewLine = (line: string): ReviewingPassResult | null => {
+  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEAN$/i.test(line)) {
     return { _tag: "clean" }
   }
 
-  const hasFindings = finalLine.match(
+  const hasFindings = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_HAS_FINDINGS\s*:\s*(.+)$/i,
   )
   if (hasFindings?.[1] !== undefined) {
@@ -245,22 +241,19 @@ export const parseReviewResult = (
 }
 
 /**
- * Parse the unique final READY_FOR_AGENT_RESULT line from an apply-findings pass.
- * Returns null for missing, duplicate, non-final, or unrecognized markers.
+ * Parse the last valid READY_FOR_AGENT_RESULT marker from a reviewing pass,
+ * tolerating explanatory prose and other non-matching candidate lines.
+ * Returns null only when no candidate line parses to a known marker.
  */
-export const parseApplyReviewResult = (
-  output: string,
-): ApplyReviewResult | null => {
-  const finalLine = uniqueFinalResultLine(output)
-  if (finalLine === null) {
-    return null
-  }
+export const parseReviewResult = (output: string): ReviewingPassResult | null =>
+  lastValidResult(output, tryParseReviewLine)
 
-  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED$/i.test(finalLine)) {
+const tryParseApplyReviewLine = (line: string): ApplyReviewResult | null => {
+  if (/^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED$/i.test(line)) {
     return { _tag: "fixed" }
   }
 
-  const fixedAndDeferred = finalLine.match(
+  const fixedAndDeferred = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_FIXED_AND_DEFERRED\s*:\s*(low|medium)\s*:\s*(.+)$/i,
   )
   if (
@@ -278,7 +271,7 @@ export const parseApplyReviewResult = (
     }
   }
 
-  const deferred = finalLine.match(
+  const deferred = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_DEFERRED\s*:\s*(low|medium)\s*:\s*(.+)$/i,
   )
   if (
@@ -296,7 +289,7 @@ export const parseApplyReviewResult = (
     }
   }
 
-  const cleared = finalLine.match(
+  const cleared = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_CLEARED\s*:\s*(.+)$/i,
   )
   if (cleared?.[1] !== undefined && cleared[1].trim() !== "") {
@@ -306,7 +299,7 @@ export const parseApplyReviewResult = (
     }
   }
 
-  const unresolvedHigh = finalLine.match(
+  const unresolvedHigh = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_UNRESOLVED_HIGH\s*:\s*(.+)$/i,
   )
   if (unresolvedHigh?.[1] !== undefined && unresolvedHigh[1].trim() !== "") {
@@ -320,18 +313,18 @@ export const parseApplyReviewResult = (
 }
 
 /**
- * Parse the unique final READY_FOR_AGENT_RESULT line from a Review Rerun Assessment.
- * Returns null for missing, duplicate, non-final, or unrecognized markers.
+ * Parse the last valid READY_FOR_AGENT_RESULT marker from an apply-findings
+ * pass, tolerating explanatory prose and other non-matching candidate lines.
+ * Returns null only when no candidate line parses to a known marker.
  */
-export const parseRerunAssessmentResult = (
+export const parseApplyReviewResult = (
   output: string,
-): RerunAssessmentResult | null => {
-  const finalLine = uniqueFinalResultLine(output)
-  if (finalLine === null) {
-    return null
-  }
+): ApplyReviewResult | null => lastValidResult(output, tryParseApplyReviewLine)
 
-  const notRequired = finalLine.match(
+const tryParseRerunAssessmentLine = (
+  line: string,
+): RerunAssessmentResult | null => {
+  const notRequired = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_RERUN_NOT_REQUIRED\s*:\s*(.+)$/i,
   )
   if (notRequired?.[1] !== undefined && notRequired[1].trim() !== "") {
@@ -341,7 +334,7 @@ export const parseRerunAssessmentResult = (
     }
   }
 
-  const required = finalLine.match(
+  const required = line.match(
     /^READY_FOR_AGENT_RESULT:\s*REVIEW_RERUN_REQUIRED\s*:\s*(.+)$/i,
   )
   if (required?.[1] !== undefined && required[1].trim() !== "") {
@@ -353,6 +346,16 @@ export const parseRerunAssessmentResult = (
 
   return null
 }
+
+/**
+ * Parse the last valid READY_FOR_AGENT_RESULT marker from a Review Rerun
+ * Assessment, tolerating explanatory prose and other non-matching candidate
+ * lines. Returns null only when no candidate line parses to a known marker.
+ */
+export const parseRerunAssessmentResult = (
+  output: string,
+): RerunAssessmentResult | null =>
+  lastValidResult(output, tryParseRerunAssessmentLine)
 
 const resolveWorktreePath = (context: LifecycleStepContext) =>
   Effect.gen(function* () {
@@ -530,7 +533,7 @@ export const review = (context: LifecycleStepContext) =>
       if (reviewingParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message: `${agentBackendLabel(context.agentBackend)} did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>`,
+          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_CLEAN or REVIEW_HAS_FINDINGS: <low|medium|high>`,
         })
       }
 
@@ -574,7 +577,7 @@ export const review = (context: LifecycleStepContext) =>
       if (applyParsed === null) {
         return yield* new ReviewResultError({
           workItemId: context.workItemId,
-          message: `${agentBackendLabel(context.agentBackend)} did not report a unique final READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>`,
+          message: `${agentBackendLabel(context.agentBackend)} did not report a valid READY_FOR_AGENT_RESULT: REVIEW_FIXED, REVIEW_FIXED_AND_DEFERRED: <low|medium>: <reason>, REVIEW_DEFERRED: <low|medium>: <reason>, REVIEW_CLEARED: <reason>, or REVIEW_UNRESOLVED_HIGH: <reason>`,
         })
       }
 
@@ -654,7 +657,7 @@ export const review = (context: LifecycleStepContext) =>
         const assessmentParsed = parseRerunAssessmentResult(
           assessment.assistantText,
         )
-        // Missing/duplicate/malformed/ambiguous → conservative full reviewing pass
+        // Missing or malformed → conservative full reviewing pass
         if (assessmentParsed?._tag === "accepted") {
           return {
             _tag: "accepted" as const,

@@ -192,8 +192,7 @@ describe("parseReviewResult", () => {
     ).toEqual({ _tag: "has_findings", severity: "high" })
   })
 
-  it("rejects missing, duplicate, non-final, unsevered, or unknown markers", () => {
-    expect(parseReviewResult("no result line")).toBeNull()
+  it("accepts the last valid marker amid duplicates or trailing prose", () => {
     expect(
       parseReviewResult(
         [
@@ -201,12 +200,16 @@ describe("parseReviewResult", () => {
           "READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS: low",
         ].join("\n"),
       ),
-    ).toBeNull()
+    ).toEqual({ _tag: "has_findings", severity: "low" })
     expect(
       parseReviewResult(
         "READY_FOR_AGENT_RESULT: REVIEW_CLEAN\nAdditional output",
       ),
-    ).toBeNull()
+    ).toEqual({ _tag: "clean" })
+  })
+
+  it("rejects missing, unsevered, or unknown markers", () => {
+    expect(parseReviewResult("no result line")).toBeNull()
     expect(
       parseReviewResult("READY_FOR_AGENT_RESULT: REVIEW_HAS_FINDINGS"),
     ).toBeNull()
@@ -257,8 +260,7 @@ describe("parseApplyReviewResult", () => {
     })
   })
 
-  it("rejects missing, duplicate, blank, high-deferred, or reviewing-only markers", () => {
-    expect(parseApplyReviewResult("no result line")).toBeNull()
+  it("accepts the last valid marker amid duplicates or trailing prose", () => {
     expect(
       parseApplyReviewResult(
         [
@@ -266,12 +268,16 @@ describe("parseApplyReviewResult", () => {
           "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: x",
         ].join("\n"),
       ),
-    ).toBeNull()
+    ).toEqual({ _tag: "cleared", reason: "x" })
     expect(
       parseApplyReviewResult(
         "READY_FOR_AGENT_RESULT: REVIEW_FIXED\ntrailing prose",
       ),
-    ).toBeNull()
+    ).toEqual({ _tag: "fixed" })
+  })
+
+  it("rejects missing, blank, high-deferred, or reviewing-only markers", () => {
+    expect(parseApplyReviewResult("no result line")).toBeNull()
     expect(
       parseApplyReviewResult("READY_FOR_AGENT_RESULT: REVIEW_DEFERRED:"),
     ).toBeNull()
@@ -352,8 +358,7 @@ describe("parseRerunAssessmentResult", () => {
     })
   })
 
-  it("rejects missing, duplicate, blank, non-final, or foreign markers", () => {
-    expect(parseRerunAssessmentResult("no result line")).toBeNull()
+  it("accepts the last valid marker amid duplicates or trailing prose", () => {
     expect(
       parseRerunAssessmentResult(
         [
@@ -361,12 +366,16 @@ describe("parseRerunAssessmentResult", () => {
           "READY_FOR_AGENT_RESULT: REVIEW_RERUN_REQUIRED: b",
         ].join("\n"),
       ),
-    ).toBeNull()
+    ).toEqual({ _tag: "rerun_required", reason: "b" })
     expect(
       parseRerunAssessmentResult(
         "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED: ok\ntrailing",
       ),
-    ).toBeNull()
+    ).toEqual({ _tag: "accepted", reason: "ok" })
+  })
+
+  it("rejects missing, blank, or foreign markers", () => {
+    expect(parseRerunAssessmentResult("no result line")).toBeNull()
     expect(
       parseRerunAssessmentResult(
         "READY_FOR_AGENT_RESULT: REVIEW_RERUN_NOT_REQUIRED:",
@@ -1839,11 +1848,11 @@ describe("review", () => {
       expect((error as ReviewResultError).message).toContain("REVIEW_FIXED")
     }))
 
-  it("fails when READY_FOR_AGENT_RESULT lines are duplicated", () =>
+  it("accepts the last valid marker when READY_FOR_AGENT_RESULT lines are duplicated", () =>
     withTemp(async (root) => {
       let continues = 0
-      const error = await run(
-        review(baseContext(root)).pipe(Effect.flip),
+      const outcome = await run(
+        review(baseContext(root)),
         stubOpencode({
           continueTurn: () => {
             continues += 1
@@ -1857,19 +1866,20 @@ describe("review", () => {
                 })
               : Effect.succeed({
                   sessionId: "ses_implement_session",
-                  assistantText: "READY_FOR_AGENT_RESULT: REVIEW_CLEAN",
+                  assistantText:
+                    "READY_FOR_AGENT_RESULT: REVIEW_CLEARED: false positive",
                 })
           },
         }),
       )
-      expect(error).toBeInstanceOf(ReviewResultError)
-      expect(continues).toBe(1)
+      expect(outcome).toEqual({ _tag: "cleared", reason: "false positive" })
+      expect(continues).toBe(2)
     }))
 
-  it("fails when READY_FOR_AGENT_RESULT is not the final line", () =>
+  it("accepts a valid marker even when trailing prose follows it", () =>
     withTemp(async (root) => {
-      const error = await run(
-        review(baseContext(root)).pipe(Effect.flip),
+      const outcome = await run(
+        review(baseContext(root)),
         stubOpencode({
           continueTurn: () =>
             Effect.succeed({
@@ -1879,7 +1889,7 @@ describe("review", () => {
             }),
         }),
       )
-      expect(error).toBeInstanceOf(ReviewResultError)
+      expect(outcome).toEqual({ _tag: "clean" })
     }))
 
   it("maps OpenCode exit failure", () =>
