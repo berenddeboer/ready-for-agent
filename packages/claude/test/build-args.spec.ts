@@ -1,4 +1,5 @@
-import { buildRunArgs } from "../src/index.js"
+import { PROMPT_ARGV_BYTE_LIMIT } from "@ready-for-agent/agent-backend"
+import { buildRunArgs, shouldUsePromptStdin } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 describe("buildRunArgs", () => {
@@ -102,6 +103,66 @@ describe("buildRunArgs", () => {
       command: "review",
     })
     expect(args.at(-1)).toBe("/review\nbody")
+  })
+
+  it("keeps a large single-line prompt off argv (ARG_MAX)", () => {
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    expect(prompt).not.toContain("\n")
+
+    const args = buildRunArgs({
+      prompt,
+      model: "sonnet",
+      thinkingLevel: "high",
+      sessionId: "11111111-1111-4111-8111-111111111111",
+    })
+
+    expect(shouldUsePromptStdin({ prompt })).toBe(true)
+    expect(args).toEqual([
+      "-p",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--dangerously-skip-permissions",
+      "--model",
+      "sonnet",
+      "--effort",
+      "high",
+      "--session-id",
+      "11111111-1111-4111-8111-111111111111",
+    ])
+    expect(args).not.toContain("--")
+  })
+
+  it("keeps prompts at the argv byte limit on argv", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT)
+
+    const args = buildRunArgs({
+      prompt,
+      model: "sonnet",
+      thinkingLevel: null,
+      sessionId: "11111111-1111-4111-8111-111111111111",
+    })
+
+    expect(shouldUsePromptStdin({ prompt })).toBe(false)
+    expect(args.at(-2)).toBe("--")
+    expect(args.at(-1)).toBe(prompt)
+  })
+
+  it("routes large command prompts to stdin including the /review prefix", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT)
+    // Body alone fits argv; the `/review\n` prefix pushes it over.
+    expect(shouldUsePromptStdin({ prompt })).toBe(false)
+    expect(shouldUsePromptStdin({ prompt, command: "/review" })).toBe(true)
+
+    const args = buildRunArgs({
+      prompt,
+      model: "sonnet",
+      thinkingLevel: null,
+      resumeSessionId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      command: "/review",
+    })
+    expect(args).not.toContain("--")
+    expect(args.at(-1)).toBe("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")
   })
 
   it("passes free-text Bedrock inference profile ids through as --model (issue #806)", () => {

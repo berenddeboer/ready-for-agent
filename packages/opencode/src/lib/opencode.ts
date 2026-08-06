@@ -101,8 +101,10 @@ export class Opencode {
             sessionId: input.sessionId,
             ...(input.command !== undefined ? { command: input.command } : {}),
           })
-          const promptOnStdin =
-            input.command === undefined && shouldUsePromptStdin(input.prompt)
+          const promptOnStdin = shouldUsePromptStdin(
+            input.prompt,
+            input.command,
+          )
           const commandName = input.command
 
           return runCliTurn({

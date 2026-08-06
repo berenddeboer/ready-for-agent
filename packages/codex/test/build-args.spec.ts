@@ -1,4 +1,5 @@
-import { buildRunArgs } from "../src/index.js"
+import { PROMPT_ARGV_BYTE_LIMIT } from "@ready-for-agent/agent-backend"
+import { buildRunArgs, shouldUsePromptStdin } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
 describe("buildRunArgs", () => {
@@ -80,6 +81,68 @@ describe("buildRunArgs", () => {
       command: "review",
     })
     expect(args.at(-1)).toBe("/review\nbody")
+  })
+
+  it("keeps a large single-line prompt off argv (ARG_MAX)", () => {
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    expect(prompt).not.toContain("\n")
+
+    expect(shouldUsePromptStdin({ prompt })).toBe(true)
+    expect(
+      buildRunArgs({
+        prompt,
+        model: "gpt-5.5",
+        thinkingLevel: "high",
+      }),
+    ).toEqual([
+      "exec",
+      "--json",
+      "--sandbox",
+      "danger-full-access",
+      "--model",
+      "gpt-5.5",
+      "-c",
+      "approval_policy=never",
+      "-c",
+      "model_reasoning_effort=high",
+      "--",
+      // `-` makes `codex exec` read the prompt from stdin.
+      "-",
+    ])
+  })
+
+  it("keeps single-line prompts at the argv byte limit on argv", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT)
+
+    expect(shouldUsePromptStdin({ prompt })).toBe(false)
+    const args = buildRunArgs({
+      prompt,
+      model: "gpt-5.5",
+      thinkingLevel: null,
+    })
+    expect(args.at(-2)).toBe("--")
+    expect(args.at(-1)).toBe(prompt)
+  })
+
+  it("routes large prompts to stdin on resume, keeping the thread id on argv", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT)
+    // Body alone fits argv; the `/review\n` prefix pushes it over.
+    expect(shouldUsePromptStdin({ prompt })).toBe(false)
+    expect(shouldUsePromptStdin({ prompt, command: "/review" })).toBe(true)
+
+    const args = buildRunArgs({
+      prompt,
+      model: "gpt-5.5",
+      thinkingLevel: null,
+      resumeSessionId: "019fab2c-9466-7432-ad16-9de23f94f2db",
+      command: "/review",
+    })
+    expect(args.slice(-4)).toEqual([
+      "resume",
+      "019fab2c-9466-7432-ad16-9de23f94f2db",
+      "--",
+      "-",
+    ])
   })
 
   it("does not treat a prompt of resume as the resume subcommand", () => {

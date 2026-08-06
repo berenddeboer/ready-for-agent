@@ -1,5 +1,33 @@
+import { exceedsPromptArgvLimit } from "@ready-for-agent/agent-backend"
+
 const commandPrefix = (command: string): string =>
   command.startsWith("/") ? command : `/${command}`
+
+/**
+ * `codex exec` reads the prompt from stdin when the positional prompt is `-`.
+ *
+ * Codex expands prompt-prefixed Agent Commands (ADR 0041) identically either
+ * way, so only size decides: past the argv byte limit argv would fail the spawn
+ * with an opaque platform error before Codex starts.
+ */
+const PROMPT_STDIN_PLACEHOLDER = "-"
+
+/**
+ * Compose the prompt body a turn sends, whether on argv or stdin.
+ */
+export const buildPromptBody = (input: {
+  readonly prompt: string
+  readonly command?: string
+}): string =>
+  input.command === undefined
+    ? input.prompt
+    : `${commandPrefix(input.command)}\n${input.prompt}`.trimEnd()
+
+/** True when the composed prompt body is too large for argv. */
+export const shouldUsePromptStdin = (input: {
+  readonly prompt: string
+  readonly command?: string
+}): boolean => exceedsPromptArgvLimit(buildPromptBody(input))
 
 /**
  * Build headless Codex argv for a new or resumed Agent Turn.
@@ -14,6 +42,10 @@ const commandPrefix = (command: string): string =>
  * exec-level flags so later turns stay unsandboxed, unattended, and JSONL.
  * Prompts are always after `--` so tokens like `resume` are never parsed as
  * subcommands.
+ *
+ * Past the argv byte limit the positional prompt becomes `-` and the adapter
+ * writes the body to the child's stdin instead
+ * (see {@link shouldUsePromptStdin}).
  */
 export const buildRunArgs = (input: {
   readonly prompt: string
@@ -24,10 +56,9 @@ export const buildRunArgs = (input: {
   readonly resumeSessionId?: string
   readonly command?: string
 }): ReadonlyArray<string> => {
-  const prompt =
-    input.command === undefined
-      ? input.prompt
-      : `${commandPrefix(input.command)}\n${input.prompt}`.trimEnd()
+  const prompt = shouldUsePromptStdin(input)
+    ? PROMPT_STDIN_PLACEHOLDER
+    : buildPromptBody(input)
 
   const args: string[] = [
     "exec",

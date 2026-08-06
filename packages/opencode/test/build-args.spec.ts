@@ -1,3 +1,4 @@
+import { PROMPT_ARGV_BYTE_LIMIT } from "@ready-for-agent/agent-backend"
 import {
   buildRunArgs,
   joinOpenCodeMessageArgs,
@@ -120,6 +121,96 @@ describe("buildRunArgs", () => {
       expect(messageTokensFromArgs(args)).toEqual(message)
       expect(args).not.toContain(prompt)
     }
+  })
+
+  it("keeps a large single-line prompt off argv (ARG_MAX)", () => {
+    // A pasted stack trace or inlined diff with no line breaks: newline
+    // detection alone would leave it on argv and fail the spawn.
+    const prompt = `Fix ${"x".repeat(PROMPT_ARGV_BYTE_LIMIT)}`
+    expect(prompt).not.toContain("\n")
+
+    const args = buildRunArgs({
+      prompt,
+      cwd: "/worktrees/repository",
+      model: "anthropic/claude-sonnet-4-5",
+      thinkingLevel: "high",
+    })
+
+    expect(shouldUsePromptStdin(prompt)).toBe(true)
+    expect(messageTokensFromArgs(args)).toEqual([])
+    expect(args).toEqual([
+      "run",
+      "--auto",
+      "--format",
+      "json",
+      "--dir",
+      "/worktrees/repository",
+      "-m",
+      "anthropic/claude-sonnet-4-5",
+      "--variant",
+      "high",
+    ])
+  })
+
+  it("keeps single-line prompts at the argv byte limit on argv", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT)
+
+    const args = buildRunArgs({
+      prompt,
+      cwd: "/worktrees/repository",
+      model: "anthropic/claude-sonnet-4-5",
+      thinkingLevel: "high",
+    })
+
+    expect(shouldUsePromptStdin(prompt)).toBe(false)
+    expect(messageTokensFromArgs(args)).toEqual([prompt])
+  })
+
+  it("keeps a large command prompt off argv but retains --command", () => {
+    const prompt = "x".repeat(PROMPT_ARGV_BYTE_LIMIT + 1)
+
+    const args = buildRunArgs({
+      prompt,
+      cwd: "/worktrees/repository",
+      model: "anthropic/claude-sonnet-4-5",
+      thinkingLevel: "high",
+      sessionId: "ses_review",
+      command: "/review",
+    })
+
+    expect(shouldUsePromptStdin(prompt, "/review")).toBe(true)
+    expect(args).toEqual([
+      "run",
+      "--auto",
+      "--format",
+      "json",
+      "--dir",
+      "/worktrees/repository",
+      "-m",
+      "anthropic/claude-sonnet-4-5",
+      "--variant",
+      "high",
+      "--session",
+      "ses_review",
+      "--command",
+      "review",
+    ])
+    expect(messageTokensFromArgs(args)).toEqual([])
+  })
+
+  it("keeps multi-line command prompts tokenized on argv", () => {
+    // Commands read `$ARGUMENTS`; only the argv byte limit moves them to stdin.
+    const prompt = "first\nsecond"
+    expect(shouldUsePromptStdin(prompt, "/review")).toBe(false)
+
+    const args = buildRunArgs({
+      prompt,
+      cwd: "/worktrees/repository",
+      model: "anthropic/claude-sonnet-4-5",
+      thinkingLevel: "high",
+      command: "/review",
+    })
+    expect(messageTokensFromArgs(args)).toEqual(["first", "second"])
   })
 
   it("includes session for continue and protects the prompt with --", () => {
