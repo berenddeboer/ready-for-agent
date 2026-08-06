@@ -85,6 +85,7 @@ Light (`:root`, `[data-theme="light"]`):
 | `--line-ghost` | `rgb(21 21 21 / 0.12)` | hairlines, ghost borders |
 | `--signal` | `#ffd21c` | accent: selection, hover, kicker tags (= Queue yellow) |
 | `--merged-halo` | `transparent` | halo behind Merged black (not needed on white) |
+| `--warn-ink` | `#7c3a00` | non-fatal warning text (Agent Backend status/preview) |
 
 Dark (`[data-theme="dark"]`):
 
@@ -100,6 +101,7 @@ Dark (`[data-theme="dark"]`):
 | `--line-ghost` | `rgb(242 243 241 / 0.14)` |
 | `--signal` | `#ffd21c` (unchanged) |
 | `--merged-halo` | `rgb(242 243 241 / 0.85)` |
+| `--warn-ink` | `#fcd34d` |
 
 **The Merged halo rule.** Merged black `#151515` vanishes on dark paper, so
 every Merged-black element — roundel, nameboard edge, ticket line bar, stamp,
@@ -110,6 +112,15 @@ compensation; everything else is a straight token swap.
 **Lane bed is theme-invariant.** `--lane-bed: #dedbd2` (warm grey column fill
 under the colored nameboards) is the same in light and dark — the Kanban
 keeps the light-mode platform grey rather than going lights-out.
+
+**The warning-ink rule.** Non-fatal warning text uses `--warn-ink` — burnt
+end of the warning ramp on light, pale end on dark — and both ends clear
+4.5:1 on every surface a warning lands on (paper, panel, dialog stage,
+plate). Warning color comes from the theme token, **never** from a Tailwind
+`dark:` variant: `dark:` compiles to `prefers-color-scheme`, so a light
+Harness surface under a dark OS preference would paint the pale ink on pale
+plate (#830). Like the plate group, `--warn-ink` is re-locked to its light
+value inside `[data-theme="dark"] [data-kanban-surface]`.
 
 ### 2.3 Masthead (dark supergraphic band in **both** themes)
 
@@ -518,6 +529,12 @@ Shared shell (native `<dialog>`):
   accent-color `--signal`.
 - **Status rows** (backend health): plate-fill inset boxes (ink border, top
   highlight), mono status text; Recheck actions use mini plates.
+  **Non-fatal warning lines** inside a status row or status label: readable
+  body copy (display ~0.82rem/600, not inherited mono microcopy) in
+  `--warn-ink` with a 2px left rule in the same ink, so the warning state is
+  structural as well as colored (§7). One shared recipe
+  (`ui.dialogStatusWarning`, rendered by `AgentBackendWarnings`) covers every
+  site; `role="status"` and the non-fatal semantics are behavior.
 - **Footer**: hairline top border, `--panel` fill, right-aligned — **all
   buttons** are riveted stamped plates (Cancel + Save share the same plate
   recipe as Recheck / mini plates; no solid-ink primary). Save pending =
@@ -658,6 +675,9 @@ A permanent fixture at the **foot of the Queue platform**, always rendered
 - On-lane text colors are fixed pairs (§2.1) — do not derive them.
 - Body text contrast ≥ 4.5:1 in both themes; mono micro-labels ≥ 3:1
   (large/short-label exception), which the token pairs satisfy.
+- Text color follows the Harness theme token, never a Tailwind `dark:`
+  (`prefers-color-scheme`) variant — the OS preference and the visible surface
+  can disagree, which breaks contrast (§2.2 warning-ink rule).
 - All interactive elements keep the global 2px focus outline; on the
   masthead it flips to `--signal`.
 - Existing ARIA semantics (tabs, lane switcher `aria-pressed`, `aria-live`

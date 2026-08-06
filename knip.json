@@ -15,14 +15,14 @@
         "src/router.tsx",
         "src/server.ts",
         "src/styles.css",
-        "test/**/*.test.ts",
+        "test/**/*.test.{ts,tsx}",
         "playwright.config.ts",
         "e2e/steps/**/*.ts",
         "e2e/support/**/*.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
-        "test/**/*.ts",
+        "test/**/*.{ts,tsx}",
         "e2e/**/*.{ts,tsx}",
         "playwright.config.ts"
       ]

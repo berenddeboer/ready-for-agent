@@ -20,6 +20,7 @@ import {
   JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
 } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
 import { formatAgentBackendStatusLabel } from "../agent-backend-status-label.js"
+import { AgentBackendWarnings } from "../agent-backend-warnings.js"
 import {
   type AgentModelOption,
   CLAUDE_AGENT_BACKEND_ID,
@@ -2257,16 +2258,9 @@ function RepositoryCard({
                       // Reason text is on the Banner below when preview fails.
                     })}
                   </p>
-                  {previewError === null &&
-                    previewWarnings.map((warning) => (
-                      <p
-                        key={warning}
-                        className="m-0 mt-1 text-sm text-amber-800 dark:text-amber-200"
-                        role="status"
-                      >
-                        {warning}
-                      </p>
-                    ))}
+                  {previewError === null && (
+                    <AgentBackendWarnings warnings={previewWarnings} />
+                  )}
                 </div>
               )}
 
