@@ -2730,12 +2730,88 @@ describe("GraphQL API", () => {
     expect(rechecked).toEqual(["claude"])
   })
 
+  test("exposes Claude Code Bedrock configuration mode on agentBackends without process env", async () => {
+    // Issue #828: CLAUDE_CODE_USE_BEDROCK=1 renames the selectable Claude option
+    // and sets configurationMode; browser never sees raw env or secrets.
+    const firstParty = await createGraphqlApi(runtime, {
+      environment: {},
+    }).fetch(
+      graphqlRequest({
+        query: `query {
+          agentBackends { id label configurationMode }
+        }`,
+      }),
+    )
+    const firstPartyJson = (await firstParty.json()) as {
+      data: {
+        agentBackends: ReadonlyArray<{
+          id: string
+          label: string
+          configurationMode: string | null
+        }>
+      }
+    }
+    expect(
+      firstPartyJson.data.agentBackends.find((entry) => entry.id === "claude"),
+    ).toEqual({
+      id: "claude",
+      label: "Claude Code",
+      configurationMode: null,
+    })
+    expect(
+      firstPartyJson.data.agentBackends.find(
+        (entry) => entry.id === "opencode",
+      ),
+    ).toEqual({
+      id: "opencode",
+      label: "OpenCode",
+      configurationMode: null,
+    })
+    // Response must not echo process environment keys or secret material.
+    expect(JSON.stringify(firstPartyJson)).not.toContain(
+      "CLAUDE_CODE_USE_BEDROCK",
+    )
+    expect(JSON.stringify(firstPartyJson)).not.toContain("AWS_SECRET")
+
+    const bedrock = await createGraphqlApi(runtime, {
+      environment: {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        AWS_SECRET_ACCESS_KEY: "must-not-leak",
+      },
+    }).fetch(
+      graphqlRequest({
+        query: `query {
+          agentBackends { id label configurationMode }
+        }`,
+      }),
+    )
+    const bedrockJson = (await bedrock.json()) as {
+      data: {
+        agentBackends: ReadonlyArray<{
+          id: string
+          label: string
+          configurationMode: string | null
+        }>
+      }
+    }
+    expect(
+      bedrockJson.data.agentBackends.find((entry) => entry.id === "claude"),
+    ).toEqual({
+      id: "claude",
+      label: "Claude Code Bedrock",
+      configurationMode: "bedrock",
+    })
+    expect(JSON.stringify(bedrockJson)).not.toContain("CLAUDE_CODE_USE_BEDROCK")
+    expect(JSON.stringify(bedrockJson)).not.toContain("must-not-leak")
+    expect(JSON.stringify(bedrockJson)).not.toContain("AWS_SECRET")
+  })
+
   test("propagates Bedrock profile catalog and discovery warnings on status, preview, and recheck", async () => {
     // Issues #820 / #821: profile IDs/ARNs, friendly names, kinds, and non-fatal
     // warnings pass through without reinterpretation.
     const bedrockProvider = { id: "bedrock", label: "Amazon Bedrock" }
     const warning =
-      "Could not list Amazon Bedrock inference profiles: access denied. Free-text Agent Model entry remains available."
+      "Could not list Amazon Bedrock inference profiles: access denied. Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend."
     const applicationArn =
       "arn:aws:bedrock:us-west-2:123456789012:application-inference-profile/my-org-sonnet"
     const profileModels = [

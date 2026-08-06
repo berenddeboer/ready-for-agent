@@ -117,6 +117,14 @@ type SessionTokens {
 type AgentBackendInfo {
   id: String!
   label: String!
+  """
+  Operator-facing configuration mode for Settings. `bedrock` when the harness
+  process enables Claude Code Bedrock mode (`CLAUDE_CODE_USE_BEDROCK=1`); null
+  when the backend has no mode variants or is in its default mode. Driven by
+  process configuration, not inspect success — does not expose env values or
+  secrets to the browser.
+  """
+  configurationMode: String
 }
 
 """

@@ -288,7 +288,7 @@ describe("ActiveAgentBackend multi-backend registry", () => {
     // Issue #820: non-fatal Bedrock discovery warnings travel with Ready status.
     const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
     const warning =
-      "Could not list Amazon Bedrock inference profiles: access denied. Free-text Agent Model entry remains available."
+      "Could not list Amazon Bedrock inference profiles: access denied. Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend."
     const profiles = [
       {
         id: "us.anthropic.claude-sonnet-4-6",

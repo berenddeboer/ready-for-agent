@@ -26,10 +26,14 @@ import { createClient } from "@ready-for-agent/graphql-client"
 import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
 import {
   type AgentModelOption,
+  CLAUDE_AGENT_BACKEND_ID,
   allowsClaudeFreeTextModels,
+  blocksClaudeBedrockModelSave,
+  claudeBedrockModelSaveBlockReason,
   findCatalogModel,
   formatAgentModelLabel,
   formatVariantLabel,
+  isClaudeBedrockConfigurationMode,
   isCustomAgentModelValue,
   isUnavailableCatalogModel,
   reconcileVariantForModel,
@@ -100,10 +104,16 @@ const agentBackendStatusQuery = {
       agentBackendStatuses: agentBackendStatusSelection,
       // Legacy singular surface for the harness default (derived server-side).
       agentBackendStatus: agentBackendStatusSelection,
-      agentBackends: { id: true, label: true },
+      agentBackends: { id: true, label: true, configurationMode: true },
     })
     return result
   },
+}
+
+type AgentBackendListEntry = {
+  id: string
+  label: string
+  configurationMode: string | null
 }
 
 type AgentBackendStatusRow = {
@@ -432,38 +442,40 @@ function SettingsChrome() {
       type BackendStatusQueryData = {
         agentBackendStatuses: readonly AgentBackendStatusRow[]
         agentBackendStatus: AgentBackendStatusRow
-        agentBackends: readonly { id: string; label: string }[]
+        agentBackends: readonly AgentBackendListEntry[]
       }
-      queryClient.setQueryData<BackendStatusQueryData>(
+      const current = queryClient.getQueryData<BackendStatusQueryData>(
         agentBackendStatusQuery.queryKey,
-        (current) => {
-          if (current == null) {
-            return {
-              agentBackendStatuses: [rechecked],
-              agentBackendStatus: rechecked,
-              agentBackends: [],
-            }
-          }
-          const priorStatuses = current.agentBackendStatuses ?? []
-          const nextStatuses = priorStatuses.some(
-            (row) => row.backend.id === backendId,
-          )
-            ? priorStatuses.map((row) =>
-                row.backend.id === backendId ? rechecked : row,
-              )
-            : [...priorStatuses, rechecked]
-          const nextDefault =
-            backendId ===
-            (config.data?.selectedAgentBackend ?? defaultBackendId)
-              ? rechecked
-              : (current.agentBackendStatus ?? rechecked)
-          return {
-            ...current,
-            agentBackendStatuses: nextStatuses,
-            agentBackendStatus: nextDefault,
-          }
-        },
       )
+      if (current == null) {
+        // Never seed a partial cache without selectable-backend mode metadata —
+        // an empty list would treat Claude as free-text and drop Bedrock Save
+        // gates (#828). Refetch the combined status + backends query instead.
+        void queryClient.invalidateQueries({
+          queryKey: agentBackendStatusQuery.queryKey,
+        })
+      } else {
+        queryClient.setQueryData<BackendStatusQueryData>(
+          agentBackendStatusQuery.queryKey,
+          {
+            ...current,
+            agentBackendStatuses: (() => {
+              const priorStatuses = current.agentBackendStatuses ?? []
+              return priorStatuses.some((row) => row.backend.id === backendId)
+                ? priorStatuses.map((row) =>
+                    row.backend.id === backendId ? rechecked : row,
+                  )
+                : [...priorStatuses, rechecked]
+            })(),
+            agentBackendStatus:
+              backendId ===
+              (config.data?.selectedAgentBackend ?? defaultBackendId)
+                ? rechecked
+                : (current.agentBackendStatus ?? rechecked),
+            // Preserve agentBackends (configurationMode) from the prior fetch.
+          },
+        )
+      }
       // Global models query is the harness-default catalog only.
       if (
         backendId === (config.data?.selectedAgentBackend ?? defaultBackendId)
@@ -653,39 +665,40 @@ function SettingsChrome() {
   const savedAgentBackend = config.data?.selectedAgentBackend ?? "opencode"
   const backendChanging = selectedAgentBackend !== savedAgentBackend
 
-  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    // Live gate can flip while a draft backend change is staged; select may
-    // already be disabled — still block submit (incl. Enter).
-    if (backendChangeBlocked && selectedAgentBackend !== savedAgentBackend) {
-      return
-    }
-    const parsedMaxSessions = Number(maxConcurrentAgentTurns)
-    const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
-    updateConfig.mutate({
-      selectedAgentBackend,
-      defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
-      defaultThinkingLevel:
-        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel.trim(),
-      reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
-      reviewThinkingLevel:
-        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
-      maxConcurrentAgentTurns: parsedMaxSessions,
-      maxConcurrentWorkItems: parsedMaxWorkItems,
-    })
-  }
-
   const catalogModels: readonly AgentModelOption[] | undefined = backendChanging
     ? (previewModels ?? undefined)
     : models.data
   const modelIds = (catalogModels ?? []).map((model) => model.id)
   // Draft backend while changing; otherwise the saved/selected harness default.
   const modelBackendId = selectedAgentBackend
-  const claudeFreeTextModels = allowsClaudeFreeTextModels(modelBackendId)
+  // configurationMode comes only from agentBackends on the status query. Until
+  // that list successfully includes Claude, treat mode as unknown — fail closed
+  // (no free-text, Save blocked) so Recheck/partial cache cannot re-enable
+  // free-text under Bedrock process env (#828 review).
+  const agentBackendsList = backendStatus.data?.agentBackends
+  const claudeBackendListEntry = agentBackendsList?.find(
+    (backend) => backend.id === CLAUDE_AGENT_BACKEND_ID,
+  )
+  const claudeConfigurationModeUnresolved =
+    modelBackendId === CLAUDE_AGENT_BACKEND_ID &&
+    (backendStatus.isPending ||
+      backendStatus.isError ||
+      agentBackendsList === undefined ||
+      claudeBackendListEntry === undefined)
+  const modelConfigurationMode =
+    (agentBackendsList ?? []).find((backend) => backend.id === modelBackendId)
+      ?.configurationMode ?? null
+  const claudeFreeTextModels =
+    !claudeConfigurationModeUnresolved &&
+    allowsClaudeFreeTextModels(modelBackendId, modelConfigurationMode)
+  const claudeBedrockStrict =
+    !claudeConfigurationModeUnresolved &&
+    isClaudeBedrockConfigurationMode(modelBackendId, modelConfigurationMode)
   const buildVariants = thinkingLevelsForModel(
     modelBackendId,
     catalogModels,
     defaultModel,
+    modelConfigurationMode,
   )
   const reviewThinkingLevelSourceModel =
     reviewModel.length > 0 ? reviewModel : defaultModel
@@ -693,25 +706,29 @@ function SettingsChrome() {
     modelBackendId,
     catalogModels,
     reviewThinkingLevelSourceModel,
+    modelConfigurationMode,
   )
   // Catalog-absent models block Save only for catalog-constrained backends.
-  // Claude free-text (Bedrock profile IDs/ARNs, custom ids) is allowed (#806).
+  // First-party Claude free-text remains allowed (#806); Bedrock is strict (#828).
   const hasUnavailableBuildModel = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: defaultModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
   const hasUnavailableReviewModel = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: reviewModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
-  // Same catalog-gate as Save: Claude free-text is never "unavailable".
+  // Same catalog-gate as Save: first-party Claude free-text is never "unavailable".
   const buildEffortSourceUnavailable = hasUnavailableBuildModel
   const reviewEffortSourceUnavailable = isUnavailableCatalogModel({
     backendId: modelBackendId,
     modelId: reviewThinkingLevelSourceModel,
     catalogModelIds: modelIds,
+    configurationMode: modelConfigurationMode,
   })
   const hasCustomBuildVariant =
     defaultThinkingLevel.length > 0 &&
@@ -742,6 +759,114 @@ function SettingsChrome() {
     (backendChanging
       ? previewPending
       : models.isPending || backendStatus.isPending)
+  const discoveryWarningsForModels = backendChanging
+    ? previewWarnings
+    : (defaultStatus?.warnings ??
+      statuses.find((row) => row.backend.id === modelBackendId)?.warnings ??
+      [])
+  const catalogFailed =
+    !backendChanging &&
+    !modelsLoading &&
+    (models.isError || backendStatus.isError)
+  const catalogLoadingForBedrock =
+    modelsLoading ||
+    modelsDisabled ||
+    (!catalogFailed && catalogModels === undefined)
+  const blockSaveForBedrockBuildModel = blocksClaudeBedrockModelSave({
+    backendId: modelBackendId,
+    configurationMode: modelConfigurationMode,
+    catalogLoading: catalogLoadingForBedrock,
+    catalogFailed,
+    catalogModels,
+    modelId: defaultModel,
+    requireSelection: true,
+  })
+  const blockSaveForBedrockReviewModel =
+    claudeBedrockStrict &&
+    reviewModel.length > 0 &&
+    blocksClaudeBedrockModelSave({
+      backendId: modelBackendId,
+      configurationMode: modelConfigurationMode,
+      catalogLoading: catalogLoadingForBedrock,
+      catalogFailed,
+      catalogModels,
+      modelId: reviewModel,
+      requireSelection: false,
+    })
+  const bedrockBuildModelBlockReason = claudeBedrockModelSaveBlockReason({
+    backendId: modelBackendId,
+    configurationMode: modelConfigurationMode,
+    catalogLoading: catalogLoadingForBedrock,
+    catalogFailed,
+    catalogModels,
+    modelId: defaultModel,
+    requireSelection: true,
+    discoveryWarnings: discoveryWarningsForModels,
+  })
+  const bedrockReviewModelBlockReason =
+    reviewModel.length > 0
+      ? claudeBedrockModelSaveBlockReason({
+          backendId: modelBackendId,
+          configurationMode: modelConfigurationMode,
+          catalogLoading: catalogLoadingForBedrock,
+          catalogFailed,
+          catalogModels,
+          modelId: reviewModel,
+          requireSelection: false,
+          discoveryWarnings: discoveryWarningsForModels,
+        })
+      : null
+  const bedrockModelSelectDisabled =
+    modelsDisabled ||
+    (claudeBedrockStrict &&
+      (catalogLoadingForBedrock ||
+        catalogFailed ||
+        catalogModels === undefined ||
+        catalogModels.length === 0))
+  // Single Save gate used by both the submit button and form onSubmit so Enter
+  // cannot bypass a disabled Save control (issue #828 review).
+  const harnessSettingsSaveBlocked =
+    config.isPending ||
+    config.isError ||
+    modelsLoading ||
+    updateConfig.isPending ||
+    // Claude mode unknown (pending/error/missing agentBackends entry) — fail closed.
+    claudeConfigurationModeUnresolved ||
+    (backendChangeBlocked && backendChanging) ||
+    (backendChanging && previewError !== null) ||
+    blockSaveForBedrockBuildModel ||
+    blockSaveForBedrockReviewModel ||
+    (defaultModel.length > 0 && hasUnavailableBuildModel) ||
+    (reviewModel.length > 0 &&
+      hasUnavailableReviewModel &&
+      !allowsClaudeFreeTextModels(modelBackendId, modelConfigurationMode)) ||
+    (!backendChanging &&
+      !claudeBedrockStrict &&
+      defaultModel.trim().length === 0) ||
+    (claudeBedrockStrict && defaultModel.trim().length === 0)
+
+  const saveSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    // Live gates can flip while a draft is staged; disabled controls do not
+    // stop implicit form submit (Enter) — re-check every Save gate here.
+    if (harnessSettingsSaveBlocked) {
+      return
+    }
+    const parsedMaxSessions = Number(maxConcurrentAgentTurns)
+    const parsedMaxWorkItems = Number(maxConcurrentWorkItems)
+    updateConfig.mutate({
+      selectedAgentBackend,
+      defaultModel: defaultModel.trim() === "" ? null : defaultModel.trim(),
+      defaultThinkingLevel:
+        defaultThinkingLevel.trim() === "" ? null : defaultThinkingLevel.trim(),
+      reviewModel: reviewModel.trim() === "" ? null : reviewModel.trim(),
+      reviewThinkingLevel:
+        reviewThinkingLevel.trim() === "" ? null : reviewThinkingLevel.trim(),
+      maxConcurrentAgentTurns: parsedMaxSessions,
+      maxConcurrentWorkItems: parsedMaxWorkItems,
+    })
+  }
+
   const recheckBusy =
     recheckBackend.isPending ||
     recheckAllPending ||
@@ -1145,6 +1270,7 @@ function SettingsChrome() {
                             modelBackendId,
                             catalogModels,
                             nextModel,
+                            modelConfigurationMode,
                           )
                           setDefaultVariant((current) =>
                             reconcileVariantForModel(current, nextVariants),
@@ -1197,8 +1323,8 @@ function SettingsChrome() {
                       )}
                       <span className={ui.dialogFieldHint}>
                         Catalog alias (haiku, sonnet, opus, fable) or any
-                        Claude-accepted model string (Bedrock inference profile
-                        ID/ARN). Used for implement and other build steps.
+                        Claude-accepted model string. Used for implement and
+                        other build steps.
                       </span>
                     </label>
                   ) : (
@@ -1215,6 +1341,7 @@ function SettingsChrome() {
                             modelBackendId,
                             catalogModels,
                             nextModel,
+                            modelConfigurationMode,
                           )
                           setDefaultVariant((current) =>
                             reconcileVariantForModel(current, nextVariants),
@@ -1225,17 +1352,31 @@ function SettingsChrome() {
                             )
                           }
                         }}
-                        required={!backendChanging}
-                        disabled={modelsDisabled}
+                        required={!backendChanging || claudeBedrockStrict}
+                        disabled={
+                          claudeBedrockStrict
+                            ? bedrockModelSelectDisabled
+                            : modelsDisabled
+                        }
                       >
                         {defaultModel.length === 0 && (
                           <option value="">
-                            {previewPending
+                            {modelsLoading || previewPending
                               ? "Loading catalog…"
-                              : "Select a build model"}
+                              : claudeBedrockStrict &&
+                                  catalogModels !== undefined &&
+                                  catalogModels.length === 0
+                                ? "No Bedrock profiles available"
+                                : claudeBedrockStrict
+                                  ? "Select a Bedrock inference profile"
+                                  : "Select a build model"}
                           </option>
                         )}
-                        {hasUnavailableBuildModel && (
+                        {(hasUnavailableBuildModel ||
+                          (claudeBedrockStrict &&
+                            defaultModel.length > 0 &&
+                            catalogModels !== undefined &&
+                            !modelIds.includes(defaultModel))) && (
                           <option value={defaultModel}>
                             {defaultModel} (not in Agent Model catalog)
                           </option>
@@ -1246,9 +1387,17 @@ function SettingsChrome() {
                           </option>
                         ))}
                       </select>
-                      <span className={ui.dialogFieldHint}>
-                        Used for implement and other build steps.
-                      </span>
+                      {bedrockBuildModelBlockReason !== null ? (
+                        <span className={ui.dialogFieldHint} role="status">
+                          {bedrockBuildModelBlockReason}
+                        </span>
+                      ) : (
+                        <span className={ui.dialogFieldHint}>
+                          {claudeBedrockStrict
+                            ? "Choose an active Anthropic-backed Bedrock inference profile for the resolved AWS region. Used for implement and other build steps."
+                            : "Used for implement and other build steps."}
+                        </span>
+                      )}
                     </label>
                   )}
 
@@ -1319,6 +1468,7 @@ function SettingsChrome() {
                             modelBackendId,
                             catalogModels,
                             nextModel.length > 0 ? nextModel : defaultModel,
+                            modelConfigurationMode,
                           )
                           setReviewVariant((current) =>
                             reconcileVariantForModel(current, nextVariants),
@@ -1370,7 +1520,11 @@ function SettingsChrome() {
                         className={cx(ui.dialogInput, ui.dialogInputMono)}
                         name="reviewModel"
                         value={reviewModel}
-                        disabled={modelsDisabled}
+                        disabled={
+                          claudeBedrockStrict
+                            ? bedrockModelSelectDisabled
+                            : modelsDisabled
+                        }
                         onChange={(event) => {
                           const nextModel = event.target.value
                           setReviewModel(nextModel)
@@ -1378,6 +1532,7 @@ function SettingsChrome() {
                             modelBackendId,
                             catalogModels,
                             nextModel.length > 0 ? nextModel : defaultModel,
+                            modelConfigurationMode,
                           )
                           setReviewVariant((current) =>
                             reconcileVariantForModel(current, nextVariants),
@@ -1385,7 +1540,11 @@ function SettingsChrome() {
                         }}
                       >
                         <option value="">Same as build model</option>
-                        {hasUnavailableReviewModel && (
+                        {(hasUnavailableReviewModel ||
+                          (claudeBedrockStrict &&
+                            reviewModel.length > 0 &&
+                            catalogModels !== undefined &&
+                            !modelIds.includes(reviewModel))) && (
                           <option value={reviewModel}>
                             {reviewModel} (not in Agent Model catalog)
                           </option>
@@ -1396,10 +1555,17 @@ function SettingsChrome() {
                           </option>
                         ))}
                       </select>
-                      <span className={ui.dialogFieldHint}>
-                        Used only for the review step. Empty uses the build
-                        model.
-                      </span>
+                      {bedrockReviewModelBlockReason !== null ? (
+                        <span className={ui.dialogFieldHint} role="status">
+                          {bedrockReviewModelBlockReason}
+                        </span>
+                      ) : (
+                        <span className={ui.dialogFieldHint}>
+                          {claudeBedrockStrict
+                            ? "Optional review profile from the same Bedrock catalog. Empty uses the build model."
+                            : "Used only for the review step. Empty uses the build model."}
+                        </span>
+                      )}
                     </label>
                   )}
 
@@ -1573,19 +1739,7 @@ function SettingsChrome() {
               type="submit"
               className={ui.platePrimary}
               aria-busy={updateConfig.isPending || undefined}
-              disabled={
-                config.isPending ||
-                config.isError ||
-                modelsLoading ||
-                updateConfig.isPending ||
-                (backendChangeBlocked && backendChanging) ||
-                (backendChanging && previewError !== null) ||
-                // Empty build model allowed on backend change (first-run style).
-                // Non-empty catalog-constrained backends must stay in catalog;
-                // Claude free-text custom ids are allowed (#806).
-                (defaultModel.length > 0 && hasUnavailableBuildModel) ||
-                (!backendChanging && defaultModel.trim().length === 0)
-              }
+              disabled={harnessSettingsSaveBlocked}
             >
               {updateConfig.isPending ? "Saving…" : "Save settings"}
             </button>

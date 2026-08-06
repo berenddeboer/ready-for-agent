@@ -64,14 +64,27 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("usesPreviewCatalog && !previewPending")
   })
 
-  test("override preview requests discovery warnings and keeps free-text models", () => {
-    // Issue #820: Repository Settings shows Bedrock catalog warnings; free-text stays.
+  test("override preview requests discovery warnings and applies Bedrock strict select (issue #828)", () => {
+    // Issue #820 warnings remain; #828 makes Bedrock mode catalog-strict for repos too.
     const source = indexSource()
     expect(source).toContain("warnings: true")
     expect(source).toContain("previewWarnings")
     expect(source).toContain("setPreviewWarnings")
     expect(source).toContain("allowsClaudeFreeTextModels")
     expect(source).toContain("claudeFreeTextModels")
+    expect(source).toContain("configurationMode: true")
+    expect(source).toContain("claudeBedrockStrict")
+    expect(source).toContain("blocksClaudeBedrockModelSave")
+    expect(source).toContain("bedrockBuildModelBlockReason")
+    expect(source).toContain("No Bedrock profiles available")
+    expect(source).toContain("discovered Bedrock inference profile")
+    // Disabled button and form onSubmit share one gate (Enter cannot bypass).
+    expect(source).toContain("repositorySettingsSaveBlocked")
+    expect(source).toContain("if (repositorySettingsSaveBlocked)")
+    expect(source).toContain("disabled={repositorySettingsSaveBlocked}")
+    // Fail closed while agentBackends / configurationMode is unknown for Claude.
+    expect(source).toContain("claudeConfigurationModeUnresolved")
+    expect(source).toContain("agentBackendsModeReady")
   })
 
   test("presents friendly Bedrock profile names and kinds while persisting executable ids (issue #821)", () => {

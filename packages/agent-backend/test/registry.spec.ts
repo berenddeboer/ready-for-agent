@@ -1,12 +1,17 @@
 import {
   AGENT_BACKEND_IDS,
+  CLAUDE_CODE_BEDROCK_CONFIGURATION_MODE,
+  CLAUDE_CODE_BEDROCK_LABEL,
+  CLAUDE_CODE_LABEL,
   agentBackendLabel,
   capabilitySupported,
   defaultAgentBackendId,
   getBuiltInAgentBackend,
   isAgentDependentLifecycleStep,
   isAgentFreeLifecycleStep,
+  isClaudeCodeBedrockConfigurationMode,
   listBuiltInAgentBackends,
+  listSelectableAgentBackendInfos,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -36,8 +41,56 @@ describe("Agent Backend registry", () => {
     expect(agentBackendLabel(AGENT_BACKEND_IDS.opencode)).toBe("OpenCode")
     expect(agentBackendLabel(AGENT_BACKEND_IDS.grok)).toBe("Grok Build")
     expect(agentBackendLabel(AGENT_BACKEND_IDS.codex)).toBe("Codex Build")
-    expect(agentBackendLabel(AGENT_BACKEND_IDS.claude)).toBe("Claude Code")
+    expect(agentBackendLabel(AGENT_BACKEND_IDS.claude)).toBe(CLAUDE_CODE_LABEL)
     expect(agentBackendLabel("unknown-backend")).toBe("unknown-backend")
+  })
+
+  it("selects Claude Code Bedrock configuration mode only for CLAUDE_CODE_USE_BEDROCK=1", () => {
+    // Issue #828: exact value "1" only; browser never reads process env.
+    expect(isClaudeCodeBedrockConfigurationMode({})).toBe(false)
+    expect(
+      isClaudeCodeBedrockConfigurationMode({ CLAUDE_CODE_USE_BEDROCK: "0" }),
+    ).toBe(false)
+    expect(
+      isClaudeCodeBedrockConfigurationMode({ CLAUDE_CODE_USE_BEDROCK: "true" }),
+    ).toBe(false)
+    expect(
+      isClaudeCodeBedrockConfigurationMode({ CLAUDE_CODE_USE_BEDROCK: "1" }),
+    ).toBe(true)
+  })
+
+  it("lists Claude Code Bedrock label and mode when Bedrock configuration is enabled", () => {
+    const firstParty = listSelectableAgentBackendInfos({})
+    const claudeFirstParty = firstParty.find(
+      (entry) => entry.id === AGENT_BACKEND_IDS.claude,
+    )
+    expect(claudeFirstParty).toEqual({
+      id: AGENT_BACKEND_IDS.claude,
+      label: CLAUDE_CODE_LABEL,
+      configurationMode: null,
+    })
+    expect(
+      firstParty.find((entry) => entry.id === AGENT_BACKEND_IDS.opencode),
+    ).toEqual({
+      id: AGENT_BACKEND_IDS.opencode,
+      label: "OpenCode",
+      configurationMode: null,
+    })
+
+    const bedrock = listSelectableAgentBackendInfos({
+      CLAUDE_CODE_USE_BEDROCK: "1",
+    })
+    expect(
+      bedrock.find((entry) => entry.id === AGENT_BACKEND_IDS.claude),
+    ).toEqual({
+      id: AGENT_BACKEND_IDS.claude,
+      label: CLAUDE_CODE_BEDROCK_LABEL,
+      configurationMode: CLAUDE_CODE_BEDROCK_CONFIGURATION_MODE,
+    })
+    // Other backends stay unlabeled by Bedrock mode.
+    expect(
+      bedrock.find((entry) => entry.id === AGENT_BACKEND_IDS.grok)?.label,
+    ).toBe("Grok Build")
   })
 
   it("declares typed capabilities for OpenCode, Grok Build, Codex Build, and Claude Code", () => {

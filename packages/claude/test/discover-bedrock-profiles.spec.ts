@@ -330,7 +330,7 @@ describe("finalizeBedrockDiscoveryModels", () => {
       warning: EMPTY_BEDROCK_CATALOG_WARNING,
     })
     expect(EMPTY_BEDROCK_CATALOG_WARNING).toContain(
-      "Free-text Agent Model entry remains available",
+      "Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend",
     )
   })
 
@@ -569,7 +569,9 @@ describe("formatBedrockDiscoveryFailure (issue #822)", () => {
         message: "Profile x could not be found",
       }),
     ]) {
-      expect(text).toContain("Free-text Agent Model entry remains available")
+      expect(text).toContain(
+        "Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend",
+      )
       // Never embed raw secret-like material from the error path.
       expect(text).not.toMatch(/AKIA|aws_secret|password=/i)
     }
@@ -585,6 +587,8 @@ describe("formatBedrockDiscoveryFailure (issue #822)", () => {
     expect(text).not.toContain("supersecretvalue")
     expect(text).not.toContain("sessiontok")
     expect(text).toContain("[redacted]")
-    expect(text).toContain("Free-text Agent Model entry remains available")
+    expect(text).toContain(
+      "Fix AWS configuration (credentials, region, bedrock:ListInferenceProfiles), then Recheck Agent Backend",
+    )
   })
 })
