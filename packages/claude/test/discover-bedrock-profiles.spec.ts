@@ -7,7 +7,9 @@ import {
   bedrockProfilesToAgentModels,
   finalizeBedrockDiscoveryModels,
   formatBedrockDiscoveryFailure,
+  regionFromAwsConfigText,
   resolveBedrockRegion,
+  scrubBedrockDiscoverySecrets,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -348,40 +350,196 @@ describe("finalizeBedrockDiscoveryModels", () => {
   })
 })
 
-describe("resolveBedrockRegion", () => {
-  it("prefers AWS_REGION over AWS_DEFAULT_REGION", () => {
+describe("resolveBedrockRegion (issue #822)", () => {
+  it("prefers AWS_REGION over AWS_DEFAULT_REGION and named-profile region", () => {
     expect(
-      resolveBedrockRegion({
-        AWS_REGION: "us-east-1",
-        AWS_DEFAULT_REGION: "us-west-2",
-      }),
+      resolveBedrockRegion(
+        {
+          AWS_REGION: "us-east-1",
+          AWS_DEFAULT_REGION: "us-west-2",
+          AWS_PROFILE: "bedrock-op",
+        },
+        {
+          readTextFile: () => "[profile bedrock-op]\nregion = eu-central-1\n",
+        },
+      ),
     ).toBe("us-east-1")
   })
 
-  it("falls back to AWS_DEFAULT_REGION", () => {
+  it("falls back to AWS_DEFAULT_REGION before named-profile region", () => {
     expect(
-      resolveBedrockRegion({
-        AWS_DEFAULT_REGION: "eu-west-1",
-      }),
+      resolveBedrockRegion(
+        {
+          AWS_DEFAULT_REGION: "eu-west-1",
+          AWS_PROFILE: "bedrock-op",
+        },
+        {
+          readTextFile: () => "[profile bedrock-op]\nregion = ap-southeast-2\n",
+        },
+      ),
     ).toBe("eu-west-1")
   })
 
-  it("returns undefined when neither region is set", () => {
-    expect(resolveBedrockRegion({ AWS_PROFILE: "bedrock-op" })).toBeUndefined()
+  it("uses the named AWS profile region when env region vars are absent", () => {
+    expect(
+      resolveBedrockRegion(
+        { AWS_PROFILE: "bedrock-op" },
+        {
+          readTextFile: (path) => {
+            expect(path).toContain(".aws")
+            return "[profile bedrock-op]\nregion = us-west-2\n"
+          },
+          homeDirectory: "/tmp/fake-home",
+        },
+      ),
+    ).toBe("us-west-2")
+  })
+
+  it("uses the default profile region when AWS_PROFILE is unset", () => {
+    expect(
+      resolveBedrockRegion(
+        {},
+        {
+          readTextFile: () => "[default]\nregion = ca-central-1\n",
+          homeDirectory: "/tmp/fake-home",
+        },
+      ),
+    ).toBe("ca-central-1")
+  })
+
+  it("honors AWS_CONFIG_FILE for profile region lookup", () => {
+    expect(
+      resolveBedrockRegion(
+        {
+          AWS_PROFILE: "ops",
+          AWS_CONFIG_FILE: "/custom/aws/config",
+        },
+        {
+          readTextFile: (path) => {
+            expect(path).toBe("/custom/aws/config")
+            return "[profile ops]\nregion = sa-east-1\n"
+          },
+        },
+      ),
+    ).toBe("sa-east-1")
+  })
+
+  it("returns undefined when env and shared config yield no region (SDK fallback path)", () => {
+    expect(
+      resolveBedrockRegion(
+        { AWS_PROFILE: "bedrock-op" },
+        {
+          readTextFile: () => null,
+          homeDirectory: "/tmp/fake-home",
+        },
+      ),
+    ).toBeUndefined()
+  })
+
+  it("parses [default] and [profile name] sections from shared config text", () => {
+    const config = `
+# comment
+[default]
+region = us-east-1
+output = json
+
+[profile bedrock-op]
+region = us-west-2
+[profile other]
+region = eu-west-1
+`
+    expect(regionFromAwsConfigText(config, "default")).toBe("us-east-1")
+    expect(regionFromAwsConfigText(config, "bedrock-op")).toBe("us-west-2")
+    expect(regionFromAwsConfigText(config, "missing")).toBeUndefined()
+  })
+
+  it("strips quotes and end-of-line comments from profile region values", () => {
+    const config = `
+[default]
+region = "us-east-1" # primary
+[profile quoted]
+region = 'eu-west-1'
+[profile commented]
+region = ap-southeast-2 ; trailing
+`
+    expect(regionFromAwsConfigText(config, "default")).toBe("us-east-1")
+    expect(regionFromAwsConfigText(config, "quoted")).toBe("eu-west-1")
+    expect(regionFromAwsConfigText(config, "commented")).toBe("ap-southeast-2")
   })
 })
 
-describe("formatBedrockDiscoveryFailure", () => {
-  it("maps access denied, credentials, throttle, region, and timeout causes", () => {
+describe("scrubBedrockDiscoverySecrets (issue #822)", () => {
+  it("redacts access keys, session tokens, and bearer payloads", () => {
+    const dirty =
+      "failed with AKIAIOSFODNN7EXAMPLE and AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG Bearer abcdefghijklmnop sessionToken=very-secret-session"
+    const clean = scrubBedrockDiscoverySecrets(dirty)
+    expect(clean).not.toContain("AKIAIOSFODNN7EXAMPLE")
+    expect(clean).not.toContain("wJalrXUtnFEMI")
+    expect(clean).not.toContain("abcdefghijklmnop")
+    expect(clean).not.toContain("very-secret-session")
+    expect(clean).toContain("[redacted]")
+  })
+
+  it("redacts property-style and JSON secretAccessKey / accessKeyId forms", () => {
+    const dirty =
+      'sdk error secretAccessKey=supersecretblob AccessKeyId: AKIAIOSFODNN7EXAMPLE {"secretAccessKey":"json-secret","sessionToken":"json-session"}'
+    const clean = scrubBedrockDiscoverySecrets(dirty)
+    expect(clean).not.toContain("supersecretblob")
+    expect(clean).not.toContain("json-secret")
+    expect(clean).not.toContain("json-session")
+    expect(clean).not.toContain("AKIAIOSFODNN7EXAMPLE")
+    expect(clean).toContain("[redacted]")
+  })
+})
+
+describe("formatBedrockDiscoveryFailure (issue #822)", () => {
+  it("maps access denied, credentials, profile, throttle, region, and timeout causes", () => {
     expect(
       formatBedrockDiscoveryFailure({ name: "AccessDeniedException" }),
     ).toContain("access denied")
+    expect(
+      formatBedrockDiscoveryFailure({ name: "AccessDeniedException" }),
+    ).toContain("bedrock:ListInferenceProfiles")
     expect(
       formatBedrockDiscoveryFailure({
         name: "ExpiredTokenException",
         message: "The security token included in the request is expired",
       }),
     ).toContain("credentials")
+    expect(
+      formatBedrockDiscoveryFailure({
+        name: "CredentialsProviderError",
+        message: "Could not load credentials from any providers",
+      }),
+    ).toContain("credentials")
+    expect(
+      formatBedrockDiscoveryFailure({
+        name: "ProfileNotFound",
+        message: "Profile bedrock-missing could not be found",
+      }),
+    ).toContain("named profile")
+    expect(
+      formatBedrockDiscoveryFailure({
+        message: "Could not find credentials for profile bedrock-op",
+      }),
+    ).toContain("named profile")
+    // Inference-profile / IAM instance-profile wording must not be rewritten
+    // as AWS_PROFILE guidance.
+    const inferenceProfileMiss = formatBedrockDiscoveryFailure({
+      name: "ResourceNotFoundException",
+      message:
+        "Inference profile arn:aws:bedrock:us-west-2:123:inference-profile/x could not be found",
+    })
+    expect(inferenceProfileMiss).not.toContain("AWS_PROFILE")
+    expect(inferenceProfileMiss).not.toContain("named profile")
+    const instanceProfileMiss = formatBedrockDiscoveryFailure({
+      name: "CredentialsProviderError",
+      message: "Instance profile credentials could not be loaded from IMDS",
+    })
+    expect(instanceProfileMiss).not.toContain("AWS_PROFILE")
+    expect(instanceProfileMiss).not.toContain("named profile")
+    // Falls through to the general credentials path.
+    expect(instanceProfileMiss).toContain("credentials")
     expect(
       formatBedrockDiscoveryFailure({ name: "ThrottlingException" }),
     ).toContain("throttled")
@@ -396,14 +554,37 @@ describe("formatBedrockDiscoveryFailure", () => {
     expect(
       formatBedrockDiscoveryFailure({ name: "AbortError", message: "aborted" }),
     ).toContain("timed out")
+    expect(
+      formatBedrockDiscoveryFailure({
+        name: "UnknownError",
+        message: "Bedrock service unavailable",
+      }),
+    ).toContain("Bedrock service unavailable")
     for (const text of [
       formatBedrockDiscoveryFailure({ name: "AccessDeniedException" }),
       formatBedrockDiscoveryFailure({ name: "ThrottlingException" }),
       formatBedrockDiscoveryFailure({ _tag: "TimeoutError" }),
+      formatBedrockDiscoveryFailure({
+        name: "ProfileNotFound",
+        message: "Profile x could not be found",
+      }),
     ]) {
       expect(text).toContain("Free-text Agent Model entry remains available")
       // Never embed raw secret-like material from the error path.
       expect(text).not.toMatch(/AKIA|aws_secret|password=/i)
     }
+  })
+
+  it("never surfaces access keys or secret payloads from generic control-plane errors", () => {
+    const text = formatBedrockDiscoveryFailure({
+      name: "Error",
+      message:
+        "request failed using AKIAIOSFODNN7EXAMPLE AWS_SECRET_ACCESS_KEY=supersecretvalue AWS_SESSION_TOKEN=sessiontok",
+    })
+    expect(text).not.toContain("AKIAIOSFODNN7EXAMPLE")
+    expect(text).not.toContain("supersecretvalue")
+    expect(text).not.toContain("sessiontok")
+    expect(text).toContain("[redacted]")
+    expect(text).toContain("Free-text Agent Model entry remains available")
   })
 })

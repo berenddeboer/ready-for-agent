@@ -295,7 +295,9 @@ try {
   mkdirSync(restrictedBin, { recursive: true })
   mkdirSync(logsDir, { recursive: true })
 
-  // Required host tools + node for the JS launcher. No bun/nx on product PATH.
+  // Required host tools + node for the JS launcher. No bun/nx/aws on product
+  // PATH. Claude Code Bedrock profile discovery uses the bundled AWS SDK and
+  // must not require the AWS CLI executable (issue #822).
   const nodePath = Bun.which("node")
   if (nodePath === null) {
     fail("node is required on PATH to run the installed launcher")
@@ -308,6 +310,10 @@ try {
       fail(`host tool ${tool} is required for this test`)
     }
     writeToolShim(restrictedBin, tool, resolved)
+  }
+  // Refuse to ship a regression that starts depending on `aws` on PATH.
+  if (existsSync(join(restrictedBin, "aws"))) {
+    fail("packed-install smoke must not place aws on the product PATH")
   }
 
   // Stage platform package for npm pack (binary + publishable manifest).

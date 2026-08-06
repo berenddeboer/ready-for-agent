@@ -519,6 +519,110 @@ describe("ActiveAgentBackend multi-backend registry", () => {
     )
   })
 
+  it("discards stale concurrent recheck catalog/provider/warning updates (issue #822)", async () => {
+    // A slower earlier Recheck must not overwrite a newer Recheck's atomic
+    // models + provider + warnings snapshot.
+    let releaseSlowInspect: (() => void) | undefined
+    const slowInspectGate = new Promise<void>((resolve) => {
+      releaseSlowInspect = resolve
+    })
+    let markSlowEntered: (() => void) | undefined
+    const slowEntered = new Promise<void>((resolve) => {
+      markSlowEntered = resolve
+    })
+    let inspectCalls = 0
+    const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
+    const firstParty = { id: "firstParty", label: "First-party" }
+    const resolveRuntime: ResolveAgentBackendRuntime = (backendId) => {
+      const reg = registration(backendId)
+      return Effect.succeed({
+        registration: reg,
+        adapter: {
+          inspect: () =>
+            Effect.gen(function* () {
+              inspectCalls += 1
+              const call = inspectCalls
+              if (call === 1) {
+                markSlowEntered?.()
+                // First recheck blocks until the second has finished applying.
+                yield* Effect.promise(() => slowInspectGate)
+                return {
+                  backend: reg.descriptor,
+                  models: [
+                    {
+                      id: "stale-profile",
+                      thinkingLevels: ["low"] as const,
+                    },
+                  ],
+                  provider: firstParty,
+                  warnings: ["stale warning"],
+                }
+              }
+              return {
+                backend: reg.descriptor,
+                models: [
+                  {
+                    id: "fresh-profile",
+                    thinkingLevels: ["high"] as const,
+                  },
+                ],
+                provider: bedrock,
+                warnings: ["fresh warning"],
+              }
+            }),
+          startTurn: () => Effect.die("unused"),
+          continueTurn: () => Effect.die("unused"),
+        },
+        telemetry: {
+          getSession: (sessionId: string) =>
+            Effect.succeed(
+              unsupportedSessionTelemetry(sessionId, reg.descriptor),
+            ),
+        },
+      })
+    }
+
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.claude,
+      resolveRuntime,
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const slowRecheck = yield* Effect.forkChild(
+          active.recheck(AGENT_BACKEND_IDS.claude, { cwd: "/tmp" }),
+        )
+        // Wait until the slow inspect has claimed generation and entered the adapter.
+        yield* Effect.promise(() => slowEntered)
+        const fast = yield* active.recheck(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(fast.kind).toBe("ready")
+        expect(fast.models.map((model) => model.id)).toEqual(["fresh-profile"])
+        expect(fast.provider).toEqual(bedrock)
+        expect(fast.warnings).toEqual(["fresh warning"])
+
+        releaseSlowInspect?.()
+        const slowResult = yield* Fiber.join(slowRecheck)
+        // Stale apply discarded: cached Active status stays on the fresh snapshot.
+        // The slow call returns current status (fresh), not the stale payload.
+        expect(slowResult.models.map((model) => model.id)).toEqual([
+          "fresh-profile",
+        ])
+        expect(slowResult.provider).toEqual(bedrock)
+        expect(slowResult.warnings).toEqual(["fresh warning"])
+
+        const cached = yield* active.getBackendStatus(AGENT_BACKEND_IDS.claude)
+        expect(cached?.models.map((model) => model.id)).toEqual([
+          "fresh-profile",
+        ])
+        expect(cached?.provider).toEqual(bedrock)
+        expect(cached?.warnings).toEqual(["fresh warning"])
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
   it("discards recheck results after the backend is dropped mid-inspect", async () => {
     let releaseInspect: (() => void) | undefined
     const inspectGate = new Promise<void>((resolve) => {

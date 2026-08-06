@@ -166,12 +166,14 @@ Claude Code with `claude auth login` or `ANTHROPIC_API_KEY` before Recheck /
 Agent Turns. For **Amazon Bedrock**, set `CLAUDE_CODE_USE_BEDROCK=1` plus AWS
 credentials/region on the harness process instead of first-party login; see
 [Claude Code on Amazon Bedrock](docs/claude-code-amazon-bedrock.md) (Ready vs
-Unavailable, hybrid model selection: catalog aliases, Settings free-text, and
-optional env pins). Harness-launched Claude processes disable auto-update for
+Unavailable, **Amazon Bedrock** provider label, profile-only catalog from the
+bundled AWS SDK—not the AWS CLI—Settings free-text, and optional env pins for
+first-party aliases). Harness-launched Claude processes disable auto-update for
 that session (`DISABLE_AUTOUPDATER`). Claude Code Agent Turns do not integrate
 Keymaxxer; Session Telemetry is unsupported in v1. Opt-in live adapter tests
 use `GROK_INTEGRATION=1` / `OPENCODE_INTEGRATION=1` / `CODEX_INTEGRATION=1` /
-`CLAUDE_INTEGRATION=1`; normal CI does not need paid model credentials.
+`CLAUDE_INTEGRATION=1` / `BEDROCK_INTEGRATION=1` (list-only; never invokes a
+model); normal CI does not need paid model credentials.
 
 # KeyMaxxer
 
@@ -201,12 +203,14 @@ backend.
 2. Can I run Claude Code through Amazon Bedrock?
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
-harness process, select Claude Code, then Recheck. In Bedrock mode the Agent
-Model catalog lists active Anthropic system-defined and application inference
-profiles from AWS (friendly names in Settings; ID/ARN stored and passed to
-Claude Code), or free-text a profile ID/ARN. First-party Claude Code keeps the
-static alias catalog. Discovery failures leave Claude Ready with a warning and
-free-text entry. Details:
+harness process, select Claude Code, then Recheck. Status shows
+**Claude Code · Amazon Bedrock**. In Bedrock mode the Agent Model catalog lists
+active Anthropic system-defined and application inference profiles from AWS via
+the bundled SDK (no AWS CLI host tool; friendly names in Settings; ID/ARN
+stored and passed to Claude Code), or free-text a profile ID/ARN. First-party
+Claude Code keeps the static alias catalog and never calls AWS. Discovery
+failures leave Claude Ready with a warning and free-text entry; listing does
+not prove InvokeModel access. Details:
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
 3. Does the harness support a Forge other than GitHub?

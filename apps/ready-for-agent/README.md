@@ -62,8 +62,9 @@ This boots the full Harness (UI + backend) on the existing monorepo dev path
 Before start, the binary checks that required host tools are on `PATH`: `git`,
 the selected Agent Backend executable (`opencode` by default), plus `gh` when a
 GitHub Repository exists and `curl` when a GitLab Repository exists. `glab` is
-an optional ambient GitLab credential source. Missing required tools fail
-immediately with install hints. Keymaxxer is optional
+an optional ambient GitLab credential source. The AWS CLI is **not** required
+for Claude Code Bedrock profile discovery (bundled AWS SDK). Missing required
+tools fail immediately with install hints. Keymaxxer is optional
 (`KEYMAXXER_ENTRYPOINT` or `keymaxxer` on PATH); ambient Forge auth still works
 without it.
 

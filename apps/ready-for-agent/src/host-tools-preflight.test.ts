@@ -160,6 +160,29 @@ describe("host tools preflight", () => {
     expect(missingClaude.message).not.toContain("opencode")
   })
 
+  test("does not require AWS CLI for Claude Code / Bedrock profile discovery (issue #822)", () => {
+    // Bedrock inference-profile listing uses the bundled AWS SDK, not `aws` on PATH.
+    const seen = new Set<string>()
+    const withClaudeNoAws = checkHostTools(
+      (command) => {
+        seen.add(command)
+        return ["git", "gh", "claude"].includes(command)
+      },
+      { selectedAgentBackendIds: ["claude"] },
+    )
+    expect(withClaudeNoAws.ok).toBe(true)
+    expect(seen.has("aws")).toBe(false)
+    expect(seen.has("aws-cli")).toBe(false)
+
+    // Even when every tool except aws is present for Claude, preflight must not
+    // invent an aws requirement.
+    const onlyAwsMissing = checkHostTools(
+      (command) => command !== "aws" && command !== "aws-cli",
+      { selectedAgentBackendIds: ["claude"] },
+    )
+    expect(onlyAwsMissing.ok).toBe(true)
+  })
+
   test("passes without keymaxxer", () => {
     const result = checkHostTools((command) =>
       ["git", "gh", "opencode"].includes(command),
