@@ -53,4 +53,14 @@ describe("Repository settings Agent Backend override", () => {
     expect(board).toContain("{workItem.agentBackend.label}")
     expect(completedRow).toContain("{workItem.agentBackend.label}")
   })
+
+  test("override preview requests provider and shows Ready status wording", () => {
+    // Issue #819: Repository Settings mirrors harness provider identity on preview.
+    const source = indexSource()
+    expect(source).toContain("provider: { id: true, label: true }")
+    expect(source).toContain("formatAgentBackendStatusLabel")
+    expect(source).toContain("previewProvider")
+    expect(source).toContain("setPreviewProvider(null)")
+    expect(source).toContain("usesPreviewCatalog && !previewPending")
+  })
 })

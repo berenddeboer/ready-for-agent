@@ -23,6 +23,7 @@ import {
   useState,
 } from "react"
 import { createClient } from "@ready-for-agent/graphql-client"
+import { formatAgentBackendStatusTrail } from "../agent-backend-status-label.js"
 import {
   type AgentModelOption,
   allowsClaudeFreeTextModels,
@@ -85,6 +86,7 @@ const agentBackendStatusSelection = {
   kind: true,
   reason: true,
   models: { id: true, thinkingLevels: true },
+  provider: { id: true, label: true },
 } as const
 
 const agentBackendStatusQuery = {
@@ -107,6 +109,7 @@ type AgentBackendStatusRow = {
   kind: "READY" | "UNAVAILABLE"
   reason: string | null
   models: readonly AgentModelOption[]
+  provider: { id: string; label: string } | null
 }
 
 const modelsQuery = {
@@ -307,6 +310,10 @@ function SettingsChrome() {
   const [previewModels, setPreviewModels] = useState<
     readonly AgentModelOption[] | null
   >(null)
+  const [previewProvider, setPreviewProvider] = useState<{
+    id: string
+    label: string
+  } | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const previewGenerationRef = useRef(0)
@@ -349,6 +356,7 @@ function SettingsChrome() {
     setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     previewGenerationRef.current += 1
     setPreviewModels(null)
+    setPreviewProvider(null)
     setPreviewError(null)
     setPreviewPending(false)
   }, [dialogOpen, config.data])
@@ -516,6 +524,7 @@ function SettingsChrome() {
         })
       }
       setPreviewModels(null)
+      setPreviewProvider(null)
       setPreviewError(null)
       setPreviewPending(false)
       return
@@ -523,6 +532,7 @@ function SettingsChrome() {
 
     setPreviewPending(true)
     setPreviewError(null)
+    setPreviewProvider(null)
     try {
       const [prefsResult, previewResult] = await Promise.all([
         graphql.query({
@@ -541,6 +551,7 @@ function SettingsChrome() {
             kind: true,
             reason: true,
             models: { id: true, thinkingLevels: true },
+            provider: { id: true, label: true },
           },
         }),
       ])
@@ -550,6 +561,7 @@ function SettingsChrome() {
       }
       applyModelPrefs(prefsResult.harnessModelPrefs)
       const preview = previewResult.previewAgentBackend
+      setPreviewProvider(preview.provider)
       if (preview.kind === "READY") {
         setPreviewModels(preview.models)
         setPreviewError(null)
@@ -565,6 +577,7 @@ function SettingsChrome() {
         return
       }
       setPreviewModels([])
+      setPreviewProvider(null)
       setPreviewError(
         error instanceof Error
           ? error.message
@@ -607,6 +620,7 @@ function SettingsChrome() {
       setMaxConcurrentWorkItems(String(config.data.maxConcurrentWorkItems))
     }
     setPreviewModels(null)
+    setPreviewProvider(null)
     setPreviewError(null)
     setPreviewPending(false)
     setRecheckAllFailures([])
@@ -957,6 +971,30 @@ function SettingsChrome() {
                       const isDefault = row.backend.id === savedAgentBackend
                       const rowRechecking =
                         recheckingBackendId === row.backend.id
+                      const previewingThisRow =
+                        backendChanging &&
+                        row.backend.id === selectedAgentBackend
+                      // When previewing a not-yet-saved selection, prefer the
+                      // previewed provider so Bedrock identity shows before Save.
+                      const providerForRow =
+                        previewingThisRow && previewProvider !== null
+                          ? previewProvider
+                          : row.provider
+                      // Derive readiness from the live preview once it finishes so
+                      // we never mix a fresh Bedrock identity with stale Active
+                      // Unavailable reason (issue #819 review).
+                      let kindForRow = row.kind
+                      let reasonForRow =
+                        row.kind === "UNAVAILABLE" ? row.reason : null
+                      if (previewingThisRow && !previewPending) {
+                        if (previewError !== null) {
+                          kindForRow = "UNAVAILABLE"
+                          reasonForRow = previewError
+                        } else {
+                          kindForRow = "READY"
+                          reasonForRow = null
+                        }
+                      }
                       return (
                         <div
                           key={row.backend.id}
@@ -964,17 +1002,13 @@ function SettingsChrome() {
                         >
                           <p className="m-0">
                             <strong>{row.backend.label}</strong>
-                            {isDefault ? " · Default" : null}
-                            {row.kind === "READY"
-                              ? " · Ready"
-                              : " · Unavailable"}
-                            {backendChanging &&
-                            row.backend.id === selectedAgentBackend
-                              ? " · Previewing selection"
-                              : null}
-                            {row.kind === "UNAVAILABLE" && row.reason !== null
-                              ? ` — ${row.reason}`
-                              : null}
+                            {formatAgentBackendStatusTrail({
+                              kind: kindForRow,
+                              provider: providerForRow,
+                              isDefault,
+                              previewing: previewingThisRow,
+                              reason: reasonForRow,
+                            })}
                           </p>
                           <button
                             type="button"
@@ -992,6 +1026,34 @@ function SettingsChrome() {
                         </div>
                       )
                     })}
+                    {backendChanging &&
+                      !statuses.some(
+                        (row) => row.backend.id === selectedAgentBackend,
+                      ) &&
+                      selectedAgentBackend !==
+                        (defaultStatus?.backend.id ?? "") && (
+                        <div className={ui.dialogStatusRow}>
+                          <p className="m-0">
+                            <strong>
+                              {(backendStatus.data?.agentBackends ?? []).find(
+                                (backend) =>
+                                  backend.id === selectedAgentBackend,
+                              )?.label ?? selectedAgentBackend}
+                            </strong>
+                            {previewPending
+                              ? " · Previewing selection…"
+                              : formatAgentBackendStatusTrail({
+                                  kind:
+                                    previewError !== null
+                                      ? "UNAVAILABLE"
+                                      : "READY",
+                                  provider: previewProvider,
+                                  previewing: true,
+                                  reason: previewError,
+                                })}
+                          </p>
+                        </div>
+                      )}
                     {statuses.length === 0 && defaultStatus === undefined && (
                       <p className={ui.dialogLoading}>
                         No Active Agent Backend status yet.

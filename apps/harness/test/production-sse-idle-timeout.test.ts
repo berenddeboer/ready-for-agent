@@ -65,6 +65,7 @@ const readyRuntimeStatus = (): AgentBackendRuntimeStatus => ({
       thinkingLevels: ["low", "high"],
     },
   ],
+  provider: null,
 })
 
 const readyStatus = (): AgentBackendStatus =>
@@ -312,6 +313,7 @@ describe("production GraphQL SSE idle timeout", () => {
             kind: "ready" as const,
             reason: null,
             models: readyStatus().models,
+            provider: null,
           }),
         withConfigCoordination: (effect) => effect,
         getRegistration: () =>

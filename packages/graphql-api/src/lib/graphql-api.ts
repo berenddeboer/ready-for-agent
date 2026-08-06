@@ -208,6 +208,13 @@ const toGraphqlSession = (session: SessionTelemetry) => ({
   updatedAt: session.updatedAt,
 })
 
+const toGraphqlProvider = (
+  provider: AgentBackendStatus["provider"] | null | undefined,
+) =>
+  provider === null || provider === undefined
+    ? null
+    : { id: provider.id, label: provider.label }
+
 const toGraphqlAgentBackendStatus = (
   status: AgentBackendStatus | AgentBackendRuntimeStatus,
 ) => {
@@ -220,6 +227,7 @@ const toGraphqlAgentBackendStatus = (
     kind: singular.kind.toUpperCase(),
     reason: singular.reason,
     models: singular.models,
+    provider: toGraphqlProvider(singular.provider),
   }
 }
 
@@ -239,11 +247,13 @@ const toGraphqlAgentBackendPreview = (preview: {
   readonly kind: "ready" | "unavailable"
   readonly reason: string | null
   readonly models: AgentBackendStatus["models"]
+  readonly provider: AgentBackendStatus["provider"]
 }) => ({
   backend: toGraphqlBackend(preview.backend),
   kind: preview.kind.toUpperCase(),
   reason: preview.reason,
   models: preview.models,
+  provider: toGraphqlProvider(preview.provider),
 })
 
 const resolveWorkItemBackend = (agentBackendId: string) => {
@@ -566,6 +576,7 @@ export const createGraphqlApi = (
                     kind: "UNAVAILABLE",
                     reason: `Unknown Agent Backend: ${args.backendId}`,
                     models: [],
+                    provider: null,
                   }
                 }
                 const active = yield* ActiveAgentBackend
@@ -984,6 +995,7 @@ export const createGraphqlApi = (
                     kind: "UNAVAILABLE",
                     reason: `Unknown Agent Backend: ${displayId}`,
                     models: [] as const,
+                    provider: null,
                   }
                 }
                 const status = yield* active.recheck(

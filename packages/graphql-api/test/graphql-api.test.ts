@@ -87,6 +87,7 @@ const defaultModels = [
 const readyRuntimeStatus = (
   models: AgentBackendRuntimeStatus["models"] = defaultModels,
   backendId: AgentBackendId = "opencode",
+  provider: AgentBackendRuntimeStatus["provider"] = null,
 ): AgentBackendRuntimeStatus => ({
   backend: {
     id: backendId,
@@ -95,6 +96,7 @@ const readyRuntimeStatus = (
   kind: "ready",
   reason: null,
   models,
+  provider,
 })
 
 const readyStatus = (
@@ -352,6 +354,7 @@ const makeRuntime = (
         kind: "ready" as const,
         reason: null,
         models: readyStatus().models,
+        provider: null,
       }),
     withConfigCoordination: (effect) => effect,
     getRegistration: () =>
@@ -2538,6 +2541,7 @@ describe("GraphQL API", () => {
             kind
             reason
             models { id }
+            provider { id label }
           }
         }`,
       }),
@@ -2550,12 +2554,14 @@ describe("GraphQL API", () => {
             kind: "READY",
             reason: null,
             models: defaultModels.map((m) => ({ id: m.id })),
+            provider: null,
           },
           {
             backend: { id: "grok", label: "grok" },
             kind: "READY",
             reason: null,
             models: [{ id: "grok-code" }],
+            provider: null,
           },
         ],
       },
@@ -2568,6 +2574,7 @@ describe("GraphQL API", () => {
             backend { id }
             kind
             models { id }
+            provider { id label }
           }
         }`,
       }),
@@ -2578,10 +2585,144 @@ describe("GraphQL API", () => {
           backend: { id: "grok" },
           kind: "READY",
           models: [{ id: "grok-code" }],
+          provider: null,
         },
       },
     })
     expect(rechecked).toEqual(["grok"])
+  })
+
+  test("propagates optional Agent Backend provider on status, preview, and recheck", async () => {
+    // Issue #819: GraphQL exposes Claude provider identity without inventing it.
+    const bedrockProvider = { id: "bedrock", label: "Amazon Bedrock" }
+    const claudeStatus = readyRuntimeStatus(
+      [{ id: "sonnet", thinkingLevels: ["low", "medium", "high"] }],
+      "claude",
+      bedrockProvider,
+    )
+    const previewed: string[] = []
+    const rechecked: string[] = []
+    await runtime.dispose()
+    runtime = makeRuntime(
+      {},
+      {},
+      {},
+      {},
+      {
+        listStatuses: Effect.succeed([claudeStatus]),
+        getBackendStatus: (backendId) =>
+          Effect.succeed(backendId === "claude" ? claudeStatus : null),
+        getStatus: Effect.succeed(toAgentBackendStatus(claudeStatus)),
+        recheck: (backendId) => {
+          rechecked.push(backendId)
+          return Effect.succeed(
+            backendId === "claude" ? claudeStatus : readyRuntimeStatus(),
+          )
+        },
+        preview: (backendId) => {
+          previewed.push(backendId)
+          if (backendId === "claude") {
+            return Effect.succeed({
+              backend: claudeStatus.backend,
+              kind: "ready" as const,
+              reason: null,
+              models: claudeStatus.models,
+              provider: bedrockProvider,
+            })
+          }
+          return Effect.succeed({
+            backend: { id: "opencode", label: "OpenCode" },
+            kind: "ready" as const,
+            reason: null,
+            models: defaultModels,
+            provider: null,
+          })
+        },
+      },
+    )
+
+    const statusResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          agentBackendStatuses {
+            backend { id label }
+            kind
+            provider { id label }
+          }
+          agentBackendStatus {
+            backend { id }
+            provider { id label }
+          }
+        }`,
+      }),
+    )
+    expect(await statusResponse.json()).toEqual({
+      data: {
+        agentBackendStatuses: [
+          {
+            backend: { id: "claude", label: "claude" },
+            kind: "READY",
+            provider: bedrockProvider,
+          },
+        ],
+        agentBackendStatus: {
+          backend: { id: "claude" },
+          provider: bedrockProvider,
+        },
+      },
+    })
+
+    const previewResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query {
+          previewAgentBackend(backendId: "claude") {
+            backend { id label }
+            kind
+            provider { id label }
+          }
+          openCode: previewAgentBackend(backendId: "opencode") {
+            backend { id }
+            provider { id label }
+          }
+        }`,
+      }),
+    )
+    expect(await previewResponse.json()).toEqual({
+      data: {
+        previewAgentBackend: {
+          backend: { id: "claude", label: "claude" },
+          kind: "READY",
+          provider: bedrockProvider,
+        },
+        openCode: {
+          backend: { id: "opencode" },
+          provider: null,
+        },
+      },
+    })
+    expect(previewed).toEqual(["claude", "opencode"])
+
+    const recheckResponse = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `mutation {
+          recheckAgentBackend(backendId: "claude") {
+            backend { id }
+            kind
+            provider { id label }
+          }
+        }`,
+      }),
+    )
+    expect(await recheckResponse.json()).toEqual({
+      data: {
+        recheckAgentBackend: {
+          backend: { id: "claude" },
+          kind: "READY",
+          provider: bedrockProvider,
+        },
+      },
+    })
+    expect(rechecked).toEqual(["claude"])
   })
 
   test("rejects invalid backend id on recheck and surfaces repository settings rejection", async () => {

@@ -19,6 +19,7 @@ import {
   COMPLETED_WORK_ITEMS_DEFAULT_PAGE_SIZE as completedWorkItemsDefaultPageSize,
   JOBS_COMPLETED_WINDOW_HOURS as jobsCompletedWindowHours,
 } from "@ready-for-agent/work-item-lifecycle/jobs-completed-window"
+import { formatAgentBackendStatusLabel } from "../agent-backend-status-label.js"
 import {
   type AgentModelOption,
   allowsClaudeFreeTextModels,
@@ -1093,6 +1094,10 @@ function RepositoryCard({
   const [previewModels, setPreviewModels] = useState<
     readonly AgentModelOption[] | null
   >(null)
+  const [previewProvider, setPreviewProvider] = useState<{
+    id: string
+    label: string
+  } | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [previewPending, setPreviewPending] = useState(false)
   const [harnessPrefsForDraft, setHarnessPrefsForDraft] = useState<{
@@ -1224,11 +1229,13 @@ function RepositoryCard({
       setPreviewPending(false)
       setPreviewError(null)
       setPreviewModels(null)
+      setPreviewProvider(null)
       setHarnessPrefsForDraft(null)
     } else {
       setPreviewPending(true)
       setPreviewError(null)
       setPreviewModels(null)
+      setPreviewProvider(null)
       setHarnessPrefsForDraft(null)
     }
 
@@ -1270,6 +1277,7 @@ function RepositoryCard({
     setIncludeAllIssueAuthors(repository.includeAllIssueAuthors)
     setWaitForReadyForReviewChecks(repository.waitForReadyForReviewChecks)
     setPreviewModels(null)
+    setPreviewProvider(null)
     setPreviewError(null)
     // Override catalogs load via preview; start pending so model fields stay
     // disabled until the effect loads the correct catalog.
@@ -1344,6 +1352,7 @@ function RepositoryCard({
     if (effective === harnessDefault) {
       setHarnessPrefsForDraft(null)
       setPreviewModels(null)
+      setPreviewProvider(null)
       setPreviewError(null)
       setPreviewPending(false)
       return
@@ -1355,6 +1364,7 @@ function RepositoryCard({
     // briefly show the wrong backend while the new preview loads.
     setHarnessPrefsForDraft(null)
     setPreviewModels(null)
+    setPreviewProvider(null)
     void (async () => {
       try {
         const [prefsResult, previewResult] = await Promise.all([
@@ -1374,6 +1384,7 @@ function RepositoryCard({
               kind: true,
               reason: true,
               models: { id: true, thinkingLevels: true },
+              provider: { id: true, label: true },
             },
           }),
         ])
@@ -1382,6 +1393,7 @@ function RepositoryCard({
         }
         setHarnessPrefsForDraft(prefsResult.harnessModelPrefs)
         const preview = previewResult.previewAgentBackend
+        setPreviewProvider(preview.provider)
         if (preview.kind === "READY") {
           setPreviewModels(preview.models)
           setPreviewError(null)
@@ -1397,6 +1409,7 @@ function RepositoryCard({
           return
         }
         setPreviewModels([])
+        setPreviewProvider(null)
         setPreviewError(
           error instanceof Error
             ? error.message
@@ -2075,6 +2088,20 @@ function RepositoryCard({
                     : "Harness default inherits the global selection. Override activates on Save when the effective backend changes. Model fields in this dialog are stashed per backend while open; empty means inherit harness for that effective backend."}
                 </span>
               </label>
+
+              {usesPreviewCatalog && !previewPending && (
+                <p className={ui.dialogStatusLabel}>
+                  {formatAgentBackendStatusLabel({
+                    backendLabel:
+                      (agentBackends.data ?? []).find(
+                        (backend) => backend.id === draftEffective,
+                      )?.label ?? draftEffective,
+                    kind: previewError !== null ? "UNAVAILABLE" : "READY",
+                    provider: previewProvider,
+                    // Reason text is on the Banner below when preview fails.
+                  })}
+                </p>
+              )}
 
               {agentBackends.isError && (
                 <Banner

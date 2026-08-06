@@ -33,6 +33,7 @@ const runtimeStatus = (
   kind,
   reason: kind === "unavailable" ? (reason ?? "unavailable") : null,
   models: kind === "unavailable" ? [] : models,
+  provider: null,
 })
 
 const readyStatus = (
@@ -130,6 +131,7 @@ export const stubActiveAgentBackendLayer = (
           kind: "ready" as const,
           reason: null,
           models: [],
+          provider: null,
         }),
       withConfigCoordination: (effect) => effect,
       getRegistration: (backendId) =>

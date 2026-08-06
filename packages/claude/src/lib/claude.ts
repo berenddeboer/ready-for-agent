@@ -23,6 +23,7 @@ import {
   foldClaudeStreamLine,
   isSuccessfulClaudeTurn,
 } from "./parse-stream.js"
+import { claudeProviderIdentity } from "./provider-identity.js"
 import {
   CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE,
   CLAUDE_STATIC_CATALOG,
@@ -97,11 +98,15 @@ export class Claude {
           if (status.kind === "unauthenticated") {
             // Bedrock third-party unusable readiness must not point at
             // `claude auth login` / first-party API key alone (#802).
+            // Attach provider when known so Status/Preview can show
+            // "Claude Code · Amazon Bedrock · Unavailable" on first failure (#819).
+            const provider = claudeProviderIdentity(status.provider)
             return yield* new AgentBackendConfigError({
               message:
                 status.provider === "bedrock"
                   ? CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE
                   : CLAUDE_UNAUTHENTICATED_MESSAGE,
+              ...(provider !== null ? { provider } : {}),
             })
           }
           if (status.kind === "failed") {
@@ -113,12 +118,16 @@ export class Claude {
             return yield* malformedOutput(input.cwd, statusOutput)
           }
 
+          // Provider identity travels with inspect so Active status, Preview,
+          // and Recheck can present Bedrock vs first-party without re-deriving
+          // it from process env (issue #819).
           return {
             backend: CLAUDE_BACKEND,
             models: CLAUDE_STATIC_CATALOG.map((model) => ({
               id: model.id,
               thinkingLevels: [...model.thinkingLevels],
             })),
+            provider: claudeProviderIdentity(status.provider),
           }
         })
 

@@ -330,6 +330,7 @@ const readyRuntimeStatus = (): AgentBackendRuntimeStatus => ({
       thinkingLevels: ["low", "high"],
     },
   ],
+  provider: null,
 })
 
 const readyStatus = (): AgentBackendStatus =>
@@ -353,6 +354,7 @@ const stubActiveAgentBackend = (): ActiveAgentBackendShape => {
         kind: "ready" as const,
         reason: null,
         models: readyStatus().models,
+        provider: null,
       }),
     withConfigCoordination: (effect) => effect,
     getRegistration: () =>
