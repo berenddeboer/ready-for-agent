@@ -254,6 +254,11 @@ The SQLite database is `ready-for-agent.db` in that directory. Set
 `SQLITE_DATABASE_PATH` to use another file. Stop the harness completely before
 opening the database with external write tooling (single-writer SQLite).
 
-## Contributing
+# Contributing
 
 Contributions welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+# Related work
+
+- Inspired by [this blog post](https://lovable.dev/blog/85000-in-tokens-later-scaling-agentic-coding-at-lovable) from Alexander at Lovable
+- ready-for-agent is an example of a [metaharness](https://metaharness.tools/).
