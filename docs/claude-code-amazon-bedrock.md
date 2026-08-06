@@ -111,7 +111,8 @@ Bedrock”.
 | --- | --- | --- | --- |
 | **First-party** (claude.ai / API key) not authenticated | No OAuth session and no usable `ANTHROPIC_API_KEY` (`loggedIn: false` on first-party) | Unavailable pointing at **`claude auth login` or `ANTHROPIC_API_KEY`** | Log in or set the API key, then Recheck |
 | **Bedrock** not ready | Claude reports `apiProvider: "bedrock"` with `loggedIn: false` (unusable Bedrock/AWS readiness) | Unavailable pointing at **AWS credentials/region and `CLAUDE_CODE_USE_BEDROCK=1`**—not first-party login | Fix harness process env / AWS access, then Recheck |
-| **Ready** (first-party or Bedrock) | Claude reports authenticated (including Bedrock third-party) | Agent Backend Ready; static alias catalog available | Work Items can run Agent Turns |
+| **Ready** (first-party) | Claude reports authenticated with `apiProvider: "firstParty"` | **Claude Code · First-party · Ready**; static alias catalog available | Work Items can run Agent Turns |
+| **Ready** (Bedrock) | Claude reports authenticated with `apiProvider: "bedrock"` | **Claude Code · Amazon Bedrock · Ready**; static alias catalog available | Work Items can run Agent Turns |
 
 CLI crashes or unparseable `claude auth status` output are **not** the Bedrock
 row above: they surface as a generic readiness-probe failure (exit code /

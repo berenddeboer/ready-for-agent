@@ -108,6 +108,11 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           id: "claude",
           label: "Claude Code",
         })
+        // Issue #819: provider identity originates from apiProvider, not env.
+        expect(result.provider).toEqual({
+          id: "firstParty",
+          label: "First-party",
+        })
         expect(result.models).toEqual(
           CLAUDE_STATIC_CATALOG.map((model) => ({
             id: model.id,
@@ -148,6 +153,11 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           id: "claude",
           label: "Claude Code",
         })
+        // Issue #819: apiProvider bedrock → Amazon Bedrock operator label.
+        expect(result.provider).toEqual({
+          id: "bedrock",
+          label: "Amazon Bedrock",
+        })
         expect(result.models.map((m) => m.id)).toEqual([
           "haiku",
           "sonnet",
@@ -169,6 +179,31 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
             "max",
           ])
         }
+      },
+    )
+  })
+
+  it("does not infer Bedrock provider from CLAUDE_CODE_USE_BEDROCK alone", async () => {
+    // Stale/ineffective env flag must not produce a Bedrock label when Claude
+    // reports first-party (issue #819).
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'if [ "$CLAUDE_CODE_USE_BEDROCK" != "1" ]; then exit 30; fi',
+        'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}\'',
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            PATH: process.env.PATH,
+            CLAUDE_CODE_USE_BEDROCK: "1",
+          }),
+        )
+        expect(result.provider).toEqual({
+          id: "firstParty",
+          label: "First-party",
+        })
+        expect(result.provider?.label).not.toContain("Bedrock")
       },
     )
   })
@@ -273,6 +308,32 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           expect(error.message).toMatch(/AWS|aws/)
           expect(error.message).not.toContain("claude auth login")
           expect(error.message).not.toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
+          // Issue #819: first Unavailable still carries provider identity.
+          expect(error.provider).toEqual({
+            id: "bedrock",
+            label: "Amazon Bedrock",
+          })
+        }
+      },
+    )
+  })
+
+  it("attaches First-party provider on unauthenticated ConfigError", async () => {
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":false,"authMethod":null,"apiProvider":"firstParty"}\'',
+        "exit 1",
+      ].join("\n"),
+      async (binary) => {
+        const error = await Effect.runPromise(inspect(binary).pipe(Effect.flip))
+        expect(error).toBeInstanceOf(AgentBackendConfigError)
+        if (error instanceof AgentBackendConfigError) {
+          expect(error.message).toBe(CLAUDE_UNAUTHENTICATED_MESSAGE)
+          expect(error.provider).toEqual({
+            id: "firstParty",
+            label: "First-party",
+          })
         }
       },
     )

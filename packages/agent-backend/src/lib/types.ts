@@ -17,6 +17,18 @@ export interface AgentBackendDescriptor {
   readonly label: string
 }
 
+/**
+ * Optional effective hosting provider for an Agent Backend (e.g. Claude Code
+ * Amazon Bedrock vs first-party). Identity originates from the adapter's
+ * inspect/auth probe — not from environment-flag inference alone.
+ */
+export interface AgentBackendProvider {
+  /** Stable machine id (e.g. `bedrock`, `firstParty`). */
+  readonly id: string
+  /** Operator-facing label (e.g. `Amazon Bedrock`, `First-party`). */
+  readonly label: string
+}
+
 /** One Agent Model in the Active Agent Backend catalog. */
 export interface AgentModel {
   readonly id: string
@@ -39,6 +51,11 @@ export interface InspectInput {
 export interface InspectResult {
   readonly backend: AgentBackendDescriptor
   readonly models: ReadonlyArray<AgentModel>
+  /**
+   * Effective hosting provider when the adapter reports one. Omitted or null
+   * for backends that do not expose provider identity.
+   */
+  readonly provider?: AgentBackendProvider | null
 }
 
 export interface AgentTurnResult {

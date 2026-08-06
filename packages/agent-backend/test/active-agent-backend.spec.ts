@@ -34,26 +34,45 @@ const makeResolve =
       string,
       ReadonlyArray<{ id: string; thinkingLevels: readonly string[] }>
     >
+    readonly providerByBackend?: Record<
+      string,
+      { id: string; label: string } | null
+    >
+    /** Provider attached to ConfigError when inspect fails for that backend. */
+    readonly failInspectProviderByBackend?: Record<
+      string,
+      { id: string; label: string }
+    >
   }): ResolveAgentBackendRuntime =>
   (backendId) => {
     const reg = registration(backendId)
     const models = options.modelsByBackend?.[backendId] ?? [
       { id: `${backendId}/model-a`, thinkingLevels: ["low", "high"] },
     ]
+    const provider =
+      options.providerByBackend !== undefined
+        ? (options.providerByBackend[backendId] ?? null)
+        : null
     return Effect.succeed({
       registration: reg,
       adapter: {
         inspect: () => {
           if (options.failInspectFor?.has(backendId)) {
+            const failProvider =
+              options.failInspectProviderByBackend?.[backendId]
             return Effect.fail(
               new AgentBackendConfigError({
                 message: `${backendId} binary missing`,
+                ...(failProvider !== undefined
+                  ? { provider: failProvider }
+                  : {}),
               }),
             )
           }
           return Effect.succeed({
             backend: reg.descriptor,
             models: [...models],
+            provider,
           })
         },
         startTurn: () => Effect.succeed(turnResult(`${backendId}-start`)),
@@ -188,6 +207,7 @@ describe("ActiveAgentBackend multi-backend registry", () => {
           cwd: "/tmp",
         })
         expect(openStatus.kind).toBe("ready")
+        expect(openStatus.provider).toBeNull()
 
         const grokStatus = yield* active.recheck(AGENT_BACKEND_IDS.grok, {
           cwd: "/tmp",
@@ -195,6 +215,7 @@ describe("ActiveAgentBackend multi-backend registry", () => {
         expect(grokStatus.kind).toBe("unavailable")
         expect(grokStatus.reason).toContain("grok binary missing")
         expect(grokStatus.models).toEqual([])
+        expect(grokStatus.provider).toBeNull()
 
         // OpenCode stays Ready while Grok is Unavailable.
         const openAfter = yield* active.getBackendStatus(
@@ -207,6 +228,118 @@ describe("ActiveAgentBackend multi-backend registry", () => {
           active.requireAgentTurnsAllowed(AGENT_BACKEND_IDS.grok),
         )
         expect(blocked._tag).toBe("Failure")
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("caches inspect provider on Active status, Recheck, and Preview", async () => {
+    // Issue #819: provider identity from inspect is preserved without UI rebuild.
+    const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
+    const layer = ActiveAgentBackendLive({
+      // Seed a non-Claude default so first activate inspects Claude.
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeResolve({
+        providerByBackend: {
+          [AGENT_BACKEND_IDS.claude]: bedrock,
+          [AGENT_BACKEND_IDS.opencode]: null,
+        },
+      }),
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const activated = yield* active.activate(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(activated.kind).toBe("ready")
+        expect(activated.provider).toEqual(bedrock)
+
+        const cached = yield* active.getBackendStatus(AGENT_BACKEND_IDS.claude)
+        expect(cached?.provider).toEqual(bedrock)
+
+        const rechecked = yield* active.recheck(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(rechecked.provider).toEqual(bedrock)
+
+        const singular = yield* active.getStatus
+        expect(singular.provider).toEqual(bedrock)
+
+        const preview = yield* active.preview(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(preview.kind).toBe("ready")
+        expect(preview.provider).toEqual(bedrock)
+
+        // Backends that do not report a provider stay null.
+        const openPreview = yield* active.preview(AGENT_BACKEND_IDS.opencode, {
+          cwd: "/tmp",
+        })
+        expect(openPreview.provider).toBeNull()
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("preserves last-known provider after a failed recheck", async () => {
+    const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
+    // Mutable set so inspect can succeed first, then fail without a provider on the error.
+    const failInspectFor = new Set<string>()
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeResolve({
+        failInspectFor,
+        providerByBackend: {
+          [AGENT_BACKEND_IDS.claude]: bedrock,
+        },
+      }),
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const ready = yield* active.activate(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(ready.kind).toBe("ready")
+        expect(ready.provider).toEqual(bedrock)
+
+        failInspectFor.add(AGENT_BACKEND_IDS.claude)
+        const failed = yield* active.recheck(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(failed.kind).toBe("unavailable")
+        expect(failed.provider).toEqual(bedrock)
+      }).pipe(Effect.provide(layer)),
+    )
+  })
+
+  it("surfaces provider from ConfigError on first failed inspect and preview", async () => {
+    const bedrock = { id: "bedrock", label: "Amazon Bedrock" }
+    const layer = ActiveAgentBackendLive({
+      selectedBackendId: AGENT_BACKEND_IDS.opencode,
+      resolveRuntime: makeResolve({
+        failInspectFor: new Set([AGENT_BACKEND_IDS.claude]),
+        failInspectProviderByBackend: {
+          [AGENT_BACKEND_IDS.claude]: bedrock,
+        },
+      }),
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const active = yield* ActiveAgentBackend
+        const failed = yield* active.activate(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(failed.kind).toBe("unavailable")
+        expect(failed.provider).toEqual(bedrock)
+
+        const preview = yield* active.preview(AGENT_BACKEND_IDS.claude, {
+          cwd: "/tmp",
+        })
+        expect(preview.kind).toBe("unavailable")
+        expect(preview.provider).toEqual(bedrock)
       }).pipe(Effect.provide(layer)),
     )
   })

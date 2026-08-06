@@ -18,6 +18,7 @@ import {
 import type {
   AgentBackendDescriptor,
   AgentBackendId,
+  AgentBackendProvider,
   AgentModel,
   AgentTurnResult,
   ContinueTurnInput,
@@ -37,6 +38,11 @@ export type AgentBackendRuntimeStatus = {
   readonly kind: AgentBackendStatusKind
   readonly reason: string | null
   readonly models: ReadonlyArray<AgentModel>
+  /**
+   * Last known hosting provider from inspect: a successful Ready result, or an
+   * unauth ConfigError that carried identity (e.g. Claude Code Amazon Bedrock).
+   */
+  readonly provider: AgentBackendProvider | null
 }
 
 /**
@@ -50,6 +56,7 @@ export type AgentBackendStatus = {
   readonly kind: AgentBackendStatusKind
   readonly reason: string | null
   readonly models: ReadonlyArray<AgentModel>
+  readonly provider: AgentBackendProvider | null
 }
 
 export type AgentBackendPreviewKind = "ready" | "unavailable"
@@ -59,6 +66,7 @@ export type AgentBackendPreview = {
   readonly kind: AgentBackendPreviewKind
   readonly reason: string | null
   readonly models: ReadonlyArray<AgentModel>
+  readonly provider: AgentBackendProvider | null
 }
 
 export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
@@ -100,7 +108,16 @@ type ActiveEntry = {
   readonly telemetry: AgentBackendTelemetry
   readonly models: ReadonlyArray<AgentModel>
   readonly unavailableReason: string | null
+  /**
+   * Last known inspect provider (Ready success or unauth ConfigError identity),
+   * or null when unknown / not reported.
+   */
+  readonly provider: AgentBackendProvider | null
 }
+
+const normalizeInspectProvider = (
+  provider: InspectResult["provider"],
+): AgentBackendProvider | null => provider ?? null
 
 type RegistryState = {
   /** Active backends keyed by backend id. */
@@ -131,6 +148,9 @@ const toRuntimeStatus = (entry: ActiveEntry): AgentBackendRuntimeStatus => {
       kind: "unavailable",
       reason: entry.unavailableReason,
       models: [],
+      // Keep last-known provider on Unavailable so Settings can still show
+      // which hosting path failed when inspect previously reported one.
+      provider: entry.provider,
     }
   }
   return {
@@ -138,6 +158,7 @@ const toRuntimeStatus = (entry: ActiveEntry): AgentBackendRuntimeStatus => {
     kind: "ready",
     reason: null,
     models: entry.models,
+    provider: entry.provider,
   }
 }
 
@@ -150,6 +171,7 @@ export const toAgentBackendStatus = (
   kind: status.kind,
   reason: status.reason,
   models: status.models,
+  provider: status.provider,
 })
 
 const notActiveStatus = (
@@ -159,6 +181,7 @@ const notActiveStatus = (
   kind: "unavailable",
   reason: "Agent Backend is not Active",
   models: [],
+  provider: null,
 })
 
 const formatInspectFailure = (error: unknown): string => {
@@ -184,6 +207,26 @@ const formatInspectFailure = (error: unknown): string => {
   return "Agent Backend inspection failed"
 }
 
+/**
+ * Provider identity attached to an inspect ConfigError (e.g. Claude unauth
+ * with known apiProvider). Null when the failure does not carry one.
+ */
+const providerFromInspectFailure = (
+  error: unknown,
+): AgentBackendProvider | null => {
+  if (
+    error instanceof AgentBackendConfigError &&
+    error.provider !== undefined
+  ) {
+    const id = error.provider.id.trim()
+    const label = error.provider.label.trim()
+    if (id.length > 0 && label.length > 0) {
+      return { id, label }
+    }
+  }
+  return null
+}
+
 const emptyEntry = (
   runtime: ResolvedAgentBackendRuntime,
   unavailableReason: string | null,
@@ -193,6 +236,7 @@ const emptyEntry = (
   telemetry: runtime.telemetry,
   models: [],
   unavailableReason,
+  provider: null,
 })
 
 export type ActiveAgentBackendShape = {
@@ -495,6 +539,11 @@ export const ActiveAgentBackendLive = (
           }
           if (Result.isFailure(inspected)) {
             const reason = formatInspectFailure(inspected.failure)
+            // Prefer provider reported with this failure (first Unavailable);
+            // otherwise keep last known identity across recheck failures.
+            const failureProvider = providerFromInspectFailure(
+              inspected.failure,
+            )
             yield* Ref.update(stateRef, (state) => {
               if (!stillSameEntry(state)) {
                 return state
@@ -508,6 +557,7 @@ export const ActiveAgentBackendLive = (
                 ...previous,
                 models: [],
                 unavailableReason: reason,
+                provider: failureProvider ?? previous.provider,
               })
               return { ...state, entries }
             })
@@ -527,6 +577,7 @@ export const ActiveAgentBackendLive = (
               ...previous,
               models: inspected.success.models,
               unavailableReason: null,
+              provider: normalizeInspectProvider(inspected.success.provider),
             })
             return { ...state, entries }
           })
@@ -684,6 +735,7 @@ export const ActiveAgentBackendLive = (
             kind: "unavailable" as const,
             reason: formatInspectFailure(inspected.failure),
             models: [] as ReadonlyArray<AgentModel>,
+            provider: providerFromInspectFailure(inspected.failure),
           }
         }
         // Preview must not mutate the Active set.
@@ -692,6 +744,7 @@ export const ActiveAgentBackendLive = (
           kind: "ready" as const,
           reason: null,
           models: inspected.success.models,
+          provider: normalizeInspectProvider(inspected.success.provider),
         }
       })
 

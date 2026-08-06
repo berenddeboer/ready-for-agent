@@ -1,10 +1,21 @@
 import { Schema } from "effect"
 
+const AgentBackendProviderSchema = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+})
+
 export class AgentBackendConfigError extends Schema.TaggedErrorClass<AgentBackendConfigError>()(
   "AgentBackendConfigError",
   {
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
+    /**
+     * Optional hosting provider known at inspect failure (e.g. Claude Code
+     * reported `apiProvider` while unauthenticated). Callers must not invent
+     * this from env flags alone.
+     */
+    provider: Schema.optionalKey(AgentBackendProviderSchema),
   },
 ) {}
 

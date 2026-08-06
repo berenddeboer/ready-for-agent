@@ -43,4 +43,17 @@ describe("Harness settings Agent Backend change", () => {
     )
     expect(source).toContain("override this per configured repo")
   })
+
+  test("Active and preview status request provider and format Ready wording", () => {
+    // Issue #819: Settings must surface Claude provider identity from GraphQL.
+    const source = rootSource()
+    expect(source).toContain("provider: { id: true, label: true }")
+    expect(source).toContain("formatAgentBackendStatusTrail")
+    expect(source).toContain("previewProvider")
+    // Preview readiness must not mix stale Active Unavailable with a fresh preview.
+    expect(source).toContain("kindForRow")
+    expect(source).toContain("previewingThisRow && !previewPending")
+    // Provider comes from inspect/status — not CLAUDE_CODE_USE_BEDROCK alone.
+    expect(source).not.toContain("CLAUDE_CODE_USE_BEDROCK")
+  })
 })

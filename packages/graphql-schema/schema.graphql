@@ -123,6 +123,22 @@ type AgentBackendInfo {
 }
 
 """
+Optional effective hosting provider reported by an Agent Backend inspect
+(e.g. Claude Code Amazon Bedrock vs first-party). Null when the backend does
+not report provider identity.
+"""
+type AgentBackendProvider {
+  """
+  Stable machine id (e.g. bedrock, firstParty).
+  """
+  id: String!
+  """
+  Operator-facing label (e.g. Amazon Bedrock, First-party).
+  """
+  label: String!
+}
+
+"""
 Per-backend readiness for one Active Agent Backend (Ready or Unavailable).
 selectedBackend and activeBackend match backend (no Selected≠Active limbo).
 """
@@ -145,6 +161,11 @@ type AgentBackendStatus {
   kind: AgentBackendStatusKind!
   reason: String
   models: [AgentModel!]!
+  """
+  Last known hosting provider from inspect when reported: Ready success or an
+  unauth ConfigError that carried identity (e.g. Claude Code Amazon Bedrock).
+  """
+  provider: AgentBackendProvider
 }
 
 enum AgentBackendStatusKind {
@@ -160,6 +181,11 @@ type AgentBackendPreview {
   kind: AgentBackendPreviewKind!
   reason: String
   models: [AgentModel!]!
+  """
+  Hosting provider when the previewed backend reports one (Ready inspect or
+  unauth ConfigError identity).
+  """
+  provider: AgentBackendProvider
 }
 
 enum AgentBackendPreviewKind {
