@@ -63,4 +63,14 @@ describe("Repository settings Agent Backend override", () => {
     expect(source).toContain("setPreviewProvider(null)")
     expect(source).toContain("usesPreviewCatalog && !previewPending")
   })
+
+  test("override preview requests discovery warnings and keeps free-text models", () => {
+    // Issue #820: Repository Settings shows Bedrock catalog warnings; free-text stays.
+    const source = indexSource()
+    expect(source).toContain("warnings: true")
+    expect(source).toContain("previewWarnings")
+    expect(source).toContain("setPreviewWarnings")
+    expect(source).toContain("allowsClaudeFreeTextModels")
+    expect(source).toContain("claudeFreeTextModels")
+  })
 })

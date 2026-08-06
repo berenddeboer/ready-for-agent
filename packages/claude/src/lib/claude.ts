@@ -15,6 +15,7 @@ import {
   runCliTurn,
 } from "@ready-for-agent/agent-backend"
 import { buildRunArgs } from "./build-args.js"
+import { discoverBedrockModelsFromAws } from "./discover-bedrock-profiles.js"
 import { makeClaudeEnvironment } from "./environment.js"
 import { parseClaudeAuthStatus } from "./parse-auth-status.js"
 import {
@@ -54,8 +55,10 @@ const clipProbeOutput = (text: string, maxChars = 240): string => {
 /**
  * Claude Code adapter implementing the backend-neutral AgentBackend contract.
  *
- * Static catalog and readiness inspection ship with this layer. Agent Turns
- * run `claude -p` with stream-json, preassign a Session UUID via
+ * Readiness inspection ships with this layer. First-party Claude Code exposes
+ * the static alias catalog; authenticated Amazon Bedrock replaces the catalog
+ * with system-defined Anthropic inference profiles from AWS (issue #820).
+ * Agent Turns run `claude -p` with stream-json, preassign a Session UUID via
  * `--session-id` (reported through `onSessionId` while the first turn runs),
  * resume later turns with `--resume`, and normalize the JSONL stream into
  * Session ID + ordered final assistant text (issue #778 / ADR 0047).
@@ -73,6 +76,13 @@ export class Claude {
             ? { environment: options.environment }
             : {},
         )
+        const discoverBedrockModels =
+          options.discoverBedrockModels ?? discoverBedrockModelsFromAws
+        // Environment map for Bedrock region resolution (same ambient vars as
+        // CLI spawns). Credentials still follow the AWS default chain.
+        const discoveryEnvironment =
+          options.environment ??
+          (process.env as Record<string, string | undefined>)
 
         const inspect = Effect.fn("Claude.inspect")(function* (
           input: InspectInput,
@@ -121,13 +131,43 @@ export class Claude {
           // Provider identity travels with inspect so Active status, Preview,
           // and Recheck can present Bedrock vs first-party without re-deriving
           // it from process env (issue #819).
+          const provider = claudeProviderIdentity(status.provider)
+
+          // First-party (and unknown): static aliases only — no AWS discovery.
+          if (status.provider !== "bedrock") {
+            return {
+              backend: CLAUDE_BACKEND,
+              models: CLAUDE_STATIC_CATALOG.map((model) => ({
+                id: model.id,
+                thinkingLevels: [...model.thinkingLevels],
+              })),
+              provider,
+              warnings: [] as const,
+            }
+          }
+
+          // Bedrock: replace floating aliases with discovered system-defined
+          // Anthropic inference profile IDs. Discovery is best-effort — Ready
+          // stays Ready with a warning when listing fails (issue #820). Bound
+          // by the same inspect timeout so a hung Bedrock API cannot stall
+          // Activate / Recheck / Preview indefinitely.
+          const discovery = yield* discoverBedrockModels({
+            environment: discoveryEnvironment,
+            timeout: input.timeout ?? defaultTimeout,
+          })
+          const warnings =
+            discovery.warning !== null && discovery.warning.trim().length > 0
+              ? [discovery.warning.trim()]
+              : []
+
           return {
             backend: CLAUDE_BACKEND,
-            models: CLAUDE_STATIC_CATALOG.map((model) => ({
+            models: discovery.models.map((model) => ({
               id: model.id,
               thinkingLevels: [...model.thinkingLevels],
             })),
-            provider: claudeProviderIdentity(status.provider),
+            provider,
+            warnings,
           }
         })
 

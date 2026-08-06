@@ -331,6 +331,7 @@ const readyRuntimeStatus = (): AgentBackendRuntimeStatus => ({
     },
   ],
   provider: null,
+  warnings: [],
 })
 
 const readyStatus = (): AgentBackendStatus =>
@@ -355,6 +356,7 @@ const stubActiveAgentBackend = (): ActiveAgentBackendShape => {
         reason: null,
         models: readyStatus().models,
         provider: null,
+        warnings: [],
       }),
     withConfigCoordination: (effect) => effect,
     getRegistration: () =>

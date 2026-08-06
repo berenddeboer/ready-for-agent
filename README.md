@@ -201,11 +201,11 @@ backend.
 2. Can I run Claude Code through Amazon Bedrock?
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
-harness process, select Claude Code, then Recheck. For models, pick a catalog
-alias (`haiku` / `sonnet` / `opus` / `fable`), enter a free-text Bedrock
-inference profile ID or ARN as build/review Agent Model, and/or optionally pin
-aliases with `ANTHROPIC_DEFAULT_*_MODEL`. First-party login failures and
-Bedrock/AWS failures show different Unavailable messages. Details:
+harness process, select Claude Code, then Recheck. In Bedrock mode the Agent
+Model catalog lists active Anthropic system-defined inference profiles from
+AWS (or free-text a profile ID/ARN). First-party Claude Code keeps the static
+alias catalog. Discovery failures leave Claude Ready with a warning and free-
+text entry. Details:
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
 3. Does the harness support a Forge other than GitHub?

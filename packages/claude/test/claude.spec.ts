@@ -14,8 +14,11 @@ import {
 import {
   CLAUDE_BEDROCK_UNAVAILABLE_MESSAGE,
   CLAUDE_STATIC_CATALOG,
+  CLAUDE_THINKING_LEVELS,
   CLAUDE_UNAUTHENTICATED_MESSAGE,
   Claude,
+  type ClaudeDiscoverBedrockModels,
+  type ClaudeLayerOptions,
 } from "../src/index.js"
 import { describe, expect, it } from "bun:test"
 
@@ -36,17 +39,23 @@ const withExecutable = async <A>(
 
 const provide = (
   binary: string,
-  environment?: Readonly<Record<string, string | undefined>>,
+  options: Pick<
+    ClaudeLayerOptions,
+    "environment" | "discoverBedrockModels"
+  > = {},
 ) =>
   Claude.layer({
     binary,
-    ...(environment !== undefined ? { environment } : {}),
+    ...options,
   }).pipe(Layer.provide(BunServices.layer))
 
 const inspect = (
   binary: string,
   timeout = "2 seconds",
-  environment?: Readonly<Record<string, string | undefined>>,
+  options: Pick<
+    ClaudeLayerOptions,
+    "environment" | "discoverBedrockModels"
+  > = {},
 ) =>
   Effect.gen(function* () {
     const backend = yield* AgentBackend
@@ -54,7 +63,29 @@ const inspect = (
       cwd: process.cwd(),
       timeout,
     })
-  }).pipe(Effect.provide(provide(binary, environment)))
+  }).pipe(Effect.provide(provide(binary, options)))
+
+const fakeDiscover =
+  (
+    result: {
+      models: ReadonlyArray<{ id: string; thinkingLevels: readonly string[] }>
+      warning: string | null
+    },
+    onCall?: (input: {
+      readonly environment: Readonly<Record<string, string | undefined>>
+      readonly timeout?: unknown
+    }) => void,
+  ): ClaudeDiscoverBedrockModels =>
+  (input) => {
+    onCall?.(input)
+    return Effect.succeed({
+      models: result.models.map((model) => ({
+        id: model.id,
+        thinkingLevels: [...model.thinkingLevels],
+      })),
+      warning: result.warning,
+    })
+  }
 
 const captureSessionScript = [
   'sid=""',
@@ -91,7 +122,11 @@ const startTurn = (
       timeout,
       ...(onSessionId !== undefined ? { onSessionId } : {}),
     })
-  }).pipe(Effect.provide(provide(binary, environment)))
+  }).pipe(
+    Effect.provide(
+      provide(binary, environment !== undefined ? { environment } : {}),
+    ),
+  )
 
 describe("Claude AgentBackend adapter (readiness inspection)", () => {
   it("inspects authenticated CLI via JSON auth status (real CLI shape)", async () => {
@@ -139,7 +174,13 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
     )
   })
 
-  it("inspects Ready when auth status is Bedrock third-party (static alias catalog)", async () => {
+  it("inspects Ready Bedrock with discovered system-defined profile catalog (issue #820)", async () => {
+    const profileIds = [
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+      "us.anthropic.claude-sonnet-4-6",
+    ]
+    let discoveryCalls = 0
+    let seenTimeout: unknown
     await withExecutable(
       [
         'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
@@ -148,7 +189,25 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
         'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}\'',
       ].join("\n"),
       async (binary) => {
-        const result = await Effect.runPromise(inspect(binary))
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            discoverBedrockModels: fakeDiscover(
+              {
+                models: profileIds.map((id) => ({
+                  id,
+                  thinkingLevels: [...CLAUDE_THINKING_LEVELS],
+                })),
+                warning: null,
+              },
+              (input) => {
+                discoveryCalls += 1
+                seenTimeout = input.timeout
+              },
+            ),
+          }),
+        )
+        // Inspect must pass its timeout budget into discovery (review #820).
+        expect(seenTimeout).toBe("2 seconds")
         expect(result.backend).toEqual({
           id: "claude",
           label: "Claude Code",
@@ -158,27 +217,88 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           id: "bedrock",
           label: "Amazon Bedrock",
         })
+        // Issue #820: Bedrock catalog is profile IDs, not floating aliases.
+        expect(result.models.map((m) => m.id)).toEqual(profileIds)
+        expect(result.models.map((m) => m.id)).not.toContain("haiku")
+        expect(result.models.map((m) => m.id)).not.toContain("sonnet")
+        expect(result.models.map((m) => m.id)).not.toContain("opus")
+        expect(result.models.map((m) => m.id)).not.toContain("fable")
+        for (const model of result.models) {
+          expect(model.thinkingLevels).toEqual([...CLAUDE_THINKING_LEVELS])
+        }
+        expect(result.warnings).toEqual([])
+        expect(discoveryCalls).toBe(1)
+      },
+    )
+  })
+
+  it("keeps Ready with warning when Bedrock discovery fails (issue #820)", async () => {
+    const warning =
+      "Could not list Amazon Bedrock inference profiles: access denied (need bedrock:ListInferenceProfiles on the harness IAM principal). Free-text Agent Model entry remains available."
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}\'',
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            discoverBedrockModels: fakeDiscover({
+              models: [],
+              warning,
+            }),
+          }),
+        )
+        expect(result.provider).toEqual({
+          id: "bedrock",
+          label: "Amazon Bedrock",
+        })
+        expect(result.models).toEqual([])
+        expect(result.warnings).toEqual([warning])
+        // Not Unavailable — discovery is catalog-only.
+        expect(result.backend.id).toBe("claude")
+      },
+    )
+  })
+
+  it("first-party Ready never calls Bedrock discovery and keeps static aliases", async () => {
+    let discoveryCalls = 0
+    await withExecutable(
+      [
+        'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
+        'printf \'%s\\n\' \'{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty"}\'',
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          inspect(binary, "2 seconds", {
+            discoverBedrockModels: fakeDiscover(
+              {
+                models: [
+                  {
+                    id: "should-not-appear",
+                    thinkingLevels: [...CLAUDE_THINKING_LEVELS],
+                  },
+                ],
+                warning: null,
+              },
+              () => {
+                discoveryCalls += 1
+              },
+            ),
+          }),
+        )
+        expect(result.provider).toEqual({
+          id: "firstParty",
+          label: "First-party",
+        })
         expect(result.models.map((m) => m.id)).toEqual([
           "haiku",
           "sonnet",
           "opus",
           "fable",
         ])
-        expect(result.models).toEqual(
-          CLAUDE_STATIC_CATALOG.map((model) => ({
-            id: model.id,
-            thinkingLevels: [...model.thinkingLevels],
-          })),
-        )
-        for (const model of result.models) {
-          expect(model.thinkingLevels).toEqual([
-            "low",
-            "medium",
-            "high",
-            "xhigh",
-            "max",
-          ])
-        }
+        expect(discoveryCalls).toBe(0)
+        expect(result.warnings).toEqual([])
       },
     )
   })
@@ -186,6 +306,7 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
   it("does not infer Bedrock provider from CLAUDE_CODE_USE_BEDROCK alone", async () => {
     // Stale/ineffective env flag must not produce a Bedrock label when Claude
     // reports first-party (issue #819).
+    let discoveryCalls = 0
     await withExecutable(
       [
         'case " $* " in *" auth status "*) ;; *) exit 20 ;; esac',
@@ -195,8 +316,16 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
       async (binary) => {
         const result = await Effect.runPromise(
           inspect(binary, "2 seconds", {
-            PATH: process.env.PATH,
-            CLAUDE_CODE_USE_BEDROCK: "1",
+            environment: {
+              PATH: process.env.PATH,
+              CLAUDE_CODE_USE_BEDROCK: "1",
+            },
+            discoverBedrockModels: fakeDiscover(
+              { models: [], warning: null },
+              () => {
+                discoveryCalls += 1
+              },
+            ),
           }),
         )
         expect(result.provider).toEqual({
@@ -204,6 +333,7 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
           label: "First-party",
         })
         expect(result.provider?.label).not.toContain("Bedrock")
+        expect(discoveryCalls).toBe(0)
       },
     )
   })
@@ -227,26 +357,39 @@ describe("Claude AgentBackend adapter (readiness inspection)", () => {
       async (binary) => {
         const result = await Effect.runPromise(
           inspect(binary, "2 seconds", {
-            PATH: process.env.PATH,
-            CLAUDE_CODE_USE_BEDROCK: "1",
-            AWS_REGION: "us-east-1",
-            AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-            AWS_SECRET_ACCESS_KEY: "secret",
-            AWS_SESSION_TOKEN: "session",
-            AWS_PROFILE: "bedrock-op",
-            AWS_BEARER_TOKEN_BEDROCK: "bedrock-bearer",
+            environment: {
+              PATH: process.env.PATH,
+              CLAUDE_CODE_USE_BEDROCK: "1",
+              AWS_REGION: "us-east-1",
+              AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
+              AWS_SECRET_ACCESS_KEY: "secret",
+              AWS_SESSION_TOKEN: "session",
+              AWS_PROFILE: "bedrock-op",
+              AWS_BEARER_TOKEN_BEDROCK: "bedrock-bearer",
+            },
+            discoverBedrockModels: fakeDiscover({
+              models: [
+                {
+                  id: "us.anthropic.claude-sonnet-4-6",
+                  thinkingLevels: [...CLAUDE_THINKING_LEVELS],
+                },
+              ],
+              warning: null,
+            }),
           }),
         )
         expect(result.backend).toEqual({
           id: "claude",
           label: "Claude Code",
         })
+        // Bedrock inspect uses discovered profiles, not floating aliases (#820).
         expect(result.models.map((m) => m.id)).toEqual([
-          "haiku",
-          "sonnet",
-          "opus",
-          "fable",
+          "us.anthropic.claude-sonnet-4-6",
         ])
+        expect(result.provider).toEqual({
+          id: "bedrock",
+          label: "Amazon Bedrock",
+        })
       },
     )
   })

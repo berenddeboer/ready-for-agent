@@ -71,6 +71,7 @@ const runtimeUnavailable = (): AgentBackendRuntimeStatus => ({
   reason: "opencode binary not found",
   models: [],
   provider: null,
+  warnings: [],
 })
 
 const statusUnavailable = (): AgentBackendStatus =>
@@ -161,6 +162,7 @@ describe("Agent Backend readiness gates", () => {
                 reason: "opencode binary not found",
                 models: [],
                 provider: null,
+                warnings: [],
               }),
             withConfigCoordination: (effect) => effect,
             getRegistration: () =>

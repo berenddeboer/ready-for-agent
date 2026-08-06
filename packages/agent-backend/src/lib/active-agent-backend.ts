@@ -43,6 +43,11 @@ export type AgentBackendRuntimeStatus = {
    * unauth ConfigError that carried identity (e.g. Claude Code Amazon Bedrock).
    */
   readonly provider: AgentBackendProvider | null
+  /**
+   * Non-fatal inspect warnings cached with Ready status (e.g. Bedrock catalog
+   * discovery). Empty when Unavailable or when inspect reported none.
+   */
+  readonly warnings: ReadonlyArray<string>
 }
 
 /**
@@ -57,6 +62,7 @@ export type AgentBackendStatus = {
   readonly reason: string | null
   readonly models: ReadonlyArray<AgentModel>
   readonly provider: AgentBackendProvider | null
+  readonly warnings: ReadonlyArray<string>
 }
 
 export type AgentBackendPreviewKind = "ready" | "unavailable"
@@ -67,6 +73,7 @@ export type AgentBackendPreview = {
   readonly reason: string | null
   readonly models: ReadonlyArray<AgentModel>
   readonly provider: AgentBackendProvider | null
+  readonly warnings: ReadonlyArray<string>
 }
 
 export class AgentBackendUnavailableError extends Schema.TaggedErrorClass<AgentBackendUnavailableError>()(
@@ -113,11 +120,24 @@ type ActiveEntry = {
    * or null when unknown / not reported.
    */
   readonly provider: AgentBackendProvider | null
+  /** Non-fatal Ready warnings from the last successful inspect. */
+  readonly warnings: ReadonlyArray<string>
 }
 
 const normalizeInspectProvider = (
   provider: InspectResult["provider"],
 ): AgentBackendProvider | null => provider ?? null
+
+const normalizeInspectWarnings = (
+  warnings: InspectResult["warnings"],
+): ReadonlyArray<string> => {
+  if (warnings === undefined) {
+    return []
+  }
+  return warnings
+    .map((warning) => warning.trim())
+    .filter((warning) => warning.length > 0)
+}
 
 type RegistryState = {
   /** Active backends keyed by backend id. */
@@ -151,6 +171,8 @@ const toRuntimeStatus = (entry: ActiveEntry): AgentBackendRuntimeStatus => {
       // Keep last-known provider on Unavailable so Settings can still show
       // which hosting path failed when inspect previously reported one.
       provider: entry.provider,
+      // Warnings are Ready-only catalog signals; clear them when Unavailable.
+      warnings: [],
     }
   }
   return {
@@ -159,6 +181,7 @@ const toRuntimeStatus = (entry: ActiveEntry): AgentBackendRuntimeStatus => {
     reason: null,
     models: entry.models,
     provider: entry.provider,
+    warnings: entry.warnings,
   }
 }
 
@@ -172,6 +195,7 @@ export const toAgentBackendStatus = (
   reason: status.reason,
   models: status.models,
   provider: status.provider,
+  warnings: status.warnings,
 })
 
 const notActiveStatus = (
@@ -182,6 +206,7 @@ const notActiveStatus = (
   reason: "Agent Backend is not Active",
   models: [],
   provider: null,
+  warnings: [],
 })
 
 const formatInspectFailure = (error: unknown): string => {
@@ -237,6 +262,7 @@ const emptyEntry = (
   models: [],
   unavailableReason,
   provider: null,
+  warnings: [],
 })
 
 export type ActiveAgentBackendShape = {
@@ -558,6 +584,7 @@ export const ActiveAgentBackendLive = (
                 models: [],
                 unavailableReason: reason,
                 provider: failureProvider ?? previous.provider,
+                warnings: [],
               })
               return { ...state, entries }
             })
@@ -573,11 +600,13 @@ export const ActiveAgentBackendLive = (
               return state
             }
             const entries = new Map(state.entries)
+            // Atomic Ready refresh: models, provider, and warnings together.
             entries.set(inspectedBackendId, {
               ...previous,
               models: inspected.success.models,
               unavailableReason: null,
               provider: normalizeInspectProvider(inspected.success.provider),
+              warnings: normalizeInspectWarnings(inspected.success.warnings),
             })
             return { ...state, entries }
           })
@@ -736,6 +765,7 @@ export const ActiveAgentBackendLive = (
             reason: formatInspectFailure(inspected.failure),
             models: [] as ReadonlyArray<AgentModel>,
             provider: providerFromInspectFailure(inspected.failure),
+            warnings: [] as ReadonlyArray<string>,
           }
         }
         // Preview must not mutate the Active set.
@@ -745,6 +775,7 @@ export const ActiveAgentBackendLive = (
           reason: null,
           models: inspected.success.models,
           provider: normalizeInspectProvider(inspected.success.provider),
+          warnings: normalizeInspectWarnings(inspected.success.warnings),
         }
       })
 

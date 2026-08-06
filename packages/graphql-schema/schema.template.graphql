@@ -163,6 +163,11 @@ type AgentBackendStatus {
   unauth ConfigError that carried identity (e.g. Claude Code Amazon Bedrock).
   """
   provider: AgentBackendProvider
+  """
+  Non-fatal inspect warnings (e.g. Bedrock inference-profile discovery failed
+  while the backend remains Ready). Empty when none.
+  """
+  warnings: [String!]!
 }
 
 enum AgentBackendStatusKind {
@@ -183,6 +188,11 @@ type AgentBackendPreview {
   unauth ConfigError identity).
   """
   provider: AgentBackendProvider
+  """
+  Non-fatal inspect warnings for the previewed backend (Ready catalog
+  discovery issues). Empty when none.
+  """
+  warnings: [String!]!
 }
 
 enum AgentBackendPreviewKind {

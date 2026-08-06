@@ -56,6 +56,12 @@ export interface InspectResult {
    * for backends that do not expose provider identity.
    */
   readonly provider?: AgentBackendProvider | null
+  /**
+   * Non-fatal operator-facing warnings from inspect (e.g. Bedrock profile
+   * discovery failed while readiness remains Ready). Omitted or empty when
+   * there is nothing to surface. Distinct from Unavailable `reason`.
+   */
+  readonly warnings?: ReadonlyArray<string>
 }
 
 export interface AgentTurnResult {
