@@ -5,7 +5,7 @@ import type { QueryClient } from "@tanstack/react-query"
  * while the tab is visible. External PR changes do not emit Work Item SSE
  * events, so Work Item invalidation alone cannot keep the header count live.
  */
-export const OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS = 30_000
+export const OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS = 120_000
 
 /**
  * Dedicated TanStack Query cache identity for GitHub-authoritative open

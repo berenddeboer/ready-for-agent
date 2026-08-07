@@ -801,8 +801,9 @@ export const createGraphqlApi = <R>(
                   projectPath: repository.projectPath,
                 }
                 // Forge is authoritative: open non-draft PRs/MRs regardless of
-                // Work Item ownership. Credential/API failures degrade to zero
-                // so the repository list still renders.
+                // Work Item ownership. GitHub observation failures must reach
+                // the dedicated query cache: converting one to zero would
+                // overwrite a last-known count with false data.
                 if (repository.forge === "gitlab") {
                   const gitlab = yield* GitLabService
                   return yield* gitlab
@@ -816,14 +817,9 @@ export const createGraphqlApi = <R>(
                 }
                 if (repository.forge !== "github") return 0
                 const github = yield* GitHubService
-                return yield* github
-                  .countOpenNonDraftPullRequests(forgeRepository)
-                  .pipe(
-                    Effect.catchTags({
-                      GitHubRepositoryUnavailableError: () => Effect.succeed(0),
-                      GitHubRequestError: () => Effect.succeed(0),
-                    }),
-                  )
+                return yield* github.countOpenNonDraftPullRequests(
+                  forgeRepository,
+                )
               }).pipe(
                 Effect.withSpan("graphql-api.Repository.pullRequestCount"),
               ),

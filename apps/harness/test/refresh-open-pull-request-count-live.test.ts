@@ -9,6 +9,14 @@ import { describe, expect, test } from "bun:test"
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+const waitFor = async (predicate: () => boolean): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return
+    await Promise.resolve()
+  }
+  throw new Error("condition did not become true")
+}
+
 describe("openPullRequestCountPresentation", () => {
   test("shows a known count with singular or plural label", () => {
     expect(
@@ -74,12 +82,148 @@ describe("openPullRequestCountPresentation", () => {
 
 describe("followOpenPullRequestCountLive", () => {
   test("exports a positive poll interval for GitHub-backed counts", () => {
-    expect(OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS).toBeGreaterThan(0)
+    expect(OPEN_PULL_REQUEST_COUNT_POLL_INTERVAL_MS).toBe(120_000)
+  })
+
+  test("retains a last-known count map after a later count fetch fails", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    let calls = 0
+    const openPullRequestCountsQuery = {
+      queryKey: openPullRequestCountsQueryKey,
+      queryFn: async () => {
+        calls += 1
+        if (calls === 1) return { "repo-1": 4 }
+        throw new Error("GitHub throttled")
+      },
+    }
+
+    await queryClient.fetchQuery(openPullRequestCountsQuery)
+    await expect(
+      queryClient.fetchQuery({ ...openPullRequestCountsQuery, staleTime: 0 }),
+    ).rejects.toThrow("GitHub throttled")
+
+    const data = queryClient.getQueryData<Readonly<Record<string, number>>>(
+      openPullRequestCountsQuery.queryKey,
+    )
+    expect(data).toEqual({ "repo-1": 4 })
+    expect(
+      openPullRequestCountPresentation({
+        count: data?.["repo-1"],
+        isPending: false,
+        isFetching: false,
+      }),
+    ).toMatchObject({ display: "4", loading: false })
+  })
+
+  test("settles a first failed count fetch as unavailable rather than zero", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const openPullRequestCountsQuery = {
+      queryKey: openPullRequestCountsQueryKey,
+      queryFn: async () => {
+        throw new Error("GitHub throttled")
+      },
+    }
+
+    await expect(
+      queryClient.fetchQuery(openPullRequestCountsQuery),
+    ).rejects.toThrow("GitHub throttled")
+
+    const data = queryClient.getQueryData<Readonly<Record<string, number>>>(
+      openPullRequestCountsQuery.queryKey,
+    )
+    expect(data).toBeUndefined()
+    expect(
+      openPullRequestCountPresentation({
+        count: data?.["repo-1"],
+        isPending: false,
+        isFetching: false,
+      }),
+    ).toEqual({
+      label: "Open pull requests unavailable",
+      display: "—",
+      loading: false,
+    })
   })
 
   test("uses a dedicated query key distinct from repositories", () => {
     expect(openPullRequestCountsQueryKey).toEqual(["open-pull-request-counts"])
     expect(openPullRequestCountsQueryKey).not.toEqual(["repositories"])
+  })
+
+  test("visibility refresh retains the last known count after throttling", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    let countFetches = 0
+    let repositoryFetches = 0
+    const openPullRequestCountsQuery = {
+      queryKey: openPullRequestCountsQueryKey,
+      queryFn: async () => {
+        countFetches += 1
+        if (countFetches === 1) return { "repo-1": 4 }
+        throw new Error("GitHub throttled")
+      },
+    }
+    const repositoriesQuery = {
+      queryKey: ["repositories"] as const,
+      queryFn: async () => {
+        repositoryFetches += 1
+        return [{ id: "repo-1" }]
+      },
+    }
+    await queryClient.fetchQuery(openPullRequestCountsQuery)
+    await queryClient.fetchQuery(repositoriesQuery)
+    repositoryFetches = 0
+
+    let visibilityState: DocumentVisibilityState = "hidden"
+    const listeners = new Map<string, EventListener>()
+    const documentRef = {
+      get visibilityState() {
+        return visibilityState
+      },
+      addEventListener: (type: string, listener: EventListener) => {
+        listeners.set(type, listener)
+      },
+      removeEventListener: (type: string) => {
+        listeners.delete(type)
+      },
+    }
+    const controller = new AbortController()
+    const follower = followOpenPullRequestCountLive({
+      queryClient,
+      openPullRequestCountsQuery,
+      signal: controller.signal,
+      documentRef,
+      pollIntervalMs: 60_000,
+    })
+
+    visibilityState = "visible"
+    listeners.get("visibilitychange")?.(new Event("visibilitychange"))
+    await waitFor(
+      () =>
+        countFetches === 2 &&
+        queryClient.getQueryState(openPullRequestCountsQuery.queryKey)
+          ?.fetchStatus === "idle",
+    )
+
+    expect(
+      queryClient.getQueryData<Readonly<Record<string, number>>>(
+        openPullRequestCountsQuery.queryKey,
+      ),
+    ).toEqual({ "repo-1": 4 })
+    expect(repositoryFetches).toBe(0)
+
+    controller.abort()
+    await follower
+    expect(
+      queryClient.getQueryData<Readonly<Record<string, number>>>(
+        openPullRequestCountsQuery.queryKey,
+      ),
+    ).toEqual({ "repo-1": 4 })
   })
 
   test("refetches only the dedicated count projection when the tab becomes visible", async () => {
