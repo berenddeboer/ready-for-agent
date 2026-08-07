@@ -15,7 +15,7 @@ const originAdmissionOrder: readonly GitHubOperationOrigin[] = [
 const AGING_MILLIS = 60_000
 const MAX_FALLBACK_THROTTLE_MILLIS = 15 * 60_000
 
-export interface GitHubThrottleStatus {
+interface GitHubThrottleStatus {
   readonly retryAt: number
 }
 
