@@ -138,10 +138,15 @@ value inside `[data-theme="dark"] [data-kanban-surface]`.
 | `--mast-plate-active` | `#e8ece9` | `#e8ece9` |
 | `--mast-plate-active-ink` | `#101314` | `#101314` |
 | `--mast-plate-active-rivet` | `rgb(16 19 18 / 0.5)` | `rgb(16 19 18 / 0.5)` |
+| `--mast-brass` | `#c9a04a` | `#c9a04a` |
+| `--mast-brass-hi` | `#f0d78a` | `#f0d78a` |
+| `--mast-brass-lo` | `#7a5a1e` | `#7a5a1e` |
 
 The band carries a low-contrast, full-width forged-iron scrollwork rail behind
 the brand and controls. A matte grain, dark vignette, and bevel-highlighted
-iron strokes add depth without reducing foreground contrast.
+iron strokes add depth without reducing foreground contrast. Brass tokens
+accent the theme lever and Settings cog (theme-invariant on the always-dark
+mast).
 
 ### 2.4 Stamped plates on paper
 
@@ -255,9 +260,10 @@ Named slots (rem), transcribed from the prototypes:
 
 - One token set; `[data-theme="dark"]` overrides the neutral/masthead/plate
   groups on `<html>`. Lane colors and fonts live outside the themed blocks.
-- Default follows `prefers-color-scheme`; a **theme-toggle plate** in the
-  masthead nav flips light/dark (moon icon, label = target theme,
-  `aria-pressed`). `?theme=light|dark` may pin a theme for sharing.
+- Default follows `prefers-color-scheme`; a **theme-toggle lever** in the
+  masthead nav flips light/dark (switchboard handle: up = light, down = dark;
+  mono label = target theme, `aria-pressed`). `?theme=light|dark` may pin a
+  theme for sharing.
 - The masthead band stays dark in both themes (§2.3).
 - Merged-PR stats use paper fill in both themes (§4.2) — no pitch-black
   departure slab in dark.
@@ -276,11 +282,18 @@ brand left and nav right, items baseline-aligned.
   and "Operator board" are not repeated here), wordmark link in display 800
   uppercase white (hover: `--signal`), mono sub-line with live status fragment
   in `--signal`.
-- **Primary nav** — B's flush stamped plates, replacing D's system-map stops:
-  Home, Repos, Completed, Settings (button, `aria-haspopup="dialog"`), plus
-  the theme-toggle plate. Plate anatomy (§5.3): 2px black border, rivet dots,
-  mono uppercase 0.7rem/700, icon (0.9rem inline SVG) + label; active page =
-  light plate (`--mast-plate-active` ink) with `aria-current="page"`.
+- **Primary nav instruments** — theme lever + Settings cog on the right
+  (Pipeline / Repos / Completed live under the Jobs switcher, not the mast):
+  - **Theme lever**: iron cradle, brass stem/handle; handle up when light,
+    down when dark (`aria-pressed`); mono brass legend shows the *target*
+    theme (same as before).
+  - **Settings cog**: brass SVG gear around an iron core with stroke
+    **sunburst / hub** icon; mono "Settings" legend; button
+    `aria-haspopup="dialog"` and accessible name `"Settings"`
+    (`aria-label` + visible text for e2e `getByRole`).
+  - Brass accents use `--mast-brass` / `-hi` / `-lo`. Instrument CSS lives in
+    `styles.css` (`.mast-theme-lever`, `.mast-settings-cog`). Jobs tabs still
+    use mini-plate rivets (§5.3).
 - **Lane ribbon**: 0.4rem strip directly under the masthead — six equal
   segments in lane-color order. Purely visual, `aria-hidden`.
 - **Not-found route**: standard panel + "Back home" link, same language.
@@ -613,14 +626,13 @@ underline).
 
 ### 5.3 Stamped plates (buttons)
 
-- **Nav plate**: 2px `#000` border, `--mast-plate` fill, rivet dots
-  (radial-gradient 1.6px at top corners), bevel
-  (`inset 0 1px 0 hi, inset 0 -2px 0 rgb(0 0 0 / 0.3)`), mono 0.7rem/700
-  uppercase; hover `--mast-plate-hover`; active = light plate.
-- **Mini plate** (pagination, banner actions, Browse, Cancel, Recheck): 2px
-  ink border, `--plate` fill, top-left + top-right rivets (1.4px dots),
-  **top inset highlight only** (`inset 0 1px 0 var(--plate-hi)` — no bottom
-  `-2px` strip), mono 0.68rem/700 uppercase; hover `--plate-hover`.
+- **Mast instruments** (theme lever + Settings cog): not stamped plates — see
+  §4.1. Tokens `--mast-plate*` remain on the theme layer for historical
+  chrome continuity but have no mast-nav recipe consumer.
+- **Mini plate** (pagination, banner actions, Browse, Cancel, Recheck, Jobs
+  tabs): 2px ink border, `--plate` fill, top-left + top-right rivets (1.4px
+  dots), **top inset highlight only** (`inset 0 1px 0 var(--plate-hi)` — no
+  bottom `-2px` strip), mono 0.68rem/700 uppercase; hover `--plate-hover`.
 - **Primary plate** (Save, credential CTAs, other dialog actions): **riveted
   stamped-plate twin of mini** — same `--plate` fill, rivets, and top-only
   bevel (not solid-ink fill). Hierarchy is position/label only so Cancel and

@@ -20,9 +20,6 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
  * `calc(100%_-_Npx)`. Bare `calc(100%-Npx)` is invalid CSS and drops the
  * right-hand rivet entirely.
  */
-const mastPlateRivets =
-  "[background-image:radial-gradient(circle_1.6px_at_7px_7px,var(--mast-plate-rivet)_1.6px,transparent_2.1px),radial-gradient(circle_1.6px_at_calc(100%_-_7px)_7px,var(--mast-plate-rivet)_1.6px,transparent_2.1px)]"
-
 const plateMiniRivets =
   "[background-image:radial-gradient(circle_1.4px_at_6px_6px,var(--plate-rivet)_1.4px,transparent_1.9px),radial-gradient(circle_1.4px_at_calc(100%_-_6px)_6px,var(--plate-rivet)_1.4px,transparent_1.9px)]"
 
@@ -57,6 +54,8 @@ export const ui = {
   /* ---------- Nav shell (§4.1) ---------- */
 
   // bg-mast-bg (not bg-[var(--mast-bg)]) so styles.css mast focus-ring selector matches.
+  // overflow-hidden clips the mobile-wide scrollwork ornament (165% width) so it
+  // cannot create horizontal page scroll; instrument labels are in-flow, not clipped.
   mast: cx(
     "relative isolate flex flex-wrap items-end justify-between overflow-hidden",
     "gap-x-10 gap-y-[1.2rem] bg-mast-bg px-[2.2rem] pt-6 pb-[1.35rem] text-[var(--mast-ink)]",
@@ -107,26 +106,16 @@ export const ui = {
   /** Child `.ok` inside brand-sub */
   brandSubOk: "text-signal",
 
-  mastNav: "relative z-20 flex flex-wrap items-center gap-[0.55rem]",
+  // items-start: top-align lever cradle + settings cog (labels hang below).
+  mastNav:
+    "relative z-20 flex flex-wrap items-start gap-x-[1.15rem] gap-y-[0.55rem]",
 
-  mastPlate: cx(
-    "inline-flex items-center gap-2 border-2 border-black",
-    "bg-[var(--mast-plate)] text-[var(--mast-plate-ink)]",
-    mastPlateRivets,
-    "shadow-[inset_0_1px_0_var(--mast-plate-hi),inset_0_-2px_0_rgb(0_0_0/0.3)]",
-    "px-[0.95rem] py-[0.55rem]",
-    "font-mono text-[0.7rem] font-bold tracking-[0.14em] uppercase no-underline",
-    "cursor-pointer transition-[background-color,color] duration-100 ease-in-out",
-    "hover:bg-[var(--mast-plate-hover)] hover:text-[var(--mast-ink)]",
-    "aria-[current=page]:bg-[var(--mast-plate-active)] aria-[current=page]:text-[var(--mast-plate-active-ink)]",
-    "aria-[current=page]:shadow-[inset_0_1px_0_rgb(255_255_255/0.65),inset_0_-2px_0_rgb(16_19_18/0.12)]",
-    // Active rivets via arbitrary variant on same element (valid calc for right edge).
-    "aria-[current=page]:[background-image:radial-gradient(circle_1.6px_at_7px_7px,var(--mast-plate-active-rivet)_1.6px,transparent_2.1px),radial-gradient(circle_1.6px_at_calc(100%_-_7px)_7px,var(--mast-plate-active-rivet)_1.6px,transparent_2.1px)]",
-    "[&_svg]:h-[0.9rem] [&_svg]:w-[0.9rem] [&_svg]:shrink-0",
-  ),
-
-  /** Standalone if SVG is not nested under mastPlate */
-  mastPlateSvg: "h-[0.9rem] w-[0.9rem] shrink-0",
+  /**
+   * Theme lever + Settings cog: visual recipes in styles.css (prototype C / B).
+   * Class names are production hooks; child anatomy uses .cradle / .teeth / etc.
+   */
+  mastThemeLever: "mast-theme-lever",
+  mastSettingsCog: "mast-settings-cog",
 
   laneRibbon:
     "flex h-[0.4rem] [&>span]:flex-1 [&>span:nth-child(1)]:bg-lane-queue [&>span:nth-child(2)]:bg-lane-build [&>span:nth-child(3)]:bg-lane-review [&>span:nth-child(4)]:bg-lane-pr [&>span:nth-child(5)]:bg-lane-attention [&>span:nth-child(6)]:bg-lane-merged",
