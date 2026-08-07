@@ -334,13 +334,14 @@ type StepRunRow = {
   readonly finished_at: number | null
   readonly reason_code: string | null
   readonly reason_message: string | null
+  readonly postponed_until: number | null
   readonly session_wait_ms: number | null
   readonly session_wait_started_at: number | null
 }
 
 const STEP_RUN_SELECT_COLUMNS = `id, work_item_id, step, status, queue_job_id, queued_at,
                         started_at, finished_at, reason_code, reason_message,
-                        session_wait_ms, session_wait_started_at`
+                        postponed_until, session_wait_ms, session_wait_started_at`
 
 const deriveQueueWaitMs = (row: StepRunRow, nowMs: number): number => {
   const endMs = row.started_at ?? row.finished_at ?? nowMs
@@ -358,20 +359,36 @@ const deriveExecutionDurationMs = (
   return Math.max(0, endMs - row.started_at)
 }
 
-const toStepRunRecord = (row: StepRunRow, nowMs: number): StepRunRecord => ({
-  id: row.id as StepRunId,
-  workItemId: row.work_item_id as WorkItemId,
-  step: row.step,
-  status: row.status,
-  queueJobId: row.queue_job_id,
-  queuedAt: new Date(row.queued_at),
-  startedAt: row.started_at === null ? null : new Date(row.started_at),
-  finishedAt: row.finished_at === null ? null : new Date(row.finished_at),
-  reasonCode: row.reason_code,
-  reasonMessage: row.reason_message,
-  queueWaitMs: deriveQueueWaitMs(row, nowMs),
-  executionDurationMs: deriveExecutionDurationMs(row, nowMs),
-})
+const toStepRunRecord = (row: StepRunRow, nowMs: number): StepRunRecord => {
+  const common = {
+    id: row.id as StepRunId,
+    workItemId: row.work_item_id as WorkItemId,
+    step: row.step,
+    queueJobId: row.queue_job_id,
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at === null ? null : new Date(row.started_at),
+    finishedAt: row.finished_at === null ? null : new Date(row.finished_at),
+    reasonCode: row.reason_code,
+    reasonMessage: row.reason_message,
+    queueWaitMs: deriveQueueWaitMs(row, nowMs),
+    executionDurationMs: deriveExecutionDurationMs(row, nowMs),
+  }
+  if (row.status === "postponed") {
+    if (row.postponed_until === null) {
+      throw new Error("Postponed Step Run is missing postponed_until")
+    }
+    if (row.finished_at === null) {
+      throw new Error("Postponed Step Run is missing finished_at")
+    }
+    return {
+      ...common,
+      status: "postponed",
+      finishedAt: new Date(row.finished_at),
+      postponedUntil: new Date(row.postponed_until),
+    }
+  }
+  return { ...common, status: row.status, postponedUntil: null }
+}
 
 const toWorkItemRecord = (
   row: WorkItemRow,

@@ -68,18 +68,21 @@ describe("work-item-progress-chrome", () => {
     )
   })
 
-  test("Waiting for blockers and worker slot share hold treatment, distinct from Queued", () => {
+  test("all derived waits share hold treatment, distinct from Queued", () => {
     const blockers = statusBadgeClassNameForStatus("WAITING_FOR_BLOCKERS")
     const workerSlot = statusBadgeClassNameForStatus("WAITING_FOR_WORKER_SLOT")
+    const github = statusBadgeClassNameForStatus("WAITING_FOR_GITHUB")
     const queued = statusBadgeClassNameForStatus("QUEUED")
     const running = statusBadgeClassNameForStatus("RUNNING")
 
     expect(blockers).toBe(cx(ui.statusTag, ui.statusTagHold))
     expect(workerSlot).toBe(cx(ui.statusTag, ui.statusTagHold))
+    expect(github).toBe(cx(ui.statusTag, ui.statusTagHold))
     expect(queued).toBe(cx(ui.statusTag, ui.statusTagPlain))
     expect(running).toBe(cx(ui.statusTag, ui.statusTagPlain))
 
     expect(blockers).toBe(workerSlot)
+    expect(blockers).toBe(github)
     expect(blockers).not.toBe(queued)
     expect(blockers).not.toBe(running)
   })

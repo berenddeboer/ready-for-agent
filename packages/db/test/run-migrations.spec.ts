@@ -102,6 +102,7 @@ describe("runMigrations", () => {
           { name: "20260729120000_work_item_publication_copy" },
           { name: "20260729160000_forge_identity_foundation" },
           { name: "20260730140857_unfinished_work_item_index" },
+          { name: "20260807100000_postponed_step_runs" },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )
@@ -943,6 +944,89 @@ describe("runMigrations", () => {
         expect(rows).toEqual([
           { id: "repo-1", wait_for_ready_for_review_checks: 1 },
           { id: "repo-2", wait_for_ready_for_review_checks: 1 },
+        ])
+      }).pipe(Effect.provide(SqliteTest)),
+    )
+  })
+
+  it("enforces Postponed Step Run deadlines", async () => {
+    const migrationSql = await readFile(
+      join(
+        import.meta.dir,
+        "../../db-schema/drizzle/20260807100000_postponed_step_runs/migration.sql",
+      ),
+      "utf8",
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql.unsafe(
+          `CREATE TABLE step_run (
+             id text PRIMARY KEY,
+             status text NOT NULL,
+             finished_at integer
+           )`,
+        )
+        for (const statement of migrationSql.split(
+          "--> statement-breakpoint",
+        )) {
+          if (statement.trim().length > 0) {
+            yield* sql.unsafe(statement)
+          }
+        }
+
+        yield* sql.unsafe(
+          `INSERT INTO step_run (id, status, finished_at, postponed_until)
+           VALUES ('queued', 'queued', NULL, NULL), ('postponed', 'postponed', 122, 123)`,
+        )
+
+        const missingDeadline = yield* Effect.exit(
+          sql.unsafe(
+            `INSERT INTO step_run (id, status, finished_at, postponed_until)
+             VALUES ('missing-deadline', 'postponed', 122, NULL)`,
+          ),
+        )
+        const missingFinishedAt = yield* Effect.exit(
+          sql.unsafe(
+            `INSERT INTO step_run (id, status, finished_at, postponed_until)
+             VALUES ('missing-finished-at', 'postponed', NULL, 123)`,
+          ),
+        )
+        const strayDeadline = yield* Effect.exit(
+          sql.unsafe(
+            `INSERT INTO step_run (id, status, finished_at, postponed_until)
+             VALUES ('stray-deadline', 'queued', NULL, 123)`,
+          ),
+        )
+        const clearingFinishedAt = yield* Effect.exit(
+          sql.unsafe(
+            `UPDATE step_run SET finished_at = NULL WHERE id = 'postponed'`,
+          ),
+        )
+
+        expect(missingDeadline._tag).toBe("Failure")
+        expect(missingFinishedAt._tag).toBe("Failure")
+        expect(strayDeadline._tag).toBe("Failure")
+        expect(clearingFinishedAt._tag).toBe("Failure")
+        expect(
+          yield* sql.unsafe(
+            `SELECT id, status, finished_at, postponed_until
+             FROM step_run ORDER BY id`,
+          ),
+        ).toEqual([
+          {
+            id: "postponed",
+            status: "postponed",
+            finished_at: 122,
+            postponed_until: 123,
+          },
+          {
+            id: "queued",
+            status: "queued",
+            finished_at: null,
+            postponed_until: null,
+          },
         ])
       }).pipe(Effect.provide(SqliteTest)),
     )

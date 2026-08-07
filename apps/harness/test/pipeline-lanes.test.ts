@@ -130,6 +130,11 @@ describe("pipelineLaneFor", () => {
       lane: "pr",
     },
     {
+      state: "WATCH_PR_STATUS_CHECKS",
+      status: "WAITING_FOR_GITHUB",
+      lane: "pr",
+    },
+    {
       state: "RESOLVE_PR_MERGE_CONFLICT",
       status: "RUNNING",
       lane: "pr",

@@ -72,7 +72,8 @@ export function statusBadgeClassNameForStatus(status: string): string {
         : status === "ABANDONED" || status === "CANCELLED"
           ? ui.statusTagGhost
           : status === "WAITING_FOR_WORKER_SLOT" ||
-              status === "WAITING_FOR_BLOCKERS"
+              status === "WAITING_FOR_BLOCKERS" ||
+              status === "WAITING_FOR_GITHUB"
             ? ui.statusTagHold
             : ui.statusTagPlain
   return cx(statusBadgeBaseClassName, tone)

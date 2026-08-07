@@ -352,6 +352,7 @@ export const stepRun = snakeCase.table(
         "failed",
         "interrupted",
         "cancelled",
+        "postponed",
       ],
     }).notNull(),
     queueJobId: text(),
@@ -360,6 +361,8 @@ export const stepRun = snakeCase.table(
     finishedAt: integer({ mode: "number" }),
     reasonCode: text(),
     reasonMessage: text(),
+    /** Present exactly when this finished Step Run was postponed for GitHub. */
+    postponedUntil: integer({ mode: "number" }),
     /**
      * Cumulative ms spent blocked on an OpenCode session slot (completed waits).
      * Excluded from max-duration / visibility-lease productive time.

@@ -59,12 +59,14 @@ export type WorkItemStatus =
   | "failed"
   | "interrupted"
   | "cancelled"
+  | "postponed"
   | "complete"
   | "abandoned"
   | "needs_human"
   | "needs_human_review"
   | "waiting_for_worker_slot"
   | "waiting_for_blockers"
+  | "waiting_for_github"
 
 type LifecyclePhase =
   | Exclude<
@@ -109,7 +111,9 @@ const lifecyclePhaseLabel = (phase: LifecyclePhase): string => {
 }
 
 export const statusLabel = (status: WorkItemStatus): string =>
-  status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
+  status === "waiting_for_github"
+    ? "Waiting for GitHub"
+    : status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase())
 
 const latestStepRun = (workItem: WorkItemRecord): StepRunRecord | undefined =>
   workItem.stepRuns.at(-1)
@@ -127,6 +131,43 @@ export const workItemIsTerminal = (
   workItem: WorkItemRecord,
 ): workItem is WorkItemRecord & { readonly state: TerminalWorkItemState } =>
   isTerminalWorkItemState(workItem.state)
+
+const hasActiveStepRunBeforeLatest = (workItem: WorkItemRecord): boolean =>
+  workItem.stepRuns
+    .slice(0, -1)
+    .some(
+      (stepRun) => stepRun.status === "queued" || stepRun.status === "running",
+    )
+
+/** Holds that always take precedence over a derived GitHub wait. */
+const higherPriorityWorkItemStatus = (
+  workItem: WorkItemRecord,
+): WorkItemStatus | null => {
+  if (workItemIsTerminal(workItem)) return workItem.state
+  if (workItem.waitingForBlockers) return "waiting_for_blockers"
+  if (workItem.waitingSince !== null) return "waiting_for_worker_slot"
+  if (workItem.paused) return "needs_human_review"
+  return null
+}
+
+/**
+ * The authoritative retry deadline is visible only while the Postponed Step
+ * Run forms the current GitHub hold. Higher-precedence holds and impossible
+ * active-resource combinations must not leak a stale wake deadline.
+ */
+export const workItemPostponedUntil = (
+  workItem: WorkItemRecord,
+): Date | null => {
+  if (
+    higherPriorityWorkItemStatus(workItem) !== null ||
+    workItem.holdsWorkerSlot ||
+    hasActiveStepRunBeforeLatest(workItem)
+  ) {
+    return null
+  }
+  const latest = latestStepRun(workItem)
+  return latest?.status === "postponed" ? latest.postponedUntil : null
+}
 
 export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
   if (
@@ -157,11 +198,9 @@ export const workItemCanRetry = (workItem: WorkItemRecord): boolean => {
 }
 
 export const workItemStatus = (workItem: WorkItemRecord): WorkItemStatus => {
-  // Terminal states always win over flags, which may lag UPDATE.
-  if (isTerminalWorkItemState(workItem.state)) return workItem.state
-  if (workItem.waitingForBlockers) return "waiting_for_blockers"
-  if (workItem.waitingSince != null) return "waiting_for_worker_slot"
-  if (workItem.paused) return "needs_human_review"
+  const higherPriorityStatus = higherPriorityWorkItemStatus(workItem)
+  if (higherPriorityStatus !== null) return higherPriorityStatus
+  if (workItemPostponedUntil(workItem) !== null) return "waiting_for_github"
   const latest = latestStepRun(workItem)
   if (latest === undefined) return "queued"
   return stepRunDisplayStatus(latest)
@@ -194,6 +233,13 @@ export const workItemStatusMessage = (
   }
   if (workItem.waitingSince != null) {
     return WAITING_FOR_WORKER_SLOT_MESSAGE
+  }
+  if (workItem.paused) {
+    return workItem.failureMessage
+  }
+  const postponedUntil = workItemPostponedUntil(workItem)
+  if (postponedUntil !== null) {
+    return `Waiting for GitHub until ${postponedUntil.toISOString()}`
   }
   if (workItem.failureMessage != null) {
     return workItem.failureMessage
@@ -246,7 +292,7 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
       ? lifecyclePhase(finalStepRun.step)
       : null
 
-  return [...latestRuns].map(([phase, stepRun]) => {
+  return [...latestRuns].flatMap(([phase, stepRun]) => {
     const status: WorkItemStatus =
       phase === finalPhase ? "needs_human" : stepRunDisplayStatus(stepRun)
     const reviewRunningPhase =
@@ -279,12 +325,27 @@ export const lifecycleLabels = (workItem: WorkItemRecord) => {
                 stepRun.reasonCode !== STEP_RUN_REASON.mergeRevalidation
               ? "Merged"
               : statusLabel(status)
-    return {
+    const latestLabel = {
       phase: phase.toUpperCase(),
       label: `${lifecyclePhaseLabel(phase)}: ${outcome}`,
       status: status.toUpperCase(),
       durationMs: cumulativeExecutionDurationMs(runsByPhase.get(phase) ?? []),
     }
+    const priorPostponedCount = (runsByPhase.get(phase) ?? [])
+      .slice(0, -1)
+      .filter((run) => run.status === "postponed").length
+    if (priorPostponedCount === 0) return [latestLabel]
+
+    const attemptLabel = priorPostponedCount === 1 ? "attempt" : "attempts"
+    return [
+      {
+        phase: phase.toUpperCase(),
+        label: `${lifecyclePhaseLabel(phase)}: Postponed (${priorPostponedCount} prior ${attemptLabel})`,
+        status: "POSTPONED",
+        durationMs: null,
+      },
+      latestLabel,
+    ]
   })
 }
 

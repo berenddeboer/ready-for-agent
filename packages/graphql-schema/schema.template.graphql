@@ -409,6 +409,11 @@ enum WorkItemStatus {
   FAILED
   INTERRUPTED
   CANCELLED
+  """
+  Finished Step Run outcome. The Work Item is Waiting for GitHub when its
+  latest Step Run is postponed with a retry deadline.
+  """
+  POSTPONED
   COMPLETE
   ABANDONED
   NEEDS_HUMAN
@@ -419,6 +424,11 @@ enum WorkItemStatus {
   Distinct from Waiting for Worker Slot and from Step Run / Agent Turn Queued.
   """
   WAITING_FOR_BLOCKERS
+  """
+  Derived from the latest Postponed Step Run and its durable wake contract.
+  This is not a Work Item lifecycle state.
+  """
+  WAITING_FOR_GITHUB
 }
 
 enum LifecyclePhase {
@@ -481,6 +491,11 @@ type WorkItem {
   status: WorkItemStatus!
   statusLabel: String!
   statusMessage: String
+  """
+  Retry deadline on the latest Postponed Step Run. Null unless the Work Item
+  is Waiting for GitHub.
+  """
+  postponedUntil: String
   paused: Boolean!
   canRetry: Boolean!
   isTerminal: Boolean!
