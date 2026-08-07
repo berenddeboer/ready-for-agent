@@ -5,6 +5,7 @@ Feature: Route Pipeline Session Telemetry through browser history
 
   Background:
     Given the Harness has Session Telemetry fixtures
+    And the Harness has a configured default build model
 
   Scenario: Pipeline open pushes Work Item telemetry path and preserves theme search
     When I open the home page with theme dark

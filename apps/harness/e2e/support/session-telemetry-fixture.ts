@@ -62,32 +62,19 @@ const seedAndRestart = async (sql: string) => {
 /**
  * Seed a paused Repository and Work Items that appear on Pipeline with
  * clickable Session IDs. Paused unfinished Work Items do not enqueue Step Runs.
+ *
+ * Does not write `config.default_model`: a non-catalog seed would leave Save
+ * blocked for later settings-history scenarios in the same live Harness
+ * process, and `ensureConfiguredDefaultBuildModel` is the shared catalog-safe
+ * path for that. Callers that need first-run suppressed should use that helper
+ * after seeding.
  */
 export const seedSessionTelemetryFixtures = async (): Promise<void> => {
   const now = Date.now()
-  // Seed a non-empty default build model so first-run Settings does not auto-open
-  // and block Pipeline scenarios. Value need not be in the live catalog for
-  // telemetry navigation (no Save). Prefs JSON mirrors the flat columns.
-  const prefs = JSON.stringify({
-    opencode: {
-      defaultModel: "e2e-fixture-model",
-      defaultThinkingLevel: null,
-      reviewModel: null,
-      reviewThinkingLevel: null,
-    },
-  })
   const sql = [
     // Clear prior fixture rows so scenarios can re-seed safely.
     `DELETE FROM work_item WHERE repository_id = ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)};`,
     `DELETE FROM repository WHERE id = ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)};`,
-    `UPDATE config SET
-       selected_agent_backend = 'opencode',
-       default_model = 'e2e-fixture-model',
-       default_thinking_level = NULL,
-       review_model = NULL,
-       review_thinking_level = NULL,
-       backend_model_prefs = ${sqlLiteral(prefs)}
-     WHERE id = 'default';`,
     `INSERT INTO repository (
        id, forge, forge_host, project_path, local_path, is_bare, paused,
        created_at, updated_at
