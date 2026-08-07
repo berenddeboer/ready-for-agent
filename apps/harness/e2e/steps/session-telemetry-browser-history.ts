@@ -1,5 +1,6 @@
 /**
- * Playwright-BDD steps for routed Session Telemetry history (issue #841).
+ * Playwright-BDD steps for routed Session Telemetry history
+ * (issues #841 / #843).
  *
  * Shared navigation steps (home open, Back/Forward, refresh, first-run cancel,
  * Pipeline tab assertions) live in kanban-route / settings-browser-history.
@@ -18,6 +19,19 @@ const telemetryPathFor = (workItemId: string): RegExp =>
   new RegExp(
     `/session/${workItemId.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&")}/telemetry/?(?:\\?.*)?$`,
   )
+
+const completedPathPattern = /\/completed\/?(?:\?.*)?$/
+
+const openSessionButton = async (page: Page, sessionId: string) => {
+  const sessionButton = page.getByRole("button", {
+    name: sessionId,
+    exact: true,
+  })
+  await expect(sessionButton).toBeVisible({ timeout: 30_000 })
+  await sessionButton.click()
+  const dialog = sessionUsageDialog(page)
+  await expect(dialog).toBeVisible({ timeout: 15_000 })
+}
 
 type SessionQueryIntercept = {
   mode: "pass" | "fail" | "available"
@@ -121,14 +135,28 @@ When(
   "I open Session Telemetry for the missing-session fixture from Pipeline",
   async ({ page }) => {
     await installSessionQueryRoute(page)
-    const sessionButton = page.getByRole("button", {
-      name: TELEMETRY_FIXTURE.missingSessionId,
-      exact: true,
-    })
-    await expect(sessionButton).toBeVisible({ timeout: 30_000 })
-    await sessionButton.click()
-    const dialog = sessionUsageDialog(page)
-    await expect(dialog).toBeVisible({ timeout: 15_000 })
+    await openSessionButton(page, TELEMETRY_FIXTURE.missingSessionId)
+  },
+)
+
+When(
+  "I open Session Telemetry for the missing-session fixture from Repos",
+  async ({ page }) => {
+    await installSessionQueryRoute(page)
+    await openSessionButton(page, TELEMETRY_FIXTURE.missingSessionId)
+  },
+)
+
+When("I open the Completed page", async ({ page }) => {
+  await page.goto("/completed")
+  await expect(page).toHaveURL(completedPathPattern)
+})
+
+When(
+  "I open Session Telemetry for the completed fixture from Completed",
+  async ({ page }) => {
+    await installSessionQueryRoute(page)
+    await openSessionButton(page, TELEMETRY_FIXTURE.completedSessionId)
   },
 )
 
@@ -199,6 +227,15 @@ Then(
 )
 
 Then(
+  "the browser location is the Session Telemetry path for the completed fixture",
+  async ({ page }) => {
+    await expect(page).toHaveURL(
+      telemetryPathFor(TELEMETRY_FIXTURE.completedWorkItemId),
+    )
+  },
+)
+
+Then(
   "the browser location is the Session Telemetry path for the missing-session fixture with theme dark",
   async ({ page }) => {
     await expect(page).toHaveURL(
@@ -208,6 +245,10 @@ Then(
     )
   },
 )
+
+Then("the browser location is the completed path", async ({ page }) => {
+  await expect(page).toHaveURL(completedPathPattern)
+})
 
 Then("the Session usage dialog is visible", async ({ page }) => {
   await expect(sessionUsageDialog(page)).toBeVisible()

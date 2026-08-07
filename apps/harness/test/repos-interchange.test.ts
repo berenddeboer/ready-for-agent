@@ -174,7 +174,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(row).toContain("onOpenSession=")
     expect(row).toContain("collapseEarlierLanes")
     expect(row).toContain("forge={repository.forge}")
-    // One SessionUsageDialog at RepositoryIssues — not per issue row.
+    // Session Telemetry is root-route owned (#843) — no local dialog here.
     expect(row).not.toContain("<SessionUsageDialog")
 
     const issuesList = sliceBetweenMarkers(
@@ -182,8 +182,10 @@ describe("Interchange phase 4: repos page + blank slate", () => {
       "function RepositoryIssues(",
       "function ParentIssueGroup(",
     )
-    expect(issuesList).toContain("<SessionUsageDialog")
+    expect(issuesList).toContain("openSessionTelemetry")
     expect(issuesList).toContain("onOpenSession={onOpenSession}")
+    expect(issuesList).not.toContain("<SessionUsageDialog")
+    expect(issuesList).not.toContain("setSessionDialog")
 
     const ui = uiSource()
     expect(ui).toContain("lifecycleInset:")

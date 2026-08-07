@@ -14,6 +14,12 @@ const rootSource = () =>
 const kanbanSource = () =>
   readFileSync(join(import.meta.dir, "../src/kanban-board.tsx"), "utf8")
 
+const indexSource = () =>
+  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+
+const completedSurfaceSource = () =>
+  readFileSync(join(import.meta.dir, "../src/completed-surface.tsx"), "utf8")
+
 const navSource = () =>
   readFileSync(join(import.meta.dir, "../src/session-telemetry-nav.ts"), "utf8")
 
@@ -29,7 +35,7 @@ const jobsSwitcherSource = () =>
 const routedDialogSource = () =>
   readFileSync(join(import.meta.dir, "../src/routed-dialog.ts"), "utf8")
 
-describe("Session Telemetry route (issue #841)", () => {
+describe("Session Telemetry route (issues #841 / #843)", () => {
   test("is a dedicated TanStack file route over the Pipeline background", () => {
     const source = telemetryRouteSource()
     expect(source).toContain(
@@ -49,11 +55,22 @@ describe("Session Telemetry route (issue #841)", () => {
     )
   })
 
-  test("Pipeline openers push Work Item ID telemetry route with in-app origin", () => {
+  test("Pipeline, Repos, and Completed openers push the same telemetry route", () => {
     const kanban = kanbanSource()
     expect(kanban).toContain("openSessionTelemetry")
     expect(kanban).not.toContain("setSessionDialog")
     expect(kanban).not.toContain("<SessionUsageDialog")
+
+    const index = indexSource()
+    expect(index).toContain("openSessionTelemetry")
+    expect(index).not.toContain("setSessionDialog")
+    expect(index).not.toContain("<SessionUsageDialog")
+
+    const completed = completedSurfaceSource()
+    expect(completed).toContain("openSessionTelemetry")
+    expect(completed).not.toContain("setSessionDialog")
+    expect(completed).not.toContain("<SessionUsageDialog")
+    expect(completed).not.toContain('from "./session-usage-dialog.js"')
 
     const nav = navSource()
     expect(nav).toContain('to: "/session/$workItemId/telemetry"')

@@ -1,6 +1,6 @@
-Feature: Route Pipeline Session Telemetry through browser history
-  Opening Session Telemetry from Pipeline uses
-  `/session/<work-item-id>/telemetry` so Back closes the dialog, Forward
+Feature: Route Session Telemetry through browser history
+  Opening Session Telemetry from Pipeline, Repos, or Completed uses the same
+  `/session/<work-item-id>/telemetry` path so Back closes the dialog, Forward
   reopens it, and Close stays synchronized with the browser location.
 
   Background:
@@ -37,6 +37,64 @@ Feature: Route Pipeline Session Telemetry through browser history
     When I close the Session usage dialog
     Then the Session usage dialog is hidden
     And the browser location is the home path
+
+  Scenario: Repos open uses the same canonical telemetry route
+    When I open the Repos page
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the missing-session fixture from Repos
+    Then the browser location is the Session Telemetry path for the missing-session fixture
+    And the Session usage dialog is visible
+    And the Session usage dialog shows the missing Session Telemetry state
+
+  Scenario: Browser Back and Forward from Repos restore origin and reopen
+    When I open the Repos page
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the missing-session fixture from Repos
+    Then the browser location is the Session Telemetry path for the missing-session fixture
+    When I go back in the browser
+    Then the Session usage dialog is hidden
+    And the browser location is the repos path
+    When I go forward in the browser
+    Then the Session usage dialog is visible
+    And the browser location is the Session Telemetry path for the missing-session fixture
+
+  Scenario: Close returns to the originating Repos location
+    When I open the Repos page
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the missing-session fixture from Repos
+    Then the browser location is the Session Telemetry path for the missing-session fixture
+    When I close the Session usage dialog
+    Then the Session usage dialog is hidden
+    And the browser location is the repos path
+
+  Scenario: Completed open uses the same canonical telemetry route
+    When I open the Completed page
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the completed fixture from Completed
+    Then the browser location is the Session Telemetry path for the completed fixture
+    And the Session usage dialog is visible
+    And the Session usage dialog shows the missing Session Telemetry state
+
+  Scenario: Browser Back and Forward from Completed restore origin and reopen
+    When I open the Completed page
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the completed fixture from Completed
+    Then the browser location is the Session Telemetry path for the completed fixture
+    When I go back in the browser
+    Then the Session usage dialog is hidden
+    And the browser location is the completed path
+    When I go forward in the browser
+    Then the Session usage dialog is visible
+    And the browser location is the Session Telemetry path for the completed fixture
+
+  Scenario: Close returns to the originating Completed location
+    When I open the Completed page
+    And I cancel the Harness settings dialog if present
+    And I open Session Telemetry for the completed fixture from Completed
+    Then the browser location is the Session Telemetry path for the completed fixture
+    When I close the Session usage dialog
+    Then the Session usage dialog is hidden
+    And the browser location is the completed path
 
   Scenario: Direct telemetry navigation shows the dialog over Pipeline
     When I open the missing-session Session Telemetry path directly
