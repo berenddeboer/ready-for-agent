@@ -197,6 +197,17 @@ export const WorkItemStepJob = Schema.TaggedStruct("work-item-step", {
 })
 export type WorkItemStepJob = typeof WorkItemStepJob.Type
 
+/**
+ * Durable delayed admission request created after GitHub explicitly throttles
+ * Watch PR Status Checks. It intentionally is not a Step Run: Waiting for
+ * GitHub owns no active attempt until this wake reaches ordinary admission.
+ */
+export const WorkItemWakeJob = Schema.TaggedStruct("work-item-wake", {
+  workItemId: WorkItemId,
+  postponedUntil: Schema.Finite,
+})
+export type WorkItemWakeJob = typeof WorkItemWakeJob.Type
+
 export const isTerminalWorkItemState = (
   state: WorkItemState,
 ): state is TerminalWorkItemState =>
@@ -335,6 +346,8 @@ export const STEP_RUN_REASON = {
   handlerFailed: "handler_failed",
   handlerDefect: "handler_defect",
   prStatusChecksUnresolved: "pr_status_checks_unresolved",
+  /** Watch PR Status Checks stopped cleanly at GitHub's explicit retry time. */
+  githubThrottled: "github_throttled",
   timeout: "timeout",
   interrupted: "interrupted",
   /** Prior harness/job-worker process ended while the Step Run was still Running. */

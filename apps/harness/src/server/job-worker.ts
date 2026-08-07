@@ -39,6 +39,7 @@ import { QueueService } from "@ready-for-agent/queue-service"
 import {
   WorkItemLifecycle,
   WorkItemStepJob,
+  WorkItemWakeJob,
   syncNeedsHumanMergeHandoffs,
 } from "@ready-for-agent/work-item-lifecycle"
 
@@ -512,7 +513,7 @@ const runLifecycleClaimLoop = (
 
       const claimed = yield* QueueService.claim(
         JOBS_QUEUE,
-        WorkItemStepJob,
+        Schema.Union([WorkItemStepJob, WorkItemWakeJob]),
         visibilityTimeout,
       ).pipe(
         Effect.catchTag("PayloadParseError", (error) =>
@@ -533,6 +534,14 @@ const runLifecycleClaimLoop = (
       }
 
       const job = claimed.value
+      const payload = job.payload
+      const jobContext =
+        payload._tag === "work-item-step"
+          ? { stepRunId: payload.stepRunId }
+          : {
+              workItemId: payload.workItemId,
+              postponedUntil: payload.postponedUntil,
+            }
       const leaseExtended = yield* queue
         .extendVisibility(job.jobId, lifecycleJobVisibilityTimeout)
         .pipe(
@@ -541,24 +550,53 @@ const runLifecycleClaimLoop = (
             JobNotFoundError: () =>
               Effect.logWarning("Skipped stale Lifecycle Job delivery", {
                 jobId: job.jobId,
-                stepRunId: job.payload.stepRunId,
+                ...jobContext,
               }).pipe(Effect.as(false)),
             AcknowledgeError: (error) =>
               Effect.logError("Lifecycle Job lease extension failed", {
                 jobId: job.jobId,
-                stepRunId: job.payload.stepRunId,
+                ...jobContext,
                 error: formatLogError(error),
               }).pipe(Effect.as(false)),
           }),
         )
       if (!leaseExtended) continue
 
+      if (payload._tag === "work-item-wake") {
+        yield* lifecycle
+          .wakePostponedStep({
+            workItemId: payload.workItemId,
+            postponedUntil: payload.postponedUntil,
+          })
+          .pipe(
+            Effect.tap((result) =>
+              result._tag === "not_due"
+                ? Effect.void
+                : queue
+                    .acknowledge(job.jobId)
+                    .pipe(
+                      Effect.catchTag("JobNotFoundError", () => Effect.void),
+                    ),
+            ),
+            Effect.tapError((error) =>
+              Effect.logError("GitHub throttle wake failed", {
+                jobId: job.jobId,
+                workItemId: payload.workItemId,
+                postponedUntil: payload.postponedUntil,
+                error: formatLogError(error),
+              }),
+            ),
+            Effect.ignore,
+          )
+        continue
+      }
+
       yield* Ref.update(activeRuns, (n) => n + 1)
-      yield* lifecycle.runStep(job.payload.stepRunId).pipe(
+      yield* lifecycle.runStep(payload.stepRunId).pipe(
         Effect.tapError((error) =>
           Effect.logError("Work Item Lifecycle Job failed", {
             jobId: job.jobId,
-            stepRunId: job.payload.stepRunId,
+            stepRunId: payload.stepRunId,
             error: formatLogError(error),
           }),
         ),

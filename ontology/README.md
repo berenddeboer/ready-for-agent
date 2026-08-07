@@ -160,7 +160,7 @@ Notes on the modelling:
 ## The lifecycle state space
 
 16 operational Lifecycle Steps, 4 terminal Work Item states, and 110 declared
-transitions, each carrying a named guard and one of 11 Step Run reason codes.
+transitions, each carrying a named guard and one of 12 Step Run reason codes.
 The happy path:
 
 ```mermaid

@@ -63,8 +63,10 @@ import {
 import { stubQueueService } from "@ready-for-agent/queue-service/test"
 import { SqliteQueueServiceLive } from "@ready-for-agent/sqlite-queue-service"
 import {
+  WorkItemId,
   WorkItemLifecycle,
   WorkItemStepJob,
+  WorkItemWakeJob,
   makeStepRunId,
 } from "@ready-for-agent/work-item-lifecycle"
 import {
@@ -244,6 +246,12 @@ const queueLayer = (
     jobId: string,
     availableAt: DateTime.Utc,
   ) => Effect.Effect<unknown> = () => Effect.void,
+  wakePostponedStep: (input: {
+    readonly workItemId: WorkItemId
+    readonly postponedUntil: number
+  }) => Effect.Effect<{
+    readonly _tag: "woke" | "stale" | "not_due"
+  }> = () => Effect.succeed({ _tag: "stale" as const }),
 ) =>
   Layer.mergeAll(
     defaultGithubLayer,
@@ -303,6 +311,7 @@ const queueLayer = (
       recoverOrphanedStepRuns,
       interruptRunningStepRunsFromPriorWorker,
       runStep,
+      wakePostponedStep,
       retry: unused,
       pause: unused,
       start: unused,
@@ -486,6 +495,64 @@ describe("Job worker", () => {
           ),
         )
       }),
+  )
+
+  it.live("dispatches and acknowledges a due GitHub throttle wake", () =>
+    Effect.gen(function* () {
+      const workItemId = WorkItemId.make("wi-01J00000000000000000000000")
+      const postponedUntil = 60_000
+      const job = rawJob(
+        WorkItemWakeJob.make({ workItemId, postponedUntil }),
+        JOBS_QUEUE,
+      )
+      const woken = yield* Deferred.make<{
+        readonly workItemId: string
+        readonly postponedUntil: number
+      }>()
+      const recovered = yield* Deferred.make<void>()
+      const acknowledged: string[] = []
+
+      yield* runScoped(
+        Effect.gen(function* () {
+          yield* runJobWorker({ idlePollInterval: Duration.zero }).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          expect(yield* Deferred.await(woken)).toEqual({
+            workItemId,
+            postponedUntil,
+          })
+          expect(acknowledged).toEqual([job.jobId])
+        }),
+        Layer.mergeAll(
+          queueLayer(
+            [job],
+            (jobId) =>
+              Effect.sync(() => {
+                acknowledged.push(jobId)
+              }),
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            Deferred.succeed(recovered, undefined).pipe(Effect.as(0)),
+            undefined,
+            undefined,
+            undefined,
+            ({
+              workItemId: receivedWorkItemId,
+              postponedUntil: receivedPostponedUntil,
+            }) =>
+              Deferred.succeed(woken, {
+                workItemId: receivedWorkItemId,
+                postponedUntil: receivedPostponedUntil,
+              }).pipe(Effect.as({ _tag: "woke" as const })),
+          ),
+          dbLayer(),
+          Layer.succeed(IssueReconciler, { reconcile: unused }),
+          keymaxxerLayer(),
+        ),
+      )
+    }),
   )
 
   it.live("skips a stale Lifecycle Job and processes a later delivery", () =>
@@ -2031,6 +2098,7 @@ describe("Job worker", () => {
           recoverOrphanedStepRuns: Effect.succeed(0),
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           start: unused,
@@ -2270,6 +2338,7 @@ describe("Job worker", () => {
             return 1
           }),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           start: unused,
@@ -2345,6 +2414,7 @@ describe("Job worker", () => {
           recoverOrphanedStepRuns: Effect.succeed(0),
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           start: unused,
@@ -2488,6 +2558,7 @@ describe("Job worker", () => {
           recoverOrphanedStepRuns: Effect.succeed(0),
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           start: unused,
@@ -2688,6 +2759,7 @@ describe("Job worker", () => {
         recoverOrphanedStepRuns: Effect.succeed(0),
         interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
         runStep: () => Effect.succeed({ _tag: "noop" as const }),
+        wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
         retry: unused,
         pause: unused,
         start: unused,
@@ -2808,6 +2880,7 @@ describe("Job worker", () => {
           recoverOrphanedStepRuns: Effect.succeed(0),
           interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
           runStep: () => Effect.succeed({ _tag: "noop" as const }),
+          wakePostponedStep: () => Effect.succeed({ _tag: "stale" as const }),
           retry: unused,
           pause: unused,
           start: unused,

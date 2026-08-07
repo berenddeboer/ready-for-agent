@@ -27,6 +27,7 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   GitHubService,
+  GitHubThrottledError,
   type PullRequestLifecycleStatus,
   formatUserFacingError,
   sanitizeUserFacingText,
@@ -108,13 +109,14 @@ import {
   type StepRunId,
   type StepRunReasonCode,
   type StepRunRecord,
-  type StepRunStatus,
+  StepRunStatus,
   WORK_ITEM_LIFECYCLE_QUEUE,
   type WorkItemId,
   type WorkItemLifecycleConfig,
   type WorkItemRecord,
   type WorkItemState,
   WorkItemStepJob,
+  WorkItemWakeJob,
   isRetryableFailedWorkItem,
   isTerminalWorkItemState,
   makeStepRunId,
@@ -196,7 +198,10 @@ const handlerFailureMessage = (error: RunHandlerError): string => {
   return conciseMessage(error, "Lifecycle Step handler failed")
 }
 
-type HandlerExitError = RunHandlerError | Cause.TimeoutError
+type HandlerExitError =
+  | RunHandlerError
+  | GitHubThrottledError
+  | Cause.TimeoutError
 
 const closeIssueEligibilityFailure = (
   cause: Cause.Cause<HandlerExitError>,
@@ -338,6 +343,34 @@ type StepRunRow = {
   readonly session_wait_ms: number | null
   readonly session_wait_started_at: number | null
 }
+
+const PostponedStepRunIdRow = Schema.Struct({ id: Schema.String })
+const LatestStepRunStatusRow = Schema.Struct({
+  status: StepRunStatus,
+  postponed_until: Schema.NullOr(Schema.Finite),
+})
+
+const decodePostponedStepRunIdRows = (rows: unknown) =>
+  Schema.decodeUnknownEffect(Schema.Array(PostponedStepRunIdRow))(rows).pipe(
+    Effect.mapError(
+      (error) =>
+        new WorkItemLifecycleDatabaseError({
+          message: `Invalid Postponed Step Run update row: ${String(error)}`,
+          cause: error,
+        }),
+    ),
+  )
+
+const decodeLatestStepRunStatusRows = (rows: unknown) =>
+  Schema.decodeUnknownEffect(Schema.Array(LatestStepRunStatusRow))(rows).pipe(
+    Effect.mapError(
+      (error) =>
+        new WorkItemLifecycleDatabaseError({
+          message: `Invalid latest Step Run status row: ${String(error)}`,
+          cause: error,
+        }),
+    ),
+  )
 
 const STEP_RUN_SELECT_COLUMNS = `id, work_item_id, step, status, queue_job_id, queued_at,
                         started_at, finished_at, reason_code, reason_message,
@@ -669,6 +702,11 @@ export type RunStepResult =
       readonly _tag: "noop"
     }
 
+export type WakePostponedStepResult =
+  | { readonly _tag: "woke" }
+  | { readonly _tag: "stale" }
+  | { readonly _tag: "not_due" }
+
 /**
  * One page of historical Completed Work Items (Complete / Abandoned, all repos).
  */
@@ -726,6 +764,14 @@ export interface WorkItemLifecycleShape {
   readonly runStep: (
     stepRunId: string,
   ) => Effect.Effect<RunStepResult, RunStepError>
+  /**
+   * Admit a due GitHub-throttle wake. A stale wake is harmless; a wake which
+   * arrives before its persisted deadline is retained for redelivery.
+   */
+  readonly wakePostponedStep: (input: {
+    readonly workItemId: WorkItemId
+    readonly postponedUntil: number
+  }) => Effect.Effect<WakePostponedStepResult, RunStepError>
   readonly retry: (
     workItemId: string,
   ) => Effect.Effect<WorkItemRecord, RetryError>
@@ -1281,6 +1327,21 @@ export const makeWorkItemLifecycleLive = (
             (error) =>
               new WorkItemLifecycleDatabaseError({
                 message: `Failed to encode work-item-step payload: ${String(error)}`,
+                cause: error,
+              }),
+          ),
+        )
+
+      const encodeWakeJob = (workItemId: string, postponedUntil: number) =>
+        Schema.decodeUnknownEffect(WorkItemWakeJob)({
+          _tag: "work-item-wake",
+          workItemId,
+          postponedUntil,
+        }).pipe(
+          Effect.mapError(
+            (error) =>
+              new WorkItemLifecycleDatabaseError({
+                message: `Failed to encode work-item-wake payload: ${String(error)}`,
                 cause: error,
               }),
           ),
@@ -3206,6 +3267,110 @@ export const makeWorkItemLifecycleLive = (
           return failed
         })
 
+      /**
+       * A GitHub throttle is a finished, non-failing Watch attempt. The wake
+       * is deliberately a queue job rather than a queued Step Run so the
+       * derived Waiting for GitHub hold owns neither a Worker Slot nor active
+       * execution history.
+       */
+      const completePostponedStep = (input: {
+        readonly stepRun: StepRunRow
+        readonly workItem: WorkItemRow
+        readonly retryAt: number
+      }): Effect.Effect<WorkItemRecord, RunStepError> =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const { stepRun, workItem, retryAt } = input
+          const wakeDelay = Duration.millis(Math.max(0, retryAt - now))
+
+          yield* Effect.logWarning(
+            "Postponing Watch PR Status Checks for GitHub",
+            {
+              workItemId: workItem.id,
+              stepRunId: stepRun.id,
+              retryAt,
+            },
+          )
+
+          yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const postponedRows = yield* sql
+                  .unsafe(
+                    `UPDATE step_run
+                   SET status = 'postponed',
+                       finished_at = ?,
+                       reason_code = ?,
+                       reason_message = ?,
+                       postponed_until = ?,
+                       updated_at = ?
+                   WHERE id = ? AND status = 'running'
+                   RETURNING id`,
+                    [
+                      now,
+                      STEP_RUN_REASON.githubThrottled,
+                      `GitHub throttled until ${new Date(retryAt).toISOString()}`,
+                      retryAt,
+                      now,
+                      stepRun.id,
+                    ],
+                  )
+                  .pipe(Effect.flatMap(decodePostponedStepRunIdRows))
+                if (!postponedRows[0]) {
+                  return
+                }
+
+                yield* sql.unsafe(
+                  `UPDATE work_item
+                   SET holds_worker_slot = 0,
+                       waiting_since = NULL,
+                       updated_at = ?
+                   WHERE id = ?`,
+                  [now, workItem.id],
+                )
+
+                const wakePayload = yield* encodeWakeJob(workItem.id, retryAt)
+                yield* queue.enqueueWithDelay(
+                  WORK_ITEM_LIFECYCLE_QUEUE,
+                  wakePayload,
+                  wakeDelay,
+                  { retryLimit: 1 },
+                )
+
+                if (stepRun.queue_job_id !== null) {
+                  yield* queue.acknowledge(stepRun.queue_job_id)
+                }
+              }),
+            )
+            .pipe(Effect.catch(catchTransactionError))
+
+          const postponed = yield* getWorkItem(workItem.id).pipe(
+            Effect.catchTag(
+              "WorkItemNotFoundError",
+              (error) =>
+                new WorkItemLifecycleDatabaseError({
+                  message: `Work Item missing after postponement: ${error.workItemId}`,
+                  cause: error,
+                }),
+            ),
+          )
+          yield* notifyWorkItemsChanged(workItem.repository_id)
+          yield* admitWaitingWorkItems.pipe(
+            Effect.catch((error) =>
+              Effect.logError(
+                "Failed to admit waiters after GitHub postponement",
+                {
+                  workItemId: workItem.id,
+                  stepRunId: stepRun.id,
+                  retryAt,
+                  error: String(error),
+                },
+              ),
+            ),
+          )
+          return postponed
+        })
+
       const completeInterruptedStep = (input: {
         readonly stepRun: StepRunRow
         readonly reasonMessage: string
@@ -3445,6 +3610,120 @@ export const makeWorkItemLifecycleLive = (
                       WHERE step_run.status = 'running'`,
           selectParams: [],
         })
+
+      const wakePostponedStep = Effect.fn(
+        "WorkItemLifecycle.wakePostponedStep",
+      )(function* ({
+        workItemId,
+        postponedUntil,
+      }: {
+        readonly workItemId: WorkItemId
+        readonly postponedUntil: number
+      }) {
+        const preAdmissionNow = yield* Clock.currentTimeMillis
+        const latestBeforeAdmission = yield* sql
+          .unsafe(
+            `SELECT status, postponed_until
+           FROM step_run
+           WHERE work_item_id = ?
+           ORDER BY queued_at DESC, rowid DESC
+           LIMIT 1`,
+            [workItemId],
+          )
+          .pipe(
+            Effect.mapError(toDatabaseError),
+            Effect.flatMap(decodeLatestStepRunStatusRows),
+          )
+        const beforeAdmission = latestBeforeAdmission[0]
+        if (
+          beforeAdmission?.status !== "postponed" ||
+          beforeAdmission.postponed_until !== postponedUntil
+        ) {
+          return { _tag: "stale" as const }
+        }
+        if (postponedUntil > preAdmissionNow) {
+          return { _tag: "not_due" as const }
+        }
+
+        // A due wake joins ordinary admission behind every existing Worker
+        // Slot waiter before it attempts to take any capacity itself.
+        yield* admitWaitingWorkItems
+
+        const now = yield* Clock.currentTimeMillis
+        const result = yield* sql
+          .withTransaction(
+            Effect.gen(function* () {
+              const latestRows = yield* sql
+                .unsafe(
+                  `SELECT status, postponed_until
+                 FROM step_run
+                 WHERE work_item_id = ?
+                 ORDER BY queued_at DESC, rowid DESC
+                 LIMIT 1`,
+                  [workItemId],
+                )
+                .pipe(Effect.flatMap(decodeLatestStepRunStatusRows))
+              const latest = latestRows[0]
+              if (
+                latest?.status !== "postponed" ||
+                latest.postponed_until !== postponedUntil
+              ) {
+                return { _tag: "stale" as const }
+              }
+              if (postponedUntil > now) {
+                return { _tag: "not_due" as const }
+              }
+
+              const workItem = yield* loadWorkItemRow(workItemId)
+              if (
+                workItem?.state !== "watch_pr_status_checks" ||
+                workItem.paused ||
+                workItem.waiting_for_blockers
+              ) {
+                return { _tag: "stale" as const }
+              }
+
+              const acquired = yield* tryAcquireWorkerSlot(workItemId, now)
+              if (!acquired) {
+                return { _tag: "woke" as const }
+              }
+              yield* enqueueStepRunForWorkItem(
+                workItemId,
+                "watch_pr_status_checks",
+                now,
+              )
+              return { _tag: "woke" as const }
+            }),
+          )
+          .pipe(
+            Effect.catch(catchTransactionError),
+            Effect.map((value): WakePostponedStepResult => {
+              if (
+                typeof value === "object" &&
+                value !== null &&
+                "_tag" in value &&
+                value._tag === "woke"
+              ) {
+                return { _tag: "woke" }
+              }
+              if (
+                typeof value === "object" &&
+                value !== null &&
+                "_tag" in value &&
+                value._tag === "not_due"
+              ) {
+                return { _tag: "not_due" }
+              }
+              return { _tag: "stale" }
+            }),
+          )
+
+        const workItem = yield* loadWorkItemRow(workItemId)
+        if (workItem) {
+          yield* notifyWorkItemsChanged(workItem.repository_id)
+        }
+        return result
+      })
 
       const runStep = Effect.fn("WorkItemLifecycle.runStep")(function* (
         stepRunId: string,
@@ -3779,6 +4058,24 @@ export const makeWorkItemLifecycleLive = (
                   )
 
                   if (Exit.isFailure(handlerExit)) {
+                    const handlerError = Cause.findErrorOption(
+                      handlerExit.cause,
+                    )
+                    if (
+                      stepRun.step === "watch_pr_status_checks" &&
+                      Option.isSome(handlerError) &&
+                      handlerError.value instanceof GitHubThrottledError
+                    ) {
+                      const postponed = yield* completePostponedStep({
+                        stepRun: afterStart,
+                        workItem,
+                        retryAt: handlerError.value.retryAt,
+                      })
+                      return {
+                        _tag: "processed" as const,
+                        workItem: postponed,
+                      }
+                    }
                     const classification = classifyHandlerFailure(
                       handlerExit.cause,
                     )
@@ -6069,6 +6366,7 @@ export const makeWorkItemLifecycleLive = (
         implementAllWithAutoMerge,
         queue: queueIssue,
         runStep,
+        wakePostponedStep,
         retry,
         pause,
         start,
