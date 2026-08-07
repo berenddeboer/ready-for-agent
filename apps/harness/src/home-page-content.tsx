@@ -3366,7 +3366,7 @@ export function WorkItemLifecycleStatus({
         ? `${lifecycleLabel.label} · ${formatDuration(displayDurationMs)}`
         : lifecycleLabel.label
     return (
-      <li key={lifecycleLabel.phase} className="min-w-0 max-w-full">
+      <li key={lifecycleLabel.phase} className="flex min-w-0 max-w-full">
         {linkToPullRequest ? (
           <a
             className={`${chipClassName} hover:underline`}
