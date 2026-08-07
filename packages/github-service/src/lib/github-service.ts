@@ -18,6 +18,22 @@ import type {
   ReadyLabeledIssue,
 } from "./types.js"
 
+/**
+ * Semantic source used by the harness to order GitHub API operations.
+ *
+ * This is deliberately a closed set: callers express why the operation is
+ * happening, while the harness owns scheduling policy and numeric priorities.
+ */
+export type GitHubOperationOrigin =
+  | "operator"
+  | "lifecycle"
+  | "polling"
+  | "background"
+
+export interface GitHubOperationOptions {
+  readonly origin: GitHubOperationOrigin
+}
+
 export interface GitHubServiceShape {
   /**
    * Login of the authenticated principal for this Repository's credential
@@ -25,12 +41,14 @@ export interface GitHubServiceShape {
    */
   readonly getAuthenticatedUserLogin: (
     repository: GitHubRepository,
+    options?: GitHubOperationOptions,
   ) => Effect.Effect<
     string,
     GitHubRepositoryUnavailableError | GitHubRequestError
   >
   readonly listReadyIssues: (
     repository: GitHubRepository,
+    options?: GitHubOperationOptions,
   ) => Effect.Effect<
     readonly ReadyLabeledIssue[],
     GitHubRepositoryUnavailableError | GitHubRequestError

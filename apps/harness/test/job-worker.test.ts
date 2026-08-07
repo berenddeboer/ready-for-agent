@@ -1404,6 +1404,7 @@ describe("Job worker", () => {
       Effect.gen(function* () {
         const claimOrder: string[] = []
         const repositoryOrder: string[] = []
+        const githubOperationOrigins: string[] = []
         const manualJob = rawJob(refreshPayload, ISSUE_REFRESH_QUEUE)
         const scheduledJob = rawJob(
           {
@@ -1424,6 +1425,7 @@ describe("Job worker", () => {
             }).pipe(Effect.forkScoped({ startImmediately: true }))
             yield* Deferred.await(done)
             expect(repositoryOrder).toEqual([repository.id, otherRepository.id])
+            expect(githubOperationOrigins).toEqual(["operator", "polling"])
             const refreshClaims = claimOrder.filter(
               (queueName) =>
                 queueName === ISSUE_REFRESH_QUEUE ||
@@ -1453,9 +1455,12 @@ describe("Job worker", () => {
             ),
             dbLayer([repository, otherRepository]),
             Layer.succeed(IssueReconciler, {
-              reconcile: (repo) =>
+              reconcile: (repo, options) =>
                 Effect.sync(() => {
                   repositoryOrder.push(repo.id)
+                  githubOperationOrigins.push(
+                    options?.githubOperation?.origin ?? "missing",
+                  )
                   return {
                     fetched: 0,
                     inserted: 0,

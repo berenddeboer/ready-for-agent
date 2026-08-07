@@ -73,6 +73,7 @@ export default defineConfig({
       "test/keymaxxer-github-layer.test.ts",
       "test/keymaxxer-gitlab-layer.test.ts",
       "test/ambient-github-layer.test.ts",
+      "test/github-operation-coordinator.test.ts",
       "test/ambient-gitlab-layer.test.ts",
       "test/application-config.test.ts",
       "test/application-runtime-disposal.test.ts",

@@ -9,7 +9,15 @@ import {
   GitHubService,
   type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
-import { ambientGitHubLayer } from "../src/server/ambient-github-layer.js"
+import { ambientGitHubLayer as makeAmbientGitHubLayer } from "../src/server/ambient-github-layer.js"
+import { GitHubOperationCoordinatorLive } from "../src/server/github-operation-coordinator.js"
+
+const ambientGitHubLayer = (
+  options: Parameters<typeof makeAmbientGitHubLayer>[0],
+) =>
+  makeAmbientGitHubLayer(options).pipe(
+    Layer.provide(GitHubOperationCoordinatorLive),
+  )
 
 const processLayer = BunChildProcessSpawner.layer.pipe(
   Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
@@ -193,12 +201,12 @@ it("canceling the first requester keeps shared authentication alive", async () =
 
   await process.started
   controller.abort()
-  await first
   const second = runtime.runPromise(listReadyIssues)
   process.complete("shared-token")
 
   try {
     expect(await second).toEqual([])
+    await first
     expect(process.startCount()).toBe(1)
     expect(process.interrupted()).toBe(0)
   } finally {
@@ -223,11 +231,11 @@ it("concurrent joiners survive cancel of the cache owner fiber", async () => {
 
   await process.started
   ownerController.abort()
-  await owner
   process.complete("shared-token")
 
   try {
     expect(await joiner).toEqual([])
+    await owner
     expect(process.startCount()).toBe(1)
     expect(process.interrupted()).toBe(0)
   } finally {
@@ -235,32 +243,23 @@ it("concurrent joiners survive cancel of the cache owner fiber", async () => {
   }
 })
 
-it("concurrent 401 responses share one refreshed token", async () => {
+it("serialized ambient operations share a 401 token refresh", async () => {
   const resolvedTokens = ["expired-token", "fresh-token"]
   let resolutions = 0
   let expiredCalls = 0
-  let releaseExpiredCalls: () => void = () => undefined
-  const bothExpiredCallsStarted = new Promise<void>((resolve) => {
-    releaseExpiredCalls = resolve
-  })
   const layer = ambientGitHubLayer({
     workspaceRoot: "/workspace",
     resolveToken: async () => resolvedTokens[resolutions++]!,
     makeService: (token) =>
       serviceWithList(() => {
         if (token === "fresh-token") return Effect.succeed([])
-        return Effect.tryPromise({
-          try: async () => {
-            expiredCalls += 1
-            if (expiredCalls === 2) releaseExpiredCalls()
-            await bothExpiredCallsStarted
-            throw new GitHubRequestError({
-              message: "Unauthorized",
-              statusCode: 401,
-            })
-          },
-          catch: (error) => error as GitHubRequestError,
-        })
+        expiredCalls += 1
+        return Effect.fail(
+          new GitHubRequestError({
+            message: "Unauthorized",
+            statusCode: 401,
+          }),
+        )
       }),
   })
 
@@ -285,7 +284,7 @@ it("concurrent 401 responses share one refreshed token", async () => {
     }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer)))),
   )
 
-  expect(expiredCalls).toBe(2)
+  expect(expiredCalls).toBe(1)
   expect(resolutions).toBe(2)
 })
 

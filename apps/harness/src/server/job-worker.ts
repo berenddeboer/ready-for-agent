@@ -16,7 +16,10 @@ import {
   RepositoryNotFoundError,
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
-import { formatUserFacingError } from "@ready-for-agent/github-service"
+import {
+  type GitHubOperationOrigin,
+  formatUserFacingError,
+} from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
   ISSUE_POLL_QUEUE,
@@ -156,9 +159,13 @@ const runPollingAutoHeal = Effect.fn("JobWorker.runPollingAutoHeal")(function* (
   })
 })
 
-const refreshRepository = Effect.fn("JobWorker.refreshRepository")(function* (
-  repositoryId: RepositoryId,
-) {
+const refreshRepository = Effect.fn("JobWorker.refreshRepository")(function* ({
+  repositoryId,
+  githubOperationOrigin,
+}: {
+  readonly repositoryId: RepositoryId
+  readonly githubOperationOrigin: GitHubOperationOrigin
+}) {
   const db = yield* DbService
   const reconciler = yield* IssueReconciler
   const repositories = yield* db.listRepositories
@@ -169,7 +176,9 @@ const refreshRepository = Effect.fn("JobWorker.refreshRepository")(function* (
   }
 
   const lifecycle = yield* WorkItemLifecycle
-  const summary = yield* reconciler.reconcile(repository)
+  const summary = yield* reconciler.reconcile(repository, {
+    githubOperation: { origin: githubOperationOrigin },
+  })
   yield* syncNeedsHumanMergeHandoffs(repositoryId)
   // Issue store is current: lift or fail Waiting for blockers Work Items.
   // Lifecycle owns Work Item mutations; reconciler only updates Issues.
@@ -351,7 +360,10 @@ const claimAndRunRefreshJob = (
         }
         case "refresh-repository": {
           const result = yield* Effect.result(
-            refreshRepository(decoded.success.repositoryId),
+            refreshRepository({
+              repositoryId: decoded.success.repositoryId,
+              githubOperationOrigin: "operator",
+            }),
           )
           yield* finalizeManualRefresh(
             job.jobId,
@@ -401,7 +413,10 @@ const claimAndRunRefreshJob = (
     }
 
     const result = yield* Effect.result(
-      refreshRepository(job.payload.repositoryId),
+      refreshRepository({
+        repositoryId: job.payload.repositoryId,
+        githubOperationOrigin: "polling",
+      }),
     )
     yield* finalizeScheduledRefresh(
       job.jobId,

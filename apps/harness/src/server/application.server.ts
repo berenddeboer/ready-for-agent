@@ -52,6 +52,7 @@ import {
   environmentConfigLayer,
   loadApplicationConfig,
 } from "./application-config.js"
+import { GitHubOperationCoordinatorLive } from "./github-operation-coordinator.js"
 import { JobWorkerLive } from "./job-worker.js"
 import { keymaxxerGitHubLayer } from "./keymaxxer-github-layer.js"
 import { keymaxxerGitLabLayer } from "./keymaxxer-gitlab-layer.js"
@@ -132,6 +133,7 @@ export const createApplication = async (
   const platformLayer = BunChildProcessSpawner.layer.pipe(
     Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
   )
+  const githubOperationCoordinatorLayer = GitHubOperationCoordinatorLive
   const githubLayer =
     sidecarUrl === undefined
       ? ambientGitHubLayer({ workspaceRoot: toolCwd }).pipe(
@@ -254,7 +256,10 @@ export const createApplication = async (
           directoryPickerLayer,
           loggingLayer,
         )
-  const appLayer = applicationServices.pipe(Layer.provide(configLayer))
+  const appLayer = applicationServices.pipe(
+    Layer.provide(configLayer),
+    Layer.provide(githubOperationCoordinatorLayer),
+  )
   const runtime = ManagedRuntime.make(appLayer)
 
   try {

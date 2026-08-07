@@ -1,12 +1,17 @@
 import { Cache, Duration, Effect, Exit, Fiber, Layer } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
+  type GitHubOperationOptions,
   type GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
   makeGitHubServiceFromToken,
 } from "@ready-for-agent/github-service"
+import {
+  GitHubOperationCoordinator,
+  type GitHubOperationOrigin,
+} from "./github-operation-coordinator.js"
 
 type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
 
@@ -26,12 +31,13 @@ export const ambientGitHubLayer = (options: {
 }): Layer.Layer<
   GitHubService,
   never,
-  ChildProcessSpawner.ChildProcessSpawner
+  ChildProcessSpawner.ChildProcessSpawner | GitHubOperationCoordinator
 > =>
   Layer.effect(
     GitHubService,
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const coordinator = yield* GitHubOperationCoordinator
       const layerScope = yield* Effect.scope
       const makeService = options.makeService ?? makeGitHubServiceFromToken
 
@@ -119,51 +125,53 @@ export const ambientGitHubLayer = (options: {
       })
 
       const authenticated = <A>(
+        origin: GitHubOperationOrigin,
         operation: (
           service: GitHubServiceShape,
         ) => Effect.Effect<A, GitHubServiceError>,
-      ): Effect.Effect<A, GitHubServiceError> => run(operation)
+      ): Effect.Effect<A, GitHubServiceError> =>
+        coordinator.execute({ origin, operation: run(operation) })
 
       return {
         getAuthenticatedUserLogin: Effect.fn(
           "AmbientGitHub.getAuthenticatedUserLogin",
-        )((repository) =>
-          authenticated((service) =>
-            service.getAuthenticatedUserLogin(repository),
+        )((repository, operationOptions) =>
+          authenticated(operationOptions?.origin ?? "polling", (service) =>
+            service.getAuthenticatedUserLogin(repository, operationOptions),
           ),
         ),
         getOpenPullRequestNumber: Effect.fn(
           "AmbientGitHub.getOpenPullRequestNumber",
         )((repository, headRefName) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.getOpenPullRequestNumber(repository, headRefName),
           ),
         ),
         findOpenPullRequestNumber: Effect.fn(
           "AmbientGitHub.findOpenPullRequestNumber",
         )((repository, headRefName) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.findOpenPullRequestNumber(repository, headRefName),
           ),
         ),
         countOpenNonDraftPullRequests: Effect.fn(
           "AmbientGitHub.countOpenNonDraftPullRequests",
         )((repository) =>
-          authenticated((service) =>
+          authenticated("background", (service) =>
             service.countOpenNonDraftPullRequests(repository),
           ),
         ),
         createDraftPullRequest: Effect.fn(
           "AmbientGitHub.createDraftPullRequest",
         )((repository, input) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.createDraftPullRequest(repository, input),
           ),
         ),
         updateOpenDraftPullRequestCopy: Effect.fn(
           "AmbientGitHub.updateOpenDraftPullRequestCopy",
         )((repository, headRefName, input) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.updateOpenDraftPullRequestCopy(
               repository,
               headRefName,
@@ -174,14 +182,14 @@ export const ambientGitHubLayer = (options: {
         getPullRequestCheckStatus: Effect.fn(
           "AmbientGitHub.getPullRequestCheckStatus",
         )((repository, headRefName) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.getPullRequestCheckStatus(repository, headRefName),
           ),
         ),
         getPrStatusCheckDiagnostics: Effect.fn(
           "AmbientGitHub.getPrStatusCheckDiagnostics",
         )((repository, checks, requestOptions) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.getPrStatusCheckDiagnostics(
               repository,
               checks,
@@ -192,7 +200,7 @@ export const ambientGitHubLayer = (options: {
         observeAutomatedReviewEvidence: Effect.fn(
           "AmbientGitHub.observeAutomatedReviewEvidence",
         )((repository, headRefName, checks) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.observeAutomatedReviewEvidence(
               repository,
               headRefName,
@@ -203,33 +211,33 @@ export const ambientGitHubLayer = (options: {
         getPullRequestLifecycleStatus: Effect.fn(
           "AmbientGitHub.getPullRequestLifecycleStatus",
         )((repository, headRefName) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.getPullRequestLifecycleStatus(repository, headRefName),
           ),
         ),
         markPullRequestReadyForReview: Effect.fn(
           "AmbientGitHub.markPullRequestReadyForReview",
         )((repository, headRefName) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.markPullRequestReadyForReview(repository, headRefName),
           ),
         ),
         mergePullRequest: Effect.fn("AmbientGitHub.mergePullRequest")(
           (repository, headRefName) =>
-            authenticated((service) =>
+            authenticated("lifecycle", (service) =>
               service.mergePullRequest(repository, headRefName),
             ),
         ),
         rerunWorkflowRun: Effect.fn("AmbientGitHub.rerunWorkflowRun")(
           (repository, workflowRunId) =>
-            authenticated((service) =>
+            authenticated("lifecycle", (service) =>
               service.rerunWorkflowRun(repository, workflowRunId),
             ),
         ),
         ensureIssueCompletedWithSummary: Effect.fn(
           "AmbientGitHub.ensureIssueCompletedWithSummary",
         )((repository, issueNumber, workItemId, summaryMarkdown) =>
-          authenticated((service) =>
+          authenticated("lifecycle", (service) =>
             service.ensureIssueCompletedWithSummary(
               repository,
               issueNumber,
@@ -239,8 +247,10 @@ export const ambientGitHubLayer = (options: {
           ),
         ),
         listReadyIssues: Effect.fn("AmbientGitHub.listReadyIssues")(
-          (repository) =>
-            authenticated((service) => service.listReadyIssues(repository)),
+          (repository, operationOptions?: GitHubOperationOptions) =>
+            authenticated(operationOptions?.origin ?? "polling", (service) =>
+              service.listReadyIssues(repository, operationOptions),
+            ),
         ),
       } satisfies GitHubServiceShape
     }),
