@@ -77,7 +77,7 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(lifecycle).toContain("onReset={() => reset.mutate()}")
   })
 
-  test("Issue kebab offers Queue and Implement actions from shared eligibility", () => {
+  test("Issue row offers inline Implement cue for basic cases; Queue stays kebab-only", () => {
     const source = homeSource()
     expect(source).toContain("issueActionEligibility({")
     expect(source).toContain('queueIssue.isPending ? "Queueing..." : "Queue"')
@@ -85,5 +85,19 @@ describe("Waiting for blockers Working-row polish", () => {
     expect(source).toContain("{canQueue && (")
     expect(source).toContain("Implement now")
     expect(source).toContain("Implement locally")
+    // Primary blue cue after the title for implementable issues only.
+    expect(source).toContain("ui.repoIssueImplementBtn")
+    expect(source).toContain("ui.repoIssueImplementIcon")
+    expect(source).toContain("ui.repoIssueTitleRow")
+    expect(source).toContain("ui.repoIssueTitleInline")
+    expect(source).toContain("ui.repoIssueImplementMenu")
+    expect(source).toContain("Implement issue #")
+    // Pending disables the primary cue (styles + behavior stay aligned).
+    expect(source).toContain("disabled={implementPending}")
+    expect(source).toContain('implementPending ? "Starting..." : "Implement"')
+    // No prominent Queue cue — blocked Queue remains under kebab only.
+    expect(source).not.toContain('"Queue >"')
+    expect(source).not.toContain('"Implement >"')
+    expect(source).toContain("className={ui.iconBtn}")
   })
 })

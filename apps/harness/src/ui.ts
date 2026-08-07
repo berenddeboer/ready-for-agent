@@ -880,14 +880,20 @@ export const ui = {
     "text-[#151515] underline underline-offset-2 hover:decoration-2 hover:decoration-signal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#151515]",
 
   /**
-   * Compact static mock of the repos issue ⋮ menu (Implement now /
-   * Implement locally) — decorative, under the hint copy. Matches the
-   * industrial menu chrome (ink border, mono uppercase items, ⋮ trigger).
+   * Compact static mock of the repos issue Implement control + menu
+   * (Implement now / Implement locally) — decorative, under the hint copy.
+   * Matches the blue start button + industrial menu chrome.
    */
-  queueHintMenuIllus: "mt-[0.1rem] flex w-fit flex-col items-end gap-[0.2rem]",
+  queueHintMenuIllus:
+    "mt-[0.1rem] flex w-fit flex-col items-start gap-[0.2rem]",
 
-  queueHintMenuKebab:
-    "inline-flex h-6 w-6 shrink-0 items-center justify-center border border-[#151515] bg-[var(--panel,#ffffff)] text-[#151515]",
+  queueHintImplementBtn: cx(
+    "inline-flex min-h-7 items-center gap-[0.32rem] whitespace-nowrap border-[1.5px] border-lane-build",
+    "bg-lane-build px-[0.55rem] py-[0.22rem]",
+    "font-mono text-[0.62rem] font-bold tracking-[0.08em] uppercase text-white",
+  ),
+
+  queueHintImplementIcon: "h-[0.8rem] w-[0.8rem] shrink-0",
 
   queueHintMenuPanel:
     "min-w-[9.5rem] border-2 border-[#151515] bg-[var(--panel,#ffffff)] py-0.5 shadow-none",
@@ -1165,11 +1171,46 @@ export const ui = {
   repoIssueNum:
     "font-mono text-[0.72rem] font-semibold leading-[1.45] text-ink-2",
 
+  /**
+   * Title + inline blue Implement control (play icon + label) on one wrapping
+   * line so the primary action sits immediately after the issue text.
+   */
+  repoIssueTitleRow:
+    "flex min-w-0 flex-wrap items-center gap-x-[0.55rem] gap-y-[0.25rem]",
+
+  /**
+   * Shared title token for parent summary and leaf rows. Keep `block` so
+   * parent-issue summaries stay full-width; leaf title rows use
+   * `repoIssueTitleInline` instead.
+   */
   repoIssueTitle:
-    "m-0 block font-display text-[0.95rem] font-medium leading-[1.3] text-ink no-underline [overflow-wrap:anywhere]",
+    "m-0 block min-w-0 font-display text-[0.95rem] font-medium leading-[1.3] text-ink no-underline [overflow-wrap:anywhere]",
+
+  /** Flex-row companion for title + Implement; no `block` so the cue can sit beside. */
+  repoIssueTitleInline:
+    "m-0 min-w-0 font-display text-[0.95rem] font-medium leading-[1.3] text-ink no-underline [overflow-wrap:anywhere]",
 
   repoIssueTitleLink:
     "hover:text-ink hover:underline hover:decoration-signal hover:decoration-2 hover:underline-offset-[3px]",
+
+  /**
+   * Visible Implement menu trigger after the issue title — Build-lane blue so
+   * the basic “start work” path is obvious. Queue stays off this cue.
+   * min-h-7 matches iconBtn hit target for the promoted primary action.
+   */
+  repoIssueImplementBtn: cx(
+    "inline-flex min-h-7 shrink-0 items-center gap-[0.32rem] whitespace-nowrap border-[1.5px] border-lane-build",
+    "bg-lane-build px-[0.55rem] py-[0.22rem]",
+    "font-mono text-[0.62rem] font-bold tracking-[0.08em] uppercase text-white",
+    "cursor-pointer transition-[background-color,border-color,filter,opacity] duration-100 ease-in-out",
+    "hover:brightness-110",
+    "disabled:cursor-wait disabled:opacity-55 disabled:hover:brightness-100",
+  ),
+
+  repoIssueImplementIcon: "h-[0.8rem] w-[0.8rem] shrink-0",
+
+  /** Left-anchored menu under the inline Implement trigger (not right-edge kebab). */
+  repoIssueImplementMenu: "left-0 right-auto",
 
   repoIssueAuthor:
     "mt-[0.15rem] block font-mono text-[0.62rem] tracking-[0.06em] text-ink-faint",

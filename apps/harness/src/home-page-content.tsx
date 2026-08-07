@@ -2919,9 +2919,78 @@ function RepositoryIssueRow({
       <div className={ui.repoIssueRow}>
         <span className={ui.repoIssueNum}>#{issue.issueNumber}</span>
         <span className="min-w-0">
-          <a className={ui.repoIssueTitle} href={issue.url}>
-            {issue.title}
-          </a>
+          <span className={ui.repoIssueTitleRow}>
+            <a className={ui.repoIssueTitleInline} href={issue.url}>
+              {issue.title}
+            </a>
+            {canImplement && (
+              <span className="relative" data-issue-menu={issue.id}>
+                <button
+                  type="button"
+                  className={ui.repoIssueImplementBtn}
+                  aria-label={`Implement issue #${issue.issueNumber}`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                  disabled={implementPending}
+                  onClick={() => {
+                    if (implementPending) return
+                    setMenuOpen((open) => !open)
+                  }}
+                >
+                  <svg
+                    aria-hidden="true"
+                    className={ui.repoIssueImplementIcon}
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
+                    <path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.12-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z" />
+                  </svg>
+                  {implementPending ? "Starting..." : "Implement"}
+                </button>
+                {menuOpen && !implementPending && (
+                  <div
+                    role="menu"
+                    className={cx(
+                      ui.menuPanel,
+                      ui.repoIssueImplementMenu,
+                      "min-w-44",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={ui.menuItem}
+                      disabled={implementPending}
+                      onClick={() => {
+                        setMenuOpen(false)
+                        implementLocally.reset()
+                        queueIssue.reset()
+                        implementNow.mutate()
+                      }}
+                    >
+                      {implementNow.isPending ? "Starting..." : "Implement now"}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={ui.menuItem}
+                      disabled={implementPending}
+                      onClick={() => {
+                        setMenuOpen(false)
+                        implementNow.reset()
+                        queueIssue.reset()
+                        implementLocally.mutate()
+                      }}
+                    >
+                      {implementLocally.isPending
+                        ? "Starting..."
+                        : "Implement locally"}
+                    </button>
+                  </div>
+                )}
+              </span>
+            )}
+          </span>
           {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
             <span className={ui.repoIssueAuthor}>{issue.issueAuthor}</span>
           )}
@@ -2933,7 +3002,7 @@ function RepositoryIssueRow({
           {issue.blockedBy.length > 0 && (
             <span className={cx(ui.stamp, ui.stampBlocked)}>Blocked</span>
           )}
-          {(canImplement || canQueue) && (
+          {canQueue && (
             <span className="relative" data-issue-menu={issue.id}>
               <button
                 type="button"
@@ -2951,58 +3020,20 @@ function RepositoryIssueRow({
               </button>
               {menuOpen && (
                 <div role="menu" className={cx(ui.menuPanel, "min-w-44")}>
-                  {canImplement && (
-                    <>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className={ui.menuItem}
-                        disabled={implementPending}
-                        onClick={() => {
-                          setMenuOpen(false)
-                          implementLocally.reset()
-                          queueIssue.reset()
-                          implementNow.mutate()
-                        }}
-                      >
-                        {implementNow.isPending
-                          ? "Starting..."
-                          : "Implement now"}
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        className={ui.menuItem}
-                        disabled={implementPending}
-                        onClick={() => {
-                          setMenuOpen(false)
-                          implementNow.reset()
-                          queueIssue.reset()
-                          implementLocally.mutate()
-                        }}
-                      >
-                        {implementLocally.isPending
-                          ? "Starting..."
-                          : "Implement locally"}
-                      </button>
-                    </>
-                  )}
-                  {canQueue && (
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={ui.menuItem}
-                      disabled={implementPending}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        implementNow.reset()
-                        implementLocally.reset()
-                        queueIssue.mutate()
-                      }}
-                    >
-                      {queueIssue.isPending ? "Queueing..." : "Queue"}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={ui.menuItem}
+                    disabled={implementPending}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      implementNow.reset()
+                      implementLocally.reset()
+                      queueIssue.mutate()
+                    }}
+                  >
+                    {queueIssue.isPending ? "Queueing..." : "Queue"}
+                  </button>
                 </div>
               )}
             </span>

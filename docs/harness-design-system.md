@@ -669,15 +669,18 @@ A permanent fixture at the **foot of the Queue platform**, always rendered
 (not only when the lane is empty):
 
 - **Panel**: `--lane-queue` fill, 2px ink border, 0.6–0.7rem padding.
-- **Tag**: solid ink fill, Queue-yellow mono uppercase text ("Queue").
+- **No Queue tag** on the hint itself (#742) — the lane header already names
+  the lane; the body is plain workflow copy.
 - **Copy** (plain words; workflow per #730): "Feed the queue — label issues
   with `ready-for-agent`. When they show up in your repos, click
-  **Implement now**." Prefer neutral "issues" over a forge brand name.
-- **Illustration**: compact static mock of the repos issue ⋮ menu showing
-  **Implement now** and **Implement locally** (decorative, `aria-hidden`)
-  so operators recognize the control on Repos.
-- No primary "Manage repos" CTA — keep the hint focused on label → Implement
-  now.
+  **Implement**." Prefer neutral "issues" over a forge brand name. Link
+  "your repos" to the Repos view.
+- **Illustration**: compact static mock of the repos-row **Implement** control
+  (Build-lane blue plate, play-triangle start icon, mono "Implement" label)
+  with a menu panel listing **Implement now** and **Implement locally**
+  (decorative, `aria-hidden`) so operators recognize the primary cue on Repos.
+  Queue for blocked issues stays kebab-only and is not illustrated here.
+- No primary "Manage repos" CTA — keep the hint focused on label → Implement.
 - No transit glyphs (no ⇄), no "Transfer" wording anywhere.
 
 ## 7. Accessibility
