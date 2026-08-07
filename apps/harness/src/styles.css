@@ -70,6 +70,11 @@
   --mast-plate-active: #e8ece9;
   --mast-plate-active-ink: #101314;
   --mast-plate-active-rivet: rgb(16 19 18 / 0.5);
+  /* Steampunk instrument accents on the dark mast (theme-invariant).
+   * Values match apps/harness/prototypes/steampunk-mast-buttons.html. */
+  --mast-brass: #c9a04a;
+  --mast-brass-hi: #f0d78a;
+  --mast-brass-lo: #7a5a1e;
 
   --plate: #dfe4e1;
   --plate-hover: #cfd6d2;
@@ -113,6 +118,9 @@
   --mast-plate-active: #e8ece9;
   --mast-plate-active-ink: #101314;
   --mast-plate-active-rivet: rgb(16 19 18 / 0.5);
+  --mast-brass: #c9a04a;
+  --mast-brass-hi: #f0d78a;
+  --mast-brass-lo: #7a5a1e;
 
   --plate: #2b2f33;
   --plate-hover: #3a4046;
@@ -218,6 +226,9 @@
   --color-mast-plate-ink: var(--mast-plate-ink);
   --color-mast-plate-active: var(--mast-plate-active);
   --color-mast-plate-active-ink: var(--mast-plate-active-ink);
+  --color-mast-brass: var(--mast-brass);
+  --color-mast-brass-hi: var(--mast-brass-hi);
+  --color-mast-brass-lo: var(--mast-brass-lo);
   --color-plate: var(--plate);
   --color-plate-hover: var(--plate-hover);
   --color-plate-ink: var(--plate-ink);
@@ -271,6 +282,180 @@
       transition-duration: 0.001ms !important;
     }
   }
+}
+
+/*
+ * Mast instruments — prototype B (Settings cog) + C (theme lever).
+ * Visual source: apps/harness/prototypes/steampunk-mast-buttons.html
+ * Gear body is an SVG path (conic-gradient only ever draws a circular pie,
+ * not a true gear silhouette).
+ */
+.mast-settings-cog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  width: 3.4rem;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  color: var(--mast-brass);
+}
+
+.mast-settings-cog .cog-body {
+  position: relative;
+  display: block;
+  width: 3.4rem;
+  height: 3.4rem;
+  flex-shrink: 0;
+}
+
+.mast-settings-cog .teeth {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--mast-brass);
+  filter: drop-shadow(0 3px 4px rgb(0 0 0 / 0.55));
+  pointer-events: none;
+}
+
+.mast-settings-cog .core {
+  position: absolute;
+  inset: 22%;
+  z-index: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #3a4046, #15181b 70%);
+  border: 2px solid var(--mast-brass-lo);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.12),
+    inset 0 -2px 4px rgb(0 0 0 / 0.5),
+    0 0 0 2px var(--mast-brass);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mast-brass-hi);
+}
+
+.mast-settings-cog .core svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.mast-settings-cog .label-ring {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mast-brass);
+  white-space: nowrap;
+  text-shadow: 0 1px 2px #000;
+  line-height: 1.2;
+}
+
+.mast-settings-cog:hover .teeth {
+  filter: brightness(1.12) drop-shadow(0 3px 4px rgb(0 0 0 / 0.55));
+}
+
+.mast-theme-lever {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+}
+
+.mast-theme-lever .cradle {
+  position: relative;
+  display: block;
+  width: 2.4rem;
+  /* Match .mast-settings-cog .cog-body so both instruments top-align cleanly. */
+  height: 3.4rem;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #3a4046 0%, #1a1e22 100%);
+  border: 2px solid #0a0c0e;
+  border-radius: 0.35rem;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / 0.08),
+    inset 0 -3px 6px rgb(0 0 0 / 0.5),
+    0 0 0 1px var(--mast-brass-lo),
+    0 4px 8px rgb(0 0 0 / 0.4);
+}
+
+.mast-theme-lever .slot {
+  position: absolute;
+  left: 50%;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  width: 6px;
+  transform: translateX(-50%);
+  background: #0a0c0e;
+  border-radius: 3px;
+  box-shadow: inset 0 0 4px #000;
+}
+
+.mast-theme-lever .handle {
+  position: absolute;
+  left: 50%;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin-left: -0.675rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    var(--mast-brass-hi),
+    var(--mast-brass) 50%,
+    var(--mast-brass-lo)
+  );
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.5),
+    inset 0 1px 0 rgb(255 255 255 / 0.4),
+    0 0 0 2px #1a1206;
+  transition: top 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+  top: 0.35rem; /* light = up */
+  z-index: 2;
+}
+
+.mast-theme-lever[aria-pressed="true"] .handle {
+  top: calc(100% - 1.7rem); /* dark = down */
+}
+
+.mast-theme-lever .stem {
+  position: absolute;
+  left: 50%;
+  width: 4px;
+  margin-left: -2px;
+  background: linear-gradient(90deg, #5a5040, var(--mast-brass), #5a5040);
+  top: 0.9rem;
+  height: 1.1rem;
+  transition:
+    top 0.28s cubic-bezier(0.34, 1.3, 0.64, 1),
+    height 0.28s cubic-bezier(0.34, 1.3, 0.64, 1);
+  z-index: 1;
+}
+
+.mast-theme-lever[aria-pressed="true"] .stem {
+  top: 1.4rem;
+  height: 0.9rem;
+}
+
+.mast-theme-lever .tag {
+  font-family: var(--font-mono);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mast-brass);
+  text-align: center;
+  line-height: 1.2;
+  text-shadow: 0 1px 2px #000;
 }
 
 /* Essentials utilities cannot express cleanly */

@@ -58,7 +58,7 @@ export function withThemePin<T extends Record<string, unknown>>(
   return { ...prev, theme }
 }
 
-/** Toggle label shows the *target* theme (moon plate → "Dark" when light). */
+/** Toggle label shows the *target* theme (lever → "Dark" when light). */
 export function themeToggleLabel(current: ThemeMode): string {
   return current === "dark" ? "Light" : "Dark"
 }

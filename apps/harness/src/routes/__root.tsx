@@ -223,9 +223,7 @@ function RootDocument({ children }: { children: ReactNode }) {
   )
 }
 
-/** Stamped-plate base for primary nav controls (active via aria-current). */
-const mastPlateClassName = ui.mastPlate
-
+/** Hub icon inside the Settings cog core (prototype B sunburst). */
 function SettingsNavIcon() {
   return (
     <svg
@@ -235,8 +233,29 @@ function SettingsNavIcon() {
       stroke="currentColor"
       strokeWidth="2"
     >
-      <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.94 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.57 15 1.7 1.7 0 0 0 3 14H3v-4h.08A1.7 1.7 0 0 0 4.6 8.94a1.7 1.7 0 0 0-.34-1.88L4.2 7l2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.57 1.7 1.7 0 0 0 10 3V3h4v.08A1.7 1.7 0 0 0 15.06 4.6a1.7 1.7 0 0 0 1.88-.34L17 4.2 19.83 7l-.06.06A1.7 1.7 0 0 0 19.43 9 1.7 1.7 0 0 0 21 10h.08v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </svg>
+  )
+}
+
+/**
+ * Solid brass gear silhouette for Settings (prototype B).
+ * True gear path — not a conic-gradient pie (that never grows teeth).
+ * 12 teeth, hub hole covered by `.core`. Path is static (viewBox 0 0 64 64).
+ */
+const SETTINGS_COG_TEETH_PATH =
+  "M 26.00 9.59 L 29.82 8.90 L 29.18 2.13 L 34.82 2.13 L 34.18 8.90 L 38.00 9.59 L 41.66 10.91 L 44.49 4.72 L 49.38 7.55 L 45.44 13.09 L 48.40 15.60 L 50.91 18.56 L 56.45 14.62 L 59.28 19.51 L 53.09 22.34 L 54.41 26.00 L 55.10 29.82 L 61.87 29.18 L 61.87 34.82 L 55.10 34.18 L 54.41 38.00 L 53.09 41.66 L 59.28 44.49 L 56.45 49.38 L 50.91 45.44 L 48.40 48.40 L 45.44 50.91 L 49.38 56.45 L 44.49 59.28 L 41.66 53.09 L 38.00 54.41 L 34.18 55.10 L 34.82 61.87 L 29.18 61.87 L 29.82 55.10 L 26.00 54.41 L 22.34 53.09 L 19.51 59.28 L 14.62 56.45 L 18.56 50.91 L 15.60 48.40 L 13.09 45.44 L 7.55 49.38 L 4.72 44.49 L 10.91 41.66 L 9.59 38.00 L 8.90 34.18 L 2.13 34.82 L 2.13 29.18 L 8.90 29.82 L 9.59 26.00 L 10.91 22.34 L 4.72 19.51 L 7.55 14.62 L 13.09 18.56 L 15.60 15.60 L 18.56 13.09 L 14.62 7.55 L 19.51 4.72 L 22.34 10.91 L 26.00 9.59 Z M 45.50 32.00 A 13.5 13.5 0 1 0 18.50 32.00 A 13.5 13.5 0 1 0 45.50 32.00 Z"
+
+function SettingsCogTeeth() {
+  return (
+    <svg
+      className="teeth"
+      aria-hidden="true"
+      viewBox="0 0 64 64"
+      fill="currentColor"
+    >
+      <path d={SETTINGS_COG_TEETH_PATH} fillRule="evenodd" />
     </svg>
   )
 }
@@ -254,10 +273,14 @@ function RootComponent() {
   )
 }
 
+/**
+ * Switchboard lever for light/dark — exact DOM/CSS of prototype C (.c-lever).
+ * Lever up = light; down = dark. Visible label is the *target* theme.
+ */
 function ThemeTogglePlate() {
   // SSR-stable initial state: server and first client paint match ("light"
   // control chrome). Page colors already follow bootstrap's data-theme; the
-  // mount effect below mirrors that onto the plate without a hydration mismatch.
+  // mount effect below mirrors that onto the lever without a hydration mismatch.
   const [theme, setTheme] = useState<ThemeMode>("light")
   // No `from: Route.fullPath` — that roots relative nav at `/` and would send
   // Repos/Completed operators home when only search should change.
@@ -273,7 +296,7 @@ function ThemeTogglePlate() {
   return (
     <button
       type="button"
-      className={mastPlateClassName}
+      className={ui.mastThemeLever}
       aria-label={`Switch to ${targetLabel} theme`}
       aria-pressed={theme === "dark"}
       onClick={() => {
@@ -289,23 +312,13 @@ function ThemeTogglePlate() {
         setTheme(next)
       }}
     >
-      <ThemeMoonIcon />
-      <span>{targetLabel}</span>
+      <span className="cradle">
+        <span className="slot" aria-hidden="true" />
+        <span className="stem" aria-hidden="true" />
+        <span className="handle" aria-hidden="true" />
+      </span>
+      <span className="tag">{targetLabel}</span>
     </button>
-  )
-}
-
-function ThemeMoonIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
-    </svg>
   )
 }
 
@@ -1038,14 +1051,21 @@ function SettingsChrome() {
           </div>
           <nav className={ui.mastNav} aria-label="Primary">
             <ThemeTogglePlate />
+            {/* Settings cog — prototype B gear (SVG teeth + iron core). */}
             <button
               type="button"
-              className={mastPlateClassName}
+              className={ui.mastSettingsCog}
               onClick={openSettings}
               aria-haspopup="dialog"
+              aria-label="Settings"
             >
-              <SettingsNavIcon />
-              Settings
+              <span className="cog-body" aria-hidden="true">
+                <SettingsCogTeeth />
+                <span className="core">
+                  <SettingsNavIcon />
+                </span>
+              </span>
+              <span className="label-ring">Settings</span>
             </button>
           </nav>
         </header>

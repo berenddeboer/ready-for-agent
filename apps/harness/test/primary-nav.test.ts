@@ -105,16 +105,28 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     )
   })
 
-  test("mast plates are Settings and theme only; brand stays left", () => {
+  test("mast instruments are Settings cog + theme lever; brand stays left", () => {
     const source = rootSource()
     const navBlock = source.slice(
       source.indexOf('aria-label="Primary"'),
       source.indexOf("</nav>"),
     )
     expect(navBlock).toContain("<SettingsNavIcon />")
+    expect(navBlock).toContain("<SettingsCogTeeth />")
+    expect(navBlock).toContain('className="cog-body"')
+    expect(navBlock).toContain('className="core"')
+    expect(navBlock).toContain('className="label-ring"')
     expect(navBlock).toContain("Settings")
+    // e2e contract: catalog-only steps use getByRole("button", { name: "Settings" }).
+    expect(navBlock).toContain('aria-label="Settings"')
     expect(navBlock).toContain("<ThemeTogglePlate />")
-    expect(navBlock).toContain("mastPlateClassName")
+    expect(navBlock).toContain("ui.mastSettingsCog")
+    // Lever recipe lives inside ThemeTogglePlate (outside the nav slice).
+    expect(source).toContain("ui.mastThemeLever")
+    expect(source).toContain('className="cradle"')
+    expect(source).toContain('className="handle"')
+    expect(source).not.toContain("lamp circuit")
+    expect(source).toContain("SETTINGS_COG_TEETH_PATH")
     // Theme left of Settings (rightmost control stays Settings).
     const settingsIdx = navBlock.indexOf("Settings")
     const themeIdx = navBlock.indexOf("<ThemeTogglePlate")
@@ -212,11 +224,23 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(ui).toMatch(/pipelineTab:[\s\S]*?\[&_svg\]/)
   })
 
-  test("mast plates keep stamped styling; brand home link is exact", () => {
+  test("mast instruments use lever + cog recipes; brand home link is exact", () => {
     const source = rootSource()
+    const ui = uiSource()
+    const styles = stylesSource()
     expect(source).toContain('from "@tanstack/react-router"')
-    expect(source).toContain("const mastPlateClassName = ui.mastPlate")
-    expect(source).toContain("className={mastPlateClassName}")
+    expect(source).toContain("ui.mastThemeLever")
+    expect(source).toContain("ui.mastSettingsCog")
+    expect(ui).toContain('mastThemeLever: "mast-theme-lever"')
+    expect(ui).toContain('mastSettingsCog: "mast-settings-cog"')
+    // Exact prototype B/C CSS lives in styles.css (SVG gear + lever handle).
+    expect(styles).toContain(".mast-settings-cog")
+    expect(styles).toContain(".mast-settings-cog .teeth")
+    expect(styles).toContain(".mast-settings-cog .core")
+    expect(styles).toContain(".mast-theme-lever")
+    expect(styles).toContain('.mast-theme-lever[aria-pressed="true"] .handle')
+    expect(source).not.toContain("lamp circuit")
+    expect(source).toContain("SETTINGS_COG_TEETH_PATH")
     // Wordmark still lands on pipeline home with exact matching.
     const brand = source.slice(
       source.indexOf("ui.brandWordmark"),
@@ -227,34 +251,25 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     // Destinations are client Links, not raw <a href> only.
     expect(source).not.toMatch(/<a\s+href=["']\/repos["']/)
     expect(source).not.toMatch(/<a\s+href=["']\/["']/)
-    // Active plate styling lives on the recipe via aria-current.
-    const ui = uiSource()
-    expect(ui).toMatch(/mastPlate:[\s\S]*?aria-\[current=page\]/)
+    // Dead stamped mast-plate recipe must not return (instruments replaced it).
+    expect(ui).not.toMatch(/\bmastPlate\s*:/)
+    expect(ui).not.toContain("mastPlateRivets")
   })
 
-  test("mast plates and Jobs tabs share right-side rivet treatment", () => {
+  test("Jobs tabs keep right-side rivet treatment; mast instruments are lever + cog", () => {
     const ui = uiSource()
     const root = rootSource()
+    const styles = stylesSource()
     const switcher = switcherSource()
 
     // Valid CSS calc spacing for the right-edge rivet (Tailwind `_` → space).
     // Bare `calc(100%-Npx)` is invalid and drops the right-hand rivet.
-    expect(ui).toContain("calc(100%_-_7px)")
     expect(ui).toContain("calc(100%_-_6px)")
     expect(ui).not.toMatch(/calc\(100%-\d+px\)/)
 
-    // Shared recipes use theme rivet tokens (no image assets).
-    expect(ui).toMatch(
-      /mastPlateRivets[\s\S]*?--mast-plate-rivet[\s\S]*?calc\(100%_-_7px\)/,
-    )
+    // Jobs mini-plate rivets use theme tokens (no image assets).
     expect(ui).toMatch(
       /plateMiniRivets[\s\S]*?--plate-rivet[\s\S]*?calc\(100%_-_6px\)/,
-    )
-    // Mast plate recipe consumes the mast rivet recipe.
-    expect(ui).toMatch(/mastPlate:[\s\S]*?mastPlateRivets/)
-    // Active mast plate keeps right-hand rivets via active token.
-    expect(ui).toMatch(
-      /mastPlate:[\s\S]*?aria-\[current=page\]:\[background-image:[\s\S]*?--mast-plate-active-rivet[\s\S]*?calc\(100%_-_7px\)/,
     )
 
     // Jobs mode tabs reuse mini-plate rivets + active override on ink fill.
@@ -266,10 +281,14 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
       /pipelineTabActiveRivets[\s\S]*?--paper[\s\S]*?calc\(100%_-_6px\)/,
     )
 
-    // Theme + Settings share mastPlate; Jobs tabs share pipelineTab — no
-    // per-control decorative rivet DOM.
-    expect(root).toContain("const mastPlateClassName = ui.mastPlate")
+    // Theme lever + Settings cog; Jobs tabs stay pipelineTab — no decorative
+    // rivet DOM on either surface.
+    expect(root).toContain("ui.mastThemeLever")
+    expect(root).toContain("ui.mastSettingsCog")
     expect(root).toContain("<ThemeTogglePlate />")
+    expect(styles).toContain(".mast-theme-lever .handle")
+    expect(styles).toContain(".mast-settings-cog .teeth")
+    expect(root).toContain("function SettingsCogTeeth")
     expect(switcher).toContain("className={ui.pipelineTab}")
     expect(switcher).not.toMatch(/rivet/i)
     expect(root).not.toMatch(/className=\{[^}]*rivet/i)
@@ -339,10 +358,11 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(source).toContain("wght@400;700")
   })
 
-  test("theme plumbing: bootstrap script, prefers-color-scheme, ?theme= pin, toggle plate", () => {
+  test("theme plumbing: bootstrap script, prefers-color-scheme, ?theme= pin, toggle lever", () => {
     const root = rootSource()
     const theme = themeSource()
     const styles = stylesSource()
+    const ui = uiSource()
     expect(theme).toContain("THEME_BOOTSTRAP_SCRIPT")
     expect(theme).toContain("prefers-color-scheme")
     expect(theme).toContain('THEME_QUERY_PARAM = "theme"')
@@ -378,16 +398,21 @@ describe("primary navigation (Interchange masthead + Jobs switcher)", () => {
     expect(root).toMatch(/Switch to \$\{targetLabel\} theme/)
     expect(root).toContain("aria-pressed")
     expect(root).toContain("themeToggleLabel")
+    // Lever chrome (prototype C) — pressed = dark, handle drops via CSS.
+    expect(root).toContain("ui.mastThemeLever")
+    expect(root).toContain('className="handle"')
+    expect(styles).toContain('.mast-theme-lever[aria-pressed="true"] .handle')
     expect(root).toContain("suppressHydrationWarning")
     expect(styles).toContain("color-scheme: light")
     expect(styles).toContain("color-scheme: dark")
+    expect(styles).toContain("--mast-brass:")
     // Dialog scrim token (phase 5) — theme-invariant dimming, not ink-derived.
     expect(styles).toContain("--scrim:")
     // Backdrop via custom Tailwind utility (dialog-backdrop on dialogPanel).
     expect(styles).toContain("@utility dialog-backdrop")
     expect(styles).toContain("::backdrop")
     expect(styles).toContain("background: var(--scrim)")
-    expect(uiSource()).toMatch(/dialogPanel:[\s\S]*?dialog-backdrop/)
+    expect(ui).toMatch(/dialogPanel:[\s\S]*?dialog-backdrop/)
     expect(root).toContain("ui.dialogPanel")
     // Ledger oxblood / elevated paper-2 palette is gone after phase 5 teardown.
     expect(styles).not.toContain("--paper-2:")
