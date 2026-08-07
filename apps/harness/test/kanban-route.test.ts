@@ -189,8 +189,12 @@ describe("kanban home board", () => {
     expect(source).toContain("Implement now")
     expect(source).toContain("Implement locally")
     expect(source).toContain("ui.queueHintMenuIllus")
-    // Issue #742: no redundant Queue tag; "Implement now" is plain body text;
-    // "your repos" links to the Repos view.
+    expect(source).toContain("ui.queueHintImplementBtn")
+    expect(source).toContain("ui.queueHintImplementIcon")
+    expect(source).toContain("click Implement.")
+    expect(source).not.toContain("ui.queueHintMenuKebab")
+    // Issue #742: no redundant Queue tag; blue Implement control teaches
+    // the repos path; "your repos" links to the Repos view.
     expect(source).not.toContain("ui.queueHintTag")
     expect(source).not.toContain("ui.queueHintAction")
     expect(source).not.toContain("<strong")

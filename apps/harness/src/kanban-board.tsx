@@ -525,20 +525,19 @@ function KanbanJobsBoard() {
                         <Link to="/repos" className={ui.queueHintLink}>
                           your repos
                         </Link>
-                        , click Implement now.
+                        , click Implement.
                       </p>
                       <div className={ui.queueHintMenuIllus} aria-hidden="true">
-                        <span className={ui.queueHintMenuKebab}>
+                        <span className={ui.queueHintImplementBtn}>
                           <svg
+                            aria-hidden="true"
+                            className={ui.queueHintImplementIcon}
                             viewBox="0 0 24 24"
                             fill="currentColor"
-                            className="h-3.5 w-3.5"
-                            aria-hidden="true"
                           >
-                            <circle cx="12" cy="5" r="1.75" />
-                            <circle cx="12" cy="12" r="1.75" />
-                            <circle cx="12" cy="19" r="1.75" />
+                            <path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.12-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z" />
                           </svg>
+                          Implement
                         </span>
                         <div className={ui.queueHintMenuPanel}>
                           <span className={ui.queueHintMenuItem}>
