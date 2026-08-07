@@ -28,7 +28,7 @@ export const TELEMETRY_FIXTURE = {
   missingSessionId: "ses_e2e_fixture_missing",
   missingSessionIssueNumber: 101,
   missingSessionIssueId: "issue-01KZD5SESS10NTE0FXX0000001",
-  /** Claude Work Item → UNSUPPORTED Session Telemetry. */
+  /** Codex Build Work Item → UNSUPPORTED Session Telemetry. */
   unsupportedWorkItemId: "wi-01KZD5SESS10NTE0FXX0000002",
   unsupportedSessionId: "ses_e2e_fixture_unsupported",
   unsupportedIssueNumber: 102,
@@ -183,7 +183,7 @@ export const seedSessionTelemetryFixtures = async (): Promise<void> => {
        ${sqlLiteral(TELEMETRY_FIXTURE.repositoryId)},
        ${TELEMETRY_FIXTURE.unsupportedIssueNumber},
        'E2E Session Telemetry unsupported',
-       'claude',
+       'codex',
        'implement',
        ${now},
        1,
