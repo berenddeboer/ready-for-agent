@@ -13,6 +13,7 @@ import {
 } from "effect"
 import { TestClock } from "effect/testing"
 import {
+  GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
@@ -64,6 +65,181 @@ const successfulHelperControl = serializeGitHubHelperControl(
 )
 
 describe("Keymaxxer-backed GitHub layer", () => {
+  it.effect(
+    "caches one authenticated login per credential path and shares concurrent lookups",
+    () =>
+      Effect.gen(function* () {
+        const identityStarted = yield* Deferred.make<void>()
+        const releaseIdentity = yield* Deferred.make<void>()
+        let helperCalls = 0
+        let credentialLookups = 0
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () =>
+            Effect.sync(() => {
+              credentialLookups += 1
+              return "TOKEN_WIDGETS"
+            }),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.gen(function* () {
+              helperCalls += 1
+              yield* Deferred.succeed(identityStarted, undefined)
+              yield* Deferred.await(releaseIdentity)
+              return {
+                exitCode: 0,
+                stdout: "operator",
+                stderr: successfulHelperControl,
+              }
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const context = yield* Layer.buildWithScope(layer, yield* Effect.scope)
+        const github = Context.get(context, GitHubService)
+
+        const first = yield* github
+          .getAuthenticatedUserLogin(acmeWidgets)
+          .pipe(Effect.forkChild)
+        const second = yield* github
+          .getAuthenticatedUserLogin(acmeWidgets)
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(identityStarted)
+        expect(helperCalls).toBe(1)
+        expect(credentialLookups).toBe(1)
+        yield* Deferred.succeed(releaseIdentity, undefined)
+        expect(yield* Fiber.join(first)).toBe("operator")
+        expect(yield* Fiber.join(second)).toBe("operator")
+
+        expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+          "operator",
+        )
+        expect(helperCalls).toBe(1)
+        expect(credentialLookups).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "refreshes the cached login when the observed Keymaxxer credential changes or disappears",
+    () =>
+      Effect.gen(function* () {
+        let tokenName: string | null = "TOKEN_FIRST"
+        const runs: RunWithSecretsInput[] = []
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed(tokenName),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) => {
+            runs.push(input)
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: input.command.includes("get-authenticated-user-login")
+                ? input.secrets[0] === "TOKEN_FIRST"
+                  ? "first"
+                  : "second"
+                : "1",
+              stderr: successfulHelperControl,
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "first",
+          )
+          tokenName = "TOKEN_SECOND"
+          // A local identity hit does not acquire a Keymaxxer credential.
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "first",
+          )
+          // The next authenticated operation observes the changed credential
+          // path and invalidates the cached identity.
+          expect(
+            yield* github.getOpenPullRequestNumber(acmeWidgets, "branch"),
+          ).toBe(1)
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "second",
+          )
+          tokenName = "TOKEN_FIRST"
+          expect(
+            yield* github.getOpenPullRequestNumber(acmeWidgets, "branch"),
+          ).toBe(1)
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "first",
+          )
+          tokenName = null
+          expect(
+            Exit.isFailure(
+              yield* Effect.exit(
+                github.getOpenPullRequestNumber(acmeWidgets, "branch"),
+              ),
+            ),
+          ).toBe(true)
+          tokenName = "TOKEN_SECOND"
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "second",
+          )
+        }).pipe(Effect.provide(layer))
+
+        expect(runs.map(({ secrets }) => secrets)).toEqual([
+          ["TOKEN_FIRST"],
+          ["TOKEN_SECOND"],
+          ["TOKEN_SECOND"],
+          ["TOKEN_FIRST"],
+          ["TOKEN_FIRST"],
+          ["TOKEN_SECOND"],
+        ])
+      }),
+  )
+
+  it.effect(
+    "does not share cached logins across Keymaxxer credential paths",
+    () =>
+      Effect.gen(function* () {
+        const tokens = new Map([
+          ["acme/widgets", "TOKEN_WIDGETS"],
+          ["acme/gadgets", "TOKEN_GADGETS"],
+        ])
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: ({ account }) =>
+            Effect.succeed(tokens.get(account) ?? null),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) =>
+            Effect.succeed({
+              exitCode: 0,
+              stdout:
+                input.secrets[0] === "TOKEN_WIDGETS" ? "widgets" : "gadgets",
+              stderr: successfulHelperControl,
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "widgets",
+          )
+          expect(yield* github.getAuthenticatedUserLogin(acmeGadgets)).toBe(
+            "gadgets",
+          )
+        }).pipe(Effect.provide(layer))
+      }),
+  )
+
   it.effect(
     "does not prompt Keymaxxer when a repository token is missing",
     () =>
@@ -156,6 +332,151 @@ describe("Keymaxxer-backed GitHub layer", () => {
         ["TOKEN_FOR_SECOND_REPOSITORY"],
       ])
     }),
+  )
+
+  it.effect(
+    "uses the credential path that selected the identity cache entry",
+    () =>
+      Effect.gen(function* () {
+        const observedTokenNames = ["TOKEN_FIRST", "TOKEN_SECOND"]
+        const runs: RunWithSecretsInput[] = []
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () =>
+            Effect.sync(() => observedTokenNames.shift() ?? "TOKEN_SECOND"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) => {
+            runs.push(input)
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: input.command.includes("list-ready-issues")
+                ? "[]"
+                : input.secrets[0] === "TOKEN_FIRST"
+                  ? "first"
+                  : "second",
+              stderr: successfulHelperControl,
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "first",
+          )
+          yield* github.listReadyIssues(acmeWidgets)
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "second",
+          )
+        }).pipe(Effect.provide(layer))
+
+        expect(runs.map(({ secrets }) => secrets)).toEqual([
+          ["TOKEN_FIRST"],
+          ["TOKEN_SECOND"],
+          ["TOKEN_SECOND"],
+        ])
+      }),
+  )
+
+  it.effect(
+    "keeps a cached login after a non-authentication helper failure",
+    () =>
+      Effect.gen(function* () {
+        let identityLookups = 0
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("TOKEN_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) =>
+            input.command.includes("list-ready-issues")
+              ? Effect.succeed({
+                  exitCode: 1,
+                  stdout: "",
+                  stderr: "temporary failure",
+                })
+              : Effect.sync(() => {
+                  identityLookups += 1
+                  return {
+                    exitCode: 0,
+                    stdout: "operator",
+                    stderr: successfulHelperControl,
+                  }
+                }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "operator",
+          )
+          expect(
+            Exit.isFailure(
+              yield* Effect.exit(github.listReadyIssues(acmeWidgets)),
+            ),
+          ).toBe(true)
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "operator",
+          )
+        }).pipe(Effect.provide(layer))
+
+        expect(identityLookups).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "invalidates a cached login after an authentication helper failure",
+    () =>
+      Effect.gen(function* () {
+        let login = "old"
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("TOKEN_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) =>
+            input.command.includes("list-ready-issues")
+              ? Effect.succeed({
+                  exitCode: GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
+                  stdout: "",
+                  stderr: "HTTP 401: Bad credentials",
+                })
+              : Effect.succeed({
+                  exitCode: 0,
+                  stdout: login,
+                  stderr: successfulHelperControl,
+                }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "old",
+          )
+          login = "new"
+          expect(
+            Exit.isFailure(
+              yield* Effect.exit(github.listReadyIssues(acmeWidgets)),
+            ),
+          ).toBe(true)
+          expect(yield* github.getAuthenticatedUserLogin(acmeWidgets)).toBe(
+            "new",
+          )
+        }).pipe(Effect.provide(layer))
+      }),
   )
 
   it.effect(

@@ -363,6 +363,44 @@ describe("IssueReconciler", () => {
     )
   })
 
+  it("resolves a scoped GitLab author before fetching remote Issues", () => {
+    const gitlabRepository = makeRepositoryRecord({
+      id: "repo-1",
+      forge: "gitlab",
+      forgeHost: "git.drupalcode.org",
+      projectPath: "project/oauth_client",
+      includeAllIssueAuthors: false,
+    })
+    const db = makeDbFixture({ issues: [] })
+    const gitlab = Layer.succeed(GitLabService, {
+      ...defaultGitLabShape,
+      getAuthenticatedUserLogin: ({ projectPath }) =>
+        Effect.sync(() => {
+          db.actions.push(`gitlab-identity:${projectPath}`)
+          return "operator"
+        }),
+      listReadyIssues: ({ projectPath }) =>
+        Effect.sync(() => {
+          db.actions.push(`gitlab:${projectPath}`)
+          return []
+        }),
+    } satisfies GitLabServiceShape)
+
+    return runReconciliation(
+      Effect.gen(function* () {
+        const reconciler = yield* IssueReconciler
+        yield* reconciler.reconcile(gitlabRepository)
+
+        expect(
+          db.actions.indexOf("gitlab-identity:project/oauth_client"),
+        ).toBeLessThan(db.actions.indexOf("gitlab:project/oauth_client"))
+      }),
+      db.layer,
+      makeGitHubLayer([], db.actions),
+      gitlab,
+    )
+  })
+
   it("classifies changes, writes by issue number, and records success", () => {
     const db = makeDbFixture({
       issues: [
@@ -861,6 +899,9 @@ describe("IssueReconciler", () => {
           { number: 5, author: "operator" },
         ])
         expect(db.actions).toContain("identity:acme/widgets")
+        expect(db.actions.indexOf("github:acme/widgets")).toBeLessThan(
+          db.actions.indexOf("identity:acme/widgets"),
+        )
       }),
       db.layer,
       makeGitHubLayer(
@@ -958,7 +999,11 @@ describe("IssueReconciler", () => {
         const error = yield* Effect.flip(reconciler.reconcile(scoped))
 
         expect(error).toBe(identityError)
-        expect(db.actions).toEqual(["list", "identity:acme/widgets"])
+        expect(db.actions).toEqual([
+          "list",
+          "github:acme/widgets",
+          "identity:acme/widgets",
+        ])
         expect(db.stored).toHaveLength(1)
         expect(db.reconciledAt).toBeUndefined()
       }),

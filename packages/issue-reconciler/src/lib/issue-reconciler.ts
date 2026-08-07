@@ -118,20 +118,36 @@ export const IssueReconcilerLive = Layer.effect(
       const workItemPullRequests = yield* db.listWorkItemPullRequests(
         repository.id,
       )
-      const authorScope = repository.includeAllIssueAuthors
-        ? ({ includeAll: true } as const)
-        : ({
-            includeAll: false,
-            operatorLogin: yield* repository.forge === "gitlab"
-              ? gitlab.getAuthenticatedUserLogin(forgeRepository)
-              : github.getAuthenticatedUserLogin(
-                  forgeRepository,
-                  options?.githubOperation,
-                ),
-          } as const)
-      const remoteIssues = yield* repository.forge === "gitlab"
-        ? gitlab.listReadyIssues(forgeRepository)
-        : github.listReadyIssues(forgeRepository, options?.githubOperation)
+      const { authorScope, remoteIssues } =
+        repository.forge === "gitlab"
+          ? {
+              authorScope: repository.includeAllIssueAuthors
+                ? ({ includeAll: true } as const)
+                : ({
+                    includeAll: false,
+                    operatorLogin:
+                      yield* gitlab.getAuthenticatedUserLogin(forgeRepository),
+                  } as const),
+              remoteIssues: yield* gitlab.listReadyIssues(forgeRepository),
+            }
+          : {
+              // An authenticated GitHub list may refresh a stale credential.
+              // Resolve the operator afterwards so author scoping uses that
+              // credential's identity for this reconciliation.
+              remoteIssues: yield* github.listReadyIssues(
+                forgeRepository,
+                options?.githubOperation,
+              ),
+              authorScope: repository.includeAllIssueAuthors
+                ? ({ includeAll: true } as const)
+                : ({
+                    includeAll: false,
+                    operatorLogin: yield* github.getAuthenticatedUserLogin(
+                      forgeRepository,
+                      options?.githubOperation,
+                    ),
+                  } as const),
+            }
       const repositoryName = repository.projectPath.toLowerCase()
 
       const localByNumber = new Map(
