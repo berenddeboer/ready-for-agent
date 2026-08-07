@@ -88,7 +88,10 @@ export class StartHarness extends Context.Service<
         const repositoryForges = peekRepositoryForges(config.databasePath)
         const result = checkHostTools(
           (command) => Bun.which(command) !== null,
-          { selectedAgentBackendIds, repositoryForges },
+          {
+            selectedAgentBackendIds,
+            repositoryForges,
+          },
         )
         if (!result.ok) {
           return yield* new StartHarnessFailed({ detail: result.message })

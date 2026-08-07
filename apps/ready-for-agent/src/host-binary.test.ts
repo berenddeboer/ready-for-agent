@@ -80,6 +80,9 @@ describe("compiled host binary ambient-auth smoke", () => {
   let databasePath = ""
   let restrictedBin = ""
   let port = 0
+  let firstRunDatabasePath = ""
+  let firstRunBin = ""
+  let firstRunPort = 0
 
   beforeAll(async () => {
     if (!hostSelection.ok) {
@@ -120,9 +123,13 @@ describe("compiled host binary ambient-auth smoke", () => {
     runCwd = join(fixtureRoot, "unrelated-cwd")
     databasePath = join(fixtureRoot, "data", "ready-for-agent.db")
     restrictedBin = join(fixtureRoot, "bin")
+    firstRunDatabasePath = join(fixtureRoot, "first-run", "ready-for-agent.db")
+    firstRunBin = join(fixtureRoot, "first-run-bin")
     mkdirSync(runCwd, { recursive: true })
     mkdirSync(dirname(databasePath), { recursive: true })
     mkdirSync(restrictedBin, { recursive: true })
+    mkdirSync(dirname(firstRunDatabasePath), { recursive: true })
+    mkdirSync(firstRunBin, { recursive: true })
 
     // Required host tools only — no bun/nx/aws on PATH for the product process.
     // Bedrock profile discovery is bundled via the AWS SDK (issue #822); the
@@ -138,10 +145,21 @@ describe("compiled host binary ambient-auth smoke", () => {
         { mode: 0o755 },
       )
     }
+
+    const git = Bun.which("git")
+    if (git === null) {
+      throw new Error("Host tool git is required for this test")
+    }
+    writeFileSync(
+      join(firstRunBin, "git"),
+      `#!/usr/bin/env bash\nexec ${JSON.stringify(git)} "$@"\n`,
+      { mode: 0o755 },
+    )
     // Explicitly leave `aws` off PATH even when installed on the host.
     expect(Bun.which("aws", { PATH: restrictedBin })).toBeNull()
 
     port = 18_000 + Math.floor(Math.random() * 1000)
+    firstRunPort = port + 1_000
   }, 600_000)
 
   afterAll(() => {
@@ -201,10 +219,24 @@ describe("compiled host binary ambient-auth smoke", () => {
     expect(helpText).toContain("start")
     expect(helpText).not.toContain("remove-github-token")
 
-    const startOnce = async () => {
+    const startOnce = async ({
+      binPath = restrictedBin,
+      dbPath = databasePath,
+      serverPort = port,
+    }: {
+      readonly binPath?: string
+      readonly dbPath?: string
+      readonly serverPort?: number
+    } = {}) => {
+      const startEnv: NodeJS.ProcessEnv = {
+        ...env,
+        PATH: binPath,
+        PORT: String(serverPort),
+        SQLITE_DATABASE_PATH: dbPath,
+      }
       const child = spawn(binaryPath, ["--no-open"], {
         cwd: runCwd,
-        env,
+        env: startEnv,
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
       })
@@ -218,7 +250,7 @@ describe("compiled host binary ambient-auth smoke", () => {
       child.stderr?.on("data", (chunk: string) => {
         stderr += chunk
       })
-      const base = `http://127.0.0.1:${port}`
+      const base = `http://127.0.0.1:${serverPort}`
       try {
         const root = await waitForHttp(`${base}/`, 60_000)
         expect(root.status).toBe(200)
@@ -277,6 +309,20 @@ describe("compiled host binary ambient-auth smoke", () => {
         await sleep(500)
       }
     }
+
+    // Fresh installs must reach Settings without the default OpenCode binary.
+    expect(Bun.which("opencode", { PATH: firstRunBin })).toBeNull()
+    await startOnce({
+      binPath: firstRunBin,
+      dbPath: firstRunDatabasePath,
+      serverPort: firstRunPort,
+    })
+    // The bootstrap-created OpenCode default is not an operator selection.
+    await startOnce({
+      binPath: firstRunBin,
+      dbPath: firstRunDatabasePath,
+      serverPort: firstRunPort,
+    })
 
     await startOnce()
     // Restart against the same database — migrations must be idempotent.

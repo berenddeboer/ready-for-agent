@@ -72,7 +72,8 @@ export type HostToolsPreflightOptions = {
    * Selected Agent Backend ids that cold-start preflight must cover
    * (harness default ∪ Repository overrides). Unknown ids are ignored.
    * Combined with {@link selectedAgentBackendId} when both are set; if neither
-   * yields a selectable id, OpenCode is required.
+   * yields a selectable id, OpenCode is required unless an explicit empty list
+   * says no backend has been selected yet.
    */
   readonly selectedAgentBackendIds?: ReadonlyArray<string>
   /**
@@ -118,7 +119,11 @@ const resolveRequiredAgentBackendIds = (
     resolved.push(value)
   }
 
-  return resolved.length > 0 ? resolved : [defaultAgentBackendId]
+  if (resolved.length > 0) return resolved
+
+  return options.selectedAgentBackendIds !== undefined && raw.length === 0
+    ? []
+    : [defaultAgentBackendId]
 }
 
 const resolveRequiredAgentBackendBinaries = (
@@ -175,11 +180,15 @@ export const checkHostTools = (
     ...forgeTools.map((tool) => tool.name),
   ].join(" and ")
 
+  const backendRequirement =
+    backendIds.length === 0
+      ? "No Agent Backend executable is required until one is selected in Settings."
+      : `Only selected Agent Backend executable(s) (${backendSummary}) are required alongside ${requiredBaseTools}.`
   const lines = [
     "Required host tools are missing from PATH:",
     ...missingRequired.map((tool) => `  - ${tool.name}: ${tool.installHint}`),
     "",
-    `Only selected Agent Backend executable(s) (${backendSummary}) are required alongside ${requiredBaseTools}.`,
+    backendRequirement,
     "Install the tools above, then run ready-for-agent again.",
     "Keymaxxer is optional and does not block start.",
   ]

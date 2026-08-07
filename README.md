@@ -146,7 +146,9 @@ Forge):
    ambient credential source, not a required host tool.
 
 **Agent Backend executable** (only the backend selected in Settings is
-required; default is OpenCode):
+required; default is OpenCode). On a first run, before any backend selection is
+stored, no Agent Backend executable is required so the Harness can open
+Settings:
 
 4. [OpenCode](https://opencode.ai/) (`opencode` on PATH) when OpenCode is the
    selected Agent Backend

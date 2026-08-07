@@ -861,8 +861,8 @@ export const DbServiceLive = Layer.effect(
                    id, selected_agent_backend, default_model, default_thinking_level,
                    review_model, review_thinking_level, backend_model_prefs,
                    max_concurrent_agent_turns, max_concurrent_work_items,
-                   created_at, updated_at
-                 ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   agent_backend_configured_at, created_at, updated_at
+                 ) VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (id) DO UPDATE SET
                    selected_agent_backend = excluded.selected_agent_backend,
                    default_model = excluded.default_model,
@@ -872,6 +872,7 @@ export const DbServiceLive = Layer.effect(
                    backend_model_prefs = excluded.backend_model_prefs,
                    max_concurrent_agent_turns = excluded.max_concurrent_agent_turns,
                    max_concurrent_work_items = excluded.max_concurrent_work_items,
+                   agent_backend_configured_at = excluded.agent_backend_configured_at,
                    updated_at = excluded.updated_at
                  RETURNING ${configSelect}`,
                 [
@@ -883,6 +884,7 @@ export const DbServiceLive = Layer.effect(
                   backendModelPrefs,
                   maxConcurrentAgentTurns,
                   maxConcurrentWorkItems,
+                  now,
                   now,
                   now,
                 ],
