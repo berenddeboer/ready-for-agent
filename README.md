@@ -216,18 +216,19 @@ permissible usage.
 4. Can I run Claude Code through Amazon Bedrock?
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
-harness process, select **Claude Code Bedrock**, then Recheck. Status shows
-**Claude Code · Amazon Bedrock**. In Bedrock mode Settings offer active
-Anthropic system-defined and application inference profiles discovered from AWS
-via the bundled SDK (no AWS CLI host tool; friendly names in Settings; ID/ARN
-stored and passed to Claude Code). First-party Claude Code offers the static
-alias catalog (`haiku`, `sonnet`, `opus`, `fable`) and never calls AWS. A model
-stored under the other provider mode is kept and shown as unavailable until you
-pick a current one — it is never rewritten or translated.
-Discovery failures leave Claude Ready with a warning but block Save until a
-discovered profile is available after Recheck; listing does not prove
-InvokeModel access. Details:
-[docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
+harness process, then select **Claude Code Bedrock** as your agent backend.
+
+For example to manually start it:
+
+```bash
+CLAUDE_CODE_USE_BEDROCK=1 AWS_PROFILE=MyProfile npx ready-for-agent@latest
+ ```
+
+Then under the global or repo settings select Claude Code Bedrock:
+
+<img src="docs/claude-bedrock-settings.png" alt="Claude BedRock settings" width="60%" />
+
+The model selection is retrieved from AWS, so make your you have valid AWS credentials.
 
 5. Can I implement something locally, and then check myself?
 
