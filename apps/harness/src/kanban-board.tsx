@@ -539,14 +539,6 @@ function KanbanJobsBoard() {
                           </svg>
                           Implement
                         </span>
-                        <div className={ui.queueHintMenuPanel}>
-                          <span className={ui.queueHintMenuItem}>
-                            Implement now
-                          </span>
-                          <span className={ui.queueHintMenuItem}>
-                            Implement locally
-                          </span>
-                        </div>
                       </div>
                     </aside>
                   )}

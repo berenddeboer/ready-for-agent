@@ -880,9 +880,8 @@ export const ui = {
     "text-[#151515] underline underline-offset-2 hover:decoration-2 hover:decoration-signal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#151515]",
 
   /**
-   * Compact static mock of the repos issue Implement control + menu
-   * (Implement now / Implement locally) — decorative, under the hint copy.
-   * Matches the blue start button + industrial menu chrome.
+   * Compact static mock of the repos issue Implement control — decorative,
+   * under the hint copy. Matches the blue start button.
    */
   queueHintMenuIllus:
     "mt-[0.1rem] flex w-fit flex-col items-start gap-[0.2rem]",
@@ -894,12 +893,6 @@ export const ui = {
   ),
 
   queueHintImplementIcon: "h-[0.8rem] w-[0.8rem] shrink-0",
-
-  queueHintMenuPanel:
-    "min-w-[9.5rem] border-2 border-[#151515] bg-[var(--panel,#ffffff)] py-0.5 shadow-none",
-
-  queueHintMenuItem:
-    "block px-2.5 py-1.5 font-mono text-[0.62rem] font-bold tracking-[0.08em] uppercase text-[#151515]",
 
   jobTicket: cx(
     // minmax(0,1fr): single column may shrink below long mono min-content so
@@ -1194,8 +1187,8 @@ export const ui = {
     "hover:text-ink hover:underline hover:decoration-signal hover:decoration-2 hover:underline-offset-[3px]",
 
   /**
-   * Visible Implement menu trigger after the issue title — Build-lane blue so
-   * the basic “start work” path is obvious. Queue stays off this cue.
+   * Visible Implement action after the issue title — Build-lane blue so the
+   * basic “start work” path is obvious. Queue stays off this cue.
    * min-h-7 matches iconBtn hit target for the promoted primary action.
    */
   repoIssueImplementBtn: cx(
@@ -1208,9 +1201,6 @@ export const ui = {
   ),
 
   repoIssueImplementIcon: "h-[0.8rem] w-[0.8rem] shrink-0",
-
-  /** Left-anchored menu under the inline Implement trigger (not right-edge kebab). */
-  repoIssueImplementMenu: "left-0 right-auto",
 
   repoIssueAuthor:
     "mt-[0.15rem] block font-mono text-[0.62rem] tracking-[0.06em] text-ink-faint",
