@@ -1,6 +1,16 @@
-import { Cache, Duration, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import {
+  Cache,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Schema,
+} from "effect"
 import {
   type GitHubHelperOperation,
+  type GitHubOperationOptions,
   type GitHubRepository,
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
@@ -20,6 +30,10 @@ import {
   makeRequestError,
   parseSerializedIssues,
 } from "./forge-helper-schemas.js"
+import {
+  GitHubOperationCoordinator,
+  type GitHubOperationOrigin,
+} from "./github-operation-coordinator.js"
 
 /**
  * Successful Keymaxxer-backed open non-draft PR counts may be reused for this
@@ -30,6 +44,16 @@ import {
 export const OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS = 5_000
 
 type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
+
+interface CountLookup {
+  readonly fiber: Fiber.Fiber<number, GitHubServiceError>
+  readonly start: CountLookupStart
+  waiters: number
+}
+
+interface CountLookupStart {
+  started: boolean
+}
 
 const openPullRequestCountCacheKey = (repository: GitHubRepository): string =>
   [
@@ -147,11 +171,16 @@ export const keymaxxerGitHubLayer = (options: {
    * Expiry is driven by the Effect `Clock` (use `TestClock` in tests).
    */
   readonly openPullRequestCountFreshnessMs?: number
-}): Layer.Layer<GitHubService, never, KeymaxxerService> =>
+}): Layer.Layer<
+  GitHubService,
+  never,
+  KeymaxxerService | GitHubOperationCoordinator
+> =>
   Layer.effect(
     GitHubService,
     Effect.gen(function* () {
       const keymaxxer = yield* KeymaxxerService
+      const coordinator = yield* GitHubOperationCoordinator
       const layerScope = yield* Effect.scope
       const countFreshnessMs =
         options.openPullRequestCountFreshnessMs ??
@@ -197,48 +226,57 @@ export const keymaxxerGitHubLayer = (options: {
         readonly repository: GitHubRepository
         readonly describe: string
         readonly args?: readonly string[]
+        readonly origin?: GitHubOperationOrigin
+        readonly onStart?: () => void
         readonly decode: (
           stdout: string,
         ) => Effect.Effect<A, GitHubRequestError>
       }): Effect.Effect<A, GitHubServiceError> =>
-        Effect.gen(function* () {
-          const tokenName = yield* ensureToken(input.repository)
-          if (tokenName === null) {
-            return yield* requestError(input.repository, input.describe)
-          }
-          const [forge, forgeHost, projectPath] = encodedRepositoryArguments(
-            input.repository,
-          )
-          const result = yield* runGitHubBin(tokenName, input.operation, [
-            forge,
-            forgeHost,
-            projectPath,
-            ...(input.args ?? []),
-          ])
-          if (result.exitCode === 2) {
-            return yield* repositoryUnavailable(input.repository)
-          }
-          if (result.exitCode !== 0) {
-            return yield* requestError(
+        coordinator.execute({
+          origin: input.origin ?? "lifecycle",
+          operation: Effect.gen(function* () {
+            input.onStart?.()
+            const tokenName = yield* ensureToken(input.repository)
+            if (tokenName === null) {
+              return yield* requestError(input.repository, input.describe)
+            }
+            const [forge, forgeHost, projectPath] = encodedRepositoryArguments(
               input.repository,
-              input.describe,
-              result.stderr || result.stdout,
             )
-          }
-          return yield* input.decode(result.stdout)
-        }).pipe(
-          Effect.catchTag("KeymaxxerError", () =>
-            Effect.fail(requestError(input.repository, input.describe)),
+            const result = yield* runGitHubBin(tokenName, input.operation, [
+              forge,
+              forgeHost,
+              projectPath,
+              ...(input.args ?? []),
+            ])
+            if (result.exitCode === 2) {
+              return yield* repositoryUnavailable(input.repository)
+            }
+            if (result.exitCode !== 0) {
+              return yield* requestError(
+                input.repository,
+                input.describe,
+                result.stderr || result.stdout,
+              )
+            }
+            return yield* input.decode(result.stdout)
+          }).pipe(
+            Effect.catchTag("KeymaxxerError", () =>
+              Effect.fail(requestError(input.repository, input.describe)),
+            ),
           ),
-        )
+        })
 
       const fetchOpenNonDraftPullRequestCount = (
         repository: GitHubRepository,
+        onStart?: () => void,
       ): Effect.Effect<number, GitHubServiceError> =>
         callHelper({
           operation: "count-open-non-draft-pull-requests",
           repository,
           describe: "count open non-draft pull requests",
+          origin: "background",
+          ...(onStart === undefined ? {} : { onStart }),
           decode: (stdout) =>
             decodeNonNegativeInt(
               stdout,
@@ -256,20 +294,38 @@ export const keymaxxerGitHubLayer = (options: {
        * (not a lowercased key reconstruction) for secret/helper casing.
        */
       const repositoriesByCountCacheKey = new Map<string, GitHubRepository>()
+      const countLookupStarts = new Map<string, CountLookupStart>()
+      const countLookups = new Map<string, CountLookup>()
+      const removeCountLookup = (key: string, lookup: CountLookup): void => {
+        if (countLookups.get(key) !== lookup) return
+        countLookups.delete(key)
+        if (countLookupStarts.get(key) === lookup.start) {
+          countLookupStarts.delete(key)
+        }
+      }
       const openPullRequestCountCache = yield* Cache.makeWith(
         (key: string) => {
+          const start = countLookupStarts.get(key)
+          const onStart =
+            start === undefined
+              ? undefined
+              : () => {
+                  start.started = true
+                  if (countLookupStarts.get(key) === start) {
+                    countLookupStarts.delete(key)
+                  }
+                }
           const repository = repositoriesByCountCacheKey.get(key)
           if (repository === undefined) {
             // Should not happen: callers register before Cache.get.
             const [forge = "", forgeHost = "", projectPath = ""] =
               key.split("\0")
-            return fetchOpenNonDraftPullRequestCount({
-              forge,
-              forgeHost,
-              projectPath,
-            })
+            return fetchOpenNonDraftPullRequestCount(
+              { forge, forgeHost, projectPath },
+              onStart,
+            )
           }
-          return fetchOpenNonDraftPullRequestCount(repository)
+          return fetchOpenNonDraftPullRequestCount(repository, onStart)
         },
         {
           capacity: 256,
@@ -285,22 +341,64 @@ export const keymaxxerGitHubLayer = (options: {
       )(function* (repository: GitHubRepository) {
         const key = openPullRequestCountCacheKey(repository)
         repositoriesByCountCacheKey.set(key, repository)
-        // Fork into the layer scope so canceling one requester cannot abort
-        // a shared in-flight helper for concurrent joiners.
-        const fiber = yield* Cache.get(openPullRequestCountCache, key).pipe(
-          Effect.forkIn(layerScope),
+        const cached = yield* Cache.getSuccess(openPullRequestCountCache, key)
+        if (Option.isSome(cached)) return cached.value
+
+        const makeLookup = Effect.fn("KeymaxxerGitHub.makeCountLookup")(
+          function* () {
+            const start: CountLookupStart = { started: false }
+            countLookupStarts.set(key, start)
+            const fiber = yield* Cache.get(openPullRequestCountCache, key).pipe(
+              Effect.forkIn(layerScope),
+            )
+            const lookup: CountLookup = {
+              fiber,
+              start,
+              waiters: 1,
+            }
+            countLookups.set(key, lookup)
+            fiber.addObserver(() => removeCountLookup(key, lookup))
+            return lookup
+          },
         )
-        return yield* Fiber.join(fiber)
+
+        const acquireLookup = Effect.suspend(() => {
+          const existing = countLookups.get(key)
+          if (existing === undefined) return makeLookup()
+          existing.waiters += 1
+          return Effect.succeed(existing)
+        })
+
+        return yield* Effect.acquireUseRelease(
+          acquireLookup,
+          (lookup) => Fiber.join(lookup.fiber),
+          (lookup, exit) =>
+            Effect.suspend(() => {
+              lookup.waiters -= 1
+              if (lookup.waiters !== 0) {
+                return Effect.void
+              }
+              if (lookup.start.started && Exit.hasInterrupts(exit)) {
+                return Effect.void
+              }
+              removeCountLookup(key, lookup)
+              if (lookup.start.started) return Effect.void
+              return Cache.invalidate(openPullRequestCountCache, key).pipe(
+                Effect.andThen(Fiber.interrupt(lookup.fiber)),
+              )
+            }),
+        )
       })
 
       const service: GitHubServiceShape = {
         getAuthenticatedUserLogin: Effect.fn(
           "KeymaxxerGitHub.getAuthenticatedUserLogin",
-        )((repository) =>
+        )((repository, operationOptions?: GitHubOperationOptions) =>
           callHelper({
             operation: "get-authenticated-user-login",
             repository,
             describe: "resolve authenticated GitHub user",
+            origin: operationOptions?.origin ?? "polling",
             decode: (stdout) =>
               decodeNonEmptyTrimmed(
                 stdout,
@@ -528,11 +626,12 @@ export const keymaxxerGitHubLayer = (options: {
           }),
         ),
         listReadyIssues: Effect.fn("KeymaxxerGitHub.listReadyIssues")(
-          (repository) =>
+          (repository, operationOptions?: GitHubOperationOptions) =>
             callHelper({
               operation: "list-ready-issues",
               repository,
               describe: "list Ready-labeled Issues",
+              origin: operationOptions?.origin ?? "polling",
               decode: (stdout) => parseIssues(stdout, repository),
             }),
         ),
