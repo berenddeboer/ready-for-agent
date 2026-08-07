@@ -3,7 +3,10 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
+
+const pipelinePageSource = () =>
+  readFileSync(join(import.meta.dir, "../src/pipeline-page.tsx"), "utf8")
 
 const sliceBetweenMarkers = (
   source: string,
@@ -25,26 +28,24 @@ const repositoryCardsSource = () =>
   sliceBetweenMarkers(
     homeSource(),
     "export function RepositoryCards()",
-    "function AddRepositoryGuidance(",
+    "function RepositorySettingsNotFoundDialog(",
   )
 
-const addRepositoryGuidanceSource = () =>
-  sliceBetweenMarkers(
-    homeSource(),
-    "function AddRepositoryGuidance(",
-    "function RepositoryCard(",
-  )
+const addRepositoryGuidanceSource = () => {
+  const source = pipelinePageSource()
+  return source.slice(source.indexOf("export function AddRepositoryGuidance("))
+}
 
 const emptyBlankSlateSource = () =>
   sliceBetweenMarkers(
-    homeSource(),
-    "function EmptyRepositoriesBlankSlate()",
-    "export function RepositoryCards()",
+    pipelinePageSource(),
+    "export function EmptyRepositoriesBlankSlate()",
+    "export function AddRepositoryGuidance(",
   )
 
 describe("blank-slate add repository command", () => {
   test("loads suggested CLI from GraphQL addRepositoryCommand query", () => {
-    const source = homeSource()
+    const source = pipelinePageSource()
     expect(source).toContain("addRepositoryCommand")
     expect(source).toContain("addRepositoryCommandQuery")
     expect(source).toContain("useSuspenseQuery(\n    addRepositoryCommandQuery")
@@ -54,10 +55,10 @@ describe("blank-slate add repository command", () => {
   })
 
   test("home zero-repo gate reuses EmptyRepositoriesBlankSlate", () => {
-    const home = homeSource()
+    const home = pipelinePageSource()
     const homeContent = home.slice(
       home.indexOf("function HomeContent()"),
-      home.indexOf("function EmptyRepositoriesBlankSlate()"),
+      home.indexOf("export function EmptyRepositoriesBlankSlate()"),
     )
     expect(homeContent).toContain("(repositories ?? []).length === 0")
     expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")

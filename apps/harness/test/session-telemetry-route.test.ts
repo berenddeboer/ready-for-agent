@@ -15,7 +15,7 @@ const kanbanSource = () =>
   readFileSync(join(import.meta.dir, "../src/kanban-board.tsx"), "utf8")
 
 const indexSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 const completedSurfaceSource = () =>
   readFileSync(join(import.meta.dir, "../src/completed-surface.tsx"), "utf8")
@@ -42,7 +42,8 @@ describe("Session Telemetry route (issues #841 / #843)", () => {
       'createFileRoute("/session/$workItemId/telemetry")',
     )
     expect(source).toContain("PipelinePage")
-    expect(source).toContain('from "./index.js"')
+    expect(source).toContain('from "../pipeline-page.js"')
+    expect(source).not.toContain('from "./index.js"')
   })
 
   test("is registered in the generated route tree", () => {

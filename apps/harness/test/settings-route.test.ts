@@ -22,7 +22,8 @@ describe("/settings route (issue #840)", () => {
     const source = settingsSource()
     expect(source).toContain('createFileRoute("/settings")')
     expect(source).toContain("PipelinePage")
-    expect(source).toContain('from "./index.js"')
+    expect(source).toContain('from "../pipeline-page.js"')
+    expect(source).not.toContain('from "./index.js"')
   })
 
   test("is registered in the generated route tree", () => {

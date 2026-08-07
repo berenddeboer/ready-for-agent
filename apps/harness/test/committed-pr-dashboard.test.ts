@@ -7,7 +7,7 @@ import {
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/pipeline-page.tsx"), "utf8")
 
 const dashboardSource = () =>
   readFileSync(
@@ -390,7 +390,7 @@ describe("Committed pull requests dashboard UI", () => {
     // Zero-repo gate lives on home; board assumes repositories exist.
     const homeContent = home.slice(
       home.indexOf("function HomeContent()"),
-      home.indexOf("function EmptyRepositoriesBlankSlate()"),
+      home.indexOf("export function EmptyRepositoriesBlankSlate()"),
     )
     expect(homeContent).toContain("(repositories ?? []).length === 0")
     expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")

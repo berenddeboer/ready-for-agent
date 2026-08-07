@@ -12,6 +12,7 @@ import {
   forgeChangeRequestNoun,
   forgeChangeRequestShort,
 } from "./forge-change-request.js"
+import type { Repository, WorkItem } from "./home-page-content.js"
 import {
   formatDuration,
   formatTerminalAgo,
@@ -19,7 +20,6 @@ import {
   useNowMs,
   worktreeLeafName,
 } from "./live-duration.js"
-import type { Repository, WorkItem } from "./routes/index.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"

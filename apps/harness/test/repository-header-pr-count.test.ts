@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 const repositoriesQuerySource = () =>
   readFileSync(join(import.meta.dir, "../src/repositories-query.ts"), "utf8")
@@ -31,7 +31,7 @@ describe("repository header pull request count", () => {
     const source = repositoriesQuerySource()
     const home = homeSource()
     // Shared module owns Configured Repositories; home re-exports it.
-    expect(home).toContain('from "../repositories-query.js"')
+    expect(home).toContain('from "./repositories-query.js"')
     expect(home).toContain("export { repositoriesQuery }")
     // Dedicated projection owns the count field; the Configured Repositories
     // selection must not include it.
@@ -54,7 +54,7 @@ describe("repository header pull request count", () => {
       "const openPullRequestCountsQuery = {",
     )
     const openCountsEnd = source.indexOf(
-      "const addRepositoryCommandQuery",
+      "export const issuesQuery",
       openCountsStart,
     )
     expect(openCountsEnd).toBeGreaterThan(openCountsStart)

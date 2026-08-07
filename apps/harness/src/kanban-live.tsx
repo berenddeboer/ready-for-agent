@@ -1,11 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
-import { followRepositoryIssuesLive } from "./refresh-issues-live.js"
 import {
   issuesQuery,
   repositoriesQuery,
   workItemsQuery,
-} from "./routes/index.js"
+} from "./home-page-content.js"
+import { followRepositoryIssuesLive } from "./refresh-issues-live.js"
 import { WorkItemsLiveUpdates } from "./work-items-live-updates.js"
 
 /**

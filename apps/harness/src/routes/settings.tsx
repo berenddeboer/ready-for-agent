@@ -6,7 +6,7 @@
  * other pages also land here so the URL and history entry stay consistent.
  */
 import { createFileRoute } from "@tanstack/react-router"
-import { PipelinePage } from "./index.js"
+import { PipelinePage } from "../pipeline-page.js"
 
 export const Route = createFileRoute("/settings")({
   component: PipelinePage,

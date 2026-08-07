@@ -14,6 +14,9 @@ const metalLaneHeaderSource = () =>
 const homeSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
 
+const pipelinePageSource = () =>
+  readFileSync(join(import.meta.dir, "../src/pipeline-page.tsx"), "utf8")
+
 const kanbanRedirectSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/kanban.tsx"), "utf8")
 
@@ -28,17 +31,19 @@ const stylesSource = () =>
 
 describe("kanban home board", () => {
   test("home route renders the board when repositories exist", () => {
-    const home = homeSource()
-    expect(home).toContain('createFileRoute("/")')
-    expect(home).toContain("function HomeContent()")
-    expect(home).toContain("(repositories ?? []).length === 0")
-    expect(home).toContain("<EmptyRepositoriesBlankSlate />")
-    expect(home).toContain("<KanbanBoard />")
-    expect(home).toContain('from "../kanban-board.js"')
+    const route = homeSource()
+    const pipeline = pipelinePageSource()
+    expect(route).toContain('createFileRoute("/")')
+    expect(route).toContain('from "../pipeline-page.js"')
+    expect(pipeline).toContain("function HomeContent()")
+    expect(pipeline).toContain("(repositories ?? []).length === 0")
+    expect(pipeline).toContain("<EmptyRepositoriesBlankSlate />")
+    expect(pipeline).toContain("<KanbanBoard />")
+    expect(pipeline).toContain('from "./kanban-board.js"')
     // Membership SSE covers both blank slate and board without `/repos`.
-    expect(home).toContain("function HomeRepositoryMembershipLive()")
-    expect(home).toContain("followRepositoryMembershipLive")
-    expect(home).toContain("liveUpdatesWarningPresentation")
+    expect(pipeline).toContain("function HomeRepositoryMembershipLive()")
+    expect(pipeline).toContain("followRepositoryMembershipLive")
+    expect(pipeline).toContain("liveUpdatesWarningPresentation")
   })
 
   test("/kanban redirects to home", () => {
@@ -378,7 +383,10 @@ describe("kanban home board", () => {
     expect(lifecycleCall).toContain("collapseEarlierLanes")
     expect(lifecycleCall).toContain("compact")
 
-    const home = homeSource()
+    const home = readFileSync(
+      join(import.meta.dir, "../src/home-page-content.tsx"),
+      "utf8",
+    )
     const completedRow = readFileSync(
       join(import.meta.dir, "../src/completed-work-item-row.tsx"),
       "utf8",
@@ -467,7 +475,10 @@ describe("kanban home board", () => {
     expect(ticket).toContain("textClassName={ui.jobTicketRuntimeLine}")
 
     // Lifecycle chips: truncating label + non-shrinking duration + title.
-    const home = homeSource()
+    const home = readFileSync(
+      join(import.meta.dir, "../src/home-page-content.tsx"),
+      "utf8",
+    )
     const lifecycle = home.slice(
       home.indexOf("export function WorkItemLifecycleStatus("),
       home.indexOf("function RepositoryIssuesSkeleton("),

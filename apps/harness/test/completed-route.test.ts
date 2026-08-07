@@ -12,7 +12,7 @@ const rootSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/__root.tsx"), "utf8")
 
 const indexSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 const rowSource = () =>
   readFileSync(
