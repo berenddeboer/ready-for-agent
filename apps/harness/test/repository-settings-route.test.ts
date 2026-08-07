@@ -27,7 +27,8 @@ describe("/repos/$repositoryId/settings route (issue #842)", () => {
     // Dialog is path-driven in RepositoryCards; route component is a placeholder.
     expect(source).toContain("return null")
     const repos = reposSource()
-    expect(repos).toContain("export function ReposPage")
+    expect(repos).toContain("function ReposPage")
+    expect(repos).toContain("component: ReposPage")
     expect(repos).toContain("<Outlet")
   })
 

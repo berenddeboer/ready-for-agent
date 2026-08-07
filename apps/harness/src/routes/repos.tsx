@@ -11,7 +11,7 @@ export const Route = createFileRoute("/repos")({
  * (issue #842). The overlay dialog is route-driven inside RepositoryCards;
  * child routes mount via Outlet so this page stays mounted across open/close.
  */
-export function ReposPage() {
+function ReposPage() {
   // Reading-width cap lives on the page body only — root chrome stays full-width.
   return (
     <main className="mx-auto max-w-[88rem] pt-8 sm:pt-10">
