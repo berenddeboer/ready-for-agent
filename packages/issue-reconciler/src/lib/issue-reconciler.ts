@@ -7,6 +7,7 @@ import {
   type RepositoryRecord,
 } from "@ready-for-agent/db-service"
 import {
+  type GitHubOperationOptions,
   type GitHubRepositoryUnavailableError,
   type GitHubRequestError,
   GitHubService,
@@ -58,9 +59,15 @@ export type ReconciliationError =
   | RepositoryNotFoundError
   | DatabaseError
 
+export interface ReconciliationOptions {
+  /** Semantic source for GitHub reads made during reconciliation. */
+  readonly githubOperation?: GitHubOperationOptions
+}
+
 export interface IssueReconcilerShape {
   readonly reconcile: (
     repository: RepositoryRecord,
+    options?: ReconciliationOptions,
   ) => Effect.Effect<ReconciliationSummary, ReconciliationError>
 }
 
@@ -98,6 +105,7 @@ export const IssueReconcilerLive = Layer.effect(
 
     const reconcile = Effect.fn("IssueReconciler.reconcile")(function* (
       repository: RepositoryRecord,
+      options?: ReconciliationOptions,
     ) {
       const forgeRepository = {
         forge: repository.forge,
@@ -108,15 +116,20 @@ export const IssueReconcilerLive = Layer.effect(
       const workItemPullRequests = yield* db.listWorkItemPullRequests(
         repository.id,
       )
-      const issueSource = repository.forge === "gitlab" ? gitlab : github
       const authorScope = repository.includeAllIssueAuthors
         ? ({ includeAll: true } as const)
         : ({
             includeAll: false,
-            operatorLogin:
-              yield* issueSource.getAuthenticatedUserLogin(forgeRepository),
+            operatorLogin: yield* repository.forge === "gitlab"
+              ? gitlab.getAuthenticatedUserLogin(forgeRepository)
+              : github.getAuthenticatedUserLogin(
+                  forgeRepository,
+                  options?.githubOperation,
+                ),
           } as const)
-      const remoteIssues = yield* issueSource.listReadyIssues(forgeRepository)
+      const remoteIssues = yield* repository.forge === "gitlab"
+        ? gitlab.listReadyIssues(forgeRepository)
+        : github.listReadyIssues(forgeRepository, options?.githubOperation)
       const repositoryName = repository.projectPath.toLowerCase()
 
       const localByNumber = new Map(

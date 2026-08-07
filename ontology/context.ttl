@@ -372,6 +372,50 @@ rfa:OperatorForgeUser
   rfa:avoidanceRationale "CONTEXT.md prefers Operator Forge User for this concept."@en ;
 ] .
 
+rfa:HarnessGitHubOperation
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "Harness GitHub Operation"@en ;
+  skos:definition "One replay-safe Harness-native action that may make one or more sequential GitHub GraphQL or REST requests while holding one GitHub Operation Coordinator permit. A successful local cache hit is not a Harness GitHub Operation because it creates no GitHub traffic; each operation must be idempotent or revalidate its remote postcondition before a mutation can be replayed."@en ;
+  skos:hiddenLabel "GitHub request"@en, "GitHub task"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessGitHubOperation ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "GitHub request"@en ;
+  rfa:avoidanceRationale "one operation may make multiple sequential requests"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:HarnessGitHubOperation ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "GitHub task"@en ;
+  rfa:avoidanceRationale "task is overloaded by Work Item and agent execution vocabulary"@en ;
+] .
+
+rfa:GitHubOperationCoordinator
+  a owl:Class, skos:Concept, rfa:ContextTerm ;
+  skos:prefLabel "GitHub Operation Coordinator"@en ;
+  skos:definition "The process-local Harness module that admits exactly one Harness GitHub Operation at a time for one application runtime. Callers choose only Operator, Lifecycle, Polling, or Background origin; normal admission is in that order with FIFO within an origin, and the globally oldest request is admitted after 60 seconds. The permit remains held through the entire active operation and is never preempted. This is not a host-wide queue or a proactive rate limiter: Agent Turns, other Harness runtimes, operator shells, Git transport, and GitHub Actions remain best-effort exclusions."@en ;
+  skos:hiddenLabel "Global GitHub queue"@en, "rate limiter"@en .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:GitHubOperationCoordinator ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "Global GitHub queue"@en ;
+  rfa:avoidanceRationale "the guarantee is scoped to one Harness runtime"@en ;
+] .
+
+[
+  a owl:Axiom ;
+  owl:annotatedSource rfa:GitHubOperationCoordinator ;
+  owl:annotatedProperty skos:hiddenLabel ;
+  owl:annotatedTarget "rate limiter"@en ;
+  rfa:avoidanceRationale "it serializes operations without proactive quota budgeting or ordinary pacing"@en ;
+] .
+
 rfa:Issue
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Issue"@en ;
