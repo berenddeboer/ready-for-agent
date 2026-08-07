@@ -9,6 +9,7 @@ import {
   type PrStatusCheckDiagnostic,
   type PullRequestCheckStatus,
   type TerminalPrStatusCheck,
+  isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
@@ -453,6 +454,17 @@ const reserveAutomatedReviewRerun = (
     return { _tag: "reserved" as const, id }
   })
 
+/** A confirmed GitHub throttle never started the rerun, so it consumes no budget. */
+const releaseThrottledAutomatedReviewRerun = (permitId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    yield* sql.unsafe(
+      `DELETE FROM automated_review_rerun
+       WHERE id = ? AND status = 'reserved'`,
+      [permitId],
+    )
+  })
+
 /** Mark the permit complete and record the Check-Start Anchor together. */
 const completeAuthorizedReviewRerun = (
   permitId: string,
@@ -687,15 +699,17 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           )
           .pipe(
             Effect.catch((cause) =>
-              Effect.succeed({
-                _tag: "ambiguous" as const,
-                reason:
-                  "message" in cause &&
-                  typeof cause.message === "string" &&
-                  cause.message.trim() !== ""
-                    ? cause.message
-                    : "Failed to observe automated review evidence",
-              }),
+              isGitHubThrottledError(cause)
+                ? Effect.fail(cause)
+                : Effect.succeed({
+                    _tag: "ambiguous" as const,
+                    reason:
+                      "message" in cause &&
+                      typeof cause.message === "string" &&
+                      cause.message.trim() !== ""
+                        ? cause.message
+                        : "Failed to observe automated review evidence",
+                  }),
             ),
           )
         if (evidence._tag === "none") {
@@ -762,7 +776,11 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
           .getPrStatusCheckDiagnostics(repository, diagnosticRequests, {
             logDirectory,
           })
-          .pipe(Effect.mapError(mapDiagnosticError))
+          .pipe(
+            Effect.mapError((cause) =>
+              isGitHubThrottledError(cause) ? cause : mapDiagnosticError(cause),
+            ),
+          )
       }
     }
     const agentBackend = yield* AgentBackend
@@ -888,16 +906,17 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
       const status = yield* github
         .getPullRequestCheckStatus(repository, branch)
         .pipe(
-          Effect.mapError(
-            (cause) =>
-              new PrStatusChecksContextError({
-                message:
-                  "message" in cause &&
-                  typeof cause.message === "string" &&
-                  cause.message.trim() !== ""
-                    ? `Failed to resolve PR head for review rerun: ${cause.message}`
-                    : "Failed to resolve PR head for review rerun",
-              }),
+          Effect.mapError((cause) =>
+            isGitHubThrottledError(cause)
+              ? cause
+              : new PrStatusChecksContextError({
+                  message:
+                    "message" in cause &&
+                    typeof cause.message === "string" &&
+                    cause.message.trim() !== ""
+                      ? `Failed to resolve PR head for review rerun: ${cause.message}`
+                      : "Failed to resolve PR head for review rerun",
+                }),
           ),
         )
       const headSha = status.headSha
@@ -924,6 +943,10 @@ export const investigatePrStatusChecks = (context: LifecycleStepContext) =>
         github.rerunWorkflowRun(repository, investigation.workflowRunId),
       )
       if (rerunResult._tag === "Failure") {
+        if (isGitHubThrottledError(rerunResult.failure)) {
+          yield* releaseThrottledAutomatedReviewRerun(permit.id)
+          return yield* rerunResult.failure
+        }
         // Reservation remains so a crash or indeterminate response cannot
         // unlock unbounded extra GitHub rerun calls after restart.
         const detail =

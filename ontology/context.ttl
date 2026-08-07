@@ -1894,7 +1894,7 @@ rfa:WaitingForBlockers
 rfa:WaitingForWorkerSlot
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Waiting for Worker Slot"@en ;
-  skos:definition "The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission."@en ;
+  skos:definition "The state of an unfinished, non-paused Work Item that is not Waiting for blockers and has not yet been Admitted because all Worker Slots are occupied. It does not occupy a Worker Slot and has no Step Run and no lifecycle job until admission. Operators may create more Work Items than the Worker Slot bound with no separate cap on how many may wait; those extras remain Waiting for Worker Slot until admitted **FIFO by time entered this state** (creation time if never admitted; re-queue time after Start when no slot was free; due-wake time when a GitHub wait cannot re-acquire a slot; the same creation time applies when a former Waiting for blockers Work Item joins this line). No priority by Repository, Issue age, or operator. Operator-visible status is Waiting for worker slot with a message that a worker slot must become available; the current Lifecycle Step is unchanged and is not queued until admission."@en ;
   skos:hiddenLabel "Queued Step Run"@en, "paused"@en, "Not Implemented"@en, "Waiting for blockers"@en .
 
 [
@@ -1932,7 +1932,7 @@ rfa:WaitingForWorkerSlot
 rfa:WaitingForGitHub
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Waiting for GitHub"@en ;
-  skos:definition "A derived Work Item hold whose latest Step Run is a Postponed Step Run with a durable wake contract and retry deadline. It is not a Lifecycle Step, Work Item state, Queue hold, or Worker Slot wait: the Work Item remains in its current pipeline lane, holds no Worker Slot, and owns no queued or running Step Run. It clears only when later lifecycle progress supersedes that Postponed history; Pause, Waiting for blockers, and Waiting for Worker Slot take presentation precedence."@en ;
+  skos:definition "A derived Work Item hold whose latest Step Run is a Postponed Step Run with a durable wake contract and retry deadline. It is not a Lifecycle Step, Work Item state, Queue hold, or Worker Slot wait: the Work Item remains in its current pipeline lane, holds no Worker Slot, and owns no queued or running Step Run. Any GitHub-dependent Lifecycle Step may create it; a due wake re-enters ordinary Worker Slot admission for that same Step and, if no slot is free, enters Waiting for Worker Slot at that wake time while retaining that FIFO position across duplicate delivery. It clears only when later lifecycle progress supersedes that Postponed history; Pause, Waiting for blockers, and Waiting for Worker Slot take presentation precedence."@en ;
   skos:hiddenLabel "Queue"@en, "Waiting for Worker Slot"@en, "paused"@en, "Work Item state"@en .
 
 [
@@ -2454,7 +2454,7 @@ rfa:StepRun
 rfa:PostponedStepRun
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Postponed Step Run"@en ;
-  skos:definition "A finished Step Run outcome that records `postponed` and one retry deadline (`postponedUntil`) because its next GitHub attempt must wait. It is immutable history, not a failed or successful attempt, and it cannot be retried manually; a later durable wake creates a fresh Step Run through ordinary admission. A Postponed Step Run derives Waiting for GitHub without adding a Work Item lifecycle state or hold flag."@en ;
+  skos:definition "A finished Step Run outcome that records `postponed` and one retry deadline (`postponedUntil`) because a GitHub-dependent Lifecycle Step must wait. It is immutable history, not a failed or successful attempt, and it cannot be retried manually; a later durable wake creates a fresh Step Run for the same Lifecycle Step through ordinary admission. A Postponed Step Run derives Waiting for GitHub without adding a Work Item lifecycle state or hold flag."@en ;
   skos:hiddenLabel "Deferred Review Finding"@en, "Queued Step Run"@en, "Retry"@en, "Failed Step Run"@en .
 
 [
@@ -2568,7 +2568,7 @@ rfa:PauseWorkItem
 rfa:StartWorkItem
   a owl:Class, skos:Concept, rfa:ContextTerm ;
   skos:prefLabel "Start Work Item"@en ;
-  skos:definition "An explicit operator request that clears a Work Item's paused flag and attempts to re-acquire a Worker Slot. If a Step Run is still running (Pause has not yet released the slot), only the paused flag is cleared so normal advancement resumes when that Step Run finishes. If no Step Run is running and a Worker Slot is free, the Work Item is re-Admitted and a new Step Run for the current Lifecycle Step is enqueued once when the latest run does not require Retry. If no Worker Slot is free and no Step Run is running, the Work Item becomes Waiting for Worker Slot and no Step Run is enqueued until re-admission. Start is idempotent when not paused and is rejected for missing, terminal, or Waiting for blockers Work Items (blockers cannot be bypassed; the hold lifts only when the Issue is Implementable)."@en ;
+  skos:definition "An explicit operator request that clears a Work Item's paused flag and attempts to re-acquire a Worker Slot. If a Step Run is still running (Pause has not yet released the slot), only the paused flag is cleared so normal advancement resumes when that Step Run finishes. If no Step Run is running and a Worker Slot is free, the Work Item is re-Admitted and a new Step Run for the current Lifecycle Step is enqueued once when the latest run does not require Retry. If no Worker Slot is free and no Step Run is running, the Work Item becomes Waiting for Worker Slot and no Step Run is enqueued until re-admission. Start is idempotent when not paused except that a due Postponed Step Run receives ordinary Worker Slot admission: before its postponedUntil deadline Start may clear Pause but neither admits nor enqueues, and at or after that deadline it re-enters admission for the same Step. Start is rejected for missing, terminal, or Waiting for blockers Work Items (blockers cannot be bypassed; the hold lifts only when the Issue is Implementable)."@en ;
   skos:hiddenLabel "Resume"@en, "unpause"@en, "Retry"@en .
 
 [

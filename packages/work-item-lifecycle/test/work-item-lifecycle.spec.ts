@@ -6605,6 +6605,69 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("postpones when Issue revalidation finds an owned PR lifecycle lookup throttled", () => {
+      const retryAt = 60_000
+      const steps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.succeed({
+            _tag: "handoff_needed" as const,
+            createdAt: new Date(0),
+            headSha: "settled-head",
+            headPushedAt: new Date(0),
+            isDraft: false,
+          }),
+        investigatePrStatusChecks: () =>
+          Effect.succeed({ _tag: "processed", handledCheckIds: [] }),
+      }
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* makeQueuedJobsAvailable
+          yield* claimAndRunPending
+
+          yield* db.deleteIssue(repository.id, issue.issueNumber)
+          yield* makeQueuedJobsAvailable
+          const afterInvestigate = yield* claimAndRunPending
+          expect(afterInvestigate._tag).toBe("processed")
+          if (afterInvestigate._tag === "processed") {
+            expect(afterInvestigate.workItem.state).toBe(
+              "investigate_pr_status_checks",
+            )
+            expect(afterInvestigate.workItem.paused).toBe(false)
+            expect(afterInvestigate.workItem.holdsWorkerSlot).toBe(false)
+            expect(afterInvestigate.workItem.stepRuns.at(-1)).toMatchObject({
+              step: "investigate_pr_status_checks",
+              status: "postponed",
+              reasonCode: STEP_RUN_REASON.githubThrottled,
+              postponedUntil: new Date(retryAt),
+            })
+          }
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(
+          Effect.provide(
+            makeTestLayer(steps, {
+              getPullRequestLifecycleStatus: () =>
+                Effect.fail(
+                  new GitHubThrottledError({ retryAt, usedFallback: false }),
+                ),
+            }).pipe(Layer.provideMerge(TestClock.layer())),
+          ),
+        ),
+      )
+    })
+
     it("uses GitLab lifecycle status (not GitHub) when a GitLab Issue closes with an owned MR", () => {
       let githubLifecycleLookupCalls = 0
       let gitlabLifecycleLookupCalls = 0
@@ -7900,6 +7963,136 @@ describe("WorkItemLifecycle", () => {
       )
     })
 
+    it("postpones a throttled Create PR and wakes that same Lifecycle Step", () => {
+      const retryAt = 60_000
+      const throttledSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        createPr: () =>
+          Effect.fail(
+            new GitHubThrottledError({ retryAt, usedFallback: false }),
+          ),
+      }
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+
+          // Create PR is the eighth step in the normal path.
+          for (let index = 0; index < 7; index += 1) {
+            yield* makeQueuedJobsAvailable
+            yield* claimAndRunPending
+          }
+          const postponed = yield* claimAndRunPending
+          expect(postponed._tag).toBe("processed")
+          if (postponed._tag === "processed") {
+            expect(postponed.workItem.stepRuns.at(-1)).toMatchObject({
+              step: "create_pr",
+              status: "postponed",
+              postponedUntil: new Date(retryAt),
+            })
+            expect(postponed.workItem.holdsWorkerSlot).toBe(false)
+          }
+
+          yield* TestClock.adjust(retryAt)
+          expect(
+            yield* lifecycle.wakePostponedStep({
+              workItemId: created.id,
+              postponedUntil: retryAt,
+            }),
+          ).toEqual({ _tag: "woke" })
+
+          const awakened = yield* lifecycle.getWorkItem(created.id)
+          expect(awakened.stepRuns.at(-2)).toMatchObject({
+            step: "create_pr",
+            status: "postponed",
+          })
+          expect(awakened.stepRuns.at(-1)).toMatchObject({
+            step: "create_pr",
+            status: "queued",
+          })
+          expect(
+            Option.isSome(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+        }).pipe(
+          Effect.provide(
+            makeTestLayer(throttledSteps).pipe(
+              Layer.provideMerge(TestClock.layer()),
+            ),
+          ),
+        ),
+      )
+    })
+
+    it("keeps a postponed deadline through Pause and rejects early or duplicate Start admission", () => {
+      const retryAt = 60_000
+      const throttledSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.fail(
+            new GitHubThrottledError({ retryAt, usedFallback: false }),
+          ),
+      }
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          yield* claimAndRunPending
+
+          const paused = yield* lifecycle.pause(created.id)
+          expect(paused.paused).toBe(true)
+          expect(paused.stepRuns.at(-1)).toMatchObject({
+            status: "postponed",
+            postponedUntil: new Date(retryAt),
+          })
+
+          const earlyStart = yield* lifecycle.start(created.id)
+          expect(earlyStart.paused).toBe(false)
+          expect(earlyStart.holdsWorkerSlot).toBe(false)
+          expect(
+            earlyStart.stepRuns.filter(
+              (run) => run.status === "queued" || run.status === "running",
+            ),
+          ).toHaveLength(0)
+          const retryError = yield* Effect.flip(lifecycle.retry(created.id))
+          expect(retryError).toBeInstanceOf(RetryNotEligibleError)
+
+          yield* TestClock.adjust(retryAt)
+          const started = yield* lifecycle.start(created.id)
+          const startedAgain = yield* lifecycle.start(created.id)
+          expect(started.holdsWorkerSlot).toBe(true)
+          expect(
+            startedAgain.stepRuns.filter(
+              (run) => run.status === "queued" || run.status === "running",
+            ),
+          ).toHaveLength(1)
+          expect(
+            yield* lifecycle.wakePostponedStep({
+              workItemId: created.id,
+              postponedUntil: retryAt,
+            }),
+          ).toEqual({ _tag: "stale" })
+        }).pipe(
+          Effect.provide(
+            makeTestLayer(throttledSteps).pipe(
+              Layer.provideMerge(TestClock.layer()),
+            ),
+          ),
+        ),
+      )
+    })
+
     it("admits older Worker Slot waiters before a due GitHub wake", () => {
       const retryAt = 60_000
       const throttledSteps: LifecycleStepsShape = {
@@ -7996,11 +8189,27 @@ describe("WorkItemLifecycle", () => {
           expect(admittedOlderWaiter.waitingSince).toBeNull()
           expect(waitingWake.holdsWorkerSlot).toBe(false)
           expect(waitingWake.waitingSince).not.toBeNull()
+          expect(waitingWake.waitingSince?.getTime()).toBe(retryAt)
           expect(
             waitingWake.stepRuns.filter(
               (run) => run.status === "queued" || run.status === "running",
             ),
           ).toHaveLength(0)
+
+          // Delayed duplicate delivery must retain the first failed admission
+          // time, so it cannot lose its FIFO position to later waiters.
+          yield* TestClock.adjust(1)
+          expect(
+            yield* lifecycle.wakePostponedStep({
+              workItemId: throttled.id,
+              postponedUntil: retryAt,
+            }),
+          ).toEqual({ _tag: "woke" })
+          expect(
+            (yield* lifecycle.getWorkItem(
+              throttled.id,
+            )).waitingSince?.getTime(),
+          ).toBe(retryAt)
         }).pipe(
           Effect.provide(
             makeTestLayer(throttledSteps).pipe(

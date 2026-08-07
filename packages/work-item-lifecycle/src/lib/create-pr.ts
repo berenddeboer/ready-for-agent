@@ -6,6 +6,7 @@ import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
 import {
   type GitHubRepository,
   GitHubService,
+  isGitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import {
   type GitLabRepository,
@@ -217,13 +218,14 @@ const findExistingOpenPr = (
     return yield* github
       .findOpenPullRequestNumber(toGitHubRepository(repository), branch)
       .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CreatePrLookupError({
-              repositoryId: context.repositoryId,
-              message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          isGitHubThrottledError(cause)
+            ? cause
+            : new CreatePrLookupError({
+                repositoryId: context.repositoryId,
+                message: `Failed to look up an open pull request for ${repository.projectPath}:${branch}`,
+                cause,
+              }),
         ),
       )
   })
@@ -238,7 +240,9 @@ const softFindExistingOpenPr = (
   branch: string,
 ) =>
   findExistingOpenPr(context, repository, branch).pipe(
-    Effect.orElseSucceed(() => null),
+    Effect.catch((error) =>
+      isGitHubThrottledError(error) ? Effect.fail(error) : Effect.succeed(null),
+    ),
   )
 
 const resolveRequiredOpenPr = (
@@ -266,13 +270,14 @@ const resolveRequiredOpenPr = (
     return yield* github
       .getOpenPullRequestNumber(toGitHubRepository(repository), branch)
       .pipe(
-        Effect.mapError(
-          (cause) =>
-            new CreatePrLookupError({
-              repositoryId: context.repositoryId,
-              message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
-              cause,
-            }),
+        Effect.mapError((cause) =>
+          isGitHubThrottledError(cause)
+            ? cause
+            : new CreatePrLookupError({
+                repositoryId: context.repositoryId,
+                message: `Failed to resolve the open pull request for ${repository.projectPath}:${branch}`,
+                cause,
+              }),
         ),
       )
   })
@@ -558,12 +563,14 @@ const attemptNativeCreateDraft = (
           pullRequestNumber,
         })),
         Effect.catch((cause) =>
-          Effect.succeed({
-            ok: false as const,
-            diagnostics: boundDiagnostics(
-              `createDraftPullRequest failed: ${errorMessage(cause)}`,
-            ),
-          }),
+          isGitHubThrottledError(cause)
+            ? Effect.fail(cause)
+            : Effect.succeed({
+                ok: false as const,
+                diagnostics: boundDiagnostics(
+                  `createDraftPullRequest failed: ${errorMessage(cause)}`,
+                ),
+              }),
         ),
       )
   })
@@ -642,13 +649,15 @@ const softReconcileDraftCopy = (
       })
       .pipe(
         Effect.catch((cause) =>
-          Effect.logWarning(
-            "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
-            {
-              pullRequestNumber,
-              cause,
-            },
-          ).pipe(Effect.as(pullRequestNumber)),
+          isGitHubThrottledError(cause)
+            ? Effect.fail(cause)
+            : Effect.logWarning(
+                "Failed to reconcile draft PR title/body to canonical publication copy; reusing open PR",
+                {
+                  pullRequestNumber,
+                  cause,
+                },
+              ).pipe(Effect.as(pullRequestNumber)),
         ),
       )
   })
@@ -888,6 +897,10 @@ export const createPr = (context: LifecycleStepContext) =>
     if (required._tag === "Success") {
       yield* softReconcileDraftCopy(repository, branch, copy, required.success)
       return toCreatePrResult(required.success, "agent_fallback", copy)
+    }
+
+    if (isGitHubThrottledError(required.failure)) {
+      return yield* required.failure
     }
 
     return yield* new CreatePrPostconditionError({
