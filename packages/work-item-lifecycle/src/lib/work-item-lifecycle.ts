@@ -30,6 +30,7 @@ import {
   GitHubThrottledError,
   type PullRequestLifecycleStatus,
   formatUserFacingError,
+  isGitHubThrottledError,
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
@@ -671,6 +672,7 @@ export type ContinueAfterHumanPrOutcomeError =
 export type ResetError =
   | WorkItemNotFoundError
   | ResetCleanupError
+  | GitHubThrottledError
   | WorkItemLifecycleDatabaseError
   | AcknowledgeError
   | JobNotFoundError
@@ -5257,13 +5259,14 @@ export const makeWorkItemLifecycleLive = (
           const cleanupContext = toLifecycleStepContext(currentWorkItem)
 
           yield* steps.removeWorktree(cleanupContext).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ResetCleanupError({
-                  workItemId,
-                  message: `Failed to remove worktree for Work Item ${workItemId}`,
-                  cause,
-                }),
+            Effect.mapError((cause) =>
+              isGitHubThrottledError(cause)
+                ? cause
+                : new ResetCleanupError({
+                    workItemId,
+                    message: `Failed to remove worktree for Work Item ${workItemId}`,
+                    cause,
+                  }),
             ),
           )
 

@@ -307,6 +307,308 @@ describe("GitHubService live implementation", () => {
     ).toBe(99)
   })
 
+  it("closes every matching open pull request sequentially before deleting its branch", async () => {
+    const mutations: unknown[] = []
+    let queries = 0
+    const service = makeGitHubService({
+      query: () => {
+        queries += 1
+        return Promise.resolve(
+          queries === 1
+            ? {
+                repository: {
+                  pullRequests: {
+                    nodes: [
+                      { id: "PR_1", state: "OPEN" },
+                      { id: "PR_2", state: "OPEN" },
+                    ],
+                    pageInfo: { endCursor: null, hasNextPage: false },
+                  },
+                },
+              }
+            : { repository: { ref: { id: "REF_branch" } } },
+        ) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        if (mutations.length < 3) {
+          return Promise.resolve({
+            updatePullRequest: { pullRequest: { state: "CLOSED" } },
+          }) as never
+        }
+        return Promise.resolve({
+          deleteRef: { clientMutationId: null },
+        }) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881"),
+    )
+
+    expect(mutations).toHaveLength(3)
+    expect(mutations[0]).toMatchObject({
+      updatePullRequest: {
+        __args: { input: { pullRequestId: "PR_1", state: "CLOSED" } },
+      },
+    })
+    expect(mutations[1]).toMatchObject({
+      updatePullRequest: {
+        __args: { input: { pullRequestId: "PR_2", state: "CLOSED" } },
+      },
+    })
+    expect(mutations[2]).toMatchObject({
+      deleteRef: { __args: { input: { refId: "REF_branch" } } },
+    })
+  })
+
+  it("closes one matching open pull request before deleting its branch", async () => {
+    const mutations: unknown[] = []
+    let queries = 0
+    const service = makeGitHubService({
+      query: () => {
+        queries += 1
+        return Promise.resolve(
+          queries === 1
+            ? {
+                repository: {
+                  pullRequests: {
+                    nodes: [{ id: "PR_1", state: "OPEN" }],
+                    pageInfo: { endCursor: null, hasNextPage: false },
+                  },
+                },
+              }
+            : { repository: { ref: { id: "REF_branch" } } },
+        ) as never
+      },
+      mutation: (request) => {
+        mutations.push(request)
+        return Promise.resolve(
+          mutations.length === 1
+            ? { updatePullRequest: { pullRequest: { state: "CLOSED" } } }
+            : { deleteRef: { clientMutationId: null } },
+        ) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881"),
+    )
+
+    expect(mutations).toHaveLength(2)
+    expect(mutations[0]).toMatchObject({
+      updatePullRequest: {
+        __args: { input: { pullRequestId: "PR_1", state: "CLOSED" } },
+      },
+    })
+    expect(mutations[1]).toMatchObject({
+      deleteRef: { __args: { input: { refId: "REF_branch" } } },
+    })
+  })
+
+  it("returns a typed request error for malformed cleanup data", async () => {
+    const service = makeGitHubService({
+      query: () => Promise.resolve({ repository: {} }) as never,
+    })
+
+    const error = await Effect.runPromise(
+      service
+        .closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881")
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.message).toContain("invalid open pull request data")
+  })
+
+  it("treats zero matching pull requests and a missing branch as cleanup success", async () => {
+    let queries = 0
+    let mutations = 0
+    const service = makeGitHubService({
+      query: () => {
+        queries += 1
+        return Promise.resolve(
+          queries === 1
+            ? {
+                repository: {
+                  pullRequests: {
+                    nodes: [],
+                    pageInfo: { endCursor: null, hasNextPage: false },
+                  },
+                },
+              }
+            : { repository: { ref: null } },
+        ) as never
+      },
+      mutation: () => {
+        mutations += 1
+        return Promise.resolve({}) as never
+      },
+    })
+
+    await Effect.runPromise(
+      service.closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881"),
+    )
+
+    expect(queries).toBe(2)
+    expect(mutations).toBe(0)
+  })
+
+  it("keeps a malformed branch-delete response distinguishable from throttling", async () => {
+    let queries = 0
+    const service = makeGitHubService({
+      query: () => {
+        queries += 1
+        return Promise.resolve(
+          queries === 1
+            ? {
+                repository: {
+                  pullRequests: {
+                    nodes: [],
+                    pageInfo: { endCursor: null, hasNextPage: false },
+                  },
+                },
+              }
+            : { repository: { ref: { id: "REF_branch" } } },
+        ) as never
+      },
+      mutation: () => Promise.resolve({ deleteRef: null }) as never,
+    })
+
+    const error = await Effect.runPromise(
+      service
+        .closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881")
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.message).toContain("did not confirm remote branch deletion")
+  })
+
+  it("returns a typed request error for malformed pull request closure data", async () => {
+    const service = makeGitHubService({
+      query: () =>
+        Promise.resolve({
+          repository: {
+            pullRequests: {
+              nodes: [{ id: "PR_1", state: "OPEN" }],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            },
+          },
+        }) as never,
+      mutation: () => Promise.resolve(null) as never,
+    })
+
+    const error = await Effect.runPromise(
+      service
+        .closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881")
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.message).toContain("invalid pull request closure data")
+  })
+
+  it("returns a typed request error for malformed branch deletion data", async () => {
+    let queries = 0
+    const service = makeGitHubService({
+      query: () => {
+        queries += 1
+        return Promise.resolve(
+          queries === 1
+            ? {
+                repository: {
+                  pullRequests: {
+                    nodes: [],
+                    pageInfo: { endCursor: null, hasNextPage: false },
+                  },
+                },
+              }
+            : { repository: { ref: { id: "REF_branch" } } },
+        ) as never
+      },
+      mutation: () => Promise.resolve({}) as never,
+    })
+
+    const error = await Effect.runPromise(
+      service
+        .closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881")
+        .pipe(Effect.flip),
+    )
+
+    expect(error).toBeInstanceOf(GitHubRequestError)
+    expect(error.message).toContain("invalid remote branch deletion data")
+  })
+
+  it("replays partial cleanup without re-closing an already-closed pull request", async () => {
+    let attempt = 0
+    const closedPullRequests: string[] = []
+    const service = makeGitHubService({
+      query: () => {
+        attempt += 1
+        if (attempt === 1) {
+          return Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [
+                  { id: "PR_1", state: "OPEN" },
+                  { id: "PR_2", state: "OPEN" },
+                ],
+                pageInfo: { endCursor: null, hasNextPage: false },
+              },
+            },
+          }) as never
+        }
+        if (attempt === 2) {
+          return Promise.resolve({
+            repository: {
+              pullRequests: {
+                nodes: [{ id: "PR_2", state: "OPEN" }],
+                pageInfo: { endCursor: null, hasNextPage: false },
+              },
+            },
+          }) as never
+        }
+        return Promise.resolve({
+          repository: { ref: { id: "REF_branch" } },
+        }) as never
+      },
+      mutation: (request) => {
+        const update = "updatePullRequest" in request
+        if (update) {
+          const id = request.updatePullRequest.__args.input.pullRequestId
+          closedPullRequests.push(id)
+          if (id === "PR_2" && closedPullRequests.length === 2) {
+            return Promise.reject(
+              new GitHubThrottledError({
+                retryAt: Date.now() + 60_000,
+                usedFallback: false,
+              }),
+            )
+          }
+          return Promise.resolve({
+            updatePullRequest: { pullRequest: { state: "CLOSED" } },
+          }) as never
+        }
+        return Promise.resolve({
+          deleteRef: { clientMutationId: null },
+        }) as never
+      },
+    })
+
+    const throttled = await Effect.runPromise(
+      service
+        .closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881")
+        .pipe(Effect.flip),
+    )
+    expect(throttled).toBeInstanceOf(GitHubThrottledError)
+
+    await Effect.runPromise(
+      service.closeOpenPullRequestsAndDeleteBranch(repository, "rfa/issue-881"),
+    )
+    expect(closedPullRequests).toEqual(["PR_1", "PR_2", "PR_2"])
+  })
+
   it("updates open draft PR copy and leaves non-draft PRs unchanged", async () => {
     const mutations: unknown[] = []
     const draftService = makeGitHubService({

@@ -1,20 +1,15 @@
 import { Duration, Effect, FileSystem, Path } from "effect"
 import { DbService, type RepositoryRecord } from "@ready-for-agent/db-service"
+import { GitHubService } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
-import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
 import {
   CreateWorktreeRepositoryNotFoundError,
   GitCommandError,
 } from "./create-worktree-errors.js"
 import { type GitRepository, gitExitCode, runGit } from "./git.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
-import {
-  RemoveWorktreeCredentialError,
-  RemoveWorktreeRemoteError,
-} from "./remove-worktree-errors.js"
+import { RemoveWorktreeRemoteError } from "./remove-worktree-errors.js"
 import { workItemBranchName, workItemWorktreePath } from "./worktree-names.js"
-
-const REMOTE_CLEANUP_TIMEOUT = Duration.seconds(60)
 
 /** Brief pause before a single automatic retry of a transient worktree delete. */
 const WORKTREE_REMOVE_RETRY_DELAY = Duration.seconds(1)
@@ -93,182 +88,6 @@ const removeResidualDirectoryWithRetry = (path: string) =>
     yield* removeDirectoryIfPresent(path).pipe(Effect.ignore)
   })
 
-const shellQuote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`
-
-const credentialedCommand = (
-  tokenName: string | null,
-  parts: ReadonlyArray<string>,
-) =>
-  [
-    ...(tokenName === null
-      ? []
-      : [`GH_TOKEN="$${tokenName}"`, `GITHUB_TOKEN="$${tokenName}"`]),
-    ...parts.map(shellQuote),
-  ].join(" ")
-
-const resolveGithubCredential = (repository: RepositoryRecord) =>
-  Effect.gen(function* () {
-    const keymaxxer = yield* KeymaxxerService
-    if (keymaxxer.enabled === false) return null
-    const account = `${repository.projectPath}`
-    const tokenName = yield* keymaxxer
-      .findSecret({
-        provider: "github",
-        account,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new RemoveWorktreeCredentialError({
-              repositoryId: repository.id,
-              message: "Failed to resolve the repository GitHub credential",
-              cause,
-            }),
-        ),
-      )
-    if (tokenName === null) {
-      return yield* new RemoveWorktreeCredentialError({
-        repositoryId: repository.id,
-        message: `No GitHub credential is configured for ${account}`,
-      })
-    }
-    return tokenName
-  })
-
-const runRemoteCommand = (input: {
-  readonly tokenName: string | null
-  readonly cwd: string
-  readonly parts: ReadonlyArray<string>
-  readonly branchName: string
-  readonly allowNonZero?: boolean
-}) =>
-  Effect.gen(function* () {
-    const keymaxxer = yield* KeymaxxerService
-    const result = yield* keymaxxer
-      .runWithSecrets({
-        command: credentialedCommand(input.tokenName, input.parts),
-        cwd: input.cwd,
-        secrets: input.tokenName === null ? [] : [input.tokenName],
-        timeoutMs: Duration.toMillis(REMOTE_CLEANUP_TIMEOUT),
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new RemoveWorktreeRemoteError({
-              message: "Failed to clean up remote PR or branch",
-              branchName: input.branchName,
-              cause,
-            }),
-        ),
-      )
-    if (result.exitCode !== 0 && input.allowNonZero !== true) {
-      return yield* new RemoveWorktreeRemoteError({
-        message: "Failed to clean up remote PR or branch",
-        branchName: input.branchName,
-      })
-    }
-    return result
-  })
-
-const closeOpenPullRequests = (input: {
-  readonly repository: RepositoryRecord
-  readonly branchName: string
-  readonly tokenName: string | null
-  readonly cwd: string
-}) =>
-  Effect.gen(function* () {
-    const repo = `${input.repository.projectPath}`
-    const listed = yield* runRemoteCommand({
-      tokenName: input.tokenName,
-      cwd: input.cwd,
-      branchName: input.branchName,
-      parts: [
-        "gh",
-        "pr",
-        "list",
-        "--repo",
-        repo,
-        "--head",
-        input.branchName,
-        "--state",
-        "open",
-        "--json",
-        "number",
-      ],
-    })
-
-    const pullRequests = yield* Effect.try({
-      try: () =>
-        JSON.parse(listed.stdout.trim() || "[]") as ReadonlyArray<{
-          readonly number: number
-        }>,
-      catch: (cause) =>
-        new RemoveWorktreeRemoteError({
-          message: "Failed to parse open pull request list for remote cleanup",
-          branchName: input.branchName,
-          cause,
-        }),
-    })
-
-    for (const pullRequest of pullRequests) {
-      yield* runRemoteCommand({
-        tokenName: input.tokenName,
-        cwd: input.cwd,
-        branchName: input.branchName,
-        parts: [
-          "gh",
-          "pr",
-          "close",
-          String(pullRequest.number),
-          "--repo",
-          repo,
-        ],
-      })
-    }
-  })
-
-const deleteRemoteBranch = (input: {
-  readonly repository: RepositoryRecord
-  readonly branchName: string
-  readonly tokenName: string | null
-  readonly cwd: string
-}) =>
-  Effect.gen(function* () {
-    const repo = `${input.repository.projectPath}`
-    // Missing remote branch is success (idempotent); other failures fail cleanup.
-    const result = yield* runRemoteCommand({
-      tokenName: input.tokenName,
-      cwd: input.cwd,
-      branchName: input.branchName,
-      allowNonZero: true,
-      parts: [
-        "gh",
-        "api",
-        "-X",
-        "DELETE",
-        `repos/${repo}/git/refs/heads/${input.branchName}`,
-      ],
-    })
-    if (result.exitCode === 0) {
-      return
-    }
-    const stderr = result.stderr.toLowerCase()
-    const stdout = result.stdout.toLowerCase()
-    if (
-      result.exitCode === 1 &&
-      (stderr.includes("not found") ||
-        stdout.includes("not found") ||
-        stderr.includes("reference does not exist") ||
-        stdout.includes("reference does not exist"))
-    ) {
-      return
-    }
-    return yield* new RemoveWorktreeRemoteError({
-      message: "Failed to delete remote Work Item branch",
-      branchName: input.branchName,
-    })
-  })
-
 const removeGitLabRemoteArtifacts = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
@@ -304,6 +123,26 @@ const removeGitLabRemoteArtifacts = (input: {
     )
   })
 
+const removeGitHubRemoteArtifacts = (input: {
+  readonly repository: RepositoryRecord
+  readonly branchName: string
+}) =>
+  Effect.gen(function* () {
+    const github = yield* GitHubService
+    const forgeRepository = {
+      forge: input.repository.forge,
+      forgeHost: input.repository.forgeHost,
+      projectPath: input.repository.projectPath,
+    }
+    // This is deliberately one service operation. Ambient and Keymaxxer
+    // adapters therefore retain their coordinator permit across list, every
+    // sequential close, and the final branch delete.
+    yield* github.closeOpenPullRequestsAndDeleteBranch(
+      forgeRepository,
+      input.branchName,
+    )
+  })
+
 const removeRemoteArtifacts = (input: {
   readonly repository: RepositoryRecord
   readonly branchName: string
@@ -312,20 +151,7 @@ const removeRemoteArtifacts = (input: {
     if (input.repository.forge === "gitlab") {
       return yield* removeGitLabRemoteArtifacts(input)
     }
-    const tokenName = yield* resolveGithubCredential(input.repository)
-    const cwd = input.repository.localPath
-    yield* closeOpenPullRequests({
-      repository: input.repository,
-      branchName: input.branchName,
-      tokenName,
-      cwd,
-    })
-    yield* deleteRemoteBranch({
-      repository: input.repository,
-      branchName: input.branchName,
-      tokenName,
-      cwd,
-    })
+    yield* removeGitHubRemoteArtifacts(input)
   })
 
 const removeLocalArtifacts = (
@@ -450,8 +276,8 @@ export const localCleanup = (
 /**
  * Inverse of createWorktree: remove local artifacts, close any open remote
  * PR/MR, and drop the remote branch when present. Missing artifacts are
- * success (idempotent). Missing Forge credential fails for GitHub Keymaxxer
- * paths; GitLab cleanup uses the ambient GitLab service.
+ * success (idempotent). GitHub uses the coordinator-backed GitHub service;
+ * GitLab cleanup uses the ambient GitLab service.
  */
 export const removeWorktree = (
   context: LifecycleStepContext,
@@ -467,5 +293,4 @@ export const removeWorktree = (
 export type RemoveWorktreeError =
   | CreateWorktreeRepositoryNotFoundError
   | GitCommandError
-  | RemoveWorktreeCredentialError
   | RemoveWorktreeRemoteError

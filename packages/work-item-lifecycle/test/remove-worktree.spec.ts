@@ -13,18 +13,20 @@ import { Effect, FileSystem, Layer, type Layer as LayerType } from "effect"
 import { DatabaseTest } from "@ready-for-agent/db/test"
 import { DbService, DbServiceLive } from "@ready-for-agent/db-service"
 import {
+  GitHubRequestError,
+  GitHubService,
+  type GitHubServiceShape,
+  GitHubThrottledError,
+} from "@ready-for-agent/github-service"
+import {
   GitLabService,
   type GitLabServiceShape,
 } from "@ready-for-agent/gitlab-service"
 import {
-  KeymaxxerError,
   KeymaxxerService,
   type KeymaxxerServiceShape,
-  type RunWithSecretsInput,
 } from "@ready-for-agent/keymaxxer-service"
 import {
-  RemoveWorktreeCredentialError,
-  RemoveWorktreeRemoteError,
   createWorktree,
   localCleanup,
   makeWorkItemId,
@@ -90,6 +92,43 @@ const stubGitLab = (
     ...overrides,
   } satisfies GitLabServiceShape)
 
+const stubGitHub = (
+  overrides: Partial<GitHubServiceShape> = {},
+): Layer.Layer<GitHubService> =>
+  Layer.succeed(GitHubService, {
+    getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
+    listReadyIssues: () => Effect.succeed([]),
+    getOpenPullRequestNumber: () => Effect.succeed(1),
+    findOpenPullRequestNumber: () => Effect.succeed(null),
+    closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
+    countOpenNonDraftPullRequests: () => Effect.succeed(0),
+    createDraftPullRequest: () => Effect.succeed(1),
+    updateOpenDraftPullRequestCopy: () => Effect.succeed(null),
+    getPullRequestCheckStatus: () =>
+      Effect.succeed({
+        _tag: "succeeded",
+        terminalChecks: [],
+        mergeability: "mergeable",
+        baseRefName: "main",
+        headPushedAt: null,
+        headSha: null,
+        createdAt: null,
+        isDraft: null,
+      }),
+    getPrStatusCheckDiagnostics: () => Effect.succeed([]),
+    observeAutomatedReviewEvidence: () =>
+      Effect.succeed({
+        _tag: "ambiguous" as const,
+        reason: "Automated review evidence observation is not configured",
+      }),
+    getPullRequestLifecycleStatus: () => Effect.succeed({ _tag: "open" }),
+    markPullRequestReadyForReview: () => Effect.void,
+    mergePullRequest: () => Effect.succeed({ _tag: "merged" }),
+    rerunWorkflowRun: () => Effect.void,
+    ensureIssueCompletedWithSummary: () => Effect.void,
+    ...overrides,
+  } satisfies GitHubServiceShape)
+
 /**
  * FileSystem layer that fails residual `remove` for a sticky path so Local
  * cleanup's residual postcondition can be forced after retries.
@@ -139,6 +178,7 @@ const run = <A, E>(
     | LayerType.Layer.Success<typeof DbServiceLive>
     | KeymaxxerService
     | GitLabService
+    | GitHubService
   >,
   keymaxxerLayer: Layer.Layer<KeymaxxerService> = stubKeymaxxer(),
   gitlabLayer: Layer.Layer<GitLabService> = stubGitLab(),
@@ -147,12 +187,14 @@ const run = <A, E>(
     never,
     FileSystem.FileSystem
   >,
+  githubLayer: Layer.Layer<GitHubService> = stubGitHub(),
 ): Promise<A> => {
   const withServices = effect.pipe(
     Effect.provide(DbServiceLive),
     Effect.provide(DatabaseTest),
     Effect.provide(keymaxxerLayer),
     Effect.provide(gitlabLayer),
+    Effect.provide(githubLayer),
   )
   const withPlatform =
     fileSystemOverlay === undefined
@@ -985,7 +1027,11 @@ describe("removeWorktree", () => {
         issueNumber: 42,
         workItemId,
       })
-      const commands: string[] = []
+      const cleanups: Array<{
+        readonly projectPath: string
+        readonly branchName: string
+      }> = []
+      let keymaxxerCalls = 0
 
       await run(
         Effect.gen(function* () {
@@ -1022,31 +1068,32 @@ describe("removeWorktree", () => {
           yield* removeWorktree(context)
         }),
         stubKeymaxxer({
-          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
-          runWithSecrets: (input: RunWithSecretsInput) => {
-            commands.push(input.command)
-            if (input.command.includes("'gh' 'pr' 'list'")) {
-              return Effect.succeed({
-                exitCode: 0,
-                stdout: '[{"number":77}]',
-                stderr: "",
-              })
-            }
+          findSecret: () => {
+            keymaxxerCalls += 1
+            return Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS")
+          },
+          runWithSecrets: () => {
+            keymaxxerCalls += 1
             return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
           },
         }),
+        stubGitLab(),
+        undefined,
+        stubGitHub({
+          closeOpenPullRequestsAndDeleteBranch: (repository, branchName) =>
+            Effect.sync(() => {
+              cleanups.push({
+                projectPath: repository.projectPath,
+                branchName,
+              })
+            }),
+        }),
       )
 
-      expect(commands.length).toBe(3)
-      expect(commands[0]).toContain('GH_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
-      expect(commands[0]).toContain('GITHUB_TOKEN="$GITHUB_TOKEN_ACME_WIDGETS"')
-      expect(commands[0]).toContain("'gh' 'pr' 'list'")
-      expect(commands[0]).toContain(branch)
-      expect(commands[0]).toContain("acme/widgets")
-      expect(commands[1]).toContain("'gh' 'pr' 'close' '77'")
-      expect(commands[1]).toContain("acme/widgets")
-      expect(commands[2]).toContain("'gh' 'api' '-X' 'DELETE'")
-      expect(commands[2]).toContain(`git/refs/heads/${branch}`)
+      expect(cleanups).toEqual([
+        { projectPath: "acme/widgets", branchName: branch },
+      ])
+      expect(keymaxxerCalls).toBe(0)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -1057,8 +1104,7 @@ describe("removeWorktree", () => {
     try {
       const bare = await initBareRepository(root)
       const workItemId = makeWorkItemId()
-      let listCalls = 0
-      let deleteCalls = 0
+      let cleanupCalls = 0
 
       await run(
         Effect.gen(function* () {
@@ -1091,37 +1137,24 @@ describe("removeWorktree", () => {
             sessionId: null,
           })
         }),
-        stubKeymaxxer({
-          runWithSecrets: (input) => {
-            if (input.command.includes("'gh' 'pr' 'list'")) {
-              listCalls += 1
-              return Effect.succeed({
-                exitCode: 0,
-                stdout: "[]",
-                stderr: "",
-              })
-            }
-            if (input.command.includes("git/refs/heads/")) {
-              deleteCalls += 1
-              return Effect.succeed({
-                exitCode: 1,
-                stdout: "",
-                stderr: "Not Found",
-              })
-            }
-            return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" })
-          },
+        stubKeymaxxer(),
+        stubGitLab(),
+        undefined,
+        stubGitHub({
+          closeOpenPullRequestsAndDeleteBranch: () =>
+            Effect.sync(() => {
+              cleanupCalls += 1
+            }),
         }),
       )
 
-      expect(listCalls).toBe(1)
-      expect(deleteCalls).toBe(1)
+      expect(cleanupCalls).toBe(1)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  it("fails when no GitHub credential is configured", async () => {
+  it("preserves native GitHub throttling for the Reset caller", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-no-cred-"))
     try {
       const bare = await initBareRepository(root)
@@ -1158,19 +1191,27 @@ describe("removeWorktree", () => {
             sessionId: null,
           }).pipe(Effect.flip)
         }),
-        stubKeymaxxer({ findSecret: () => Effect.succeed(null) }),
+        stubKeymaxxer(),
+        stubGitLab(),
+        undefined,
+        stubGitHub({
+          closeOpenPullRequestsAndDeleteBranch: () =>
+            Effect.fail(
+              new GitHubThrottledError({
+                retryAt: Date.now() + 60_000,
+                usedFallback: false,
+              }),
+            ),
+        }),
       )
 
-      expect(error).toBeInstanceOf(RemoveWorktreeCredentialError)
-      expect((error as RemoveWorktreeCredentialError).message).toContain(
-        "No GitHub credential is configured for acme/widgets",
-      )
+      expect(error).toBeInstanceOf(GitHubThrottledError)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
   })
 
-  it("maps Keymaxxer remote command failure", async () => {
+  it("preserves native GitHub request errors", async () => {
     const root = await mkdtemp(join(tmpdir(), "rfa-rm-wt-remote-fail-"))
     try {
       const bare = await initBareRepository(root)
@@ -1207,18 +1248,18 @@ describe("removeWorktree", () => {
             sessionId: null,
           }).pipe(Effect.flip)
         }),
-        stubKeymaxxer({
-          runWithSecrets: () =>
+        stubKeymaxxer(),
+        stubGitLab(),
+        undefined,
+        stubGitHub({
+          closeOpenPullRequestsAndDeleteBranch: () =>
             Effect.fail(
-              new KeymaxxerError({
-                operation: "runWithSecrets",
-                message: "process failed",
-              }),
+              new GitHubRequestError({ message: "network unavailable" }),
             ),
         }),
       )
 
-      expect(error).toBeInstanceOf(RemoveWorktreeRemoteError)
+      expect(error).toBeInstanceOf(GitHubRequestError)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

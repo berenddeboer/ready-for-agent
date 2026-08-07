@@ -148,6 +148,16 @@ export interface GitHubServiceShape {
     workItemId: string,
     summaryMarkdown: string,
   ) => Effect.Effect<void, GitHubServiceError>
+  /**
+   * Close every currently-open pull request for the exact head branch, then
+   * remove that remote branch. The operation re-lists open pull requests on
+   * every invocation, so a retry after a partial completion only closes the
+   * remaining PRs. An absent branch is the successful postcondition.
+   */
+  readonly closeOpenPullRequestsAndDeleteBranch: (
+    repository: GitHubRepository,
+    headRefName: string,
+  ) => Effect.Effect<void, GitHubServiceError>
 }
 
 export class GitHubService extends Context.Service<
