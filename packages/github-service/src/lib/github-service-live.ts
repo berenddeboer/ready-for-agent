@@ -322,6 +322,17 @@ const decodeSync = <S extends { readonly Type: unknown }>(
   value: unknown,
 ): S["Type"] => Schema.decodeUnknownSync(schema)(value)
 
+/** Decode external GraphQL data into a typed request failure, never a defect. */
+const decodeGitHubResponse = <S extends { readonly Type: unknown }>(
+  schema: S & Parameters<typeof Schema.decodeUnknownSync>[0],
+  value: unknown,
+  message: string,
+): Effect.Effect<S["Type"], GitHubRequestError> =>
+  Effect.try({
+    try: () => decodeSync(schema, value),
+    catch: (cause) => new GitHubRequestError({ message, cause }),
+  })
+
 const GitHubIssueStateSchema = Schema.Literals(["OPEN", "CLOSED"])
 const GitHubMergeableSchema = Schema.Literals([
   "MERGEABLE",
@@ -393,6 +404,52 @@ const ReadyLabeledIssueFieldsSchema = Schema.Struct({
 const AuthenticatedUserLoginSchema = Schema.Struct({
   login: RequiredString,
 })
+const CleanupPullRequestPageSchema = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      pullRequests: Schema.Struct({
+        nodes: Schema.NullOr(
+          Schema.Array(
+            Schema.NullOr(
+              Schema.Struct({
+                id: RequiredString,
+                state: Schema.Literal("OPEN"),
+              }),
+            ),
+          ),
+        ),
+        pageInfo: Schema.Struct({
+          endCursor: Schema.NullOr(Schema.String),
+          hasNextPage: Schema.Boolean,
+        }),
+      }),
+    }),
+  ),
+})
+const CleanupBranchRefResultSchema = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      ref: Schema.NullOr(Schema.Struct({ id: RequiredString })),
+    }),
+  ),
+})
+const CleanupPullRequestMutationSchema = Schema.Struct({
+  updatePullRequest: Schema.NullOr(
+    Schema.Struct({
+      pullRequest: Schema.NullOr(
+        Schema.Struct({ state: Schema.Literal("CLOSED") }),
+      ),
+    }),
+  ),
+})
+const CleanupDeleteRefMutationSchema = Schema.Struct({
+  deleteRef: Schema.NullOr(
+    Schema.Struct({ clientMutationId: Schema.NullOr(Schema.String) }),
+  ),
+})
+type CleanupPullRequestPage = typeof CleanupPullRequestPageSchema.Type
+type CleanupBranchRefResult = typeof CleanupBranchRefResultSchema.Type
+type CleanupPullRequestMutation = typeof CleanupPullRequestMutationSchema.Type
 
 const uniqueTerminalChecks = (
   checks: readonly TerminalPrStatusCheck[],
@@ -1258,6 +1315,207 @@ const makeGitHubApiService = (
     "GitHubService.findOpenPullRequestNumber",
   )(function* (repository, headRefName) {
     return yield* findOpenPullRequestNumberImpl(client, repository, headRefName)
+  }),
+  closeOpenPullRequestsAndDeleteBranch: Effect.fn(
+    "GitHubService.closeOpenPullRequestsAndDeleteBranch",
+  )(function* (repository, headRefName) {
+    if (typeof headRefName !== "string" || headRefName.trim() === "") {
+      return yield* new GitHubRequestError({
+        message: `Invalid pull request head branch for ${repository.owner}/${repository.name}`,
+      })
+    }
+
+    const pullRequestIds: string[] = []
+    let cursor: string | null = null
+    for (;;) {
+      const afterCursor: string | null = cursor
+      const page: CleanupPullRequestPage = yield* githubQuery(
+        `Failed to list open pull requests for cleanup on ${repository.owner}/${repository.name}:${headRefName}`,
+        (signal) =>
+          client.query(
+            {
+              repository: {
+                __args: repository,
+                pullRequests: {
+                  __args: {
+                    first: PAGE_SIZE,
+                    states: ["OPEN" as const],
+                    headRefName,
+                    ...(afterCursor === null ? {} : { after: afterCursor }),
+                  },
+                  nodes: {
+                    id: true,
+                    state: true,
+                  },
+                  pageInfo: {
+                    endCursor: true,
+                    hasNextPage: true,
+                  },
+                },
+              },
+            },
+            signal,
+          ),
+      ).pipe(
+        Effect.flatMap((result) =>
+          decodeGitHubResponse(
+            CleanupPullRequestPageSchema,
+            result,
+            `GitHub returned invalid open pull request data while cleaning ${repository.owner}/${repository.name}:${headRefName}`,
+          ),
+        ),
+      )
+      if (page.repository === null) {
+        return yield* new GitHubApiRepositoryUnavailableError(repository)
+      }
+      for (const pullRequest of page.repository.pullRequests.nodes ?? []) {
+        if (pullRequest === null) continue
+        pullRequestIds.push(pullRequest.id)
+      }
+      const { pageInfo } = page.repository.pullRequests
+      if (pageInfo.hasNextPage !== true) break
+      if (
+        typeof pageInfo.endCursor !== "string" ||
+        pageInfo.endCursor.trim() === ""
+      ) {
+        return yield* new GitHubRequestError({
+          message: `GitHub returned an invalid pull request page while cleaning ${repository.owner}/${repository.name}:${headRefName}`,
+        })
+      }
+      cursor = pageInfo.endCursor
+    }
+
+    if (pullRequestIds.length > 0) {
+      const mutate = client.mutation
+      if (mutate === undefined) {
+        return yield* new GitHubRequestError({
+          message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}`,
+        })
+      }
+      for (const pullRequestId of pullRequestIds) {
+        const mutation: CleanupPullRequestMutation = yield* githubRequest(
+          `Failed to close pull request for cleanup on ${repository.owner}/${repository.name}:${headRefName}`,
+          (signal) =>
+            mutate(
+              {
+                updatePullRequest: {
+                  __args: {
+                    input: {
+                      pullRequestId,
+                      state: "CLOSED" as const,
+                    },
+                  },
+                  pullRequest: {
+                    state: true,
+                  },
+                },
+              },
+              signal,
+            ),
+        ).pipe(
+          Effect.flatMap((response) =>
+            decodeGitHubResponse(
+              CleanupPullRequestMutationSchema,
+              response,
+              `GitHub returned invalid pull request closure data while cleaning ${repository.owner}/${repository.name}:${headRefName}`,
+            ),
+          ),
+        )
+        if (mutation.updatePullRequest?.pullRequest?.state !== "CLOSED") {
+          return yield* new GitHubRequestError({
+            message: `GitHub did not confirm pull request closure for ${repository.owner}/${repository.name}:${headRefName}`,
+          })
+        }
+      }
+    }
+
+    const loadBranchRef = (): Effect.Effect<
+      string | null,
+      | GitHubRequestError
+      | GitHubThrottledError
+      | GitHubApiRepositoryUnavailableError
+    > =>
+      Effect.gen(function* () {
+        const result: CleanupBranchRefResult = yield* githubQuery(
+          `Failed to find remote branch for cleanup on ${repository.owner}/${repository.name}:${headRefName}`,
+          (signal) =>
+            client.query(
+              {
+                repository: {
+                  __args: repository,
+                  ref: {
+                    __args: {
+                      qualifiedName: `refs/heads/${headRefName}`,
+                    },
+                    id: true,
+                  },
+                },
+              },
+              signal,
+            ),
+        ).pipe(
+          Effect.flatMap((response) =>
+            decodeGitHubResponse(
+              CleanupBranchRefResultSchema,
+              response,
+              `GitHub returned invalid branch reference data while cleaning ${repository.owner}/${repository.name}:${headRefName}`,
+            ),
+          ),
+        )
+        if (result.repository === null) {
+          return yield* new GitHubApiRepositoryUnavailableError(repository)
+        }
+        const ref = result.repository.ref
+        if (ref === null) return null
+        return ref.id
+      })
+
+    const refId = yield* loadBranchRef()
+    if (refId === null) return
+    const mutate = client.mutation
+    if (mutate === undefined) {
+      return yield* new GitHubRequestError({
+        message: `GitHub GraphQL client does not support mutations for ${repository.owner}/${repository.name}`,
+      })
+    }
+    yield* githubRequest(
+      `Failed to delete remote branch for cleanup on ${repository.owner}/${repository.name}:${headRefName}`,
+      (signal) =>
+        mutate(
+          {
+            deleteRef: {
+              __args: { input: { refId } },
+              clientMutationId: true,
+            },
+          },
+          signal,
+        ),
+    ).pipe(
+      Effect.flatMap((response) =>
+        decodeGitHubResponse(
+          CleanupDeleteRefMutationSchema,
+          response,
+          `GitHub returned invalid remote branch deletion data while cleaning ${repository.owner}/${repository.name}:${headRefName}`,
+        ),
+      ),
+      Effect.filterOrFail(
+        (result) => result.deleteRef !== null,
+        () =>
+          new GitHubRequestError({
+            message: `GitHub did not confirm remote branch deletion for ${repository.owner}/${repository.name}:${headRefName}`,
+          }),
+      ),
+      // A concurrent branch deletion is the same successful postcondition.
+      // Revalidate only ordinary request failures: a throttle must propagate
+      // immediately without spending another request.
+      Effect.catchTag("GitHubRequestError", (error) =>
+        loadBranchRef().pipe(
+          Effect.flatMap((remainingRefId) =>
+            remainingRefId === null ? Effect.void : Effect.fail(error),
+          ),
+        ),
+      ),
+    )
   }),
   createDraftPullRequest: Effect.fn("GitHubService.createDraftPullRequest")(
     function* (repository, input) {
@@ -2493,6 +2751,9 @@ export const makeGitHubService = (
     getOpenPullRequestNumber: adaptRepository(service.getOpenPullRequestNumber),
     findOpenPullRequestNumber: adaptRepository(
       service.findOpenPullRequestNumber,
+    ),
+    closeOpenPullRequestsAndDeleteBranch: adaptRepository(
+      service.closeOpenPullRequestsAndDeleteBranch,
     ),
     countOpenNonDraftPullRequests: adaptRepository(
       service.countOpenNonDraftPullRequests,

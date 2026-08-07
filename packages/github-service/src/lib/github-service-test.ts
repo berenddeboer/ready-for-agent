@@ -40,6 +40,7 @@ export const makeGitHubServiceTest = (
     getAuthenticatedUserLogin: () => Effect.succeed("test-operator"),
     getOpenPullRequestNumber: () => Effect.succeed(1),
     findOpenPullRequestNumber: () => Effect.succeed(1),
+    closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
     countOpenNonDraftPullRequests: () => Effect.succeed(0),
     createDraftPullRequest: () => Effect.succeed(1),
     updateOpenDraftPullRequestCopy: () => Effect.succeed(1),

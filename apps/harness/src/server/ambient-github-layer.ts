@@ -263,6 +263,16 @@ export const ambientGitHubLayer = (options: {
             service.findOpenPullRequestNumber(repository, headRefName),
           ),
         ),
+        closeOpenPullRequestsAndDeleteBranch: Effect.fn(
+          "AmbientGitHub.closeOpenPullRequestsAndDeleteBranch",
+        )((repository, headRefName) =>
+          authenticated("operator", repository, (service) =>
+            service.closeOpenPullRequestsAndDeleteBranch(
+              repository,
+              headRefName,
+            ),
+          ),
+        ),
         countOpenNonDraftPullRequests: Effect.fn(
           "AmbientGitHub.countOpenNonDraftPullRequests",
         )((repository) =>

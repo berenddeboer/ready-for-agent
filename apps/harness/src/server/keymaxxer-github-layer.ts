@@ -589,6 +589,18 @@ export const keymaxxerGitHubLayer = (options: {
               ),
           }),
         ),
+        closeOpenPullRequestsAndDeleteBranch: Effect.fn(
+          "KeymaxxerGitHub.closeOpenPullRequestsAndDeleteBranch",
+        )((repository, headRefName) =>
+          callHelper({
+            operation: "close-open-pull-requests-and-delete-branch",
+            repository,
+            describe: "close open pull requests and delete remote branch",
+            args: [encodeArgument(headRefName)],
+            origin: "operator",
+            decode: decodeVoid,
+          }),
+        ),
         createDraftPullRequest: Effect.fn(
           "KeymaxxerGitHub.createDraftPullRequest",
         )((repository, input) =>

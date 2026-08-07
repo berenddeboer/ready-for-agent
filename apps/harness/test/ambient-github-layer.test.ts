@@ -36,6 +36,7 @@ const serviceWithList = (
   getAuthenticatedUserLogin: () => Effect.die("not used"),
   getOpenPullRequestNumber: () => Effect.die("not used"),
   findOpenPullRequestNumber: () => Effect.die("not used"),
+  closeOpenPullRequestsAndDeleteBranch: () => Effect.die("not used"),
   createDraftPullRequest: () => Effect.die("not used"),
   updateOpenDraftPullRequestCopy: () => Effect.die("not used"),
   countOpenNonDraftPullRequests: () => Effect.succeed(0),
@@ -251,6 +252,33 @@ it.effect(
 
       expect(tokenIndex).toBe(2)
     }),
+)
+
+it.effect("runs remote cleanup through the ambient coordinator operation", () =>
+  Effect.gen(function* () {
+    const cleanups: string[] = []
+    const layer = ambientGitHubLayer({
+      workspaceRoot: "/workspace",
+      resolveToken: async () => "ambient-token",
+      makeService: () => ({
+        ...serviceWithList(() => Effect.succeed([])),
+        closeOpenPullRequestsAndDeleteBranch: (_repository, headRefName) =>
+          Effect.sync(() => {
+            cleanups.push(headRefName)
+          }),
+      }),
+    })
+
+    yield* Effect.gen(function* () {
+      const github = yield* GitHubService
+      yield* github.closeOpenPullRequestsAndDeleteBranch(
+        repository,
+        "rfa/issue-881",
+      )
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+
+    expect(cleanups).toEqual(["rfa/issue-881"])
+  }),
 )
 
 it.effect("ambient GitHub authentication refreshes once after a 401", () =>

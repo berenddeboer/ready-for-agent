@@ -286,6 +286,47 @@ describe("Keymaxxer-backed GitHub layer", () => {
       }),
   )
 
+  it.effect(
+    "runs remote cleanup as one native helper without exposing a token",
+    () =>
+      Effect.gen(function* () {
+        const runs: RunWithSecretsInput[] = []
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) => {
+            runs.push(input)
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "",
+              stderr: successfulHelperControl,
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          yield* github.closeOpenPullRequestsAndDeleteBranch(
+            acmeWidgets,
+            "rfa/issue-881",
+          )
+        }).pipe(Effect.provide(layer))
+
+        expect(runs).toHaveLength(1)
+        expect(runs[0]?.secrets).toEqual(["GITHUB_TOKEN_ACME_WIDGETS"])
+        expect(runs[0]?.command).toContain(
+          "close-open-pull-requests-and-delete-branch",
+        )
+        expect(runs[0]?.command).not.toContain("gh pr")
+      }),
+  )
+
   it.effect("selects colliding token names by Repository account", () =>
     Effect.gen(function* () {
       const runs: RunWithSecretsInput[] = []
@@ -1695,6 +1736,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           getAuthenticatedUserLogin: () => Effect.die("not used"),
           getOpenPullRequestNumber: () => Effect.die("not used"),
           findOpenPullRequestNumber: () => Effect.die("not used"),
+          closeOpenPullRequestsAndDeleteBranch: () => Effect.die("not used"),
           createDraftPullRequest: () => Effect.die("not used"),
           updateOpenDraftPullRequestCopy: () => Effect.die("not used"),
           countOpenNonDraftPullRequests: () => Effect.die("not used"),
@@ -1793,6 +1835,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           getAuthenticatedUserLogin: () => Effect.die("not used"),
           getOpenPullRequestNumber: () => Effect.die("not used"),
           findOpenPullRequestNumber: () => Effect.die("not used"),
+          closeOpenPullRequestsAndDeleteBranch: () => Effect.die("not used"),
           createDraftPullRequest: () => Effect.die("not used"),
           updateOpenDraftPullRequestCopy: () => Effect.die("not used"),
           countOpenNonDraftPullRequests: () =>

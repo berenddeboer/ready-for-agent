@@ -20,6 +20,7 @@ type Mutation {
   mergePullRequest(input: MergePullRequestInput!): MergePullRequestPayload
   createPullRequest(input: CreatePullRequestInput!): CreatePullRequestPayload
   updatePullRequest(input: UpdatePullRequestInput!): UpdatePullRequestPayload
+  deleteRef(input: DeleteRefInput!): DeleteRefPayload
   addComment(input: AddCommentInput!): AddCommentPayload
   closeIssue(input: CloseIssueInput!): CloseIssuePayload
 }
@@ -41,8 +42,23 @@ type CreatePullRequestPayload {
 
 input UpdatePullRequestInput {
   pullRequestId: ID!
+  state: PullRequestUpdateState
   title: String
   body: String
+  clientMutationId: String
+}
+
+enum PullRequestUpdateState {
+  OPEN
+  CLOSED
+}
+
+input DeleteRefInput {
+  refId: ID!
+  clientMutationId: String
+}
+
+type DeleteRefPayload {
   clientMutationId: String
 }
 
@@ -121,6 +137,7 @@ type Repository {
   id: ID!
   nameWithOwner: String!
   defaultBranchRef: Ref
+  ref(qualifiedName: String!): Ref
   issues(first: Int, after: String, labels: [String!]): IssueConnection!
   issue(number: Int!): Issue
   pullRequests(
@@ -132,6 +149,7 @@ type Repository {
 }
 
 type Ref {
+  id: ID!
   name: String!
 }
 

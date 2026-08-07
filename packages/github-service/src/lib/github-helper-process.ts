@@ -1,5 +1,6 @@
 import type { Effect } from "effect"
 import { runGitHubCli } from "../bin/cli.js"
+import { closeOpenPullRequestsAndDeleteBranchProgram } from "../bin/close-open-pull-requests-and-delete-branch.js"
 import { runCountOpenNonDraftPullRequestsProgram } from "../bin/count-open-non-draft-pull-requests.js"
 import { createDraftPullRequestProgram } from "../bin/create-draft-pull-request.js"
 import { ensureIssueCompletedWithSummaryProgram } from "../bin/ensure-issue-completed-with-summary.js"
@@ -27,6 +28,7 @@ export const GITHUB_HELPER_OPERATIONS = [
   "get-authenticated-user-login",
   "get-open-pr-number",
   "find-open-pr-number",
+  "close-open-pull-requests-and-delete-branch",
   "count-open-non-draft-pull-requests",
   "create-draft-pull-request",
   "update-open-draft-pull-request-copy",
@@ -139,6 +141,8 @@ const programs: Record<
   "get-authenticated-user-login": getAuthenticatedUserLoginProgram,
   "get-open-pr-number": getOpenPullRequestNumberProgram,
   "find-open-pr-number": findOpenPullRequestNumberProgram,
+  "close-open-pull-requests-and-delete-branch":
+    closeOpenPullRequestsAndDeleteBranchProgram,
   "create-draft-pull-request": createDraftPullRequestProgram,
   "update-open-draft-pull-request-copy": updateOpenDraftPullRequestCopyProgram,
   "get-pr-check-status": getPrCheckStatusProgram,

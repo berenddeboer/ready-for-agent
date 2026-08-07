@@ -188,6 +188,7 @@ const defaultGithubLayer = Layer.merge(
   Layer.succeed(GitHubService, {
     getOpenPullRequestNumber: () => Effect.succeed(1),
     findOpenPullRequestNumber: () => Effect.succeed(1),
+    closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
     createDraftPullRequest: () => Effect.succeed(1),
     updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
     countOpenNonDraftPullRequests: () => Effect.succeed(0),
@@ -744,6 +745,7 @@ describe("Job worker", () => {
       const github = Layer.succeed(GitHubService, {
         getOpenPullRequestNumber: () => Effect.succeed(1),
         findOpenPullRequestNumber: () => Effect.succeed(1),
+        closeOpenPullRequestsAndDeleteBranch: () => Effect.void,
         createDraftPullRequest: () => Effect.succeed(1),
         updateOpenDraftPullRequestCopy: () => Effect.succeed(1),
         countOpenNonDraftPullRequests: () => Effect.succeed(0),
