@@ -263,7 +263,8 @@ describe("kanban home board", () => {
   test("retains board controls and excludes repository management on the board", () => {
     const source = boardSource()
     // Section collapse absence is covered by the #681 header-band test above.
-    expect(source).toContain("<SessionUsageDialog")
+    // Session Telemetry is route-driven from root (issue #841); board opens it.
+    expect(source).toContain("openSessionTelemetry")
     expect(source).toContain("<WorkItemPauseButton")
     expect(source).toContain("<WorkItemLifecycleStatus")
     expect(source).toContain("<Copy")

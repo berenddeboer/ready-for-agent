@@ -1,5 +1,5 @@
 import { useQueries, useSuspenseQuery } from "@tanstack/react-query"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useMemo, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
@@ -26,7 +26,6 @@ import {
   JOBS_FAILED_LIMIT,
   JobsCardSkeleton,
   type Repository,
-  SessionUsageDialog,
   type WorkItem,
   WorkItemLifecycleStatus,
   WorkItemPauseButton,
@@ -36,6 +35,7 @@ import {
   jobsWorkingWorkItemsQuery,
   repositoriesQuery,
 } from "./routes/index.js"
+import { openSessionTelemetry } from "./session-telemetry-nav.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { cx, ui } from "./ui.js"
 import { workItemIssueUrl } from "./work-item-issue-url.js"
@@ -313,10 +313,14 @@ function PipelineTicket({
 function KanbanJobsBoard() {
   const { selectedRepositoryId } = useJobsRepositoryFilter()
   const [mobileLane, setMobileLane] = useState<PipelineLaneId>("queue")
-  const [sessionDialog, setSessionDialog] = useState<{
-    readonly workItemId: string
-    readonly sessionId: string
-  } | null>(null)
+  const navigate = useNavigate()
+  const openSessionFromPipeline = (workItemId: string, sessionId: string) => {
+    void openSessionTelemetry({
+      navigate,
+      workItemId,
+      sessionId,
+    })
+  }
   const { data: repositories } = useSuspenseQuery(repositoriesQuery)
   const workingQueries = useQueries({
     queries: repositories.map((repository) =>
@@ -505,9 +509,7 @@ function KanbanJobsBoard() {
                           laneId={lane.id}
                           departing={departing}
                           arriving={arriving}
-                          onOpenSession={(workItemId, sessionId) =>
-                            setSessionDialog({ workItemId, sessionId })
-                          }
+                          onOpenSession={openSessionFromPipeline}
                         />
                       ))}
                     </ul>
@@ -555,12 +557,6 @@ function KanbanJobsBoard() {
           </div>
         </section>
       </div>
-      <SessionUsageDialog
-        workItemId={sessionDialog?.workItemId ?? null}
-        sessionId={sessionDialog?.sessionId ?? null}
-        open={sessionDialog !== null}
-        onClose={() => setSessionDialog(null)}
-      />
     </article>
   )
 }

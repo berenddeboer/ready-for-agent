@@ -103,7 +103,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const issues = sliceBetweenMarkers(
       homeSource(),
       "function RepositoryIssueRow(",
-      "export function SessionUsageDialog(",
+      "export function JobsCardSkeleton(",
     )
     expect(issues).toContain("ui.repoIssue")
     expect(issues).toContain("ui.repoIssueNum")
@@ -169,7 +169,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const row = sliceBetweenMarkers(
       homeSource(),
       "function RepositoryIssueRow(",
-      "export function SessionUsageDialog(",
+      "export function JobsCardSkeleton(",
     )
     expect(row).toContain("onOpenSession=")
     expect(row).toContain("collapseEarlierLanes")
@@ -236,7 +236,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     const leaf = sliceBetweenMarkers(
       source,
       "function RepositoryIssueRow(",
-      "export function SessionUsageDialog(",
+      "export function JobsCardSkeleton(",
     )
     expect(leaf).toContain("ui.bannerCompact")
     expect(leaf).toContain("ui.repoIssueError")

@@ -78,6 +78,7 @@ import {
   followRepositoryWorkItemsLive,
 } from "../refresh-work-items-live.js"
 import { type Repository, repositoriesQuery } from "../repositories-query.js"
+import { SessionUsageDialog } from "../session-usage-dialog.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { cx, ui } from "../ui.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
@@ -155,61 +156,6 @@ const agentBackendsQuery = {
 
 /** Empty select value means inherit the harness default (null override). */
 const HARNESS_DEFAULT_BACKEND_VALUE = ""
-
-const sessionQuery = (workItemId: string) => ({
-  queryKey: ["session", workItemId] as const,
-  queryFn: async () => {
-    const result = await graphql.query({
-      session: {
-        __args: { workItemId },
-        id: true,
-        availability: true,
-        backend: { id: true, label: true },
-        model: {
-          providerId: true,
-          id: true,
-          thinkingLevel: true,
-        },
-        tokens: {
-          input: true,
-          output: true,
-          reasoning: true,
-          cacheRead: true,
-          cacheWrite: true,
-        },
-        cost: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    })
-    return result.session
-  },
-})
-
-const formatSessionCost = (cost: number): string =>
-  new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(cost)
-
-const formatSessionInstant = (value: string | null | undefined): string => {
-  if (value === null || value === undefined || value === "") {
-    return "—"
-  }
-  const ms = Date.parse(value)
-  if (Number.isNaN(ms)) {
-    return value
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(ms)
-}
-
-const formatTokenCount = (value: number): string =>
-  new Intl.NumberFormat(undefined).format(value)
 
 /**
  * Dedicated cache identity for GitHub open non-draft Pull Request counts.
@@ -2808,8 +2754,9 @@ function RepositoryIssues({
   workItemsLoading: boolean
 }) {
   const { data: issues } = useSuspenseQuery(issuesQuery(repository.id))
-  // One Session usage dialog for the whole list (not per issue row) so the
-  // fixed session-usage-title id stays unique — same pattern as Kanban/Completed.
+  // One Session usage dialog for the whole list (not per issue row). Title ids
+  // are per-instance (useId) so coexistence with the root route-driven dialog
+  // remains valid until #843 unifies ownership.
   const [sessionDialog, setSessionDialog] = useState<{
     workItemId: string
     sessionId: string
@@ -3269,199 +3216,6 @@ function RepositoryIssueRow({
         </p>
       )}
     </li>
-  )
-}
-
-export function SessionUsageDialog({
-  workItemId,
-  sessionId,
-  open,
-  onClose,
-}: {
-  workItemId: string | null
-  sessionId: string | null
-  open: boolean
-  onClose: () => void
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const enabled = open && workItemId !== null
-  const session = useQuery({
-    ...sessionQuery(workItemId ?? ""),
-    enabled,
-  })
-
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (dialog === null) return
-    if (open) {
-      if (!dialog.open) dialog.showModal()
-    } else if (dialog.open) {
-      dialog.close()
-    }
-  }, [open])
-
-  const backendLabel = session.data?.backend.label
-
-  return (
-    <dialog
-      ref={dialogRef}
-      className={cx(ui.dialogPanel, ui.dialogPanelNarrow)}
-      aria-labelledby="session-usage-title"
-      onClose={onClose}
-    >
-      <div className={cx(ui.dialogHeader, ui.dialogHeaderCompact)}>
-        <p className={ui.dialogKicker}>Session usage</p>
-        <h2
-          id="session-usage-title"
-          className={cx(ui.dialogTitle, ui.dialogTitleSm)}
-        >
-          {backendLabel ? `${backendLabel} Session` : "Session"}
-        </h2>
-        {sessionId !== null && (
-          <p
-            className="mt-1 truncate font-mono text-xs text-ink-faint"
-            title={sessionId}
-          >
-            {sessionId}
-          </p>
-        )}
-      </div>
-      <div className={cx(ui.dialogBody, ui.dialogBodyCompact)}>
-        {!enabled ? null : session.isPending ? (
-          <p className={ui.dialogLoading}>Loading usage…</p>
-        ) : session.isError ? (
-          <Banner
-            className={ui.bannerCompact}
-            tone="alarm"
-            tag="Error"
-            role="alert"
-          >
-            Could not load Session usage. Close and try again.
-          </Banner>
-        ) : session.data === null || session.data === undefined ? (
-          <Banner
-            className={ui.bannerCompact}
-            tone="guidance"
-            tag="Session"
-            role="status"
-          >
-            Work Item not found.
-          </Banner>
-        ) : session.data.availability === "UNSUPPORTED" ? (
-          <Banner
-            className={ui.bannerCompact}
-            tone="guidance"
-            tag="Session"
-            role="status"
-          >
-            {session.data.backend.label} does not provide Session Telemetry.
-          </Banner>
-        ) : session.data.availability === "MISSING" ? (
-          <Banner
-            className={ui.bannerCompact}
-            tone="guidance"
-            tag="Session"
-            role="status"
-          >
-            {session.data.backend.label} no longer has this Session locally.
-            Usage cannot be loaded.
-          </Banner>
-        ) : session.data.availability === "UNAVAILABLE" ? (
-          <div className="grid gap-3">
-            <Banner
-              className={ui.bannerCompact}
-              tone="guidance"
-              tag="Session"
-              role="status"
-            >
-              {session.data.backend.label} Session Telemetry is temporarily
-              unavailable. Retry in a moment.
-            </Banner>
-            <button
-              type="button"
-              className={cx(ui.plateMini, "justify-self-start")}
-              onClick={() => {
-                void session.refetch()
-              }}
-            >
-              Retry
-            </button>
-          </div>
-        ) : (
-          <table className={ui.dialogTable}>
-            <tbody>
-              <tr>
-                <th scope="row">Model</th>
-                <td>
-                  {session.data.model === null ||
-                  session.data.model === undefined
-                    ? "—"
-                    : [
-                        session.data.model.providerId,
-                        session.data.model.id,
-                        session.data.model.thinkingLevel,
-                      ]
-                        .filter(
-                          (part) =>
-                            part !== null && part !== undefined && part !== "",
-                        )
-                        .join(" / ")}
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Input tokens</th>
-                <td>{formatTokenCount(session.data.tokens?.input ?? 0)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Output tokens</th>
-                <td>{formatTokenCount(session.data.tokens?.output ?? 0)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Reasoning tokens</th>
-                <td>{formatTokenCount(session.data.tokens?.reasoning ?? 0)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Cache read</th>
-                <td>{formatTokenCount(session.data.tokens?.cacheRead ?? 0)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Cache write</th>
-                <td>
-                  {formatTokenCount(session.data.tokens?.cacheWrite ?? 0)}
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Cost</th>
-                <td>
-                  {session.data.cost === null || session.data.cost === undefined
-                    ? "—"
-                    : formatSessionCost(session.data.cost)}
-                </td>
-              </tr>
-              <tr>
-                <th scope="row">Created</th>
-                <td>{formatSessionInstant(session.data.createdAt)}</td>
-              </tr>
-              <tr>
-                <th scope="row">Updated</th>
-                <td>{formatSessionInstant(session.data.updatedAt)}</td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-      </div>
-      <div className={cx(ui.dialogFooter, ui.dialogFooterCompact)}>
-        <button
-          type="button"
-          className={ui.plateMini}
-          onClick={() => {
-            dialogRef.current?.close()
-          }}
-        >
-          Close
-        </button>
-      </div>
-    </dialog>
   )
 }
 

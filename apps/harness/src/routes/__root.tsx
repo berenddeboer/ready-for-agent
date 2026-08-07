@@ -52,8 +52,13 @@ import { repositoriesQuery } from "../repositories-query.js"
 import {
   isHarnessSettingsPath,
   isOtherRoutedDialogPath,
+  isSessionTelemetryPath,
+  parseSessionTelemetryPath,
   readHarnessSettingsHistoryState,
+  readSessionTelemetryHistoryState,
+  wasSessionTelemetryOpenedFromInApp,
 } from "../routed-dialog.js"
+import { SessionUsageDialog } from "../session-usage-dialog.js"
 import appCss from "../styles.css?url"
 import {
   THEME_BOOTSTRAP_SCRIPT,
@@ -267,9 +272,62 @@ function RootComponent() {
   return (
     <div className="min-h-screen w-full">
       <SettingsChrome />
+      {/* Route-driven Session Telemetry overlay (issue #841); dialog is one root
+          instance so Pipeline open, Back/Forward, and direct loads share state. */}
+      <SessionTelemetryOverlay />
       <ReactQueryDevtools buttonPosition="bottom-left" />
       <TanStackRouterDevtools position="bottom-right" />
     </div>
+  )
+}
+
+/**
+ * Session Telemetry at `/session/<work-item-id>/telemetry` (ADR 0048 / #841).
+ * Explicit Pipeline opens push history; Close/Escape/Back leave the route;
+ * direct entry closes with replace → `/`.
+ */
+function SessionTelemetryOverlay() {
+  const navigate = useNavigate()
+  const router = useRouter()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const telemetryHistoryState = useRouterState({
+    select: (s) => readSessionTelemetryHistoryState(s.location.state),
+  })
+  const parsed = parseSessionTelemetryPath(pathname)
+  const workItemId = parsed?.workItemId ?? null
+  const open = workItemId !== null
+  const sessionIdHint = telemetryHistoryState?.sessionId ?? null
+
+  const leaveSessionTelemetryRoute = () => {
+    // Require both history marker and same-document flag so a full reload
+    // (which restores history state) still uses replace → `/`.
+    const openedFromInApp =
+      wasSessionTelemetryOpenedFromInApp() &&
+      telemetryHistoryState?.kind === "in-app-origin"
+    if (openedFromInApp && router.history.canGoBack()) {
+      router.history.back()
+      return
+    }
+    void navigate({
+      to: "/",
+      search: (prev) => prev,
+      replace: true,
+    })
+  }
+
+  return (
+    <SessionUsageDialog
+      workItemId={workItemId}
+      sessionId={sessionIdHint}
+      open={open}
+      onClose={() => {
+        // Native dialog already closed; leave the route only when we are still
+        // on the telemetry path (Back already changed location first).
+        if (isSessionTelemetryPath(pathname)) {
+          leaveSessionTelemetryRoute()
+        }
+      }}
+    />
   )
 }
 
