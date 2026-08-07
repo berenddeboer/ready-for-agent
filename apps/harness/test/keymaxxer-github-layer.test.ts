@@ -1,18 +1,47 @@
+import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpawner"
+import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunPath from "@effect/platform-bun/BunPath"
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, Layer, ManagedRuntime } from "effect"
+import {
+  Context,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+} from "effect"
 import { TestClock } from "effect/testing"
 import {
   GitHubRequestError,
   GitHubService,
+  type GitHubServiceShape,
 } from "@ready-for-agent/github-service"
 import {
   KeymaxxerService,
   type RunWithSecretsInput,
 } from "@ready-for-agent/keymaxxer-service"
+import { ambientGitHubLayer } from "../src/server/ambient-github-layer.js"
+import {
+  GitHubOperationCoordinator,
+  GitHubOperationCoordinatorLive,
+  makeGitHubOperationCoordinator,
+} from "../src/server/github-operation-coordinator.js"
 import {
   OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS,
-  keymaxxerGitHubLayer,
+  keymaxxerGitHubLayer as makeKeymaxxerGitHubLayer,
 } from "../src/server/keymaxxer-github-layer.js"
+
+const keymaxxerGitHubLayer = (
+  options: Parameters<typeof makeKeymaxxerGitHubLayer>[0],
+) =>
+  makeKeymaxxerGitHubLayer(options).pipe(
+    Layer.provide(GitHubOperationCoordinatorLive),
+  )
+
+const processLayer = BunChildProcessSpawner.layer.pipe(
+  Layer.provideMerge(Layer.merge(BunFileSystem.layer, BunPath.layer)),
+)
 
 const acmeWidgets = {
   forge: "github",
@@ -829,8 +858,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
   )
 
   it("concurrent count joiners survive cancel of the cache owner fiber", async () => {
-    // Cache.get is forked into the layer scope: aborting one waiter must not
-    // cancel the shared helper or fail a concurrent joiner.
+    // A concurrent waiter keeps the shared lookup alive when its owner aborts.
     const runs: RunWithSecretsInput[] = []
     let releaseHelper: (() => void) | undefined
     const helperHeld = new Promise<void>((resolve) => {
@@ -881,6 +909,90 @@ describe("Keymaxxer-backed GitHub layer", () => {
       expect(await joiner).toBe(7)
       expect(runs).toHaveLength(1)
     } finally {
+      await runtime.dispose()
+    }
+  })
+
+  it("cancels a queued count cache miss before it starts the helper", async () => {
+    let releaseActiveHelper: () => void = () => {}
+    const activeHelperHeld = new Promise<void>((resolve) => {
+      releaseActiveHelper = resolve
+    })
+    let signalActiveHelperStart: () => void = () => {}
+    const activeHelperStarted = new Promise<void>((resolve) => {
+      signalActiveHelperStart = resolve
+    })
+    let signalCountCoordinatorEntry: () => void = () => {}
+    const countCoordinatorEntered = new Promise<void>((resolve) => {
+      signalCountCoordinatorEntry = resolve
+    })
+    let countHelperStarts = 0
+    const coordinator = makeGitHubOperationCoordinator()
+    const coordinatorLayer = Layer.succeed(GitHubOperationCoordinator, {
+      execute: (input) => {
+        if (input.origin === "background") {
+          signalCountCoordinatorEntry()
+        }
+        return coordinator.execute(input)
+      },
+    })
+    const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+      initialize: Effect.void,
+      findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+      findSecrets: () => Effect.die("not used"),
+      hasSecret: () => Effect.die("not used"),
+      addSecret: () => Effect.die("not used"),
+      runWithSecrets: (input) =>
+        Effect.gen(function* () {
+          if (input.command.includes("count-open-non-draft-pull-requests.ts")) {
+            countHelperStarts += 1
+            return { exitCode: 0, stdout: "7", stderr: "" }
+          }
+          signalActiveHelperStart()
+          yield* Effect.promise(() => activeHelperHeld)
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ _tag: "open" }),
+            stderr: "",
+          }
+        }),
+    })
+    const runtime = ManagedRuntime.make(
+      makeKeymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+        Layer.provide(keymaxxerLayer),
+        Layer.provide(coordinatorLayer),
+      ),
+    )
+    await runtime.context()
+
+    const countOnce = Effect.gen(function* () {
+      const github = yield* GitHubService
+      return yield* github.countOpenNonDraftPullRequests(acmeWidgets)
+    })
+    const holdPermit = Effect.gen(function* () {
+      const github = yield* GitHubService
+      return yield* github.getPullRequestLifecycleStatus(acmeWidgets, "branch")
+    })
+
+    const active = runtime.runPromise(holdPermit)
+    await activeHelperStarted
+    const controller = new AbortController()
+    const cancelledCount = runtime
+      .runPromise(countOnce, { signal: controller.signal })
+      .catch(() => undefined)
+
+    try {
+      // The count miss has submitted its background operation behind the held
+      // lifecycle operation, so cancellation exercises its queued path.
+      await countCoordinatorEntered
+      controller.abort()
+      await cancelledCount
+      releaseActiveHelper()
+      await active
+
+      expect(countHelperStarts).toBe(0)
+    } finally {
+      releaseActiveHelper()
       await runtime.dispose()
     }
   })
@@ -1078,6 +1190,150 @@ describe("Keymaxxer-backed GitHub layer", () => {
         }).pipe(Effect.provide(layer))
 
         expect(runs).toHaveLength(3)
+      }),
+  )
+
+  it.effect(
+    "a successful count cache hit bypasses a held coordinator permit",
+    () =>
+      Effect.gen(function* () {
+        const lifecycleHelperStarted = yield* Deferred.make<void>()
+        const releaseLifecycleHelper = yield* Deferred.make<void>()
+        let helperCalls = 0
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: (input) =>
+            Effect.gen(function* () {
+              helperCalls += 1
+              if (
+                input.command.includes("count-open-non-draft-pull-requests.ts")
+              ) {
+                return { exitCode: 0, stdout: "8", stderr: "" }
+              }
+              yield* Deferred.succeed(lifecycleHelperStarted, undefined)
+              yield* Deferred.await(releaseLifecycleHelper)
+              return {
+                exitCode: 0,
+                stdout: JSON.stringify({ _tag: "open" }),
+                stderr: "",
+              }
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+          openPullRequestCountFreshnessMs: 60_000,
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const context = yield* Layer.buildWithScope(layer, yield* Effect.scope)
+        const github = Context.get(context, GitHubService)
+        expect(yield* github.countOpenNonDraftPullRequests(acmeWidgets)).toBe(8)
+
+        const lifecycle = yield* github
+          .getPullRequestLifecycleStatus(acmeWidgets, "branch")
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(lifecycleHelperStarted)
+
+        expect(yield* github.countOpenNonDraftPullRequests(acmeWidgets)).toBe(8)
+        expect(helperCalls).toBe(2)
+
+        yield* Deferred.succeed(releaseLifecycleHelper, undefined)
+        expect((yield* Fiber.join(lifecycle))._tag).toBe("open")
+      }),
+  )
+
+  it.effect(
+    "Keymaxxer and ambient GitHub operations share one runtime coordinator",
+    () =>
+      Effect.gen(function* () {
+        const helperStarted = yield* Deferred.make<void>()
+        const releaseHelper = yield* Deferred.make<void>()
+        let ambientTokenResolutions = 0
+        let ambientOperations = 0
+        const coordinator = makeGitHubOperationCoordinator()
+        const coordinatorLayer = Layer.succeed(
+          GitHubOperationCoordinator,
+          coordinator,
+        )
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.gen(function* () {
+              yield* Deferred.succeed(helperStarted, undefined)
+              yield* Deferred.await(releaseHelper)
+              return {
+                exitCode: 0,
+                stdout: JSON.stringify({ _tag: "open" }),
+                stderr: "",
+              }
+            }),
+        })
+        const ambientService = {
+          listReadyIssues: () =>
+            Effect.sync(() => {
+              ambientOperations += 1
+              return []
+            }),
+          getAuthenticatedUserLogin: () => Effect.die("not used"),
+          getOpenPullRequestNumber: () => Effect.die("not used"),
+          findOpenPullRequestNumber: () => Effect.die("not used"),
+          createDraftPullRequest: () => Effect.die("not used"),
+          updateOpenDraftPullRequestCopy: () => Effect.die("not used"),
+          countOpenNonDraftPullRequests: () => Effect.die("not used"),
+          getPullRequestCheckStatus: () => Effect.die("not used"),
+          getPrStatusCheckDiagnostics: () => Effect.die("not used"),
+          observeAutomatedReviewEvidence: () => Effect.die("not used"),
+          getPullRequestLifecycleStatus: () => Effect.die("not used"),
+          markPullRequestReadyForReview: () => Effect.die("not used"),
+          mergePullRequest: () => Effect.die("not used"),
+          rerunWorkflowRun: () => Effect.die("not used"),
+          ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+        } satisfies GitHubServiceShape
+        const scope = yield* Effect.scope
+        const keymaxxerContext = yield* Layer.buildWithScope(
+          makeKeymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+            Layer.provide(keymaxxerLayer),
+            Layer.provide(coordinatorLayer),
+          ),
+          scope,
+        )
+        const ambientContext = yield* Layer.buildWithScope(
+          ambientGitHubLayer({
+            workspaceRoot: "/workspace",
+            resolveToken: async () => {
+              ambientTokenResolutions += 1
+              return "ambient-token"
+            },
+            makeService: () => ambientService,
+          }).pipe(Layer.provide(coordinatorLayer), Layer.provide(processLayer)),
+          scope,
+        )
+        const keymaxxer = Context.get(keymaxxerContext, GitHubService)
+        const ambient = Context.get(ambientContext, GitHubService)
+
+        const keymaxxerOperation = yield* keymaxxer
+          .getPullRequestLifecycleStatus(acmeWidgets, "branch")
+          .pipe(Effect.forkChild)
+        yield* Deferred.await(helperStarted)
+
+        const ambientOperation = yield* ambient
+          .listReadyIssues(acmeWidgets)
+          .pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        expect(ambientTokenResolutions).toBe(0)
+        expect(ambientOperations).toBe(0)
+
+        yield* Deferred.succeed(releaseHelper, undefined)
+        expect((yield* Fiber.join(keymaxxerOperation))._tag).toBe("open")
+        expect(yield* Fiber.join(ambientOperation)).toEqual([])
+        expect(ambientTokenResolutions).toBe(1)
+        expect(ambientOperations).toBe(1)
       }),
   )
 
