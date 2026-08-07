@@ -1149,6 +1149,9 @@ export const ui = {
   repoIssuesList: "m-0 grid list-none gap-0 p-0",
 
   repoIssuesEmpty:
+    "m-0 font-mono text-[0.68rem] tracking-[0.08em] text-ink-faint",
+
+  repoIssuesUnrefreshed:
     "m-0 font-mono text-[0.68rem] tracking-[0.08em] uppercase text-ink-faint",
 
   repoIssue:

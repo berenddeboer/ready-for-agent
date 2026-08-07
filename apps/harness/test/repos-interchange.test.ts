@@ -129,6 +129,41 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/stampBlocked:[\s\S]*?bg-lane-queue/)
   })
 
+  test("zero relevant issues omit the kicker but retain refresh chrome", () => {
+    const card = sliceBetweenMarkers(
+      homeSource(),
+      "function RepositoryCard(",
+      "function RepositoryIssues(",
+    )
+    expect(card).toContain("const hasNoRelevantIssues =")
+    expect(card).toContain("relevantIssues?.length === 0")
+    expect(card).toContain("{!hasNoRelevantIssues ? (")
+    expect(card).toContain(
+      "<h3 className={ui.repoIssuesKicker}>Relevant issues</h3>",
+    )
+    expect(card).toContain(
+      'aria-label={\n                  refreshingIssues ? "Refreshing issues" : "Refresh issues"',
+    )
+    expect(card).toContain("ui.repoIssuesUnrefreshed")
+
+    const issues = sliceBetweenMarkers(
+      homeSource(),
+      "function RepositoryIssues(",
+      "function ParentIssueGroup(",
+    )
+    expect(issues).toContain("No issues found this harness can work on.")
+    expect(issues).toContain("ui.repoIssuesEmpty")
+
+    const ui = uiSource()
+    const emptyStyle = sliceBetweenMarkers(
+      ui,
+      "repoIssuesEmpty:",
+      "repoIssuesUnrefreshed:",
+    )
+    expect(emptyStyle).not.toContain("uppercase")
+    expect(ui).toMatch(/repoIssuesUnrefreshed:[\s\S]*?uppercase/)
+  })
+
   test("latest work item lifecycle chrome sits in 1.5px inset panel", () => {
     const lifecycle = sliceBetweenMarkers(
       homeSource(),

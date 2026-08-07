@@ -1998,6 +1998,12 @@ function RepositoryCard({
   }, [awaitingRefresh, issuesChangeCount])
 
   const refreshingIssues = refreshIssues.isPending || awaitingRefresh
+  const { data: relevantIssues } = useQuery({
+    ...issuesQuery(repository.id),
+    enabled: repository.issuesReconciledAt !== null,
+  })
+  const hasNoRelevantIssues =
+    repository.issuesReconciledAt !== null && relevantIssues?.length === 0
 
   const addGitHubToken = useMutation({
     mutationFn: async () => {
@@ -2974,7 +2980,9 @@ function RepositoryCard({
             )}
           <div className={ui.repoIssues}>
             <div className={ui.repoIssuesHead}>
-              <h3 className={ui.repoIssuesKicker}>Relevant issues</h3>
+              {!hasNoRelevantIssues ? (
+                <h3 className={ui.repoIssuesKicker}>Relevant issues</h3>
+              ) : null}
               <button
                 type="button"
                 className={ui.iconBtn}
@@ -3021,7 +3029,7 @@ function RepositoryCard({
               </Banner>
             )}
             {repository.issuesReconciledAt === null ? (
-              <p className={ui.repoIssuesEmpty}>Not refreshed yet.</p>
+              <p className={ui.repoIssuesUnrefreshed}>Not refreshed yet.</p>
             ) : (
               <Suspense fallback={<RepositoryIssuesSkeleton />}>
                 <RepositoryIssues
