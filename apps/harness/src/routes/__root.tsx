@@ -45,6 +45,7 @@ import {
 import { Banner, BannerActionButton } from "../banner.js"
 import { CommittedPullRequestsDashboard } from "../committed-pr-dashboard.js"
 import { READY_FOR_AGENT_VERSION_LABEL } from "../generated/version"
+import { GitHubThrottleBanner } from "../github-throttle-banner.js"
 import { JobsRepositoryFilterProvider } from "../jobs-repository-filter.js"
 import { JobsViewSwitcher } from "../jobs-view-switcher.js"
 import { MastheadScrollwork } from "../masthead-scrollwork.js"
@@ -120,6 +121,17 @@ const agentBackendStatusQuery = {
       agentBackends: { id: true, label: true, configurationMode: true },
     })
     return result
+  },
+}
+
+const githubThrottleStatusQuery = {
+  queryKey: ["githubThrottleStatus"],
+  refetchInterval: 1_000,
+  queryFn: async () => {
+    const result = await graphql.query({
+      githubThrottleStatus: { retryAt: true },
+    })
+    return result.githubThrottleStatus
   },
 }
 
@@ -411,6 +423,7 @@ function SettingsChrome() {
   const [autoOpenAttempted, setAutoOpenAttempted] = useState(false)
   const config = useQuery(configQuery)
   const backendStatus = useQuery(agentBackendStatusQuery)
+  const githubThrottle = useQuery(githubThrottleStatusQuery)
   // Do not treat pending/unknown as empty: hide the band only once membership
   // has loaded with zero repositories (matches HomeContent blank-slate gate).
   const repositoriesMembership = useQuery(repositoriesQuery)
@@ -1149,6 +1162,7 @@ function SettingsChrome() {
       </div>
 
       <div className={ui.pageShell}>
+        <GitHubThrottleBanner retryAt={githubThrottle.data?.retryAt} />
         {showBackendBanner && !dialogOpen && (
           <Banner
             tone="alarm"

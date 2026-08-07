@@ -1,5 +1,8 @@
 import { Context, Effect, Layer } from "effect"
-import type { GitHubOperationOrigin } from "@ready-for-agent/github-service"
+import {
+  type GitHubOperationOrigin,
+  GitHubThrottledError,
+} from "@ready-for-agent/github-service"
 
 export type { GitHubOperationOrigin } from "@ready-for-agent/github-service"
 
@@ -10,6 +13,11 @@ const originAdmissionOrder: readonly GitHubOperationOrigin[] = [
   "background",
 ]
 const AGING_MILLIS = 60_000
+const MAX_FALLBACK_THROTTLE_MILLIS = 15 * 60_000
+
+interface GitHubThrottleStatus {
+  readonly retryAt: number
+}
 
 export interface GitHubOperationCoordinatorShape {
   /**
@@ -19,7 +27,17 @@ export interface GitHubOperationCoordinatorShape {
   readonly execute: <A, E>(input: {
     readonly origin: GitHubOperationOrigin
     readonly operation: Effect.Effect<A, E>
-  }) => Effect.Effect<A, E>
+  }) => Effect.Effect<A, E | GitHubThrottledError>
+  /**
+   * Records explicit GitHub flow-control evidence. The returned value is the
+   * runtime-normalized error, including exponential fallback when GitHub gave
+   * no secondary-limit deadline.
+   */
+  readonly reportThrottle: (
+    throttle: GitHubThrottledError,
+  ) => GitHubThrottledError
+  /** Null once the local deadline has elapsed; state is never persisted. */
+  readonly throttleStatus: () => GitHubThrottleStatus | null
 }
 
 export class GitHubOperationCoordinator extends Context.Service<
@@ -32,6 +50,7 @@ interface WaitingOperation {
   readonly enqueuedAt: number
   readonly start: () => void
   readonly interrupt: () => void
+  readonly throttle: (error: GitHubThrottledError) => void
   started: boolean
 }
 
@@ -50,6 +69,8 @@ export const makeGitHubOperationCoordinator = (options?: {
   const waiting: WaitingOperation[] = []
   let active: WaitingOperation | undefined
   let disposed = false
+  let throttle: GitHubThrottledError | undefined
+  let fallbackThrottleMillis = 60_000
 
   const remove = (operation: WaitingOperation): void => {
     const index = waiting.indexOf(operation)
@@ -84,6 +105,35 @@ export const makeGitHubOperationCoordinator = (options?: {
     admitNext()
   }
 
+  const throttleStatus = (): GitHubThrottleStatus | null => {
+    if (throttle === undefined) return null
+    if (throttle.retryAt > now()) return { retryAt: throttle.retryAt }
+    throttle = undefined
+    return null
+  }
+
+  const reportThrottle = (
+    observed: GitHubThrottledError,
+  ): GitHubThrottledError => {
+    const retryAt = observed.usedFallback
+      ? now() + fallbackThrottleMillis
+      : observed.retryAt
+    fallbackThrottleMillis = observed.usedFallback
+      ? Math.min(fallbackThrottleMillis * 2, MAX_FALLBACK_THROTTLE_MILLIS)
+      : 60_000
+    const normalized = new GitHubThrottledError({
+      retryAt,
+      usedFallback: observed.usedFallback,
+    })
+    if (throttle === undefined || normalized.retryAt > throttle.retryAt) {
+      throttle = normalized
+    }
+    const activeThrottle = throttle
+    const pending = waiting.splice(0)
+    for (const operation of pending) operation.throttle(activeThrottle)
+    return activeThrottle
+  }
+
   const execute: GitHubOperationCoordinatorShape["execute"] = (input) =>
     Effect.callback((resume) => {
       let operation: WaitingOperation
@@ -92,6 +142,7 @@ export const makeGitHubOperationCoordinator = (options?: {
         enqueuedAt: now(),
         started: false,
         interrupt: () => resume(Effect.interrupt),
+        throttle: (error) => resume(Effect.fail(error)),
         start: () => {
           resume(
             Effect.uninterruptible(input.operation).pipe(
@@ -103,6 +154,11 @@ export const makeGitHubOperationCoordinator = (options?: {
       if (disposed) {
         operation.interrupt()
       } else {
+        const currentThrottle = throttleStatus()
+        if (currentThrottle !== null && throttle !== undefined) {
+          operation.throttle(throttle)
+          return Effect.void
+        }
         waiting.push(operation)
         admitNext()
       }
@@ -115,6 +171,8 @@ export const makeGitHubOperationCoordinator = (options?: {
 
   return {
     execute,
+    reportThrottle,
+    throttleStatus,
     dispose: () => {
       if (disposed) return
       disposed = true

@@ -935,6 +935,8 @@ describe("Keymaxxer-backed GitHub layer", () => {
         }
         return coordinator.execute(input)
       },
+      reportThrottle: (throttle) => coordinator.reportThrottle(throttle),
+      throttleStatus: () => coordinator.throttleStatus(),
     })
     const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
       initialize: Effect.void,

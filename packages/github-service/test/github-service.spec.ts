@@ -7,6 +7,7 @@ import {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
   GitHubService,
+  GitHubThrottledError,
   type ReadyLabeledIssue,
   formatUserFacingError,
   makeGitHubServiceFromToken,
@@ -47,6 +48,142 @@ const issue = (
 })
 
 describe("GitHubService live implementation", () => {
+  it.effect("normalizes primary reset headers into GitHub Throttled", () =>
+    Effect.gen(function* () {
+      let requests = 0
+      const resetSeconds = Math.floor(Date.now() / 1_000) + 120
+      const service = makeGitHubServiceFromToken("token", async () => {
+        requests += 1
+        return new Response("API rate limit exceeded", {
+          status: 403,
+          headers: {
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": String(resetSeconds),
+          },
+        })
+      })
+
+      const error = yield* service.listReadyIssues(repository).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(GitHubThrottledError)
+      expect(error.retryAt).toBe(resetSeconds * 1_000)
+      expect(error.usedFallback).toBe(false)
+      expect(requests).toBe(1)
+    }),
+  )
+
+  it.effect(
+    "uses a safe deadline for a recognized primary limit without reset headers",
+    () =>
+      Effect.gen(function* () {
+        const service = makeGitHubServiceFromToken(
+          "token",
+          async () => new Response("API rate limit exceeded", { status: 403 }),
+        )
+
+        const before = Date.now()
+        const error = yield* service
+          .listReadyIssues(repository)
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubThrottledError)
+        expect(error.retryAt).toBeGreaterThanOrEqual(before + 60_000)
+        expect(error.usedFallback).toBe(false)
+      }),
+  )
+
+  it.effect(
+    "keeps permission 403 responses as one non-retryable request error",
+    () =>
+      Effect.gen(function* () {
+        let requests = 0
+        const service = makeGitHubServiceFromToken("token", async () => {
+          requests += 1
+          return new Response("Resource not accessible by integration", {
+            status: 403,
+          })
+        })
+
+        const error = yield* service
+          .listReadyIssues(repository)
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect(error.retryable).toBe(false)
+        expect(requests).toBe(1)
+      }),
+  )
+
+  it.effect("honors Retry-After and reports zero remaining after success", () =>
+    Effect.gen(function* () {
+      let reported: GitHubThrottledError | undefined
+      const resetSeconds = Math.floor(Date.now() / 1_000) + 120
+      const throttled = makeGitHubServiceFromToken(
+        "token",
+        async () =>
+          new Response("secondary rate limit", {
+            status: 429,
+            headers: { "retry-after": "120" },
+          }),
+      )
+      const throttle = yield* throttled
+        .listReadyIssues(repository)
+        .pipe(Effect.flip)
+      expect(throttle.retryAt).toBeGreaterThan(Date.now() + 119_000)
+      expect(throttle.usedFallback).toBe(false)
+
+      const successful = makeGitHubServiceFromToken(
+        "token",
+        async () =>
+          new Response(
+            JSON.stringify({ data: { viewer: { login: "octocat" } } }),
+            {
+              headers: {
+                "content-type": "application/json",
+                "x-ratelimit-remaining": "0",
+                "x-ratelimit-reset": String(resetSeconds),
+              },
+            },
+          ),
+        undefined,
+        (error) => {
+          reported = error
+        },
+      )
+      expect(yield* successful.getAuthenticatedUserLogin(repository)).toBe(
+        "octocat",
+      )
+      expect(reported?.retryAt).toBe(resetSeconds * 1_000)
+    }),
+  )
+
+  it.effect(
+    "normalizes a recognized GraphQL secondary-limit error without retry",
+    () =>
+      Effect.gen(function* () {
+        let requests = 0
+        const service = makeGitHubService({
+          query: () => {
+            requests += 1
+            return Promise.reject(
+              new GenqlError(
+                [{ message: "You have exceeded a secondary rate limit." }],
+                null,
+              ),
+            )
+          },
+        })
+
+        const error = yield* service
+          .getOpenPullRequestNumber(repository, "rfa/issue-876")
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubThrottledError)
+        expect(error.usedFallback).toBe(true)
+        expect(requests).toBe(1)
+      }),
+  )
+
   it.effect("preserves an HTTP authentication status", () =>
     Effect.gen(function* () {
       let requests = 0
@@ -1032,6 +1169,70 @@ describe("GitHubService live implementation", () => {
     })
   })
 
+  it.effect("does not fall back from a throttled Checks API response", () =>
+    Effect.gen(function* () {
+      let actionsRequests = 0
+      const resetSeconds = Math.floor(Date.now() / 1_000) + 120
+      const service = makeGitHubServiceFromToken("token", async (input) => {
+        const url = String(input)
+        if (url.includes("api.github.com/graphql")) {
+          return new Response(
+            JSON.stringify({
+              data: {
+                repository: {
+                  pullRequests: {
+                    nodes: [
+                      {
+                        state: "OPEN",
+                        merged: false,
+                        headRefOid: "sha-head",
+                        baseRefName: "main",
+                        mergeable: "MERGEABLE",
+                        statusCheckRollup: { state: "FAILURE" },
+                      },
+                    ],
+                  },
+                },
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )
+        }
+        if (url.includes("/check-runs")) {
+          return new Response("API rate limit exceeded", {
+            status: 403,
+            headers: {
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(resetSeconds),
+            },
+          })
+        }
+        if (url.includes("/actions/")) {
+          actionsRequests += 1
+          return new Response(
+            JSON.stringify({ total_count: 0, workflow_runs: [] }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )
+        }
+        if (url.includes("/statuses")) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        }
+        return new Response("not found", { status: 404 })
+      })
+
+      const error = yield* service
+        .getPullRequestCheckStatus(repository, "branch")
+        .pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(GitHubThrottledError)
+      expect(error.retryAt).toBe(resetSeconds * 1_000)
+      expect(actionsRequests).toBe(0)
+    }),
+  )
+
   it("maps the production success+skipped Actions fallback shape and excludes skipped jobs", async () => {
     const service = makeGitHubServiceFromToken("token", async (input) => {
       const url = String(input)
@@ -1207,6 +1408,34 @@ describe("GitHubService live implementation", () => {
       },
     ])
   })
+
+  it.effect(
+    "propagates Actions job log throttles to the coordinator boundary",
+    () =>
+      Effect.gen(function* () {
+        const service = makeGitHubServiceFromToken("token", async (input) => {
+          const url = String(input)
+          if (url.includes("/actions/jobs/200")) {
+            return new Response("You have exceeded a secondary rate limit.", {
+              status: 429,
+            })
+          }
+          return new Response("not found", {
+            status: 404,
+            statusText: "Not Found",
+          })
+        })
+
+        const error = yield* service
+          .getPrStatusCheckDiagnostics(repository, [
+            { externalId: "actions-job:200", name: "lint" },
+          ])
+          .pipe(Effect.flip)
+
+        expect(error).toBeInstanceOf(GitHubThrottledError)
+        expect(error.usedFallback).toBe(true)
+      }),
+  )
 
   it("marks commit-status diagnostics unavailable without treating them as hard failure", async () => {
     const service = makeGitHubServiceFromToken("token", async () => {

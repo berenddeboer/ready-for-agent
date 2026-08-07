@@ -8,6 +8,7 @@ import type {
 import type {
   GitHubRepositoryUnavailableError,
   GitHubRequestError,
+  GitHubThrottledError,
   MergePullRequestResult,
 } from "@ready-for-agent/github-service"
 import type {
@@ -124,6 +125,7 @@ export type LifecycleStepError =
   | DatabaseError
   | RepositoryNotFoundError
   | GitHubRequestError
+  | GitHubThrottledError
   | GitHubRepositoryUnavailableError
   | GitLabRequestError
   | GitLabProjectUnavailableError

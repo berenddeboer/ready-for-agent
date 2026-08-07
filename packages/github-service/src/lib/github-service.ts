@@ -3,10 +3,7 @@ import type {
   AutomatedReviewEvidenceCheck,
   AutomatedReviewEvidenceObservation,
 } from "./automated-review-evidence.js"
-import type {
-  GitHubRepositoryUnavailableError,
-  GitHubRequestError,
-} from "./errors.js"
+import type { GitHubServiceError } from "./errors.js"
 import type {
   GitHubRepository,
   MergePullRequestResult,
@@ -42,24 +39,15 @@ export interface GitHubServiceShape {
   readonly getAuthenticatedUserLogin: (
     repository: GitHubRepository,
     options?: GitHubOperationOptions,
-  ) => Effect.Effect<
-    string,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<string, GitHubServiceError>
   readonly listReadyIssues: (
     repository: GitHubRepository,
     options?: GitHubOperationOptions,
-  ) => Effect.Effect<
-    readonly ReadyLabeledIssue[],
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<readonly ReadyLabeledIssue[], GitHubServiceError>
   readonly getPullRequestCheckStatus: (
     repository: GitHubRepository,
     headRefName: string,
-  ) => Effect.Effect<
-    PullRequestCheckStatus,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<PullRequestCheckStatus, GitHubServiceError>
   /**
    * Load harness diagnostics (job metadata + bounded log excerpt) for red
    * PR Status Checks. Prefer Actions job logs for `actions-job:<id>` ids;
@@ -70,10 +58,7 @@ export interface GitHubServiceShape {
     repository: GitHubRepository,
     checks: readonly PrStatusCheckDiagnosticsRequest[],
     options?: PrStatusCheckDiagnosticsOptions,
-  ) => Effect.Effect<
-    readonly PrStatusCheckDiagnostic[],
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<readonly PrStatusCheckDiagnostic[], GitHubServiceError>
   /**
    * Observe whether a green-only Status Check Handoff has positive or
    * ambiguous automated-review evidence. Used by Investigate to skip an
@@ -83,24 +68,15 @@ export interface GitHubServiceShape {
     repository: GitHubRepository,
     headRefName: string,
     checks: readonly AutomatedReviewEvidenceCheck[],
-  ) => Effect.Effect<
-    AutomatedReviewEvidenceObservation,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<AutomatedReviewEvidenceObservation, GitHubServiceError>
   readonly getPullRequestLifecycleStatus: (
     repository: GitHubRepository,
     headRefName: string,
-  ) => Effect.Effect<
-    PullRequestLifecycleStatus,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<PullRequestLifecycleStatus, GitHubServiceError>
   readonly getOpenPullRequestNumber: (
     repository: GitHubRepository,
     headRefName: string,
-  ) => Effect.Effect<
-    number,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<number, GitHubServiceError>
   /**
    * Soft lookup of an open pull request for the exact head branch.
    * Returns null when no open PR exists (does not fail).
@@ -108,10 +84,7 @@ export interface GitHubServiceShape {
   readonly findOpenPullRequestNumber: (
     repository: GitHubRepository,
     headRefName: string,
-  ) => Effect.Effect<
-    number | null,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<number | null, GitHubServiceError>
   /**
    * Count currently open, non-draft pull requests for the Repository.
    * Author, branch, labels, and Work Item ownership are ignored. Merged,
@@ -119,10 +92,7 @@ export interface GitHubServiceShape {
    */
   readonly countOpenNonDraftPullRequests: (
     repository: GitHubRepository,
-  ) => Effect.Effect<
-    number,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<number, GitHubServiceError>
   /**
    * Create a draft pull request for head against the Repository default base
    * (or an explicit base). Returns the new PR number. Does not push the head
@@ -136,10 +106,7 @@ export interface GitHubServiceShape {
       readonly body: string
       readonly baseRefName?: string
     },
-  ) => Effect.Effect<
-    number,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<number, GitHubServiceError>
   /**
    * When an open draft PR exists for the exact head branch, set its title and
    * body to the provided values. Ready (non-draft) open PRs are left unchanged.
@@ -152,24 +119,15 @@ export interface GitHubServiceShape {
       readonly title: string
       readonly body: string
     },
-  ) => Effect.Effect<
-    number | null,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<number | null, GitHubServiceError>
   readonly markPullRequestReadyForReview: (
     repository: GitHubRepository,
     headRefName: string,
-  ) => Effect.Effect<
-    void,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<void, GitHubServiceError>
   readonly mergePullRequest: (
     repository: GitHubRepository,
     headRefName: string,
-  ) => Effect.Effect<
-    MergePullRequestResult,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<MergePullRequestResult, GitHubServiceError>
   /**
    * Rerun an entire GitHub Actions workflow run (not failed-jobs-only).
    * Used by Investigate PR Status Checks for terminal incomplete automated
@@ -178,10 +136,7 @@ export interface GitHubServiceShape {
   readonly rerunWorkflowRun: (
     repository: GitHubRepository,
     workflowRunId: number,
-  ) => Effect.Effect<
-    void,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<void, GitHubServiceError>
   /**
    * Ensure a No-Change Outcome summary is posted once (hidden Work Item marker)
    * and the Issue is closed with state reason COMPLETED. Idempotent across
@@ -192,10 +147,7 @@ export interface GitHubServiceShape {
     issueNumber: number,
     workItemId: string,
     summaryMarkdown: string,
-  ) => Effect.Effect<
-    void,
-    GitHubRepositoryUnavailableError | GitHubRequestError
-  >
+  ) => Effect.Effect<void, GitHubServiceError>
 }
 
 export class GitHubService extends Context.Service<

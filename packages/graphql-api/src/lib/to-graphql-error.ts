@@ -21,6 +21,7 @@ type TaggedError = {
   readonly activeBackendId?: string
   readonly unfinishedWorkItemCount?: number
   readonly scope?: string
+  readonly retryAt?: number
 }
 
 const isTaggedError = (error: unknown): error is TaggedError =>
@@ -181,6 +182,18 @@ export const toGraphQLError = (error: unknown): GraphQLError => {
         error.message ?? "GitLab request failed",
         "GITLAB_REQUEST_FAILED",
       )
+    case "GitHubThrottledError": {
+      const retryAt = error.retryAt
+      const retryTime =
+        typeof retryAt === "number" && Number.isFinite(retryAt)
+          ? new Date(retryAt).toISOString()
+          : "the GitHub reset time"
+      return gql(
+        `GitHub is throttling Harness requests until ${retryTime}`,
+        "GITHUB_THROTTLED",
+        { retryAt },
+      )
+    }
     case "RepositoryIdentityChangeBlockedError":
       return gql(
         error.message ??

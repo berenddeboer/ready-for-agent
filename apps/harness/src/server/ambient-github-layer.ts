@@ -6,6 +6,8 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  type GitHubThrottledError,
+  isGitHubThrottledError,
   makeGitHubServiceFromToken,
 } from "@ready-for-agent/github-service"
 import {
@@ -13,7 +15,10 @@ import {
   type GitHubOperationOrigin,
 } from "./github-operation-coordinator.js"
 
-type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
+type GitHubServiceError =
+  | GitHubRepositoryUnavailableError
+  | GitHubRequestError
+  | GitHubThrottledError
 
 /** Unit key for the process-wide ambient GitHub CLI token cache. */
 const TOKEN_CACHE_KEY = true as const
@@ -27,7 +32,10 @@ const authenticationError = (cause: unknown) =>
 export const ambientGitHubLayer = (options: {
   readonly workspaceRoot: string
   readonly resolveToken?: () => Promise<string>
-  readonly makeService?: (token: string) => GitHubServiceShape
+  readonly makeService?: (
+    token: string,
+    observeThrottle: (throttle: GitHubThrottledError) => void,
+  ) => GitHubServiceShape
 }): Layer.Layer<
   GitHubService,
   never,
@@ -39,7 +47,18 @@ export const ambientGitHubLayer = (options: {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const coordinator = yield* GitHubOperationCoordinator
       const layerScope = yield* Effect.scope
-      const makeService = options.makeService ?? makeGitHubServiceFromToken
+      const makeService =
+        options.makeService ??
+        ((
+          token: string,
+          observeThrottle: (throttle: GitHubThrottledError) => void,
+        ) =>
+          makeGitHubServiceFromToken(
+            token,
+            undefined,
+            undefined,
+            observeThrottle,
+          ))
 
       const resolveGhToken = Effect.fn("AmbientGitHub.resolveGhToken")(
         function* () {
@@ -104,7 +123,9 @@ export const ambientGitHubLayer = (options: {
         ) => Effect.Effect<A, GitHubServiceError>,
       ) {
         const token = yield* acquireToken()
-        const first = yield* Effect.result(operation(makeService(token)))
+        const first = yield* Effect.result(
+          operation(makeService(token, coordinator.reportThrottle)),
+        )
         if (
           first._tag !== "Failure" ||
           first.failure._tag !== "GitHubRequestError" ||
@@ -121,7 +142,9 @@ export const ambientGitHubLayer = (options: {
           (cached) => cached === token,
         )
         const refreshed = yield* acquireToken()
-        return yield* operation(makeService(refreshed))
+        return yield* operation(
+          makeService(refreshed, coordinator.reportThrottle),
+        )
       })
 
       const authenticated = <A>(
@@ -130,7 +153,14 @@ export const ambientGitHubLayer = (options: {
           service: GitHubServiceShape,
         ) => Effect.Effect<A, GitHubServiceError>,
       ): Effect.Effect<A, GitHubServiceError> =>
-        coordinator.execute({ origin, operation: run(operation) })
+        coordinator.execute({
+          origin,
+          operation: run(operation).pipe(
+            Effect.catchIf(isGitHubThrottledError, (throttle) =>
+              Effect.fail(coordinator.reportThrottle(throttle)),
+            ),
+          ),
+        })
 
       return {
         getAuthenticatedUserLogin: Effect.fn(
