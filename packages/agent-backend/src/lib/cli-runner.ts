@@ -96,6 +96,15 @@ export type RunCliTurnInput = {
    * {@link DEFAULT_STARTUP_TIMEOUT}.
    */
   readonly startupTimeout?: Duration.Input
+  /**
+   * Optional backend-specific side channel that succeeds when the turn has
+   * begun without yet writing stdout (e.g. OpenCode session-store activity for
+   * a silent parent while a task subagent runs). Completing disarms the
+   * startup window the same way the first stdout byte does. Failures are
+   * ignored so a broken probe cannot sink the turn. The runner stays
+   * backend-neutral: adapters own the observation policy.
+   */
+  readonly observeStartup?: Effect.Effect<void, unknown>
 }
 
 const commandOptions = (input: {
@@ -211,10 +220,12 @@ export const runCliCapture = (
  * ordered assistant text, require a Session ID on success.
  *
  * A startup-only inactivity bound fails the turn as soon as it is clear the CLI
- * never started (no stdout output within `startupTimeout` of spawn) instead of
- * holding the Work Item for the whole turn timeout. The first stdout output
- * disarms it, because a legitimate mid-turn tool call (build, test suite) can
- * stay silent for many minutes.
+ * never started (no stdout output and no successful `observeStartup` within
+ * `startupTimeout` of spawn) instead of holding the Work Item for the whole
+ * turn timeout. The first stdout output or a successful backend side-channel
+ * observation disarms it, because a legitimate mid-turn tool call (build, test
+ * suite) or a silent parent stream while a task subagent works can stay quiet
+ * for many minutes.
  */
 export const runCliTurn = (
   input: RunCliTurnInput,
@@ -249,8 +260,23 @@ export const runCliTurn = (
 
         // Disarms the startup bound on the first stdout output rather than the
         // first parsed line, so a CLI that streams one large slow line still
-        // counts as started.
+        // counts as started. Optional observeStartup is the same signal via a
+        // backend side channel (session store, etc.).
         const started = yield* Deferred.make<void>()
+        if (input.observeStartup !== undefined) {
+          // Race the probe against `started` so once stdout (or the probe)
+          // disarms the window, SQLite/side-channel polling does not continue
+          // for the rest of a long turn.
+          yield* Effect.race(
+            input.observeStartup.pipe(
+              Effect.andThen(Deferred.succeed(started, undefined)),
+              // Probe failure must not complete the race (that would exit the
+              // fiber without disarming). Fall through to stdout / watchdog.
+              Effect.catchCause(() => Effect.never),
+            ),
+            Deferred.await(started),
+          ).pipe(Effect.forkScoped)
+        }
         const startupWatchdog = Deferred.await(started).pipe(
           Effect.timeoutOrElse({
             duration: startupTimeout,

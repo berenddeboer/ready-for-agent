@@ -713,6 +713,140 @@ describe("runCliTurn", () => {
     )
   })
 
+  it("disarms the startup window when observeStartup succeeds before first stdout", async () => {
+    // OpenCode-like: outer stream stays silent past the startup window while a
+    // backend side channel reports the turn has begun (task subagent active).
+    await withExecutable(
+      [
+        "sleep 0.45",
+        `printf '%s\\n' '{"sessionID":"ses_side","text":"from-child"}'`,
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+              startupTimeout: Duration.millis(200),
+              forceKillAfter: Duration.millis(100),
+              parseLine: parseSimpleLine,
+              observeStartup: Effect.sleep(Duration.millis(50)),
+            }),
+          ),
+        )
+        expect(result).toEqual({
+          sessionId: "ses_side",
+          assistantText: "from-child",
+        })
+      },
+    )
+  })
+
+  it("still fails within the startup window when observeStartup never completes", async () => {
+    await withExecutable("sleep 100", async (binary) => {
+      const startedAt = Date.now()
+      const error = await Effect.runPromise(
+        withSpawner((spawner) =>
+          runCliTurn({
+            spawner,
+            binary,
+            args: [],
+            cwd: process.cwd(),
+            env: sanitizeInheritedEnvironment(),
+            timeout: Duration.seconds(30),
+            startupTimeout: Duration.millis(200),
+            forceKillAfter: Duration.millis(100),
+            parseLine: parseSimpleLine,
+            // Never reports activity: silent CLI must still fail fast.
+            observeStartup: Effect.never,
+          }).pipe(Effect.flip),
+        ),
+      )
+      const elapsed = Date.now() - startedAt
+      expect(error).toEqual(
+        new AgentBackendStartupTimeoutError({
+          cwd: process.cwd(),
+          startupTimeoutMs: 200,
+        }),
+      )
+      expect(elapsed).toBeLessThan(5_000)
+    })
+  })
+
+  it("ignores observeStartup failures and still uses stdout to disarm", async () => {
+    await withExecutable(
+      [`printf '%s\\n' '{"sessionID":"ses_probe_fail","text":"ok"}'`].join(
+        "\n",
+      ),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(2),
+              startupTimeout: Duration.millis(300),
+              parseLine: parseSimpleLine,
+              observeStartup: Effect.fail(new Error("probe broken")),
+            }),
+          ),
+        )
+        expect(result).toEqual({
+          sessionId: "ses_probe_fail",
+          assistantText: "ok",
+        })
+      },
+    )
+  })
+
+  it("stops observeStartup once stdout disarms the startup window", async () => {
+    let probeTicks = 0
+    await withExecutable(
+      [
+        `printf '%s\\n' '{"sessionID":"ses_probe_stop","text":"ok"}'`,
+        // Keep the turn alive so a leaked probe would keep ticking.
+        "sleep 0.4",
+      ].join("\n"),
+      async (binary) => {
+        const result = await Effect.runPromise(
+          withSpawner((spawner) =>
+            runCliTurn({
+              spawner,
+              binary,
+              args: [],
+              cwd: process.cwd(),
+              env: sanitizeInheritedEnvironment(),
+              timeout: Duration.seconds(5),
+              startupTimeout: Duration.seconds(5),
+              forceKillAfter: Duration.millis(100),
+              parseLine: parseSimpleLine,
+              observeStartup: Effect.gen(function* () {
+                for (;;) {
+                  probeTicks += 1
+                  yield* Effect.sleep(Duration.millis(50))
+                }
+              }),
+            }),
+          ),
+        )
+        expect(result).toEqual({
+          sessionId: "ses_probe_stop",
+          assistantText: "ok",
+        })
+        // Probe should be interrupted shortly after first stdout; a full-turn
+        // leak over ~400ms would land many more 50ms ticks.
+        expect(probeTicks).toBeLessThan(6)
+      },
+    )
+  })
+
   it("returns cleanly when the CLI exits on its own", async () => {
     await withExecutable(
       [`printf '%s\\n' '{"sessionID":"ses_clean","text":"ok"}'`].join("\n"),
