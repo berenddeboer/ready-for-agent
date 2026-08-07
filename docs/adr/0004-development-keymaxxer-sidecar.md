@@ -8,6 +8,16 @@ Ready for Agent uses a shared backend Keymaxxer Service that never exposes raw s
 - Development uses `scripts/run-with-keymaxxer-sidecar.ts` so the sidecar survives Vite reloads. Production uses one lifecycle owner (`apps/harness/src/server/production-lifecycle.ts`) that starts the sidecar as a lifecycle-owned child by re-executing the same program in an internal non-product mode (`--ready-for-agent-internal-keymaxxer-sidecar`), captures the stdout bootstrap line `KEYMAXXER_SIDECAR_URL=http://127.0.0.1:<port>/<capability>/mcp` through a private pipe, and keeps that URL in memory only. Compiled binaries need no external Bun runtime and no workspace TypeScript Sidecar entrypoint.
 - There is no unauthenticated `/health` route. Readiness is TCP listen; auth is the unguessable path capability (#113).
 
+## Serialization boundaries
+
+The Sidecar's human-dialog lane prevents competing vault unlock and approval
+dialogs; it is not a GitHub request queue. The Harness-owned, process-local
+**GitHub Operation Coordinator** admits a complete Keymaxxer-backed GitHub
+operation before secret lookup and helper dispatch, and keeps its permit until
+the helper settles. The Sidecar remains responsible only for vault interaction
+and named-secret injection, so it neither owns coordinator state nor derives
+GitHub throttling from helper stderr.
+
 ## Security
 
 - Bind `127.0.0.1` only. MCP lives only at `/<capability>/mcp`.

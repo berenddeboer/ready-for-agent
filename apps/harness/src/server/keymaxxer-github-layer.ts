@@ -9,6 +9,7 @@ import {
   Schema,
 } from "effect"
 import {
+  GITHUB_HELPER_THROTTLED_EXIT_CODE,
   type GitHubHelperOperation,
   type GitHubOperationOptions,
   type GitHubRepository,
@@ -16,8 +17,9 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
-  type GitHubThrottledError,
+  GitHubThrottledError,
   formatGitHubHelperShellCommand,
+  parseGitHubHelperControl,
   resolveGitHubHelperChildSpawn,
 } from "@ready-for-agent/github-service"
 import { KeymaxxerService } from "@ready-for-agent/keymaxxer-service"
@@ -84,7 +86,17 @@ const SerializedAutomatedReviewEvidenceObservation = Schema.Union([
   }),
 ])
 
-const requestError = makeRequestError(GitHubRequestError)
+/**
+ * Helper output is an untrusted credential boundary. Do not copy it into
+ * request errors: those errors can be returned via GraphQL and logged by the
+ * caller. The optional detail parameter preserves the shared parser callback
+ * shape while deliberately discarding any helper-supplied text.
+ */
+const requestError = (
+  repository: GitHubRepository,
+  operation: string,
+  _detail?: string,
+) => makeRequestError(GitHubRequestError)(repository, operation)
 
 const repositoryUnavailable = (repository: GitHubRepository) =>
   new GitHubRepositoryUnavailableError(repository)
@@ -99,7 +111,7 @@ const decodePositiveInt = (
 ): Effect.Effect<number, GitHubRequestError> => {
   const number = Number(stdout.trim())
   if (!Number.isSafeInteger(number) || number <= 0) {
-    return Effect.fail(requestError(repository, describe, stdout))
+    return Effect.fail(requestError(repository, describe))
   }
   return Effect.succeed(number)
 }
@@ -119,7 +131,7 @@ const decodeNonNegativeInt = (
   }
   const count = Number(trimmed)
   if (!Number.isSafeInteger(count) || count < 0) {
-    return Effect.fail(requestError(repository, describe, stdout))
+    return Effect.fail(requestError(repository, describe))
   }
   return Effect.succeed(count)
 }
@@ -136,7 +148,7 @@ const decodeNullableInt = (
   }
   const number = Number(trimmed)
   if (!Number.isSafeInteger(number) || number <= 0) {
-    return Effect.fail(requestError(repository, describe, stdout))
+    return Effect.fail(requestError(repository, describe))
   }
   return Effect.succeed(number)
 }
@@ -164,7 +176,7 @@ const decodeJson =
   ) =>
   (stdout: string): Effect.Effect<A, GitHubRequestError> =>
     Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(stdout).pipe(
-      Effect.mapError(() => requestError(repository, describe, stdout)),
+      Effect.mapError(() => requestError(repository, describe)),
     )
 
 export const keymaxxerGitHubLayer = (options: {
@@ -256,14 +268,35 @@ export const keymaxxerGitHubLayer = (options: {
             if (result.exitCode === 2) {
               return yield* repositoryUnavailable(input.repository)
             }
-            if (result.exitCode !== 0) {
-              return yield* requestError(
-                input.repository,
-                input.describe,
-                result.stderr || result.stdout,
+            if (result.exitCode === GITHUB_HELPER_THROTTLED_EXIT_CODE) {
+              const control = parseGitHubHelperControl(result.stderr)
+              if (control?.kind !== "github-throttled") {
+                return yield* requestError(input.repository, input.describe)
+              }
+              return yield* coordinator.reportThrottle(
+                new GitHubThrottledError({
+                  retryAt: control.retryAt,
+                  usedFallback: control.usedFallback,
+                }),
               )
             }
-            return yield* input.decode(result.stdout)
+            if (result.exitCode !== 0) {
+              return yield* requestError(input.repository, input.describe)
+            }
+            const control = parseGitHubHelperControl(result.stderr)
+            if (control?.kind !== "success") {
+              return yield* requestError(input.repository, input.describe)
+            }
+            const value = yield* input.decode(result.stdout)
+            if (control.throttle !== null) {
+              coordinator.reportThrottle(
+                new GitHubThrottledError({
+                  retryAt: control.throttle.retryAt,
+                  usedFallback: control.throttle.usedFallback,
+                }),
+              )
+            }
+            return value
           }).pipe(
             Effect.catchTag("KeymaxxerError", () =>
               Effect.fail(requestError(input.repository, input.describe)),

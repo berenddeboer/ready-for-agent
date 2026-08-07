@@ -1,14 +1,19 @@
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { Effect, Layer, Schema } from "effect"
-import { GitHubRepositoryUnavailableError } from "../lib/errors.js"
+import {
+  GitHubRepositoryUnavailableError,
+  type GitHubThrottledError,
+  isGitHubThrottledError,
+} from "../lib/errors.js"
+import {
+  GITHUB_HELPER_THROTTLED_EXIT_CODE,
+  githubHelperSuccess,
+  githubHelperThrottled,
+  serializeGitHubHelperControl,
+} from "../lib/github-helper-protocol.js"
 import type { GitHubService } from "../lib/github-service.js"
-import { GitHubServiceLive } from "../lib/github-service-live.js"
-import { formatUserFacingError } from "../lib/user-facing-error.js"
-
-const GitHubServiceCliLive = GitHubServiceLive.pipe(
-  Layer.provide(BunFileSystem.layer),
-)
+import { makeGitHubServiceLive } from "../lib/github-service-live.js"
 
 export class CliArgumentError extends Schema.TaggedErrorClass<CliArgumentError>()(
   "CliArgumentError",
@@ -38,20 +43,60 @@ export const writeStandardOutput = (value: string): Effect.Effect<void> =>
 
 export const runGitHubCli = <A, E>(
   program: Effect.Effect<A, E, GitHubService>,
-): void =>
+): void => {
+  let observedThrottle: GitHubThrottledError | undefined
+  const observeThrottle = (throttle: GitHubThrottledError): void => {
+    if (
+      observedThrottle === undefined ||
+      throttle.retryAt > observedThrottle.retryAt
+    ) {
+      observedThrottle = throttle
+    }
+  }
+  const githubServiceCliLive = makeGitHubServiceLive(observeThrottle).pipe(
+    Layer.provide(BunFileSystem.layer),
+  )
+  const writeControl = (control: ReturnType<typeof githubHelperSuccess>) =>
+    process.stderr.write(`${serializeGitHubHelperControl(control)}\n`)
+  const writeThrottle = (throttle: GitHubThrottledError) =>
+    process.stderr.write(
+      `${serializeGitHubHelperControl(githubHelperThrottled(throttle))}\n`,
+    )
+
   program.pipe(
-    Effect.provide(GitHubServiceCliLive),
+    Effect.provide(githubServiceCliLive),
+    Effect.tap(() =>
+      Effect.sync(() =>
+        writeControl(
+          observedThrottle === undefined
+            ? githubHelperSuccess()
+            : githubHelperSuccess({ throttle: observedThrottle }),
+        ),
+      ),
+    ),
     Effect.catch((error) =>
       Effect.sync(() => {
         if (error instanceof GitHubRepositoryUnavailableError) {
           process.exitCode = 2
           return
         }
-        process.stderr.write(
-          `${formatUserFacingError(error, "Command failed")}\n`,
-        )
+        if (isGitHubThrottledError(error)) {
+          writeThrottle(error)
+          process.exitCode = GITHUB_HELPER_THROTTLED_EXIT_CODE
+          return
+        }
+        if (error instanceof CliArgumentError) {
+          process.stderr.write(`${error.message}\n`)
+          process.exitCode = 1
+          return
+        }
+        // Child stderr crosses the Keymaxxer credential boundary. Errors from
+        // remote APIs or Effect defects can contain arbitrary request data, so
+        // keep the user-facing failure deliberately non-diagnostic here.
+        process.stderr.write("GitHub helper command failed\n")
         process.exitCode = 1
       }),
     ),
     BunRuntime.runMain,
   )
+}

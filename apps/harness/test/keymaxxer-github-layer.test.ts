@@ -16,6 +16,10 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  GitHubThrottledError,
+  githubHelperSuccess,
+  githubHelperThrottled,
+  serializeGitHubHelperControl,
 } from "@ready-for-agent/github-service"
 import {
   KeymaxxerService,
@@ -55,6 +59,10 @@ const acmeGadgets = {
   projectPath: "acme/gadgets",
 } as const
 
+const successfulHelperControl = serializeGitHubHelperControl(
+  githubHelperSuccess(),
+)
+
 describe("Keymaxxer-backed GitHub layer", () => {
   it.effect(
     "does not prompt Keymaxxer when a repository token is missing",
@@ -74,7 +82,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
             }),
           runWithSecrets: (input) => {
             runs.push(input)
-            return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "[]",
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -114,7 +126,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
         addSecret: () => Effect.die("not used"),
         runWithSecrets: (input) => {
           runs.push(input)
-          return Effect.succeed({ exitCode: 0, stdout: "[]", stderr: "" })
+          return Effect.succeed({
+            exitCode: 0,
+            stdout: "[]",
+            stderr: successfulHelperControl,
+          })
         },
       })
       const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
@@ -187,7 +203,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
                   ],
                 },
               ]),
-              stderr: "",
+              stderr: successfulHelperControl,
             })
           },
         })
@@ -280,7 +296,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
                 },
               ],
             }),
-            stderr: "",
+            stderr: successfulHelperControl,
           })
         },
       })
@@ -349,7 +365,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
                 },
               ],
             }),
-            stderr: "",
+            stderr: successfulHelperControl,
           }),
       })
       const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
@@ -400,7 +416,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
           addSecret: () => Effect.die("not used"),
           runWithSecrets: (input) => {
             runs.push(input)
-            return Effect.succeed({ exitCode: 0, stdout: "321", stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "321",
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -438,7 +458,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
           addSecret: () => Effect.die("not used"),
           runWithSecrets: (input) => {
             runs.push(input)
-            return Effect.succeed({ exitCode: 0, stdout: "4", stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "4",
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -476,9 +500,17 @@ describe("Keymaxxer-backed GitHub layer", () => {
           runWithSecrets: (input) => {
             runs.push(input)
             if (runs.length === 1) {
-              return Effect.succeed({ exitCode: 0, stdout: "   ", stderr: "" })
+              return Effect.succeed({
+                exitCode: 0,
+                stdout: "   ",
+                stderr: successfulHelperControl,
+              })
             }
-            return Effect.succeed({ exitCode: 0, stdout: "3", stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "3",
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -545,7 +577,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           Effect.succeed({
             exitCode: 0,
             stdout: responses.shift()!,
-            stderr: "",
+            stderr: successfulHelperControl,
           }),
       })
       const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
@@ -619,7 +651,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
             return Effect.succeed({
               exitCode: 0,
               stdout: JSON.stringify({ _tag: "ready" }),
-              stderr: "",
+              stderr: successfulHelperControl,
             })
           },
         })
@@ -646,11 +678,12 @@ describe("Keymaxxer-backed GitHub layer", () => {
   )
 
   it.effect(
-    "sanitizes ANSI Effect dumps from CLI stderr into plain GitHubRequestError messages",
+    "does not surface raw helper stderr in GitHubRequestError messages",
     () =>
       Effect.gen(function* () {
         const esc = String.fromCharCode(0x1b)
-        const ansiDump = `{\n  ${esc}[0m_tag${esc}[2m:${esc}[0m ${esc}[32m"GitHubRequestError"${esc}[0m,\n  ${esc}[0mmessage${esc}[2m:${esc}[0m ${esc}[32m"HTTP 401: Bad credentials"${esc}[0m,\n}`
+        const secret = "ghp_helper_stderr_must_not_escape"
+        const ansiDump = `{\n  ${esc}[0m_tag${esc}[2m:${esc}[0m ${esc}[32m"GitHubRequestError"${esc}[0m,\n  ${esc}[0mmessage${esc}[2m:${esc}[0m ${esc}[32m"HTTP 401: Bad credentials ${secret}"${esc}[0m,\n}`
         const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
           initialize: Effect.void,
           findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
@@ -684,10 +717,46 @@ describe("Keymaxxer-backed GitHub layer", () => {
 
         expect(error).toBeInstanceOf(GitHubRequestError)
         expect(error.message).toBe(
-          "Failed to get pull request check status for processfocus/monorepo: HTTP 401: Bad credentials",
+          "Failed to get pull request check status for processfocus/monorepo",
         )
         expect(error.message.includes(`${esc}[`)).toBe(false)
         expect(error.message).not.toContain("_tag")
+        expect(error.message).not.toContain("Bad credentials")
+        expect(error.message).not.toContain(secret)
+      }),
+  )
+
+  it.effect(
+    "does not surface raw successful-helper stdout in decode errors",
+    () =>
+      Effect.gen(function* () {
+        const secret = "ghp_helper_stdout_must_not_escape"
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: 0,
+              stdout: secret,
+              stderr: successfulHelperControl,
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        const error = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github
+            .countOpenNonDraftPullRequests(acmeWidgets)
+            .pipe(Effect.flip)
+        }).pipe(Effect.provide(layer))
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect(error.message).not.toContain(secret)
       }),
   )
 
@@ -718,7 +787,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           return Effect.succeed({
             exitCode: 0,
             stdout: JSON.stringify(serializedOutcomes[runs.length - 1]),
-            stderr: "",
+            stderr: successfulHelperControl,
           })
         },
       })
@@ -774,7 +843,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
                 closingPullRequests: [],
               },
             ]),
-            stderr: "",
+            stderr: successfulHelperControl,
           }),
       })
       const layer = keymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
@@ -825,7 +894,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
               runs.push(input)
               yield* Deferred.succeed(helperStarted, undefined)
               yield* Deferred.await(releaseHelper)
-              return { exitCode: 0, stdout: "7", stderr: "" }
+              return {
+                exitCode: 0,
+                stdout: "7",
+                stderr: successfulHelperControl,
+              }
             }),
         })
         const layer = keymaxxerGitHubLayer({
@@ -876,7 +949,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
           runs.push(input)
           helperStarts += 1
           yield* Effect.promise(() => helperHeld)
-          return { exitCode: 0, stdout: "7", stderr: "" }
+          return { exitCode: 0, stdout: "7", stderr: successfulHelperControl }
         }),
     })
     const runtime = ManagedRuntime.make(
@@ -948,14 +1021,14 @@ describe("Keymaxxer-backed GitHub layer", () => {
         Effect.gen(function* () {
           if (input.command.includes("count-open-non-draft-pull-requests.ts")) {
             countHelperStarts += 1
-            return { exitCode: 0, stdout: "7", stderr: "" }
+            return { exitCode: 0, stdout: "7", stderr: successfulHelperControl }
           }
           signalActiveHelperStart()
           yield* Effect.promise(() => activeHelperHeld)
           return {
             exitCode: 0,
             stdout: JSON.stringify({ _tag: "open" }),
-            stderr: "",
+            stderr: successfulHelperControl,
           }
         }),
     })
@@ -1018,7 +1091,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
           runWithSecrets: (input) => {
             runs.push(input)
             const stdout = input.secrets[0] === "TOKEN_WIDGETS" ? "2" : "9"
-            return Effect.succeed({ exitCode: 0, stdout, stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout,
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -1061,7 +1138,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
             return Effect.succeed({
               exitCode: 0,
               stdout: String(runs.length),
-              stderr: "",
+              stderr: successfulHelperControl,
             })
           },
         })
@@ -1103,7 +1180,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
             return Effect.succeed({
               exitCode: 0,
               stdout: String(runs.length * 3),
-              stderr: "",
+              stderr: successfulHelperControl,
             })
           },
         })
@@ -1150,9 +1227,17 @@ describe("Keymaxxer-backed GitHub layer", () => {
               })
             }
             if (runs.length === 2) {
-              return Effect.succeed({ exitCode: 2, stdout: "", stderr: "" })
+              return Effect.succeed({
+                exitCode: 2,
+                stdout: "",
+                stderr: "",
+              })
             }
-            return Effect.succeed({ exitCode: 0, stdout: "0", stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "0",
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -1214,14 +1299,18 @@ describe("Keymaxxer-backed GitHub layer", () => {
               if (
                 input.command.includes("count-open-non-draft-pull-requests.ts")
               ) {
-                return { exitCode: 0, stdout: "8", stderr: "" }
+                return {
+                  exitCode: 0,
+                  stdout: "8",
+                  stderr: successfulHelperControl,
+                }
               }
               yield* Deferred.succeed(lifecycleHelperStarted, undefined)
               yield* Deferred.await(releaseLifecycleHelper)
               return {
                 exitCode: 0,
                 stdout: JSON.stringify({ _tag: "open" }),
-                stderr: "",
+                stderr: successfulHelperControl,
               }
             }),
         })
@@ -1272,7 +1361,7 @@ describe("Keymaxxer-backed GitHub layer", () => {
               return {
                 exitCode: 0,
                 stdout: JSON.stringify({ _tag: "open" }),
-                stderr: "",
+                stderr: successfulHelperControl,
               }
             }),
         })
@@ -1359,7 +1448,11 @@ describe("Keymaxxer-backed GitHub layer", () => {
             expect(input.secrets).toEqual([secretName])
             expect(input.command).toContain(`GITHUB_TOKEN="$${secretName}"`)
             expect(JSON.stringify(input)).not.toContain(rawToken)
-            return Effect.succeed({ exitCode: 0, stdout: "5", stderr: "" })
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "5",
+              stderr: successfulHelperControl,
+            })
           },
         })
         const layer = keymaxxerGitHubLayer({
@@ -1374,6 +1467,167 @@ describe("Keymaxxer-backed GitHub layer", () => {
         expect(count).toBe(5)
         expect(runs).toHaveLength(1)
         expect(JSON.stringify(runs)).not.toContain(rawToken)
+      }),
+  )
+
+  it.effect(
+    "reconstructs a typed GitHub throttle from a full helper control result",
+    () =>
+      Effect.gen(function* () {
+        const retryAt = Date.now() + 60_000
+        let helperRuns = 0
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () => {
+            helperRuns += 1
+            return Effect.succeed({
+              exitCode: 3,
+              stdout: "",
+              stderr: serializeGitHubHelperControl(
+                githubHelperThrottled({ retryAt, usedFallback: false }),
+              ),
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        const [first, second] = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          const first = yield* github
+            .getOpenPullRequestNumber(acmeWidgets, "first")
+            .pipe(Effect.flip)
+          const second = yield* github
+            .getOpenPullRequestNumber(acmeWidgets, "second")
+            .pipe(Effect.flip)
+          return [first, second] as const
+        }).pipe(Effect.provide(layer))
+        expect(first).toBeInstanceOf(GitHubThrottledError)
+        if (first instanceof GitHubThrottledError) {
+          expect(first.retryAt).toBe(retryAt)
+        }
+        expect(second).toBeInstanceOf(GitHubThrottledError)
+        expect(helperRuns).toBe(1)
+      }),
+  )
+
+  it.effect(
+    "fails malformed helper throttle results without guessing or exposing their payload",
+    () =>
+      Effect.gen(function* () {
+        const secret = "ghp_helper_protocol_secret"
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({
+              exitCode: 3,
+              stdout: "",
+              stderr: JSON.stringify({
+                version: 99,
+                kind: "github-throttled",
+                retryAt: Date.now() + 60_000,
+                usedFallback: false,
+                secret,
+              }),
+            }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const error = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github
+            .getOpenPullRequestNumber(acmeWidgets, "branch")
+            .pipe(Effect.flip)
+        }).pipe(Effect.provide(layer))
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+        expect(error.message).not.toContain(secret)
+      }),
+  )
+
+  it.effect(
+    "rejects successful helper results without the required control record",
+    () =>
+      Effect.gen(function* () {
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.succeed({ exitCode: 0, stdout: "7", stderr: "" }),
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+        const error = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          return yield* github
+            .getOpenPullRequestNumber(acmeWidgets, "branch")
+            .pipe(Effect.flip)
+        }).pipe(Effect.provide(layer))
+
+        expect(error).toBeInstanceOf(GitHubRequestError)
+      }),
+  )
+
+  it.effect(
+    "closes future Keymaxxer admission after a successful final-quota helper result",
+    () =>
+      Effect.gen(function* () {
+        const retryAt = Date.now() + 60_000
+        let helperRuns = 0
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () => Effect.succeed("GITHUB_TOKEN_ACME_WIDGETS"),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () => {
+            helperRuns += 1
+            return Effect.succeed({
+              exitCode: 0,
+              stdout: "7",
+              stderr: serializeGitHubHelperControl(
+                githubHelperSuccess({
+                  throttle: { retryAt, usedFallback: false },
+                }),
+              ),
+            })
+          },
+        })
+        const layer = keymaxxerGitHubLayer({
+          workspaceRoot: "/workspace",
+        }).pipe(Layer.provide(keymaxxerLayer))
+
+        const [first, second] = yield* Effect.gen(function* () {
+          const github = yield* GitHubService
+          const first = yield* github.getOpenPullRequestNumber(
+            acmeWidgets,
+            "first",
+          )
+          const second = yield* github
+            .getOpenPullRequestNumber(acmeWidgets, "second")
+            .pipe(Effect.flip)
+          return [first, second] as const
+        }).pipe(Effect.provide(layer))
+        expect(first).toBe(7)
+        expect(second).toBeInstanceOf(GitHubThrottledError)
+        if (second instanceof GitHubThrottledError) {
+          expect(second.retryAt).toBe(retryAt)
+        }
+        expect(helperRuns).toBe(1)
       }),
   )
 })
