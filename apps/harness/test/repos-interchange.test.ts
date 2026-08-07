@@ -260,17 +260,25 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     )
     const ui = uiSource()
 
-    // The mixed row holds a button for a collapsed lane and an ol/li/span for
-    // the running focus lane. Pin both the row alignment and chip metrics.
+    // The mixed row holds a direct button for a collapsed lane and an
+    // ol/li/span for the running focus lane. The li must be a flex container:
+    // otherwise its inline-flex chip participates in an inline line box and
+    // acquires baseline leading above the visible chip.
     expect(lifecycle).toContain("className={ui.legRow}")
+    expect(lifecycle).toContain("className={ui.legSummary}")
     expect(lifecycle).toContain('key="focus-lane"')
     expect(lifecycle).toContain("isFocusLane: true")
+    const chipRenderer = sliceBetweenMarkers(
+      lifecycle,
+      "const renderLifecycleChip =",
+      "const renderChipList =",
+    )
+    expect(chipRenderer).toContain(
+      '<li key={lifecycleLabel.phase} className="flex min-w-0 max-w-full">',
+    )
     expect(ui).toMatch(
       /lifecycleLegRowClasses\s*=\s*"flex flex-wrap items-start gap-\[0\.35rem\]"/,
     )
-    expect(ui).toMatch(/lifecycleFocusRunningChip:\s*"leading-\[1\.2\]"/)
-    expect(ui).not.toMatch(/leg:\s*"[^"\n]*leading-\[1\.2\]/)
-    expect(ui).toMatch(/legSummary:[\s\S]*?leading-\[1\.2\]/)
   })
 
   test("parent issue groups use an aligned details card", () => {
