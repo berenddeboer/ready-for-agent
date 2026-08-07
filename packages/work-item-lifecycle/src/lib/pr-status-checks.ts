@@ -19,6 +19,10 @@ import {
 } from "./agent-turn-forge-auth.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
 import {
+  promptUserContentSection,
+  sanitizePromptUserContent,
+} from "./sanitize-prompt-user-content.js"
+import {
   DEFAULT_LIFECYCLE_MAX_DURATIONS,
   STEP_RUN_REASON,
   type StepRunReasonCode,
@@ -493,11 +497,19 @@ const sourceLabel = (externalId: string): string => {
   return "unknown source"
 }
 
-const formatRedCheckLine = (check: ObservedPrStatusCheckRow): string =>
-  `- ${check.name} (external id: ${check.external_id}, source: ${sourceLabel(check.external_id)})`
+/** Format one red check line for investigation prompts (exported for tests). */
+export const formatRedCheckLine = (check: {
+  readonly name: string
+  readonly external_id: string
+}): string =>
+  // Check names are mid-line fragments: sanitize tags only (no wrap).
+  `- ${sanitizePromptUserContent(check.name)} (external id: ${check.external_id}, source: ${sourceLabel(check.external_id)})`
 
-const formatDiagnosticBlock = (diagnostic: PrStatusCheckDiagnostic): string => {
-  const header = `### ${diagnostic.name} (${diagnostic.externalId}, source: ${diagnostic.source})`
+/** Format one harness diagnostic block for investigation prompts (exported for tests). */
+export const formatDiagnosticBlock = (
+  diagnostic: PrStatusCheckDiagnostic,
+): string => {
+  const header = `### ${sanitizePromptUserContent(diagnostic.name)} (${diagnostic.externalId}, source: ${diagnostic.source})`
   const urlLine =
     diagnostic.htmlUrl === null
       ? "HTML URL: none"
@@ -512,15 +524,13 @@ const formatDiagnosticBlock = (diagnostic: PrStatusCheckDiagnostic): string => {
       urlLine,
       pathLine,
       "Log excerpt (use this evidence first):",
-      "```",
-      diagnostic.logFetch.excerpt,
-      "```",
+      promptUserContentSection("check_log", diagnostic.logFetch.excerpt),
     ].join("\n")
   }
   return [
     header,
     urlLine,
-    `Log fetch unavailable: ${diagnostic.logFetch.reason}`,
+    `Log fetch unavailable: ${sanitizePromptUserContent(diagnostic.logFetch.reason)}`,
   ].join("\n")
 }
 
@@ -616,13 +626,15 @@ const buildInvestigationOutcomeFallbackPrompt = (
     ...investigationOutcomeContractLines(forge),
   ].join("\n")
 
-const buildInvestigationRecoveryPrompt = (
+/** Recovery prompt after a FAILED investigation outcome (exported for tests). */
+export const buildInvestigationRecoveryPrompt = (
   reason: string,
   forge: "github" | "gitlab" = "github",
 ): string =>
   [
     "Make one focused recovery attempt to process the PR Status Check Handoff.",
-    `Your previous outcome was FAILED: ${reason}`,
+    "Your previous outcome was FAILED.",
+    promptUserContentSection("failed_reason", reason),
     "Re-check the current pull request and retry the failed inspection or any safe action that can produce a replacement check execution, including restarting an appropriate failed workflow.",
     "Do not create an empty or no-op commit merely to restart checks.",
     ...investigationOutcomeContractLines(forge),

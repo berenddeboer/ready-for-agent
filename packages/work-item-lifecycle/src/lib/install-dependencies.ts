@@ -13,6 +13,7 @@ import {
   WorktreeContextMissingError,
 } from "./install-dependencies-errors.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
+import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
 
 const STDERR_DIAGNOSTIC_LIMIT = 4_000
 
@@ -108,22 +109,31 @@ const runInstallCommand = (cwd: string, install: InstallCommand) =>
     }
   })
 
-const ambiguousFallbackPrompt = (
+/** Pure prompt used when install-plan detection is inconclusive (exported for tests). */
+export const buildAmbiguousFallbackPrompt = (
   plan: Extract<InstallPlan, { _tag: "Fallback" }>,
 ) =>
   [
     "Install project dependencies in this worktree using the package manager appropriate for this repository.",
     "Do not start implementation work.",
-    `Detection could not choose a direct install command: ${plan.reason}`,
+    "Detection could not choose a direct install command:",
+    promptUserContentSection("diagnostics", plan.reason),
   ].join("\n")
 
-const failedDirectFallbackPrompt = (error: InstallCommandError) =>
+/** Pure prompt used after a direct install command fails (exported for tests). */
+export const buildFailedDirectFallbackPrompt = (error: {
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly exitCode: number
+  readonly stderr: string
+}) =>
   [
     "Complete dependency installation in this worktree.",
     "Do not start implementation work.",
     `A direct install command failed: ${error.command} ${error.args.join(" ")}`,
     `Exit code: ${error.exitCode}`,
-    `stderr: ${error.stderr || "(empty)"}`,
+    "stderr:",
+    promptUserContentSection("command_stderr", error.stderr || "(empty)"),
   ].join("\n")
 
 const runOpencodeFallback = (
@@ -168,7 +178,7 @@ export const installDependencies = (context: LifecycleStepContext) =>
       yield* runOpencodeFallback(
         context,
         worktreePath,
-        ambiguousFallbackPrompt(plan),
+        buildAmbiguousFallbackPrompt(plan),
       )
       return
     }
@@ -178,7 +188,7 @@ export const installDependencies = (context: LifecycleStepContext) =>
         runOpencodeFallback(
           context,
           worktreePath,
-          failedDirectFallbackPrompt(error),
+          buildFailedDirectFallbackPrompt(error),
         ),
       ),
     )
