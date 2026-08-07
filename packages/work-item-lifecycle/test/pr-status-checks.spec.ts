@@ -13,6 +13,7 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  GitHubThrottledError,
   type PullRequestCheckStatus,
 } from "@ready-for-agent/github-service"
 import {
@@ -2782,6 +2783,80 @@ describe("PR status check steps", () => {
     )
 
     expect(rerunIds).toEqual([workflowRunId, workflowRunId, workflowRunId])
+  })
+
+  it("does not spend the automated-review rerun budget on GitHub throttles", async () => {
+    let rerunCalls = 0
+    const workflowRunId = 101
+    const status = {
+      _tag: "succeeded" as const,
+      ...mergeable,
+      headSha: "sha-throttled-rerun",
+      terminalChecks: [
+        {
+          externalId: "actions-job:review",
+          name: "Claude Code Review/claude-review",
+          outcome: "green" as const,
+        },
+      ],
+    }
+    const rerunVerdict = `READY_FOR_AGENT_RESULT: RERUN_REVIEW: ${workflowRunId} Claude Code Review`
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* seedWorkItem
+        yield* watchPrStatusChecks(context)
+        for (
+          let attempt = 0;
+          attempt < AUTOMATED_REVIEW_RERUN_LIMIT;
+          attempt += 1
+        ) {
+          const throttled = yield* Effect.result(
+            investigatePrStatusChecks(context),
+          )
+          expect(throttled._tag).toBe("Failure")
+          if (throttled._tag === "Failure") {
+            expect(throttled.failure).toBeInstanceOf(GitHubThrottledError)
+          }
+        }
+
+        const successful = yield* investigatePrStatusChecks(context)
+        expect(successful).toEqual({
+          _tag: "checks_triggered",
+          handledCheckIds: [expect.any(String)],
+          checkStartAnchorRecorded: true,
+        })
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            db,
+            githubWith(status, {
+              rerunWorkflowRun: () => {
+                rerunCalls += 1
+                return rerunCalls <= AUTOMATED_REVIEW_RERUN_LIMIT
+                  ? Effect.fail(
+                      new GitHubThrottledError({
+                        retryAt: Date.now() + 60_000,
+                        usedFallback: false,
+                      }),
+                    )
+                  : Effect.void
+              },
+            }),
+            keymaxxer,
+            opencodeWith(
+              Array.from(
+                { length: AUTOMATED_REVIEW_RERUN_LIMIT + 1 },
+                () => rerunVerdict,
+              ),
+            ),
+            DatabaseTest,
+          ),
+        ),
+      ),
+    )
+
+    expect(rerunCalls).toBe(AUTOMATED_REVIEW_RERUN_LIMIT + 1)
   })
 
   it("keeps a reserved permit when the GitHub rerun response is indeterminate", async () => {

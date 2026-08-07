@@ -27,13 +27,15 @@ import {
 } from "@ready-for-agent/db-service"
 import {
   GitHubService,
-  GitHubThrottledError,
+  type GitHubThrottledError,
   type PullRequestLifecycleStatus,
   formatUserFacingError,
+  isGitHubThrottledError,
   sanitizeUserFacingText,
 } from "@ready-for-agent/github-service"
 import { GitLabService } from "@ready-for-agent/gitlab-service"
 import {
+  OperationalLifecycleStep as OperationalLifecycleStepSchema,
   type WorkItemPredicateShape,
   evaluateActionableIssue,
   evaluateImplementableIssue,
@@ -346,6 +348,16 @@ type StepRunRow = {
 
 const PostponedStepRunIdRow = Schema.Struct({ id: Schema.String })
 const LatestStepRunStatusRow = Schema.Struct({
+  step: OperationalLifecycleStepSchema,
+  status: StepRunStatus,
+  postponed_until: Schema.NullOr(Schema.Finite),
+})
+const StartedWorkItemRow = Schema.Struct({
+  id: Schema.String,
+  state: OperationalLifecycleStepSchema,
+})
+const ActiveStepRunRow = Schema.Struct({ id: Schema.String })
+const LatestStepRunDeadlineRow = Schema.Struct({
   status: StepRunStatus,
   postponed_until: Schema.NullOr(Schema.Finite),
 })
@@ -367,6 +379,39 @@ const decodeLatestStepRunStatusRows = (rows: unknown) =>
       (error) =>
         new WorkItemLifecycleDatabaseError({
           message: `Invalid latest Step Run status row: ${String(error)}`,
+          cause: error,
+        }),
+    ),
+  )
+
+const decodeStartedWorkItemRows = (rows: unknown) =>
+  Schema.decodeUnknownEffect(Schema.Array(StartedWorkItemRow))(rows).pipe(
+    Effect.mapError(
+      (error) =>
+        new WorkItemLifecycleDatabaseError({
+          message: `Invalid started Work Item row: ${String(error)}`,
+          cause: error,
+        }),
+    ),
+  )
+
+const decodeActiveStepRunRows = (rows: unknown) =>
+  Schema.decodeUnknownEffect(Schema.Array(ActiveStepRunRow))(rows).pipe(
+    Effect.mapError(
+      (error) =>
+        new WorkItemLifecycleDatabaseError({
+          message: `Invalid active Step Run row: ${String(error)}`,
+          cause: error,
+        }),
+    ),
+  )
+
+const decodeLatestStepRunDeadlineRows = (rows: unknown) =>
+  Schema.decodeUnknownEffect(Schema.Array(LatestStepRunDeadlineRow))(rows).pipe(
+    Effect.mapError(
+      (error) =>
+        new WorkItemLifecycleDatabaseError({
+          message: `Invalid latest Step Run deadline row: ${String(error)}`,
           cause: error,
         }),
     ),
@@ -1437,7 +1482,7 @@ export const makeWorkItemLifecycleLive = (
             .unsafe(
               `UPDATE work_item
              SET holds_worker_slot = 0,
-                 waiting_since = ?,
+                 waiting_since = COALESCE(waiting_since, ?),
                  updated_at = ?
              WHERE id = ?`,
               [now, now, workItemId],
@@ -2540,7 +2585,10 @@ export const makeWorkItemLifecycleLive = (
        */
       const inspectOwnedPrLifecycleStatus = (
         row: WorkItemRow,
-      ): Effect.Effect<PullRequestLifecycleStatus | null> =>
+      ): Effect.Effect<
+        PullRequestLifecycleStatus | null,
+        GitHubThrottledError
+      > =>
         Effect.gen(function* () {
           const repositories = yield* db.listRepositories
           const repository = repositories.find(
@@ -2569,13 +2617,15 @@ export const makeWorkItemLifecycleLive = (
           )
         }).pipe(
           Effect.catch((error) =>
-            Effect.logWarning(
-              "Owned-PR lifecycle lookup failed after Issue revalidation; failing closed to pause",
-              {
-                workItemId: row.id,
-                error: String(error),
-              },
-            ).pipe(Effect.as(null)),
+            isGitHubThrottledError(error)
+              ? Effect.fail(error)
+              : Effect.logWarning(
+                  "Owned-PR lifecycle lookup failed after Issue revalidation; failing closed to pause",
+                  {
+                    workItemId: row.id,
+                    error: String(error),
+                  },
+                ).pipe(Effect.as(null)),
           ),
         )
 
@@ -2594,7 +2644,7 @@ export const makeWorkItemLifecycleLive = (
       const resolveOwnedPrIssueStop = (
         row: WorkItemRow,
         pullRequestNumber: number,
-      ): Effect.Effect<OwnedPrIssueStop> =>
+      ): Effect.Effect<OwnedPrIssueStop, GitHubThrottledError> =>
         Effect.gen(function* () {
           const status = yield* inspectOwnedPrLifecycleStatus(row)
           if (status !== null && status._tag === "merged") {
@@ -2671,7 +2721,7 @@ export const makeWorkItemLifecycleLive = (
               readonly failureCode: string
               readonly failureMessage: string
             }
-      }): Effect.Effect<WorkItemRecord, RunStepError> =>
+      }): Effect.Effect<WorkItemRecord, RunStepError | GitHubThrottledError> =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
           const { stepRun, workItem, output, revalidation } = input
@@ -3268,8 +3318,8 @@ export const makeWorkItemLifecycleLive = (
         })
 
       /**
-       * A GitHub throttle is a finished, non-failing Watch attempt. The wake
-       * is deliberately a queue job rather than a queued Step Run so the
+       * A GitHub throttle is a finished, non-failing lifecycle attempt. The
+       * wake is deliberately a queue job rather than a queued Step Run so the
        * derived Waiting for GitHub hold owns neither a Worker Slot nor active
        * execution history.
        */
@@ -3283,14 +3333,12 @@ export const makeWorkItemLifecycleLive = (
           const { stepRun, workItem, retryAt } = input
           const wakeDelay = Duration.millis(Math.max(0, retryAt - now))
 
-          yield* Effect.logWarning(
-            "Postponing Watch PR Status Checks for GitHub",
-            {
-              workItemId: workItem.id,
-              stepRunId: stepRun.id,
-              retryAt,
-            },
-          )
+          yield* Effect.logWarning("Postponing Lifecycle Step for GitHub", {
+            workItemId: workItem.id,
+            stepRunId: stepRun.id,
+            step: stepRun.step,
+            retryAt,
+          })
 
           yield* sql
             .withTransaction(
@@ -3623,7 +3671,7 @@ export const makeWorkItemLifecycleLive = (
         const preAdmissionNow = yield* Clock.currentTimeMillis
         const latestBeforeAdmission = yield* sql
           .unsafe(
-            `SELECT status, postponed_until
+            `SELECT step, status, postponed_until
            FROM step_run
            WHERE work_item_id = ?
            ORDER BY queued_at DESC, rowid DESC
@@ -3655,7 +3703,7 @@ export const makeWorkItemLifecycleLive = (
             Effect.gen(function* () {
               const latestRows = yield* sql
                 .unsafe(
-                  `SELECT status, postponed_until
+                  `SELECT step, status, postponed_until
                  FROM step_run
                  WHERE work_item_id = ?
                  ORDER BY queued_at DESC, rowid DESC
@@ -3676,7 +3724,7 @@ export const makeWorkItemLifecycleLive = (
 
               const workItem = yield* loadWorkItemRow(workItemId)
               if (
-                workItem?.state !== "watch_pr_status_checks" ||
+                workItem?.state !== latest.step ||
                 workItem.paused ||
                 workItem.waiting_for_blockers
               ) {
@@ -3687,11 +3735,7 @@ export const makeWorkItemLifecycleLive = (
               if (!acquired) {
                 return { _tag: "woke" as const }
               }
-              yield* enqueueStepRunForWorkItem(
-                workItemId,
-                "watch_pr_status_checks",
-                now,
-              )
+              yield* enqueueStepRunForWorkItem(workItemId, latest.step, now)
               return { _tag: "woke" as const }
             }),
           )
@@ -4062,9 +4106,8 @@ export const makeWorkItemLifecycleLive = (
                       handlerExit.cause,
                     )
                     if (
-                      stepRun.step === "watch_pr_status_checks" &&
                       Option.isSome(handlerError) &&
-                      handlerError.value instanceof GitHubThrottledError
+                      isGitHubThrottledError(handlerError.value)
                     ) {
                       const postponed = yield* completePostponedStep({
                         stepRun: afterStart,
@@ -4141,7 +4184,17 @@ export const makeWorkItemLifecycleLive = (
                     workItem,
                     output: handlerExit.value,
                     revalidation,
-                  })
+                  }).pipe(
+                    Effect.catch((error) =>
+                      isGitHubThrottledError(error)
+                        ? completePostponedStep({
+                            stepRun: afterStart,
+                            workItem,
+                            retryAt: error.retryAt,
+                          })
+                        : Effect.fail(error),
+                    ),
+                  )
 
                   return { _tag: "processed" as const, workItem: completed }
                 }),
@@ -4345,29 +4398,70 @@ export const makeWorkItemLifecycleLive = (
           })
         }
 
+        const now = yield* Clock.currentTimeMillis
         if (!workItem.paused) {
-          return yield* getWorkItem(workItemId)
+          const latestRows = yield* sql
+            .unsafe(
+              `SELECT step, status, postponed_until FROM step_run
+               WHERE work_item_id = ?
+               ORDER BY queued_at DESC, rowid DESC
+               LIMIT 1`,
+              [workItemId],
+            )
+            .pipe(
+              Effect.mapError(toDatabaseError),
+              Effect.flatMap(decodeLatestStepRunStatusRows),
+            )
+          const latest = latestRows[0]
+          if (
+            latest?.status !== "postponed" ||
+            latest.step !== workItem.state ||
+            latest.postponed_until === null ||
+            latest.postponed_until > now
+          ) {
+            return yield* getWorkItem(workItemId)
+          }
         }
 
-        const now = yield* Clock.currentTimeMillis
         yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              const startedRows = (yield* sql.unsafe(
-                `UPDATE work_item
+              const startedRows = yield* sql
+                .unsafe(
+                  `UPDATE work_item
                   SET paused = 0,
                       failure_code = NULL,
                       failure_message = NULL,
                       updated_at = ?
                   WHERE id = ?
-                    AND paused = 1
                     AND state NOT IN ('complete', 'failed', 'abandoned', 'needs_human')
+                    AND (
+                      paused = 1
+                      OR (
+                        (
+                          SELECT step FROM step_run
+                          WHERE work_item_id = ?
+                          ORDER BY queued_at DESC, rowid DESC
+                          LIMIT 1
+                        ) = state
+                        AND (
+                          SELECT status FROM step_run
+                          WHERE work_item_id = ?
+                          ORDER BY queued_at DESC, rowid DESC
+                          LIMIT 1
+                        ) = 'postponed'
+                        AND (
+                          SELECT postponed_until FROM step_run
+                          WHERE work_item_id = ?
+                          ORDER BY queued_at DESC, rowid DESC
+                          LIMIT 1
+                        ) <= ?
+                      )
+                    )
                   RETURNING id, state`,
-                [now, workItemId],
-              )) as readonly {
-                readonly id: string
-                readonly state: OperationalLifecycleStep
-              }[]
+                  [now, workItemId, workItemId, workItemId, workItemId, now],
+                )
+                .pipe(Effect.flatMap(decodeStartedWorkItemRows))
 
               if (!startedRows[0]) {
                 const current = yield* loadWorkItemRow(workItemId)
@@ -4385,28 +4479,42 @@ export const makeWorkItemLifecycleLive = (
 
               const pendingStep = startedRows[0].state
 
-              const activeRows = (yield* sql.unsafe(
-                `SELECT id FROM step_run
+              const activeRows = yield* sql
+                .unsafe(
+                  `SELECT id FROM step_run
                  WHERE work_item_id = ?
                    AND status IN ('queued', 'running')
                  LIMIT 1`,
-                [workItemId],
-              )) as readonly { readonly id: string }[]
+                  [workItemId],
+                )
+                .pipe(Effect.flatMap(decodeActiveStepRunRows))
               if (activeRows[0]) {
                 // Running Step Run still holds the slot from Pause-while-running.
                 return
               }
 
-              const latestRows = (yield* sql.unsafe(
-                `SELECT status FROM step_run
+              const latestRows = yield* sql
+                .unsafe(
+                  `SELECT status, postponed_until FROM step_run
                  WHERE work_item_id = ?
                    AND step = ?
                  ORDER BY queued_at DESC, rowid DESC
                  LIMIT 1`,
-                [workItemId, pendingStep],
-              )) as readonly { readonly status: string }[]
+                  [workItemId, pendingStep],
+                )
+                .pipe(Effect.flatMap(decodeLatestStepRunDeadlineRows))
               const latestStatus = latestRows[0]?.status
               if (latestStatus === "failed" || latestStatus === "interrupted") {
+                return
+              }
+              const postponedUntil = latestRows[0]?.postponed_until
+              if (
+                latestStatus === "postponed" &&
+                typeof postponedUntil === "number" &&
+                postponedUntil > now
+              ) {
+                // Start may clear an explicit Pause, but never lets an
+                // operator bypass GitHub's authoritative retry deadline.
                 return
               }
 
