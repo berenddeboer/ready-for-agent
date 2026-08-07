@@ -3,10 +3,12 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import { Effect, Layer, Schema } from "effect"
 import {
   GitHubRepositoryUnavailableError,
+  GitHubRequestError,
   type GitHubThrottledError,
   isGitHubThrottledError,
 } from "../lib/errors.js"
 import {
+  GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   githubHelperSuccess,
   githubHelperThrottled,
@@ -94,7 +96,13 @@ export const runGitHubCli = <A, E>(
         // remote APIs or Effect defects can contain arbitrary request data, so
         // keep the user-facing failure deliberately non-diagnostic here.
         process.stderr.write("GitHub helper command failed\n")
-        process.exitCode = 1
+        // The Keymaxxer parent preserves this semantic exit code as a typed
+        // authentication failure, so it can invalidate only affected
+        // authenticated-identity cache entries.
+        process.exitCode =
+          error instanceof GitHubRequestError && error.statusCode === 401
+            ? GITHUB_HELPER_AUTHENTICATION_EXIT_CODE
+            : 1
       }),
     ),
     BunRuntime.runMain,

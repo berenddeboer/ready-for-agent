@@ -9,6 +9,7 @@ import {
   Schema,
 } from "effect"
 import {
+  GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   type GitHubHelperOperation,
   type GitHubOperationOptions,
@@ -68,6 +69,10 @@ const openPullRequestCountCacheKey = (repository: GitHubRepository): string =>
     repository.projectPath.toLowerCase(),
   ].join("\0")
 
+/** Cache namespace for one Repository's Keymaxxer credential path. */
+const authenticatedUserCacheKey = (repository: GitHubRepository): string =>
+  openPullRequestCountCacheKey(repository)
+
 /** GitHub-only helper wire format (no GitLab counterpart). */
 const SerializedAutomatedReviewEvidenceObservation = Schema.Union([
   Schema.TaggedStruct("none", {
@@ -97,6 +102,16 @@ const requestError = (
   operation: string,
   _detail?: string,
 ) => makeRequestError(GitHubRequestError)(repository, operation)
+
+const authenticationError = (
+  repository: GitHubRepository,
+  operation: string,
+  detail?: string,
+) =>
+  new GitHubRequestError({
+    message: requestError(repository, operation, detail).message,
+    statusCode: 401,
+  })
 
 const repositoryUnavailable = (repository: GitHubRepository) =>
   new GitHubRepositoryUnavailableError(repository)
@@ -231,6 +246,14 @@ export const keymaxxerGitHubLayer = (options: {
           ),
       )
 
+      let invalidateAuthenticatedUser = (
+        _repository: GitHubRepository,
+      ): Effect.Effect<void> => Effect.void
+      let observeCredential = (
+        _repository: GitHubRepository,
+        _tokenName: string | null,
+      ): Effect.Effect<void> => Effect.void
+
       /**
        * Shared Keymaxxer helper invocation: token lookup, repository arg
        * encoding, exit-code mapping, stdout decode, and KeymaxxerError →
@@ -248,61 +271,75 @@ export const keymaxxerGitHubLayer = (options: {
           stdout: string,
         ) => Effect.Effect<A, GitHubRequestError>
       }): Effect.Effect<A, GitHubServiceError> =>
-        coordinator.execute({
-          origin: input.origin ?? "lifecycle",
-          operation: Effect.gen(function* () {
-            input.onStart?.()
-            const tokenName = yield* ensureToken(input.repository)
-            if (tokenName === null) {
-              return yield* requestError(input.repository, input.describe)
-            }
-            const [forge, forgeHost, projectPath] = encodedRepositoryArguments(
-              input.repository,
-            )
-            const result = yield* runGitHubBin(tokenName, input.operation, [
-              forge,
-              forgeHost,
-              projectPath,
-              ...(input.args ?? []),
-            ])
-            if (result.exitCode === 2) {
-              return yield* repositoryUnavailable(input.repository)
-            }
-            if (result.exitCode === GITHUB_HELPER_THROTTLED_EXIT_CODE) {
-              const control = parseGitHubHelperControl(result.stderr)
-              if (control?.kind !== "github-throttled") {
+        coordinator
+          .execute({
+            origin: input.origin ?? "lifecycle",
+            operation: Effect.gen(function* () {
+              input.onStart?.()
+              const tokenName = yield* ensureToken(input.repository)
+              yield* observeCredential(input.repository, tokenName)
+              if (tokenName === null) {
                 return yield* requestError(input.repository, input.describe)
               }
-              return yield* coordinator.reportThrottle(
-                new GitHubThrottledError({
-                  retryAt: control.retryAt,
-                  usedFallback: control.usedFallback,
-                }),
-              )
-            }
-            if (result.exitCode !== 0) {
-              return yield* requestError(input.repository, input.describe)
-            }
-            const control = parseGitHubHelperControl(result.stderr)
-            if (control?.kind !== "success") {
-              return yield* requestError(input.repository, input.describe)
-            }
-            const value = yield* input.decode(result.stdout)
-            if (control.throttle !== null) {
-              coordinator.reportThrottle(
-                new GitHubThrottledError({
-                  retryAt: control.throttle.retryAt,
-                  usedFallback: control.throttle.usedFallback,
-                }),
-              )
-            }
-            return value
-          }).pipe(
-            Effect.catchTag("KeymaxxerError", () =>
-              Effect.fail(requestError(input.repository, input.describe)),
+              const [forge, forgeHost, projectPath] =
+                encodedRepositoryArguments(input.repository)
+              const result = yield* runGitHubBin(tokenName, input.operation, [
+                forge,
+                forgeHost,
+                projectPath,
+                ...(input.args ?? []),
+              ])
+              if (result.exitCode === 2) {
+                return yield* repositoryUnavailable(input.repository)
+              }
+              if (result.exitCode === GITHUB_HELPER_THROTTLED_EXIT_CODE) {
+                const control = parseGitHubHelperControl(result.stderr)
+                if (control?.kind !== "github-throttled") {
+                  return yield* requestError(input.repository, input.describe)
+                }
+                return yield* coordinator.reportThrottle(
+                  new GitHubThrottledError({
+                    retryAt: control.retryAt,
+                    usedFallback: control.usedFallback,
+                  }),
+                )
+              }
+              if (result.exitCode === GITHUB_HELPER_AUTHENTICATION_EXIT_CODE) {
+                return yield* authenticationError(
+                  input.repository,
+                  input.describe,
+                )
+              }
+              if (result.exitCode !== 0) {
+                return yield* requestError(input.repository, input.describe)
+              }
+              const control = parseGitHubHelperControl(result.stderr)
+              if (control?.kind !== "success") {
+                return yield* requestError(input.repository, input.describe)
+              }
+              const value = yield* input.decode(result.stdout)
+              if (control.throttle !== null) {
+                coordinator.reportThrottle(
+                  new GitHubThrottledError({
+                    retryAt: control.throttle.retryAt,
+                    usedFallback: control.throttle.usedFallback,
+                  }),
+                )
+              }
+              return value
+            }).pipe(
+              Effect.catchTag("KeymaxxerError", () =>
+                Effect.fail(requestError(input.repository, input.describe)),
+              ),
             ),
-          ),
-        })
+          })
+          .pipe(
+            Effect.tapError((error) =>
+              error._tag === "GitHubRequestError" && error.statusCode === 401
+                ? invalidateAuthenticatedUser(input.repository)
+                : Effect.void,
+            ),
+          )
 
       const fetchOpenNonDraftPullRequestCount = (
         repository: GitHubRepository,
@@ -427,24 +464,99 @@ export const keymaxxerGitHubLayer = (options: {
         )
       })
 
-      const service: GitHubServiceShape = {
-        getAuthenticatedUserLogin: Effect.fn(
-          "KeymaxxerGitHub.getAuthenticatedUserLogin",
-        )((repository, operationOptions?: GitHubOperationOptions) =>
-          callHelper({
+      const authenticatedUserLookupsByCacheKey = new Map<
+        string,
+        {
+          readonly repository: GitHubRepository
+          readonly origin: GitHubOperationOrigin
+        }
+      >()
+      const authenticatedUserCredentialNamesByRepository = new Map<
+        string,
+        string
+      >()
+      const authenticatedUserCache = yield* Cache.makeWith(
+        (key: string) => {
+          const lookup = authenticatedUserLookupsByCacheKey.get(key)
+          if (lookup === undefined) {
+            return Effect.fail(
+              requestError(
+                { forge: "github", forgeHost: "", projectPath: "" },
+                "resolve authenticated GitHub user",
+                "missing identity cache key",
+              ),
+            )
+          }
+          return callHelper({
             operation: "get-authenticated-user-login",
-            repository,
+            repository: lookup.repository,
             describe: "resolve authenticated GitHub user",
-            origin: operationOptions?.origin ?? "polling",
+            origin: lookup.origin,
             decode: (stdout) =>
               decodeNonEmptyTrimmed(
                 stdout,
-                repository,
+                lookup.repository,
                 "resolve authenticated GitHub user",
                 "empty login",
               ),
-          }),
-        ),
+          })
+        },
+        {
+          capacity: 256,
+          timeToLive: (exit) =>
+            Exit.isSuccess(exit) ? Duration.infinity : Duration.zero,
+        },
+      )
+
+      invalidateAuthenticatedUser = (repository) => {
+        const key = authenticatedUserCacheKey(repository)
+        authenticatedUserLookupsByCacheKey.delete(key)
+        return Cache.invalidate(authenticatedUserCache, key)
+      }
+
+      observeCredential = (repository, tokenName) => {
+        const repositoryKey = openPullRequestCountCacheKey(repository)
+        const previousTokenName =
+          authenticatedUserCredentialNamesByRepository.get(repositoryKey)
+        if (tokenName === null) {
+          if (previousTokenName === undefined) return Effect.void
+          authenticatedUserCredentialNamesByRepository.delete(repositoryKey)
+          return invalidateAuthenticatedUser(repository)
+        }
+        if (previousTokenName === tokenName) return Effect.void
+        authenticatedUserCredentialNamesByRepository.set(
+          repositoryKey,
+          tokenName,
+        )
+        return previousTokenName === undefined
+          ? Effect.void
+          : invalidateAuthenticatedUser(repository)
+      }
+
+      const getAuthenticatedUserLogin = Effect.fn(
+        "KeymaxxerGitHub.getAuthenticatedUserLogin",
+      )(function* (
+        repository: GitHubRepository,
+        operationOptions?: GitHubOperationOptions,
+      ) {
+        const key = authenticatedUserCacheKey(repository)
+        authenticatedUserLookupsByCacheKey.set(key, {
+          repository,
+          origin: operationOptions?.origin ?? "polling",
+        })
+        const cached = yield* Cache.getSuccess(authenticatedUserCache, key)
+        if (Option.isSome(cached)) return cached.value
+
+        // Cache owns the lookup for the application scope, so a canceled
+        // caller cannot tear down a concurrent reconciliation's identity work.
+        const lookup = yield* Cache.get(authenticatedUserCache, key).pipe(
+          Effect.forkIn(layerScope),
+        )
+        return yield* Fiber.join(lookup)
+      })
+
+      const service: GitHubServiceShape = {
+        getAuthenticatedUserLogin,
         getOpenPullRequestNumber: Effect.fn(
           "KeymaxxerGitHub.getOpenPullRequestNumber",
         )((repository, headRefName) =>

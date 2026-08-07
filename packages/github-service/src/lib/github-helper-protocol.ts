@@ -8,6 +8,8 @@
  */
 export const GITHUB_HELPER_PROTOCOL_VERSION = 1 as const
 export const GITHUB_HELPER_THROTTLED_EXIT_CODE = 3 as const
+/** Typed helper exit used by the Keymaxxer parent to invalidate auth caches. */
+export const GITHUB_HELPER_AUTHENTICATION_EXIT_CODE = 4 as const
 
 export interface GitHubHelperThrottle {
   readonly retryAt: number

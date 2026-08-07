@@ -9,6 +9,7 @@
  * returns a null repository.
  */
 import {
+  GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   type GitHubHelperThrottle,
   githubHelperSuccess,
@@ -417,7 +418,8 @@ export const runOpenNonDraftPullRequestCountCli = async (
       }
     }
     return {
-      exitCode: 1,
+      exitCode:
+        result.statusCode === 401 ? GITHUB_HELPER_AUTHENTICATION_EXIT_CODE : 1,
       stdout: "",
       stderr: "Failed to count open pull requests\n",
     }

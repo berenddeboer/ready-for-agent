@@ -2,6 +2,7 @@ import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, test } from "vitest"
 import {
+  GITHUB_HELPER_AUTHENTICATION_EXIT_CODE,
   GITHUB_HELPER_THROTTLED_EXIT_CODE,
   parseGitHubHelperControl,
 } from "../src/lib/github-helper-protocol.js"
@@ -340,6 +341,22 @@ describe("runOpenNonDraftPullRequestCountCli", () => {
     )
     expect(result.exitCode).toBe(2)
     expect(result.stdout).toBe("")
+  })
+
+  test("preserves HTTP 401 as the authentication exit code", async () => {
+    const result = await runOpenNonDraftPullRequestCountCli(
+      [encode("github"), encode("github.com"), encode("acme/widgets")],
+      {
+        env: { GITHUB_TOKEN: "bad-token" },
+        fetchImpl: async () =>
+          new Response("Bad credentials", {
+            status: 401,
+            statusText: "Unauthorized",
+          }),
+      },
+    )
+
+    expect(result.exitCode).toBe(GITHUB_HELPER_AUTHENTICATION_EXIT_CODE)
   })
 
   test("exits 1 without a token and does not call GitHub", async () => {

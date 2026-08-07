@@ -2,7 +2,7 @@ import * as BunChildProcessSpawner from "@effect/platform-bun/BunChildProcessSpa
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
 import * as BunPath from "@effect/platform-bun/BunPath"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer, ManagedRuntime, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   GitHubRequestError,
@@ -51,6 +51,15 @@ const serviceWithList = (
   mergePullRequest: () => Effect.die("not used"),
   rerunWorkflowRun: () => Effect.void,
   ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+})
+
+const serviceWithAuthenticatedUser = (
+  getAuthenticatedUserLogin: GitHubServiceShape["getAuthenticatedUserLogin"],
+  listReadyIssues: GitHubServiceShape["listReadyIssues"] = () =>
+    Effect.succeed([]),
+): GitHubServiceShape => ({
+  ...serviceWithList(listReadyIssues),
+  getAuthenticatedUserLogin,
 })
 
 const controlledTokenProcess = () => {
@@ -127,6 +136,121 @@ it.effect("ambient GitHub authentication is resolved once", () =>
     expect(resolutions).toBe(1)
     expect(tokens).toEqual(["cached-token", "cached-token"])
   }),
+)
+
+it.effect(
+  "caches ambient authenticated logins per Repository credential path",
+  () =>
+    Effect.gen(function* () {
+      let identityLookups = 0
+      const layer = ambientGitHubLayer({
+        workspaceRoot: "/workspace",
+        resolveToken: async () => "cached-token",
+        makeService: () =>
+          serviceWithAuthenticatedUser(({ projectPath }) =>
+            Effect.sync(() => {
+              identityLookups += 1
+              return projectPath
+            }),
+          ),
+      })
+
+      yield* Effect.gen(function* () {
+        const github = yield* GitHubService
+        expect(yield* github.getAuthenticatedUserLogin(repository)).toBe(
+          "acme/widgets",
+        )
+        expect(
+          yield* github.getAuthenticatedUserLogin({
+            ...repository,
+            projectPath: "acme/gadgets",
+          }),
+        ).toBe("acme/gadgets")
+        expect(yield* github.getAuthenticatedUserLogin(repository)).toBe(
+          "acme/widgets",
+        )
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+
+      expect(identityLookups).toBe(2)
+    }),
+)
+
+it.effect("shares concurrent ambient authenticated identity lookups", () =>
+  Effect.gen(function* () {
+    const identityStarted = yield* Deferred.make<void>()
+    const releaseIdentity = yield* Deferred.make<void>()
+    let identityLookups = 0
+    const layer = ambientGitHubLayer({
+      workspaceRoot: "/workspace",
+      resolveToken: async () => "cached-token",
+      makeService: () =>
+        serviceWithAuthenticatedUser(() =>
+          Effect.gen(function* () {
+            identityLookups += 1
+            yield* Deferred.succeed(identityStarted, undefined)
+            yield* Deferred.await(releaseIdentity)
+            return "operator"
+          }),
+        ),
+    })
+
+    yield* Effect.gen(function* () {
+      const github = yield* GitHubService
+      const first = yield* github
+        .getAuthenticatedUserLogin(repository)
+        .pipe(Effect.forkChild)
+      const second = yield* github
+        .getAuthenticatedUserLogin(repository)
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(identityStarted)
+      expect(identityLookups).toBe(1)
+      yield* Deferred.succeed(releaseIdentity, undefined)
+      expect(yield* Fiber.join(first)).toBe("operator")
+      expect(yield* Fiber.join(second)).toBe("operator")
+    }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+  }),
+)
+
+it.effect(
+  "ambient authentication refresh invalidates cached logins for every Repository",
+  () =>
+    Effect.gen(function* () {
+      const tokens = ["expired-token", "fresh-token"]
+      let tokenIndex = 0
+      const layer = ambientGitHubLayer({
+        workspaceRoot: "/workspace",
+        resolveToken: async () => tokens[tokenIndex++]!,
+        makeService: (token) =>
+          serviceWithAuthenticatedUser(
+            () => Effect.succeed(token === "expired-token" ? "old" : "new"),
+            () =>
+              token === "expired-token"
+                ? Effect.fail(
+                    new GitHubRequestError({
+                      message: "Unauthorized",
+                      statusCode: 401,
+                    }),
+                  )
+                : Effect.succeed([]),
+          ),
+      })
+
+      yield* Effect.gen(function* () {
+        const github = yield* GitHubService
+        expect(yield* github.getAuthenticatedUserLogin(repository)).toBe("old")
+        const otherRepository = {
+          ...repository,
+          projectPath: "acme/gadgets",
+        }
+        expect(yield* github.getAuthenticatedUserLogin(otherRepository)).toBe(
+          "old",
+        )
+        expect(yield* github.listReadyIssues(otherRepository)).toEqual([])
+        expect(yield* github.getAuthenticatedUserLogin(repository)).toBe("new")
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(processLayer))))
+
+      expect(tokenIndex).toBe(2)
+    }),
 )
 
 it.effect("ambient GitHub authentication refreshes once after a 401", () =>
