@@ -15,11 +15,16 @@ import {
 import { buildRunArgs, shouldUsePromptStdin } from "./build-args.js"
 import { makeOpencodeEnvironment } from "./environment.js"
 import type { OpencodeConfigError } from "./errors.js"
+import {
+  type OpencodePathEnv,
+  resolveOpencodeDbPath,
+} from "./opencode-db-path.js"
 import { parseAssistantTextFromLine } from "./parse-assistant-text.js"
 import { parseCommandTaskResultFromLine } from "./parse-command-task-result.js"
 import { parseErrorClassificationFromLine } from "./parse-error-classification.js"
 import { parseSessionIdFromLine } from "./parse-session-id.js"
 import { parseVerboseModelsOutputDetailed } from "./parse-verbose-models.js"
+import { observeOpencodeStartupActivity } from "./startup-activity.js"
 import type { OpencodeLayerOptions } from "./types.js"
 
 const DEFAULT_TIMEOUT = Duration.minutes(30)
@@ -81,6 +86,41 @@ export class Opencode {
           }
         })
 
+        // Cache a successful DB path for the adapter lifetime so session-bearing
+        // turns do not re-spawn `opencode db path` after the first hit. Misses
+        // are retried with backoff so a transient CLI failure does not drop the
+        // #852 probe, without spawnSync-thrashing every 100ms poll on a permanent
+        // miss (CLI lookup can block up to ~2s).
+        let cachedStartupActivityDbPath: string | undefined =
+          options.startupActivityDbPath
+        let lastStartupDbPathResolveAttemptMs = 0
+        const STARTUP_DB_PATH_RETRY_MS = 2_000
+
+        const resolveStartupActivityDbPath = (): string | null => {
+          if (options.startupActivityDbPath !== undefined) {
+            return options.startupActivityDbPath
+          }
+          if (cachedStartupActivityDbPath !== undefined) {
+            return cachedStartupActivityDbPath
+          }
+          const now = Date.now()
+          if (
+            lastStartupDbPathResolveAttemptMs > 0 &&
+            now - lastStartupDbPathResolveAttemptMs < STARTUP_DB_PATH_RETRY_MS
+          ) {
+            return null
+          }
+          lastStartupDbPathResolveAttemptMs = now
+          const resolved = resolveOpencodeDbPath({
+            binary,
+            env: environment as OpencodePathEnv,
+          })
+          if (resolved !== null) {
+            cachedStartupActivityDbPath = resolved
+          }
+          return resolved
+        }
+
         const runTurn = (input: {
           readonly prompt: string
           readonly cwd: string
@@ -107,6 +147,10 @@ export class Opencode {
           })
           const promptOnStdin = shouldUsePromptStdin(promptInput)
           const commandName = input.command
+          // Snapshot just before spawn so only post-spawn task/child activity
+          // disarms the startup window (not historical review attempts).
+          const startedAfterMs = Date.now()
+          const knownSessionId = input.sessionId
 
           return runCliTurn({
             spawner,
@@ -118,6 +162,21 @@ export class Opencode {
             knownSessionId: input.sessionId,
             ...(input.onSessionId !== undefined
               ? { onSessionId: input.onSessionId }
+              : {}),
+            ...(options.startupTimeout !== undefined
+              ? { startupTimeout: options.startupTimeout }
+              : {}),
+            // Always attach when the Session is known: resolveDbPath may miss
+            // on the first poll and succeed later (unlike a one-shot null that
+            // dropped the probe for the whole turn).
+            ...(knownSessionId !== undefined
+              ? {
+                  observeStartup: observeOpencodeStartupActivity({
+                    sessionId: knownSessionId,
+                    startedAfterMs,
+                    resolveDbPath: resolveStartupActivityDbPath,
+                  }),
+                }
               : {}),
             observerLabel: "OpenCode",
             parseLine: (line) => {

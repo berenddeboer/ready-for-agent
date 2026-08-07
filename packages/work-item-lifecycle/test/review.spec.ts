@@ -8,6 +8,7 @@ import {
   AgentBackend,
   AgentBackendExitError,
   AgentBackendSessionIdMissingError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
 } from "@ready-for-agent/agent-backend"
 import { DatabaseTest } from "@ready-for-agent/db/test"
@@ -1939,6 +1940,44 @@ describe("review", () => {
         ),
       )
       expect(error).toBeInstanceOf(ReviewOpenCodeError)
+    }))
+
+  it("retains the startup-timeout cause in the Review failure message", () =>
+    withTemp(async (root) => {
+      const error = await run(
+        review(baseContext(root)).pipe(Effect.flip),
+        Layer.succeed(
+          AgentBackend,
+          AgentBackend.of({
+            startTurn: () =>
+              Effect.succeed({ sessionId: "unused", assistantText: "" }),
+            continueTurn: () =>
+              Effect.fail(
+                new AgentBackendStartupTimeoutError({
+                  cwd: root,
+                  startupTimeoutMs: 60_000,
+                  sessionId: "ses_review",
+                }),
+              ),
+            inspect: () =>
+              Effect.succeed({
+                backend: { id: "opencode" as const, label: "OpenCode" },
+                models: [],
+              }),
+          }),
+        ),
+      )
+      expect(error).toBeInstanceOf(ReviewOpenCodeError)
+      expect((error as ReviewOpenCodeError).message).toContain(
+        "no output within the startup window (60000ms)",
+      )
+      expect((error as ReviewOpenCodeError).cause).toEqual(
+        new AgentBackendStartupTimeoutError({
+          cwd: root,
+          startupTimeoutMs: 60_000,
+          sessionId: "ses_review",
+        }),
+      )
     }))
 
   it("maps missing Session ID from OpenCode", () =>

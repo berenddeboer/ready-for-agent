@@ -1,3 +1,4 @@
+import { mkdtempSync, rmSync } from "node:fs"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -7,11 +8,13 @@ import {
   AgentBackend,
   AgentBackendExitError,
   AgentBackendMalformedOutputError,
+  AgentBackendStartupTimeoutError,
   AgentBackendTimeoutError,
   type OnSessionId,
   PROMPT_ARGV_BYTE_LIMIT,
 } from "@ready-for-agent/agent-backend"
 import { Opencode, parseVerboseModelsOutput } from "../src/index.js"
+import { Database } from "bun:sqlite"
 import { describe, expect, it } from "bun:test"
 
 const withExecutable = async <A>(
@@ -488,6 +491,194 @@ describe("Opencode AgentBackend adapter", () => {
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
+  })
+
+  it("completes a /review turn when parent JSONL is silent past startup while a task subagent is active", async () => {
+    // Regression for #852: OpenCode persists the nested review task immediately
+    // but the outer JSONL stream stays quiet until the child finishes. The
+    // startup window must not treat that as a hang.
+    const childText = "READY_FOR_AGENT_RESULT: REVIEW_CLEAN"
+    const toolUse = JSON.stringify({
+      type: "tool_use",
+      sessionID: "ses_review_parent",
+      part: {
+        type: "tool",
+        tool: "task",
+        state: {
+          status: "completed",
+          input: { command: "review" },
+          output: `<task_result>\n${childText}\n</task_result>`,
+        },
+      },
+    })
+
+    const fixtureDir = mkdtempSync(join(tmpdir(), "opencode-review-startup-"))
+    const dbPath = join(fixtureDir, "opencode.db")
+    const db = new Database(dbPath)
+    db.exec(`
+      CREATE TABLE session (
+        id text PRIMARY KEY,
+        project_id text NOT NULL DEFAULT 'proj',
+        parent_id text,
+        slug text NOT NULL DEFAULT 'slug',
+        directory text NOT NULL DEFAULT '/tmp',
+        title text NOT NULL DEFAULT 'title',
+        version text NOT NULL DEFAULT '1',
+        time_created integer NOT NULL,
+        time_updated integer NOT NULL
+      );
+      CREATE TABLE part (
+        id text PRIMARY KEY,
+        message_id text NOT NULL DEFAULT 'msg',
+        session_id text NOT NULL,
+        time_created integer NOT NULL,
+        time_updated integer NOT NULL,
+        data text NOT NULL
+      );
+    `)
+    const parentCreated = Date.now() - 60_000
+    db.query(
+      `INSERT INTO session (id, time_created, time_updated) VALUES (?, ?, ?)`,
+    ).run("ses_review_parent", parentCreated, parentCreated)
+    db.close()
+
+    const directory = await mkdtemp(join(tmpdir(), "opencode-review-silent-"))
+    const binaryPath = join(directory, "opencode")
+    try {
+      await writeFile(
+        binaryPath,
+        [
+          "#!/bin/sh",
+          // Parent stream silent past the startup window, then emits the
+          // nested task result — matching real OpenCode /review behaviour.
+          // Window is deliberately wider than poll/seed slack to avoid flakes.
+          "sleep 0.8",
+          `printf '%s\\n' '${toolUse.replace(/'/g, `'\\''`)}'`,
+          "exit 0",
+          "",
+        ].join("\n"),
+      )
+      await chmod(binaryPath, 0o700)
+
+      // Seed child-session activity shortly after spawn so the OpenCode
+      // adapter's observeStartup probe disarms the startup watchdog.
+      const seedChild = async () => {
+        await Bun.sleep(40)
+        const live = new Database(dbPath)
+        const now = Date.now()
+        live
+          .query(
+            `INSERT INTO session (id, parent_id, time_created, time_updated)
+             VALUES (?, ?, ?, ?)`,
+          )
+          .run("ses_review_child", "ses_review_parent", now, now)
+        live.close()
+      }
+      void seedChild()
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const backend = yield* AgentBackend
+          return yield* backend.continueTurn({
+            sessionId: "ses_review_parent",
+            cwd: process.cwd(),
+            prompt: "Review uncommitted worktree changes.",
+            model: "test/model",
+            thinkingLevel: "test",
+            command: "/review",
+            timeout: "5 seconds",
+          })
+        }).pipe(
+          Effect.provide(
+            Opencode.layer({
+              binary: binaryPath,
+              keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+              startupActivityDbPath: dbPath,
+              // Past seed (40ms) and default poll (100ms); before parent stdout.
+              startupTimeout: "500 millis",
+            }).pipe(Layer.provide(BunServices.layer)),
+          ),
+        ),
+      )
+
+      expect(result).toEqual({
+        sessionId: "ses_review_parent",
+        assistantText: childText,
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+      rmSync(fixtureDir, { recursive: true, force: true })
+    }
+  })
+
+  it("still fails startup when a known session has no task subagent activity", async () => {
+    const fixtureDir = mkdtempSync(join(tmpdir(), "opencode-review-hang-"))
+    const dbPath = join(fixtureDir, "opencode.db")
+    const db = new Database(dbPath)
+    db.exec(`
+      CREATE TABLE session (
+        id text PRIMARY KEY,
+        project_id text NOT NULL DEFAULT 'proj',
+        parent_id text,
+        slug text NOT NULL DEFAULT 'slug',
+        directory text NOT NULL DEFAULT '/tmp',
+        title text NOT NULL DEFAULT 'title',
+        version text NOT NULL DEFAULT '1',
+        time_created integer NOT NULL,
+        time_updated integer NOT NULL
+      );
+      CREATE TABLE part (
+        id text PRIMARY KEY,
+        message_id text NOT NULL DEFAULT 'msg',
+        session_id text NOT NULL,
+        time_created integer NOT NULL,
+        time_updated integer NOT NULL,
+        data text NOT NULL
+      );
+    `)
+    const parentCreated = Date.now() - 60_000
+    db.query(
+      `INSERT INTO session (id, time_created, time_updated) VALUES (?, ?, ?)`,
+    ).run("ses_hang_parent", parentCreated, parentCreated)
+    db.close()
+
+    await withExecutable("sleep 100", async (binary) => {
+      try {
+        const error = await Effect.runPromise(
+          Effect.gen(function* () {
+            const backend = yield* AgentBackend
+            return yield* backend.continueTurn({
+              sessionId: "ses_hang_parent",
+              cwd: process.cwd(),
+              prompt: "Review uncommitted worktree changes.",
+              model: "test/model",
+              thinkingLevel: "test",
+              command: "/review",
+              timeout: "30 seconds",
+            })
+          }).pipe(
+            Effect.provide(
+              Opencode.layer({
+                binary,
+                keymaxxerMcpUrl: "http://127.0.0.1:6057/test/mcp",
+                startupActivityDbPath: dbPath,
+                startupTimeout: "200 millis",
+              }).pipe(Layer.provide(BunServices.layer)),
+            ),
+            Effect.flip,
+          ),
+        )
+        expect(error).toEqual(
+          new AgentBackendStartupTimeoutError({
+            cwd: process.cwd(),
+            startupTimeoutMs: 200,
+            sessionId: "ses_hang_parent",
+          }),
+        )
+      } finally {
+        rmSync(fixtureDir, { recursive: true, force: true })
+      }
+    })
   })
 
   it("does not fail the run when onSessionId fails", async () => {

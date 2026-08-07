@@ -1,6 +1,10 @@
 import { Effect, FileSystem } from "effect"
 import { SqlClient } from "effect/unstable/sql"
-import { AgentBackend, agentBackendLabel } from "@ready-for-agent/agent-backend"
+import {
+  AgentBackend,
+  AgentBackendStartupTimeoutError,
+  agentBackendLabel,
+} from "@ready-for-agent/agent-backend"
 import { DbService } from "@ready-for-agent/db-service"
 import { CurrentStepRun } from "./agent-turn-limiter.js"
 import type { LifecycleStepContext } from "./lifecycle-steps.js"
@@ -20,6 +24,24 @@ import {
   REVIEW_REVIEWING_MESSAGE,
   STEP_RUN_REASON,
 } from "./types.js"
+
+/**
+ * Operator-facing Review agent failure text. Retains the specific startup
+ * timeout cause so Step Run diagnostics are not only the generic wrapper.
+ */
+export const reviewAgentFailureMessage = (
+  backendLabel: string,
+  action: string,
+  cause: unknown,
+): string => {
+  if (cause instanceof AgentBackendStartupTimeoutError) {
+    return `${backendLabel} failed ${action}: no output within the startup window (${cause.startupTimeoutMs}ms)`
+  }
+  if (cause instanceof Error && cause.message.trim() !== "") {
+    return `${backendLabel} failed ${action}: ${cause.message}`
+  }
+  return `${backendLabel} failed ${action}`
+}
 
 /** Max build-model apply rounds per Review Step Run before Needs Human. */
 export const MAX_REVIEW_FIX_ROUNDS = 5
@@ -497,7 +519,11 @@ export const review = (context: LifecycleStepContext) =>
           Effect.mapError(
             (cause) =>
               new ReviewOpenCodeError({
-                message: `${agentBackendLabel(context.agentBackend)} failed to review the Work Item`,
+                message: reviewAgentFailureMessage(
+                  agentBackendLabel(context.agentBackend),
+                  "to review the Work Item",
+                  cause,
+                ),
                 worktreePath,
                 sessionId,
                 cause,
@@ -520,7 +546,11 @@ export const review = (context: LifecycleStepContext) =>
             Effect.mapError(
               (cause) =>
                 new ReviewOpenCodeError({
-                  message: `${agentBackendLabel(context.agentBackend)} failed to report the Review verdict`,
+                  message: reviewAgentFailureMessage(
+                    agentBackendLabel(context.agentBackend),
+                    "to report the Review verdict",
+                    cause,
+                  ),
                   worktreePath,
                   sessionId,
                   cause,
@@ -565,7 +595,11 @@ export const review = (context: LifecycleStepContext) =>
           Effect.mapError(
             (cause) =>
               new ReviewOpenCodeError({
-                message: `${agentBackendLabel(context.agentBackend)} failed while applying Review Findings`,
+                message: reviewAgentFailureMessage(
+                  agentBackendLabel(context.agentBackend),
+                  "while applying Review Findings",
+                  cause,
+                ),
                 worktreePath,
                 sessionId,
                 cause,
@@ -646,7 +680,11 @@ export const review = (context: LifecycleStepContext) =>
             Effect.mapError(
               (cause) =>
                 new ReviewOpenCodeError({
-                  message: `${agentBackendLabel(context.agentBackend)} failed during Review Rerun Assessment`,
+                  message: reviewAgentFailureMessage(
+                    agentBackendLabel(context.agentBackend),
+                    "during Review Rerun Assessment",
+                    cause,
+                  ),
                   worktreePath,
                   sessionId,
                   cause,
