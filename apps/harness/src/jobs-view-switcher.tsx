@@ -62,7 +62,8 @@ export function JobsViewSwitcher() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const onCompleted =
     pathname === "/completed" || pathname.startsWith("/completed/")
-  // `/settings` uses Pipeline as its canonical background (issue #840).
+  // `/settings` and Session Telemetry use Pipeline as canonical background
+  // (issues #840 / #841).
   const pipelineActive = isPipelineBackgroundPath(pathname)
   const reposActive = pathname === "/repos" || pathname.startsWith("/repos/")
   // Filters only drive the Pipeline board today (full in-memory item set).

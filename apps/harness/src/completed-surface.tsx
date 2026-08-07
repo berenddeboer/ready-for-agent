@@ -7,7 +7,7 @@
 import { type ReactNode, useState } from "react"
 import { CompletedWorkItemRow } from "./completed-work-item-row.js"
 import type { Repository, WorkItem } from "./routes/index.js"
-import { SessionUsageDialog } from "./routes/index.js"
+import { SessionUsageDialog } from "./session-usage-dialog.js"
 import { ui } from "./ui.js"
 
 export type CompletedIssueLookup = {

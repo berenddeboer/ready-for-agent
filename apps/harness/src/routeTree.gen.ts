@@ -15,6 +15,7 @@ import { Route as GraphqlRouteImport } from './routes/graphql'
 import { Route as KanbanRouteImport } from './routes/kanban'
 import { Route as ReposRouteImport } from './routes/repos'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as SessionWorkItemIdTelemetryRouteImport } from './routes/session.$workItemId.telemetry'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,12 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SessionWorkItemIdTelemetryRoute =
+  SessionWorkItemIdTelemetryRouteImport.update({
+    id: '/session/$workItemId/telemetry',
+    path: '/session/$workItemId/telemetry',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +61,7 @@ export interface FileRoutesByFullPath {
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
   '/settings': typeof SettingsRoute
+  '/session/$workItemId/telemetry': typeof SessionWorkItemIdTelemetryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +70,7 @@ export interface FileRoutesByTo {
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
   '/settings': typeof SettingsRoute
+  '/session/$workItemId/telemetry': typeof SessionWorkItemIdTelemetryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,13 +80,27 @@ export interface FileRoutesById {
   '/kanban': typeof KanbanRoute
   '/repos': typeof ReposRoute
   '/settings': typeof SettingsRoute
+  '/session/$workItemId/telemetry': typeof SessionWorkItemIdTelemetryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/completed' | '/graphql' | '/kanban' | '/repos' | '/settings'
+    | '/'
+    | '/completed'
+    | '/graphql'
+    | '/kanban'
+    | '/repos'
+    | '/settings'
+    | '/session/$workItemId/telemetry'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/completed' | '/graphql' | '/kanban' | '/repos' | '/settings'
+  to:
+    | '/'
+    | '/completed'
+    | '/graphql'
+    | '/kanban'
+    | '/repos'
+    | '/settings'
+    | '/session/$workItemId/telemetry'
   id:
     | '__root__'
     | '/'
@@ -86,6 +109,7 @@ export interface FileRouteTypes {
     | '/kanban'
     | '/repos'
     | '/settings'
+    | '/session/$workItemId/telemetry'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,6 +119,7 @@ export interface RootRouteChildren {
   KanbanRoute: typeof KanbanRoute
   ReposRoute: typeof ReposRoute
   SettingsRoute: typeof SettingsRoute
+  SessionWorkItemIdTelemetryRoute: typeof SessionWorkItemIdTelemetryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -141,6 +166,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/session/$workItemId/telemetry': {
+      id: '/session/$workItemId/telemetry'
+      path: '/session/$workItemId/telemetry'
+      fullPath: '/session/$workItemId/telemetry'
+      preLoaderRoute: typeof SessionWorkItemIdTelemetryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -151,6 +183,7 @@ const rootRouteChildren: RootRouteChildren = {
   KanbanRoute: KanbanRoute,
   ReposRoute: ReposRoute,
   SettingsRoute: SettingsRoute,
+  SessionWorkItemIdTelemetryRoute: SessionWorkItemIdTelemetryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -113,11 +113,9 @@ describe("Interchange phase 5: dialogs, menus, chrome + Ledger teardown", () => 
   })
 
   test("session usage dialog is narrow shell with table and telemetry banners", () => {
-    const home = homeSource()
-    const dialog = sliceBetween(
-      home,
-      "export function SessionUsageDialog",
-      "export function JobsCardSkeleton",
+    const dialog = readFileSync(
+      join(import.meta.dir, "../src/session-usage-dialog.tsx"),
+      "utf8",
     )
     expect(dialog).toContain("ui.dialogPanel")
     expect(dialog).toContain("ui.dialogPanelNarrow")

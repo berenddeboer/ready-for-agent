@@ -80,10 +80,13 @@ export const ensureConfiguredDefaultBuildModel = async (): Promise<void> => {
     models { id }
   }`)
 
-  if (
-    data.config.defaultModel !== null &&
-    data.config.defaultModel.length > 0
-  ) {
+  const catalogIds = new Set(
+    data.models.map((model) => model.id).filter((id) => id.length > 0),
+  )
+  const current = data.config.defaultModel
+  // Non-empty alone is not enough: a seeded non-catalog value (e.g. from another
+  // e2e feature's SQL fixture) still blocks Save via catalog-only gates (#841).
+  if (current !== null && current.length > 0 && catalogIds.has(current)) {
     return
   }
 
