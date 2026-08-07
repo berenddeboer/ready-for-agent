@@ -3,6 +3,8 @@
  * agent-authored title/body used identically for git commit and draft PR.
  */
 
+import { promptUserContentSection } from "./sanitize-prompt-user-content.js"
+
 /** GitHub pull request title limit. */
 export const PUBLICATION_TITLE_MAX_LENGTH = 256
 
@@ -241,15 +243,14 @@ export const buildCreatePrFallbackPromptWithCopy = (input: {
     "Push this exact branch if needed, then open a PR against the repository default base branch.",
     "Create the pull request as a draft.",
     "Use this exact title and body — do not invent different publication copy:",
-    `Title: ${input.title}`,
-    "Body:",
-    input.body,
+    promptUserContentSection("publication_title", input.title),
+    promptUserContentSection("publication_body", input.body),
     `If a suitable open PR whose head is exactly ${input.branch} already exists, succeed without creating a duplicate; if it is still a draft, update its title and body to match the copy above.`,
     "Do not merge the pull request.",
     input.credentialGuidance,
     "",
     "Bounded native failure diagnostics:",
-    input.diagnostics,
+    promptUserContentSection("diagnostics", input.diagnostics),
   ].join("\n")
 
 export const buildCommitFallbackPromptWithCopy = (input: {
@@ -262,11 +263,8 @@ export const buildCommitFallbackPromptWithCopy = (input: {
     "The harness attempted to create a git commit for the implementation changes in this worktree and failed.",
     "Repair the underlying problem and create the commit yourself.",
     "Prefer this exact commit message (subject + body). Only change the message if repository policy (for example commitlint) requires a different form:",
-    "-----",
-    `${input.title}`,
-    "",
-    input.body,
-    "-----",
+    promptUserContentSection("publication_title", input.title),
+    promptUserContentSection("publication_body", input.body),
     `The commit must still close GitHub issue #${input.issueNumber} (include Closes #${input.issueNumber} in the body unless policy forbids it — then mention the issue another accepted way).`,
     "Stage only the relevant implementation changes, then commit.",
     "Exclude harness-owned diagnostic artifacts such as `.ready-for-agent/`.",
@@ -274,5 +272,5 @@ export const buildCommitFallbackPromptWithCopy = (input: {
     "Do not open a pull request.",
     "",
     "Bounded native failure diagnostics:",
-    input.diagnostics,
+    promptUserContentSection("diagnostics", input.diagnostics),
   ].join("\n")
