@@ -191,7 +191,7 @@ KEYMAXXER_ENABLED=false npx ready-for-agent@latest
 
 # Frequently Asked Questions
 
-1. Is there support for agents other than OpenCode?
+1. What coding cli agents are supported?
 
 Yes. Settings can select [OpenCode](https://opencode.ai/),
 [Codex](https://github.com/openai/codex), [Grok Build](https://docs.x.ai/), or
@@ -202,7 +202,18 @@ Items are unfinished (including Needs Human). Model catalogs and effort
 backend. Model selection is catalog-only for every backend: build and review
 models are picked from the Agent Backend's current catalog, never typed in.
 
-2. Can I run Claude Code through Amazon Bedrock?
+2. Does the harness support a Forge other than GitHub?
+
+Yes. GitLab Repository identity, Issue reconciliation, and local Agent Turns
+through Review are supported. GitLab Pull Request lifecycle operations are
+being delivered in later phases.
+
+3. Can I use my Claude subscription?
+
+Yes, since we use Claude Code directly instead of the API, this is
+permissible usage.
+
+4. Can I run Claude Code through Amazon Bedrock?
 
 Yes. Export `CLAUDE_CODE_USE_BEDROCK=1` and your AWS credentials/region on the
 harness process, select **Claude Code Bedrock**, then Recheck. Status shows
@@ -218,16 +229,15 @@ discovered profile is available after Recheck; listing does not prove
 InvokeModel access. Details:
 [docs/claude-code-amazon-bedrock.md](docs/claude-code-amazon-bedrock.md).
 
-3. Does the harness support a Forge other than GitHub?
-
-Yes. GitLab Repository identity, Issue reconciliation, and local Agent Turns
-through Review are supported. GitLab Pull Request lifecycle operations are
-being delivered in later phases.
-
-4. Can I implement something locally, and then check myself?
+5. Can I implement something locally, and then check myself?
 
 Yes, pick "Implement locally" from the kebab menu. Everything stays
 local, and no commit is made.
+
+6. Can I specify a different model or coding agent per repo?
+
+Yes, check the repo settings. This allows you to configure more
+expensive models for more complex code, and cheaper models for others.
 
 # Architecture
 
