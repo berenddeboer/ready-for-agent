@@ -176,7 +176,9 @@ const HARNESS_DEFAULT_BACKEND_VALUE = ""
 /**
  * Dedicated cache identity for GitHub open non-draft Pull Request counts.
  * Independent of {@link repositoriesQuery}: a slow or failed count must not
- * cancel or block the Configured Repositories projection.
+ * cancel or block the Configured Repositories projection. Failures remain
+ * failures so TanStack Query can retain the last successful count map, or
+ * present unavailable when there is no successful observation yet.
  */
 const openPullRequestCountsQuery = {
   queryKey: openPullRequestCountsQueryKey,

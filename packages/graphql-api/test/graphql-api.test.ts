@@ -18,6 +18,7 @@ import {
   GitHubRepositoryUnavailableError,
   GitHubService,
   type GitHubServiceShape,
+  GitHubThrottledError,
 } from "@ready-for-agent/github-service"
 import {
   GitLabProjectUnavailableError,
@@ -2828,7 +2829,7 @@ describe("GraphQL API", () => {
     })
   })
 
-  test("pullRequestCount degrades to zero when GitHub is unavailable", async () => {
+  test("pullRequestCount leaves a GitHub-unavailable observation unavailable", async () => {
     await runtime.dispose()
     runtime = makeRuntime(
       {
@@ -2850,8 +2851,42 @@ describe("GraphQL API", () => {
         query: `query { repositories { pullRequestCount } }`,
       }),
     )
-    expect(await response.json()).toEqual({
-      data: { repositories: [{ pullRequestCount: 0 }] },
+    expect(await response.json()).toMatchObject({
+      data: null,
+      errors: [{}],
+    })
+  })
+
+  test("pullRequestCount reports GitHub throttling instead of a successful zero", async () => {
+    const retryAt = Date.parse("2026-08-07T12:00:00.000Z")
+    await runtime.dispose()
+    runtime = makeRuntime(
+      { listRepositories: Effect.succeed([repository]) },
+      {},
+      {},
+      {},
+      {},
+      {},
+      {
+        countOpenNonDraftPullRequests: () =>
+          Effect.fail(
+            new GitHubThrottledError({ retryAt, usedFallback: false }),
+          ),
+      },
+    )
+
+    const response = await createGraphqlApi(runtime).fetch(
+      graphqlRequest({
+        query: `query { repositories { pullRequestCount } }`,
+      }),
+    )
+    expect(await response.json()).toMatchObject({
+      data: null,
+      errors: [
+        {
+          extensions: { code: "GITHUB_THROTTLED", retryAt },
+        },
+      ],
     })
   })
 

@@ -1429,6 +1429,104 @@ describe("Keymaxxer-backed GitHub layer", () => {
   )
 
   it.effect(
+    "a throttled count cache miss reaches neither GitHub adapter before its retry deadline",
+    () =>
+      Effect.gen(function* () {
+        let keymaxxerSecretLookups = 0
+        let keymaxxerHelperRuns = 0
+        let ambientTokenResolutions = 0
+        let ambientCountOperations = 0
+        const coordinator = makeGitHubOperationCoordinator()
+        coordinator.reportThrottle(
+          new GitHubThrottledError({
+            retryAt: Date.now() + 60_000,
+            usedFallback: false,
+          }),
+        )
+        const coordinatorLayer = Layer.succeed(
+          GitHubOperationCoordinator,
+          coordinator,
+        )
+        const keymaxxerLayer = Layer.succeed(KeymaxxerService, {
+          initialize: Effect.void,
+          findSecret: () =>
+            Effect.sync(() => {
+              keymaxxerSecretLookups += 1
+              return "GITHUB_TOKEN_ACME_WIDGETS"
+            }),
+          findSecrets: () => Effect.die("not used"),
+          hasSecret: () => Effect.die("not used"),
+          addSecret: () => Effect.die("not used"),
+          runWithSecrets: () =>
+            Effect.sync(() => {
+              keymaxxerHelperRuns += 1
+              return {
+                exitCode: 0,
+                stdout: "7",
+                stderr: successfulHelperControl,
+              }
+            }),
+        })
+        const ambientService = {
+          listReadyIssues: () => Effect.die("not used"),
+          getAuthenticatedUserLogin: () => Effect.die("not used"),
+          getOpenPullRequestNumber: () => Effect.die("not used"),
+          findOpenPullRequestNumber: () => Effect.die("not used"),
+          createDraftPullRequest: () => Effect.die("not used"),
+          updateOpenDraftPullRequestCopy: () => Effect.die("not used"),
+          countOpenNonDraftPullRequests: () =>
+            Effect.sync(() => {
+              ambientCountOperations += 1
+              return 7
+            }),
+          getPullRequestCheckStatus: () => Effect.die("not used"),
+          getPrStatusCheckDiagnostics: () => Effect.die("not used"),
+          observeAutomatedReviewEvidence: () => Effect.die("not used"),
+          getPullRequestLifecycleStatus: () => Effect.die("not used"),
+          markPullRequestReadyForReview: () => Effect.die("not used"),
+          mergePullRequest: () => Effect.die("not used"),
+          rerunWorkflowRun: () => Effect.die("not used"),
+          ensureIssueCompletedWithSummary: () => Effect.die("not used"),
+        } satisfies GitHubServiceShape
+        const scope = yield* Effect.scope
+        const keymaxxerContext = yield* Layer.buildWithScope(
+          makeKeymaxxerGitHubLayer({ workspaceRoot: "/workspace" }).pipe(
+            Layer.provide(keymaxxerLayer),
+            Layer.provide(coordinatorLayer),
+          ),
+          scope,
+        )
+        const ambientContext = yield* Layer.buildWithScope(
+          ambientGitHubLayer({
+            workspaceRoot: "/workspace",
+            resolveToken: async () => {
+              ambientTokenResolutions += 1
+              return "ambient-token"
+            },
+            makeService: () => ambientService,
+          }).pipe(Layer.provide(coordinatorLayer), Layer.provide(processLayer)),
+          scope,
+        )
+        const keymaxxer = Context.get(keymaxxerContext, GitHubService)
+        const ambient = Context.get(ambientContext, GitHubService)
+
+        const [keymaxxerFailure, ambientFailure] = yield* Effect.all([
+          keymaxxer
+            .countOpenNonDraftPullRequests(acmeWidgets)
+            .pipe(Effect.flip),
+          ambient.countOpenNonDraftPullRequests(acmeWidgets).pipe(Effect.flip),
+        ])
+
+        expect(keymaxxerFailure).toBeInstanceOf(GitHubThrottledError)
+        expect(ambientFailure).toBeInstanceOf(GitHubThrottledError)
+        expect(keymaxxerSecretLookups).toBe(0)
+        expect(keymaxxerHelperRuns).toBe(0)
+        expect(ambientTokenResolutions).toBe(0)
+        expect(ambientCountOperations).toBe(0)
+      }),
+  )
+
+  it.effect(
     "raw Forge credentials stay in the Keymaxxer child and never enter the count result path",
     () =>
       Effect.gen(function* () {
