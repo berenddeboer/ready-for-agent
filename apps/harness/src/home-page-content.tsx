@@ -2866,21 +2866,6 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
-  const implementLocally = useMutation({
-    mutationFn: async () => {
-      const result = await graphql.mutation({
-        implementLocally: {
-          __args: {
-            repositoryId: issue.repositoryId,
-            issueNumber: issue.issueNumber,
-          },
-          ...workItemFields,
-        },
-      })
-      return result.implementLocally
-    },
-    onSuccess: onImplementSuccess,
-  })
   const queueIssue = useMutation({
     mutationFn: async () => {
       const result = await graphql.mutation({
@@ -2896,8 +2881,7 @@ function RepositoryIssueRow({
     },
     onSuccess: onImplementSuccess,
   })
-  const implementPending =
-    implementNow.isPending || implementLocally.isPending || queueIssue.isPending
+  const implementPending = implementNow.isPending || queueIssue.isPending
 
   useEffect(() => {
     if (!menuOpen) return
@@ -2928,71 +2912,26 @@ function RepositoryIssueRow({
               {issue.title}
             </a>
             {canImplement && (
-              <span className="relative" data-issue-menu={issue.id}>
-                <button
-                  type="button"
-                  className={ui.repoIssueImplementBtn}
-                  aria-label={`Implement issue #${issue.issueNumber}`}
-                  aria-haspopup="menu"
-                  aria-expanded={menuOpen}
-                  disabled={implementPending}
-                  onClick={() => {
-                    if (implementPending) return
-                    setMenuOpen((open) => !open)
-                  }}
+              <button
+                type="button"
+                className={ui.repoIssueImplementBtn}
+                aria-label={`Implement issue #${issue.issueNumber}`}
+                disabled={implementPending}
+                onClick={() => {
+                  queueIssue.reset()
+                  implementNow.mutate()
+                }}
+              >
+                <svg
+                  aria-hidden="true"
+                  className={ui.repoIssueImplementIcon}
+                  viewBox="0 0 24 24"
+                  fill="currentColor"
                 >
-                  <svg
-                    aria-hidden="true"
-                    className={ui.repoIssueImplementIcon}
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.12-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z" />
-                  </svg>
-                  {implementPending ? "Starting..." : "Implement"}
-                </button>
-                {menuOpen && !implementPending && (
-                  <div
-                    role="menu"
-                    className={cx(
-                      ui.menuPanel,
-                      ui.repoIssueImplementMenu,
-                      "min-w-44",
-                    )}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={ui.menuItem}
-                      disabled={implementPending}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        implementLocally.reset()
-                        queueIssue.reset()
-                        implementNow.mutate()
-                      }}
-                    >
-                      {implementNow.isPending ? "Starting..." : "Implement now"}
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={ui.menuItem}
-                      disabled={implementPending}
-                      onClick={() => {
-                        setMenuOpen(false)
-                        implementNow.reset()
-                        queueIssue.reset()
-                        implementLocally.mutate()
-                      }}
-                    >
-                      {implementLocally.isPending
-                        ? "Starting..."
-                        : "Implement locally"}
-                    </button>
-                  </div>
-                )}
-              </span>
+                  <path d="M8 5.14v13.72a1 1 0 0 0 1.53.85l10.12-6.86a1 1 0 0 0 0-1.7L9.53 4.29A1 1 0 0 0 8 5.14Z" />
+                </svg>
+                {implementPending ? "Starting..." : "Implement"}
+              </button>
             )}
           </span>
           {issue.issueAuthor !== null && issue.issueAuthor !== "" && (
@@ -3032,7 +2971,6 @@ function RepositoryIssueRow({
                     onClick={() => {
                       setMenuOpen(false)
                       implementNow.reset()
-                      implementLocally.reset()
                       queueIssue.mutate()
                     }}
                   >
@@ -3068,9 +3006,7 @@ function RepositoryIssueRow({
           onOpenSession={onOpenSession}
         />
       )}
-      {(implementNow.isError ||
-        implementLocally.isError ||
-        queueIssue.isError) && (
+      {(implementNow.isError || queueIssue.isError) && (
         <Banner
           className={cx(ui.bannerCompact, ui.repoIssueError)}
           tone="alarm"

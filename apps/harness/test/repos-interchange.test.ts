@@ -112,6 +112,16 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(issues).toContain("ui.repoIssueImplementBtn")
     expect(issues).toContain("ui.repoIssueImplementIcon")
     expect(issues).toContain("disabled={implementPending}")
+    const implementAction = sliceBetweenMarkers(
+      issues,
+      "{canImplement && (",
+      "{canQueue && (",
+    )
+    expect(implementAction).toContain("queueIssue.reset()")
+    expect(implementAction).toContain("implementNow.mutate()")
+    expect(implementAction).not.toContain('aria-haspopup="menu"')
+    expect(implementAction).not.toContain('role="menu"')
+    expect(implementAction).not.toContain("Implement locally")
     expect(issues).toContain("ui.repoIssueAuthor")
     expect(issues).toContain("ui.stamp")
     expect(issues).toContain("ui.stampClosed")
@@ -137,6 +147,7 @@ describe("Interchange phase 4: repos page + blank slate", () => {
     expect(ui).toMatch(/repoIssueTitle:\s*\n\s*"m-0 block /)
     expect(ui).toMatch(/repoIssueImplementBtn:[\s\S]*?bg-lane-build/)
     expect(ui).toMatch(/repoIssueImplementBtn:[\s\S]*?min-h-7/)
+    expect(ui).not.toContain("repoIssueImplementMenu:")
     expect(ui).toMatch(/stampClosed:[\s\S]*?border-dashed/)
     expect(ui).toMatch(/stampBlocked:[\s\S]*?bg-lane-queue/)
   })
