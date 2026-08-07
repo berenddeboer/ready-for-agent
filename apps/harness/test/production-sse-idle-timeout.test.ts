@@ -371,6 +371,7 @@ describe("production GraphQL SSE idle timeout", () => {
         recoverOrphanedStepRuns: Effect.succeed(0),
         interruptRunningStepRunsFromPriorWorker: Effect.succeed(0),
         runStep: unused,
+        wakePostponedStep: unused,
         retry: unused,
         pause: unused,
         start: unused,

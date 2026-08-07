@@ -10,6 +10,7 @@ import {
   Layer,
   Option,
   Result,
+  Schema,
   Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
@@ -20,6 +21,7 @@ import {
   DbServiceLive,
   RepositoryHasRunningStepError,
 } from "@ready-for-agent/db-service"
+import { GitHubThrottledError } from "@ready-for-agent/github-service"
 import {
   EnqueueError,
   type JobId,
@@ -7790,6 +7792,296 @@ describe("WorkItemLifecycle", () => {
           expect(after.stepRuns[0]!.finishedAt).toBeNull()
         }).pipe(Effect.provide(layer)),
       )
+    })
+
+    it("postpones a throttled Watch attempt and wakes a fresh attempt at the persisted deadline", () => {
+      const retryAt = 60_000
+      const throttledSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.fail(
+            new GitHubThrottledError({ retryAt, usedFallback: false }),
+          ),
+      }
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const queue = yield* QueueService
+          const sql = yield* SqlClient.SqlClient
+          const { repository, issue } = yield* seedActionableIssue
+          const created = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+
+          // Create Worktree through Create PR, then the first Watch attempt.
+          yield* driveThroughCreatePrAlreadyReady(created.id)
+          const postponedResult = yield* claimAndRunPending
+          expect(postponedResult._tag).toBe("processed")
+          if (postponedResult._tag === "processed") {
+            expect(postponedResult.workItem.state).toBe(
+              "watch_pr_status_checks",
+            )
+            expect(postponedResult.workItem.holdsWorkerSlot).toBe(false)
+            expect(postponedResult.workItem.waitingSince).toBeNull()
+            expect(postponedResult.workItem.stepRuns.at(-1)).toMatchObject({
+              step: "watch_pr_status_checks",
+              status: "postponed",
+              reasonCode: STEP_RUN_REASON.githubThrottled,
+              postponedUntil: new Date(retryAt),
+            })
+            expect(
+              postponedResult.workItem.stepRuns.filter(
+                (run) => run.status === "queued" || run.status === "running",
+              ),
+            ).toHaveLength(0)
+          }
+
+          const delayedJobs = yield* Schema.decodeUnknownEffect(
+            Schema.Array(
+              Schema.Struct({
+                queue: Schema.String,
+                available_at: Schema.Finite,
+              }),
+            ),
+          )(yield* sql.unsafe(`SELECT queue, available_at FROM job_queue`))
+          expect(delayedJobs).toEqual([
+            { queue: WORK_ITEM_LIFECYCLE_QUEUE, available_at: retryAt },
+          ])
+          expect(
+            Option.isNone(yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)),
+          ).toBe(true)
+
+          yield* TestClock.adjust(retryAt)
+          const wake = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+          expect(Option.isSome(wake)).toBe(true)
+          if (Option.isNone(wake)) {
+            return yield* Effect.die("expected the due GitHub wake")
+          }
+          expect(wake.value.payload).toEqual({
+            _tag: "work-item-wake",
+            workItemId: created.id,
+            postponedUntil: retryAt,
+          })
+          const wakeResult = yield* lifecycle.wakePostponedStep({
+            workItemId: created.id,
+            postponedUntil: retryAt,
+          })
+          expect(wakeResult).toEqual({ _tag: "woke" })
+          expect(
+            yield* lifecycle.wakePostponedStep({
+              workItemId: created.id,
+              postponedUntil: retryAt,
+            }),
+          ).toEqual({ _tag: "stale" })
+          yield* queue.acknowledge(wake.value.jobId)
+
+          const awakened = yield* lifecycle.getWorkItem(created.id)
+          expect(awakened.holdsWorkerSlot).toBe(true)
+          expect(awakened.waitingSince).toBeNull()
+          expect(awakened.stepRuns.at(-2)).toMatchObject({
+            step: "watch_pr_status_checks",
+            status: "postponed",
+            postponedUntil: new Date(retryAt),
+          })
+          expect(awakened.stepRuns.at(-1)).toMatchObject({
+            step: "watch_pr_status_checks",
+            status: "queued",
+            postponedUntil: null,
+          })
+        }).pipe(
+          Effect.provide(
+            makeTestLayer(throttledSteps).pipe(
+              Layer.provideMerge(TestClock.layer()),
+            ),
+          ),
+        ),
+      )
+    })
+
+    it("admits older Worker Slot waiters before a due GitHub wake", () => {
+      const retryAt = 60_000
+      const throttledSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.fail(
+            new GitHubThrottledError({ retryAt, usedFallback: false }),
+          ),
+      }
+
+      return Effect.runPromise(
+        Effect.gen(function* () {
+          const lifecycle = yield* WorkItemLifecycle
+          const db = yield* DbService
+          const { repository, issue } = yield* seedActionableIssue
+          const config = yield* db.getConfig
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 1,
+          })
+
+          const throttled = yield* lifecycle.implementNow(
+            repository.id,
+            issue.issueNumber,
+          )
+          yield* driveThroughCreatePrAlreadyReady(throttled.id)
+
+          const seedWaiter = (suffix: string) =>
+            Effect.gen(function* () {
+              const waiterRepository = yield* db.addRepository({
+                ...sampleRepository,
+                localPath: `/repos/acme/wake-waiter-${suffix}.git`,
+                projectPath: `acme/wake-waiter-${suffix}`,
+              })
+              const waiterIssue = yield* db.storeIssue({
+                repositoryId: waiterRepository.id,
+                issueNumber: 42,
+                ...sampleIssueFields,
+                url: `https://github.com/acme/wake-waiter-${suffix}/issues/42`,
+              })
+              return { waiterRepository, waiterIssue }
+            })
+
+          const firstWaiterIssue = yield* seedWaiter("first")
+          const secondWaiterIssue = yield* seedWaiter("second")
+          const firstWaiter = yield* lifecycle.implementNow(
+            firstWaiterIssue.waiterRepository.id,
+            firstWaiterIssue.waiterIssue.issueNumber,
+          )
+          const secondWaiter = yield* lifecycle.implementNow(
+            secondWaiterIssue.waiterRepository.id,
+            secondWaiterIssue.waiterIssue.issueNumber,
+          )
+          expect(firstWaiter.waitingSince).not.toBeNull()
+          expect(secondWaiter.waitingSince).not.toBeNull()
+
+          yield* claimAndRunPending
+          expect(
+            (yield* lifecycle.getWorkItem(firstWaiter.id)).holdsWorkerSlot,
+          ).toBe(true)
+          expect(
+            (yield* lifecycle.getWorkItem(secondWaiter.id)).waitingSince,
+          ).not.toBeNull()
+
+          yield* db.updateConfig({
+            selectedAgentBackend: "opencode",
+            defaultModel:
+              config.defaultModel ?? "opencode/deepseek-v4-flash-free",
+            defaultThinkingLevel: config.defaultThinkingLevel ?? "low",
+            reviewModel: config.reviewModel,
+            reviewThinkingLevel: config.reviewThinkingLevel,
+            maxConcurrentAgentTurns: config.maxConcurrentAgentTurns,
+            maxConcurrentWorkItems: 2,
+          })
+          yield* TestClock.adjust(retryAt)
+          expect(
+            yield* lifecycle.wakePostponedStep({
+              workItemId: throttled.id,
+              postponedUntil: retryAt,
+            }),
+          ).toEqual({ _tag: "woke" })
+
+          const admittedOlderWaiter = yield* lifecycle.getWorkItem(
+            secondWaiter.id,
+          )
+          const waitingWake = yield* lifecycle.getWorkItem(throttled.id)
+          expect(admittedOlderWaiter.holdsWorkerSlot).toBe(true)
+          expect(admittedOlderWaiter.waitingSince).toBeNull()
+          expect(waitingWake.holdsWorkerSlot).toBe(false)
+          expect(waitingWake.waitingSince).not.toBeNull()
+          expect(
+            waitingWake.stepRuns.filter(
+              (run) => run.status === "queued" || run.status === "running",
+            ),
+          ).toHaveLength(0)
+        }).pipe(
+          Effect.provide(
+            makeTestLayer(throttledSteps).pipe(
+              Layer.provideMerge(TestClock.layer()),
+            ),
+          ),
+        ),
+      )
+    })
+
+    it("persists a postponed Watch attempt and delayed wake across restart", async () => {
+      const retryAt = 60_000
+      const throttledSteps: LifecycleStepsShape = {
+        ...successfulSteps,
+        watchPrStatusChecks: () =>
+          Effect.fail(
+            new GitHubThrottledError({ retryAt, usedFallback: false }),
+          ),
+      }
+      const root = await mkdtemp(join(tmpdir(), "rfa-github-throttle-"))
+      const dbPath = join(root, "restart.db")
+
+      try {
+        const workItemId = await Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const { repository, issue } = yield* seedActionableIssue
+                const created = yield* lifecycle.implementNow(
+                  repository.id,
+                  issue.issueNumber,
+                )
+                yield* driveThroughCreatePrAlreadyReady(created.id)
+                yield* claimAndRunPending
+                return created.id
+              }),
+              makeRestartTestLayer(throttledSteps, dbPath),
+            ),
+          ),
+        )
+
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.provide(
+              Effect.gen(function* () {
+                const lifecycle = yield* WorkItemLifecycle
+                const queue = yield* QueueService
+                yield* TestClock.setTime(retryAt)
+
+                const wake = yield* queue.rawClaim(WORK_ITEM_LIFECYCLE_QUEUE)
+                expect(Option.isSome(wake)).toBe(true)
+                if (Option.isNone(wake)) {
+                  return yield* Effect.die("expected persisted GitHub wake")
+                }
+                expect(
+                  yield* lifecycle.wakePostponedStep({
+                    workItemId,
+                    postponedUntil: retryAt,
+                  }),
+                ).toEqual({ _tag: "woke" })
+                yield* queue.acknowledge(wake.value.jobId)
+
+                const reloaded = yield* lifecycle.getWorkItem(workItemId)
+                expect(reloaded.stepRuns.at(-2)).toMatchObject({
+                  step: "watch_pr_status_checks",
+                  status: "postponed",
+                  postponedUntil: new Date(retryAt),
+                })
+                expect(reloaded.stepRuns.at(-1)).toMatchObject({
+                  step: "watch_pr_status_checks",
+                  status: "queued",
+                })
+              }),
+              makeRestartTestLayer(successfulSteps, dbPath),
+            ),
+          ),
+        )
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
     })
 
     it("records typed handler failure as Failed Step Run and leaves the pending step", () => {
