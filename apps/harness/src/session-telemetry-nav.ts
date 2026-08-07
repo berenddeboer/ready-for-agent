@@ -1,5 +1,6 @@
 /**
- * Navigate to the browser-addressable Session Telemetry overlay (issue #841).
+ * Navigate to the browser-addressable Session Telemetry overlay
+ * (issues #841 / #843). Shared by Pipeline, Repos, and Completed.
  *
  * Route key is the owning Work Item ID (ADR 0048). Optional sessionId is only a
  * history-state display hint until the session query resolves.

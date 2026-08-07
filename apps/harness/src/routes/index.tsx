@@ -92,7 +92,7 @@ import {
   readRepositorySettingsHistoryState,
   wasRepositorySettingsOpenedFromInAppThisDocument,
 } from "../routed-dialog.js"
-import { SessionUsageDialog } from "../session-usage-dialog.js"
+import { openSessionTelemetry } from "../session-telemetry-nav.js"
 import { sessionWorktreeParts } from "../session-worktree-line.js"
 import { cx, ui } from "../ui.js"
 import { workItemIssueUrl } from "../work-item-issue-url.js"
@@ -3058,15 +3058,14 @@ function RepositoryIssues({
   workItemsLoading: boolean
 }) {
   const { data: issues } = useSuspenseQuery(issuesQuery(repository.id))
-  // One Session usage dialog for the whole list (not per issue row). Title ids
-  // are per-instance (useId) so coexistence with the root route-driven dialog
-  // remains valid until #843 unifies ownership.
-  const [sessionDialog, setSessionDialog] = useState<{
-    workItemId: string
-    sessionId: string
-  } | null>(null)
+  // Session Telemetry is route-owned at root (`/session/<work-item-id>/telemetry`).
+  const navigate = useNavigate()
   const onOpenSession = (workItemId: string, sessionId: string) => {
-    setSessionDialog({ workItemId, sessionId })
+    void openSessionTelemetry({
+      navigate,
+      workItemId,
+      sessionId,
+    })
   }
 
   if (issues.length === 0) {
@@ -3086,48 +3085,40 @@ function RepositoryIssues({
   }
 
   return (
-    <>
-      <ul className={ui.repoIssuesList}>
-        {issues.map((issue) => {
-          if (issue.parent !== null) return null
-          if (!issue.hasChildren) {
-            return (
-              <RepositoryIssueRow
-                issue={issue}
-                key={issue.id}
-                repository={repository}
-                workItems={workItems}
-                workItemsLoading={workItemsLoading}
-                onOpenSession={onOpenSession}
-              />
-            )
-          }
-
-          const children = childrenByParent.get(issue.issueNumber) ?? []
-          const closedChildren = children.filter(
-            (child) => child.state === "CLOSED",
-          ).length
+    <ul className={ui.repoIssuesList}>
+      {issues.map((issue) => {
+        if (issue.parent !== null) return null
+        if (!issue.hasChildren) {
           return (
-            <ParentIssueGroup
+            <RepositoryIssueRow
+              issue={issue}
               key={issue.id}
-              parent={issue}
-              childIssues={children}
-              closedChildren={closedChildren}
               repository={repository}
               workItems={workItems}
               workItemsLoading={workItemsLoading}
               onOpenSession={onOpenSession}
             />
           )
-        })}
-      </ul>
-      <SessionUsageDialog
-        workItemId={sessionDialog?.workItemId ?? null}
-        sessionId={sessionDialog?.sessionId ?? null}
-        open={sessionDialog !== null}
-        onClose={() => setSessionDialog(null)}
-      />
-    </>
+        }
+
+        const children = childrenByParent.get(issue.issueNumber) ?? []
+        const closedChildren = children.filter(
+          (child) => child.state === "CLOSED",
+        ).length
+        return (
+          <ParentIssueGroup
+            key={issue.id}
+            parent={issue}
+            childIssues={children}
+            closedChildren={closedChildren}
+            repository={repository}
+            workItems={workItems}
+            workItemsLoading={workItemsLoading}
+            onOpenSession={onOpenSession}
+          />
+        )
+      })}
+    </ul>
   )
 }
 

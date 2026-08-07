@@ -1,8 +1,9 @@
 /**
  * Session usage modal (Session Telemetry presentation).
  *
- * Open ownership may be local (Repos/Completed) or route-driven from root
- * (`/session/<work-item-id>/telemetry`, issue #841). Presentation is shared.
+ * Open ownership is route-driven from root
+ * (`/session/<work-item-id>/telemetry`, issues #841 / #843). Pipeline, Repos,
+ * and Completed open the same path; this component only presents state.
  */
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useId, useRef } from "react"
@@ -79,8 +80,8 @@ export function SessionUsageDialog({
   onClose: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
-  // Per-instance title id: root mounts a route-driven dialog while Repos/
-  // Completed still mount local ones until #843 — a fixed id would collide.
+  // useId keeps the accessible title stable if more than one mount ever
+  // coexists (tests, transitions). Root is the sole production owner.
   const titleId = `session-usage-title-${useId().replaceAll(":", "")}`
   const enabled = open && workItemId !== null
   const session = useQuery({

@@ -11,6 +11,13 @@ const pageLandmark = (page: Page) =>
     .getByRole("heading", { name: "No repositories configured" })
     .or(page.getByRole("region", { name: "Lifecycle pipeline" }))
     .or(page.getByRole("region", { name: "Configured repositories" }))
+    // Completed archive body (issue #843 Session Telemetry origin).
+    .or(page.getByRole("list", { name: "All completed work items" }))
+    .or(
+      page.getByRole("status").filter({
+        hasText: /No completed work items|Loading completed work items/i,
+      }),
+    )
 
 const graphqlJson = async <T>(
   query: string,

@@ -4,10 +4,11 @@
  * Primary Jobs switcher (Pipeline | Repos | Completed) lives in sticky root
  * chrome — this surface only keeps the card body.
  */
-import { type ReactNode, useState } from "react"
+import { useNavigate } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import { CompletedWorkItemRow } from "./completed-work-item-row.js"
 import type { Repository, WorkItem } from "./routes/index.js"
-import { SessionUsageDialog } from "./session-usage-dialog.js"
+import { openSessionTelemetry } from "./session-telemetry-nav.js"
 import { ui } from "./ui.js"
 
 export type CompletedIssueLookup = {
@@ -51,10 +52,15 @@ export function CompletedCardGrid({
   readonly emptyMessage: string
   readonly ariaLabel: string
 }) {
-  const [sessionDialog, setSessionDialog] = useState<{
-    readonly workItemId: string
-    readonly sessionId: string
-  } | null>(null)
+  // Session Telemetry is route-owned at root (`/session/<work-item-id>/telemetry`).
+  const navigate = useNavigate()
+  const onOpenSession = (workItemId: string, sessionId: string) => {
+    void openSessionTelemetry({
+      navigate,
+      workItemId,
+      sessionId,
+    })
+  }
 
   if (items.length === 0) {
     return (
@@ -65,30 +71,18 @@ export function CompletedCardGrid({
   }
 
   return (
-    <>
-      <ul className={ui.completedCardGrid} aria-label={ariaLabel}>
-        {items.map((workItem) => (
-          <CompletedWorkItemRow
-            key={workItem.id}
-            workItem={workItem}
-            repository={repositoryById.get(workItem.repositoryId)}
-            issue={issueByRepoAndNumber.get(
-              repositoryIssueKey(workItem.repositoryId, workItem.issueNumber),
-            )}
-            onOpenSession={(workItemId, sessionId) => {
-              setSessionDialog({ workItemId, sessionId })
-            }}
-          />
-        ))}
-      </ul>
-      <SessionUsageDialog
-        workItemId={sessionDialog?.workItemId ?? null}
-        sessionId={sessionDialog?.sessionId ?? null}
-        open={sessionDialog !== null}
-        onClose={() => {
-          setSessionDialog(null)
-        }}
-      />
-    </>
+    <ul className={ui.completedCardGrid} aria-label={ariaLabel}>
+      {items.map((workItem) => (
+        <CompletedWorkItemRow
+          key={workItem.id}
+          workItem={workItem}
+          repository={repositoryById.get(workItem.repositoryId)}
+          issue={issueByRepoAndNumber.get(
+            repositoryIssueKey(workItem.repositoryId, workItem.issueNumber),
+          )}
+          onOpenSession={onOpenSession}
+        />
+      ))}
+    </ul>
   )
 }

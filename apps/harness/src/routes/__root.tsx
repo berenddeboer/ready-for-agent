@@ -272,8 +272,9 @@ function RootComponent() {
   return (
     <div className="min-h-screen w-full">
       <SettingsChrome />
-      {/* Route-driven Session Telemetry overlay (issue #841); dialog is one root
-          instance so Pipeline open, Back/Forward, and direct loads share state. */}
+      {/* Route-driven Session Telemetry overlay (issues #841 / #843); one root
+          instance so Pipeline/Repos/Completed open, Back/Forward, and direct
+          loads share ownership. */}
       <SessionTelemetryOverlay />
       <ReactQueryDevtools buttonPosition="bottom-left" />
       <TanStackRouterDevtools position="bottom-right" />
@@ -282,9 +283,9 @@ function RootComponent() {
 }
 
 /**
- * Session Telemetry at `/session/<work-item-id>/telemetry` (ADR 0048 / #841).
- * Explicit Pipeline opens push history; Close/Escape/Back leave the route;
- * direct entry closes with replace → `/`.
+ * Session Telemetry at `/session/<work-item-id>/telemetry` (ADR 0048 / #841 / #843).
+ * Explicit opens from Pipeline, Repos, or Completed push history; Close/Escape/
+ * Back leave the route; direct entry closes with replace → `/`.
  */
 function SessionTelemetryOverlay() {
   const navigate = useNavigate()
