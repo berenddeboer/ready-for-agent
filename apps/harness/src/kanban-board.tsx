@@ -3,6 +3,19 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { type CSSProperties, Suspense, useMemo, useState } from "react"
 import { Banner } from "./banner.js"
 import { Copy } from "./copy.js"
+import {
+  JOBS_FAILED_LIMIT,
+  JobsCardSkeleton,
+  type Repository,
+  type WorkItem,
+  WorkItemLifecycleStatus,
+  WorkItemPauseButton,
+  issuesQuery,
+  jobsCompletedWorkItemsQuery,
+  jobsFailedWorkItemsQuery,
+  jobsWorkingWorkItemsQuery,
+  repositoriesQuery,
+} from "./home-page-content.js"
 import { useJobsRepositoryFilter } from "./jobs-repository-filter.js"
 import { KanbanLiveUpdates } from "./kanban-live.js"
 import {
@@ -22,19 +35,6 @@ import {
   ROUTE_TRANSITION_MS,
   presentLaneColumnItems,
 } from "./pipeline-route-transition.js"
-import {
-  JOBS_FAILED_LIMIT,
-  JobsCardSkeleton,
-  type Repository,
-  type WorkItem,
-  WorkItemLifecycleStatus,
-  WorkItemPauseButton,
-  issuesQuery,
-  jobsCompletedWorkItemsQuery,
-  jobsFailedWorkItemsQuery,
-  jobsWorkingWorkItemsQuery,
-  repositoriesQuery,
-} from "./routes/index.js"
 import { openSessionTelemetry } from "./session-telemetry-nav.js"
 import { sessionWorktreeParts } from "./session-worktree-line.js"
 import { cx, ui } from "./ui.js"

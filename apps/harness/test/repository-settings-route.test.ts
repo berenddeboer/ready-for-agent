@@ -9,7 +9,7 @@ const routeSource = () =>
   )
 
 const homeSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 const reposSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/repos.tsx"), "utf8")

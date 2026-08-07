@@ -7,7 +7,7 @@
 import { useNavigate } from "@tanstack/react-router"
 import type { ReactNode } from "react"
 import { CompletedWorkItemRow } from "./completed-work-item-row.js"
-import type { Repository, WorkItem } from "./routes/index.js"
+import type { Repository, WorkItem } from "./home-page-content.js"
 import { openSessionTelemetry } from "./session-telemetry-nav.js"
 import { ui } from "./ui.js"
 

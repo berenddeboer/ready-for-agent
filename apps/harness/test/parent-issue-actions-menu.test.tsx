@@ -149,7 +149,7 @@ describe("ParentIssueGroup control order", () => {
   test("chevron sits left of kebab; kebab is rightmost control", () => {
     // Parent row lives in the dashboard route; lock DOM order without a browser.
     const source = readFileSync(
-      join(import.meta.dir, "../src/routes/index.tsx"),
+      join(import.meta.dir, "../src/home-page-content.tsx"),
       "utf8",
     )
     const groupStart = source.indexOf("function ParentIssueGroup")

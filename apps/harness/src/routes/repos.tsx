@@ -1,6 +1,9 @@
 import { Outlet, createFileRoute } from "@tanstack/react-router"
 import { Suspense } from "react"
-import { RepositoryCards, RepositoryCardsSkeleton } from "./index.js"
+import {
+  RepositoryCards,
+  RepositoryCardsSkeleton,
+} from "../home-page-content.js"
 
 export const Route = createFileRoute("/repos")({
   component: ReposPage,

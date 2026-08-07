@@ -7,14 +7,14 @@ import {
   CompletedSurface,
   repositoryIssueKey,
 } from "../completed-surface.js"
-import { ui } from "../ui.js"
-import { WorkItemsLiveUpdates } from "../work-items-live-updates.js"
 import {
   COMPLETED_WORK_ITEMS_PAGE_SIZE,
   completedWorkItemsHistoryQuery,
   issuesQuery,
   repositoriesQuery,
-} from "./index.js"
+} from "../home-page-content.js"
+import { ui } from "../ui.js"
+import { WorkItemsLiveUpdates } from "../work-items-live-updates.js"
 
 /**
  * Full completed-work archive (server-paginated). Sticky Jobs chrome links here.

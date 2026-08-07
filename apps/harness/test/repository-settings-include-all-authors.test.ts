@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 const indexSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 describe("Repository settings Include all Issue Authors", () => {
   test("exposes Include all Issue Authors in settings and saves local state", () => {

@@ -5,8 +5,11 @@ import { describe, expect, test } from "bun:test"
 const reposSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/repos.tsx"), "utf8")
 
-const homeSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+const homeRouteSource = () =>
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
+
+const pipelinePageSource = () =>
+  readFileSync(join(import.meta.dir, "../src/pipeline-page.tsx"), "utf8")
 
 const rootSource = () =>
   readFileSync(join(import.meta.dir, "../src/routes/__root.tsx"), "utf8")
@@ -20,7 +23,7 @@ describe("/repos route", () => {
     expect(source).toContain('createFileRoute("/repos")')
     expect(source).toContain("<RepositoryCards />")
     expect(source).toContain("<RepositoryCardsSkeleton />")
-    expect(source).toContain('from "./index.js"')
+    expect(source).toContain('from "../home-page-content.js"')
   })
 
   test("is registered in the generated route tree", () => {
@@ -67,10 +70,10 @@ describe("/repos route", () => {
   })
 
   test("home shows blank slate with zero repos and board with one or more", () => {
-    const source = homeSource()
+    const source = pipelinePageSource()
     const homeContent = source.slice(
       source.indexOf("function HomeContent()"),
-      source.indexOf("function EmptyRepositoriesBlankSlate()"),
+      source.indexOf("export function EmptyRepositoriesBlankSlate()"),
     )
     expect(homeContent).toContain("(repositories ?? []).length === 0")
     expect(homeContent).toContain("<EmptyRepositoriesBlankSlate />")
@@ -89,11 +92,13 @@ describe("/repos route", () => {
   })
 
   test("repos empty state reuses EmptyRepositoriesBlankSlate", () => {
-    const source = homeSource()
-    expect(source).toContain("function EmptyRepositoriesBlankSlate()")
+    const source = homeRouteSource()
+    const pipeline = pipelinePageSource()
+    expect(source).toContain('from "./pipeline-page.js"')
+    expect(pipeline).toContain("export function EmptyRepositoriesBlankSlate()")
     const cards = source.slice(
       source.indexOf("export function RepositoryCards()"),
-      source.indexOf("function AddRepositoryGuidance("),
+      source.indexOf("function RepositorySettingsNotFoundDialog("),
     )
     const emptyStart = cards.indexOf("if (repositories.length === 0)")
     const emptyReturn = cards.indexOf("return (", emptyStart)

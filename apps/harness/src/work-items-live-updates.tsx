@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
+import { workItemsQuery } from "./home-page-content.js"
 import { followRepositoryWorkItemsLive } from "./refresh-work-items-live.js"
-import { workItemsQuery } from "./routes/index.js"
 
 /**
  * Mounts Work Item live invalidation for board/archive routes that do not

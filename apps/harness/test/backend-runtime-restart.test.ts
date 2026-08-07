@@ -61,7 +61,7 @@ describe("backend runtime restart", () => {
 
     expect(
       isBackendRuntimeSource(
-        resolve(workspaceRoot, "apps/harness/src/routes/index.tsx"),
+        resolve(workspaceRoot, "apps/harness/src/home-page-content.tsx"),
         workspaceRoot,
       ),
     ).toBe(false)
@@ -85,7 +85,7 @@ describe("backend runtime restart", () => {
     } as unknown as ViteDevServer)
 
     plugin.hotUpdate({
-      file: resolve(workspaceRoot, "apps/harness/src/routes/index.tsx"),
+      file: resolve(workspaceRoot, "apps/harness/src/home-page-content.tsx"),
     })
     plugin.hotUpdate({
       file: resolve(workspaceRoot, "packages/db-service/src/index.ts"),

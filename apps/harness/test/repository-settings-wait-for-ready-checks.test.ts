@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 const indexSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 describe("Repository settings Wait for checks to start after ready for review", () => {
   test("exposes the ready-check wait checkbox, help text, and save path", () => {

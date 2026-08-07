@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 
 const homeSource = () =>
-  readFileSync(join(import.meta.dir, "../src/routes/index.tsx"), "utf8")
+  readFileSync(join(import.meta.dir, "../src/home-page-content.tsx"), "utf8")
 
 const uiSource = () =>
   readFileSync(join(import.meta.dir, "../src/ui.ts"), "utf8")

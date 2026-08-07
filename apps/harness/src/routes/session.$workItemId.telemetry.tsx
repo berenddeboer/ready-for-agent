@@ -8,7 +8,7 @@
  * consistent; Close uses history.back when the open was in-app.
  */
 import { createFileRoute } from "@tanstack/react-router"
-import { PipelinePage } from "./index.js"
+import { PipelinePage } from "../pipeline-page.js"
 
 export const Route = createFileRoute("/session/$workItemId/telemetry")({
   component: PipelinePage,
