@@ -6,6 +6,7 @@ import {
   GitHubRequestError,
   GitHubService,
   type GitHubServiceShape,
+  type GitHubThrottledError,
   formatGitHubHelperShellCommand,
   resolveGitHubHelperChildSpawn,
 } from "@ready-for-agent/github-service"
@@ -29,7 +30,10 @@ import {
  */
 export const OPEN_PULL_REQUEST_COUNT_FRESHNESS_MS = 5_000
 
-type GitHubServiceError = GitHubRepositoryUnavailableError | GitHubRequestError
+type GitHubServiceError =
+  | GitHubRepositoryUnavailableError
+  | GitHubRequestError
+  | GitHubThrottledError
 
 const openPullRequestCountCacheKey = (repository: GitHubRepository): string =>
   [
